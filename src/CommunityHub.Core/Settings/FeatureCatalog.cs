@@ -463,6 +463,22 @@ public static class FeatureCatalog
         // outbound email. (§234, 2026-07-07: the extra broad-rings DATE gate
         // (FeatureSetting.ActiveFromForBroadRings = 1 Dec 2026) was retired — dead code
         // since §59 moved the speaker email to the operator-approved queue apply step.)
+        // 🔴🔴 §1020 — THIS NO LONGER CONTROLS THE ZOHO→CEH SYNC. IT IS THE SPEAKER MAIL, ONLY.
+        //
+        // Operator 2026-08-09: *"Zoho→CEH kill switch - disable/remove this from settings totally
+        // and leave it off in the code. we cannot have anyone turn this on by mistake."*
+        //
+        // 🔑 The key had TWO jobs and that was the danger: it gated the Zoho→CEH engine (§1000) AND
+        // owns the `session-time-location-changed` mail. Deleting it outright would have removed a
+        // PARTICIPANT MAIL from the settings page, breaking his standing rule that *"everything
+        // targetting one of the roles must be defined in settings, no exception"*. So the two were
+        // severed instead: the sync is hard-off in code with NO switch (see
+        // SessionChangeDetectionService), and what remains here controls only whether a speaker is
+        // told their room or time changed — a mail that §1004 now sends from the CEH editor.
+        //
+        // ⚠️ The KEY is deliberately unchanged. Renaming it would orphan the existing
+        // FeatureSettings rows and the EmailTemplateCatalog mapping for no gain; the NAME and
+        // DESCRIPTION are what an operator reads, and both now say what it really does.
         new("session-change-alerts", "Settings.Feat.SessionChangeAlerts.Name",
             "Settings.Feat.SessionChangeAlerts.Desc",
             FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,

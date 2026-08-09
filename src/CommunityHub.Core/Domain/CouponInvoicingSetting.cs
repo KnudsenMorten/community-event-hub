@@ -152,6 +152,70 @@ public class CouponInvoicingSetting
     /// Stops the alert becoming hourly noise while still letting it repeat if ignored.</summary>
     public DateTimeOffset? LastAlertedAt { get; set; }
 
+    /// <summary>
+    /// 🔴 §1016d — when this coupon was last INVOICED, so claims are batched into one invoice per
+    /// billing period instead of one invoice per claim.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"the claim gets registered so fx a ticket claim for 2 tickets
+    /// decreases from 20 to 18. But we dont want to invoice customer for every single claim; that
+    /// creates to many invoices. therefore you must batch them to every 2 weeks and remember when
+    /// the last invoice was sent for this coupon, so you know the 'catch-up' to invoice."*</para>
+    ///
+    /// <para>🔑 <b>The claim and the invoice were already separate — only the CADENCE was wrong.</b>
+    /// The balance has always moved the moment a ticket is claimed (that is the pool arithmetic, and
+    /// it is unaffected by any of this). What ran too often was the INVOICE: the job passes every
+    /// ~10 minutes, and each pass invoiced whatever was new, so a coupon claimed on ten different
+    /// days produced ten invoices.</para>
+    ///
+    /// <para>🔒 <b>The "catch-up" needs no separate bookkeeping, and that is why this is one field.</b>
+    /// Every claim already carries its own <c>CouponTicket-{id}</c> reference and the run skips any
+    /// reference already present on a booked or draft invoice (§787's idempotency interlock). So
+    /// "everything since the last invoice" is simply "everything not yet invoiced" — which the
+    /// existing scan computes exactly. This timestamp only decides WHEN to send, never WHAT.</para>
+    ///
+    /// <para>⚠️ Null on a coupon never invoiced ⇒ the window is measured from
+    /// <see cref="FirstSeenClaimedAt"/>, so the FIRST batch accumulates too. Otherwise claim #1
+    /// would get an invoice to itself and only the rest would ever be batched.</para>
+    ///
+    /// <para>🔒 A DRY RUN must never stamp this — nothing was created, and stamping it would push
+    /// the next real invoice out by a fortnight.</para>
+    /// </remarks>
+    public DateTimeOffset? LastInvoicedAt { get; set; }
+
+    /// <summary>
+    /// §1016d — THIS coupon's billing period in days, overriding the edition default
+    /// (<see cref="Integrations.Erp.InvoicingOptions.CouponInvoiceIntervalDays"/>, 14).
+    /// Null ⇒ use the default.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"maybe the internal days could be a field that could be adjusted
+    /// pr coupon"*. He is right, and the reason is in the agreements rather than in the code: a
+    /// billing period is something negotiated with a partner, so two partners can perfectly well
+    /// have different ones. A single global number forces the strictest partner's terms onto
+    /// everybody.</para>
+    ///
+    /// <para>🔒 <b>0 means "invoice every pass"</b> for this coupon (no batching) — the same meaning
+    /// the global setting gives it, so the two cannot be read differently. A NEGATIVE value is
+    /// treated as unset rather than as an error: this is a number typed into a form, and a typo
+    /// must fall back to the default rather than change the billing terms silently.</para>
+    /// </remarks>
+    public int? InvoiceIntervalDays { get; set; }
+
+    /// <summary>
+    /// §1016c — when the partner was last told their promo code is live, and at which address.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Recorded because this is the ONE coupon mail that leaves the building. Every other one
+    /// goes to <c>info@</c>, where a duplicate is noise; this one reaches a customer, where a
+    /// duplicate is an organizer looking careless. The page shows it beside the button so nobody
+    /// sends it twice by hand.
+    /// </remarks>
+    public DateTimeOffset? ClaimInviteSentAt { get; set; }
+
+    /// <inheritdoc cref="ClaimInviteSentAt"/>
+    public string? ClaimInviteSentToEmail { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? LastUpdatedByEmail { get; set; }

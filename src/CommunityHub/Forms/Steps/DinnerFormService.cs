@@ -41,7 +41,11 @@ public sealed class DinnerFormModel
     [BindNever] public string Email { get; set; } = string.Empty;
 
     [BindNever] public string EventCode { get; set; } = string.Empty;
-    [BindNever] public string DinnerVenue { get; set; } = "AC Hotel Bella Sky Copenhagen (speaker hotel)";
+    // §978 (operator 2026-08-09): *"remeve the word here (speaker hotel) from the appreciation
+    // dinner form"*. The dinner invites volunteers, media, event partners, sponsors, VIPs and
+    // organizers as well as speakers — calling the venue "the speaker hotel" reads, to most of the
+    // people receiving it, as somewhere they are not staying.
+    [BindNever] public string DinnerVenue { get; set; } = "AC Hotel Bella Sky Copenhagen";
     [BindNever] public string DinnerDateLabel { get; set; } = "9th Feb 2027";
     [BindNever] public string RsvpDeadlineLabel { get; set; } = "Feb 1, 2027";
 }

@@ -768,6 +768,7 @@
   <data name="SpeakerForm.PhotoLabel" xml:space="preserve"><value>Photo URL</value></data>
   <data name="SpeakerForm.PhotoNote" xml:space="preserve"><value>A link to your speaker headshot. Imported from Sessionize when available.</value></data>
   <data name="SpeakerForm.PhotoAlt" xml:space="preserve"><value>Your speaker photo preview</value></data>
+  <data name="SpeakerForm.PhotoUnfetchable" xml:space="preserve"><value>We can’t show this photo: the link points somewhere that needs a Microsoft sign-in, so it won’t open for the programme either. Please paste a public image link.</value></data>
   <data name="SpeakerForm.SessionsNote" xml:space="preserve"><value>Your sessions are managed in Sessionize and on the published agenda — edit titles, abstracts and the schedule there. Speaking-day flags (pre-day / main day) are set under Speaking days above.</value></data>
   <data name="SpeakerForm.ManualTitle" xml:space="preserve"><value>Speaker manual</value></data>
   <data name="SpeakerForm.ManualNote" xml:space="preserve"><value>&lt;strong&gt;Reference sample from a sister community&lt;/strong&gt; — until the ELDK27 speaker manual is published, this is a good example of what to expect (logistics, venue map, presentation guidance, social-media branding).</value></data>
@@ -883,7 +884,9 @@
   <data name="RoleWiz.Step.masterclass.Desc" xml:space="preserve"><value>Pick the Master Class you'll attend on the master-class day. You can change it any time while seats last.</value></data>
   <!-- 384: waitlist is its OWN step - booking a seat and queueing for a different class are not mutually exclusive, so one radio could not express both. -->
   <data name="RoleWiz.Step.masterclass-waitlist" xml:space="preserve"><value>Master Class waitlist</value></data>
-  <data name="RoleWiz.Step.masterclass-waitlist.Desc" xml:space="preserve"><value>Optional: join the waitlist for a Master Class that is already full. You keep any seat you already hold.</value></data>
+  <!-- §973 (operator 2026-08-09) — his exact wording, replacing "Optional: join the waitlist for a
+       Master Class that is already full. You keep any seat you already hold." -->
+  <data name="RoleWiz.Step.masterclass-waitlist.Desc" xml:space="preserve"><value>You can join the waitlist for a full master class here.</value></data>
   <!-- 452 (operator 2026-07-27): renamed with the menu — he asked for the wizard step too, so the
        step chip, the menu item and the Register entry now all read the same thing. -->
   <data name="RoleWiz.Step.party" xml:space="preserve"><value>Party Preday</value></data>
@@ -1519,8 +1522,8 @@
   <data name="Settings.Feat.BackstageSpeakerSync.Desc" xml:space="preserve"><value>On Save &amp; sync, create a speaker in Zoho Backstage when they don't exist yet. The Backstage API is create-only, so an existing speaker is never duplicated — info@ is emailed to update them manually. Ring-scoped; off by default.</value></data>
   <data name="Settings.Feat.Sessionize.Name" xml:space="preserve"><value>Sessionize import</value></data>
   <data name="Settings.Feat.Sessionize.Desc" xml:space="preserve"><value>Import accepted speakers and sessions from your Sessionize endpoint.</value></data>
-  <data name="Settings.Feat.SessionChangeAlerts.Name" xml:space="preserve"><value>Session time / location change alerts</value></data>
-  <data name="Settings.Feat.SessionChangeAlerts.Desc" xml:space="preserve"><value>Automatically detect when a session's time or room changes in Zoho Backstage and queue the change for your approval; the affected speaker(s) are emailed when you approve it. Ring-scoped; off by default.</value></data>
+  <data name="Settings.Feat.SessionChangeAlerts.Name" xml:space="preserve"><value>Email speakers when their session moves</value></data>
+  <data name="Settings.Feat.SessionChangeAlerts.Desc" xml:space="preserve"><value>Emails a session's speakers when an organizer changes its room or time in the hub. Speakers are only emailed on or after the notice-start date set under Setup → Session source; before that a change applies silently. This controls the SPEAKER EMAIL only — it does not sync anything. The hub owns the schedule and the event platform never writes back to it; that is fixed in code and has no setting.</value></data>
   <data name="Settings.Feat.SignageAgendaSync.Name" xml:space="preserve"><value>Signage agenda (venue screens)</value></data>
   <data name="Settings.Feat.SignageAgendaSync.Desc" xml:space="preserve"><value>Copies the complete Zoho Backstage agenda into CEH every 5 minutes so the screens around the venue can show it — including the breaks, registration, lunch and party that CEH does not otherwise store. A change you make in Backstage reaches the screens within one cycle. It only reads: &lt;b&gt;nothing is ever written back to Zoho&lt;/b&gt;. If Zoho cannot be reached, the screens keep showing the last agenda we pulled rather than going blank. Off by default — switch it on when the screens go up.</value></data>
   <data name="Settings.Feat.SpeakerChangeAlerts.Name" xml:space="preserve"><value>Speaker profile change alerts</value></data>

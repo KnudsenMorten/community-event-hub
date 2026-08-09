@@ -589,7 +589,34 @@ public sealed class MasterClassEmailService
         // constructions) ⇒ the old behaviour: a non-throwing send counts as sent.
         if (_outcome is not null && !_outcome.LastSendDelivered) return false;
 
-        a.MasterClassInviteSentAt = DateTimeOffset.UtcNow;
+        var invitedAt = DateTimeOffset.UtcNow;
+        a.MasterClassInviteSentAt = invitedAt;
+
+        // 🔴 §968a — STAMP THE WELCOME ANCHOR TOO. This mail already calls itself "the de-facto
+        // 2-day WELCOME (§215)" fifty lines above, and the get-started digest is anchored on
+        // `WelcomeWithLoginSentAt` with a hard rule: **never welcomed ⇒ never chased** (§738,
+        // `if (p.WelcomeWithLoginSentAt is null) continue`). Nothing on this path ever set it —
+        // only the 1-day welcome and the crew welcome do — so a 2-day attendee was welcomed by this
+        // mail and then **permanently invisible to the digest**.
+        //
+        // ⚠️ That was survivable only because there were ZERO attendees while tickets were not on
+        // sale. It stops being survivable the day they are (§968, found 2026-08-08, two working days
+        // before ticket launch).
+        //
+        // 🔒 AFTER the delivered-vs-dropped check, deliberately: a ring-dropped invite is not a
+        // welcome, and stamping one would start the 14-day clock on a mail nobody received —
+        // exactly the §738 defect (a stamp that reads "welcomed" when nothing was sent).
+        // 🔑 Only when not already set, so a re-send never restarts somebody's cadence.
+        if (pid is int welcomedId)
+        {
+            var participant = await _db.Participants
+                .FirstOrDefaultAsync(p => p.Id == welcomedId, ct);
+            if (participant is not null && participant.WelcomeWithLoginSentAt is null)
+            {
+                participant.WelcomeWithLoginSentAt = invitedAt;
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
         return true;
     }
@@ -1174,10 +1201,16 @@ public sealed class MasterClassEmailService
                 x.EventId == a.EventId
                 && x.MirrorState == MirrorState.Active
                 && x.Email == a.Email, ct);
+            // 🔴 §1015 — IT IS A BULLET, NOT A PARAGRAPH. Operator 2026-08-09: *"the event hub
+            // sign-in has been closed should be in the bullet above"*. Both statements answer the
+            // same "That means:" lead-in, so a <p> after </ul> read as a new, unrelated thought —
+            // and it sat directly under a one-item list, which is where the eye expects item two.
+            // The template now carries the token INSIDE the <ul>, so this must render an <li>.
             tokens["signInBlockBlock"] = stillEntitled
-                ? "<p style=\"margin:0 0 16px;\">You still hold another active ticket, so your "
-                  + "<strong>Event Hub sign-in stays open</strong>.</p>"
-                : "<p style=\"margin:0 0 16px;\">Your <strong>Event Hub sign-in has been closed</strong>.</p>";
+                ? "<li style=\"margin:0 0 8px;\">you still hold another active ticket, so your "
+                  + "<strong>Event Hub sign-in stays open</strong>.</li>"
+                : "<li style=\"margin:0 0 8px;\">your <strong>Event Hub sign-in has been "
+                  + "closed</strong>.</li>";
 
             using (_context.Set(context))
             {

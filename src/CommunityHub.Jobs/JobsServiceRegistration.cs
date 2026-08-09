@@ -241,6 +241,9 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Forms.AttendeeWizardService>();
         services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
         services.AddScoped<CommunityHub.Core.Reminders.GetStartedDigestBuilder>();
+        // §994 — runs immediately before the digest, so an organizer added since the last pass is
+        // chaseable on this one (they get no welcome mail, so nothing else would ever anchor them).
+        services.AddScoped<CommunityHub.Core.Reminders.OrganizerWelcomeAnchorSeeder>();
         // §746 — the completion notice was hooked ONLY to /Forms/Wizard, so anyone finishing on a
         // standalone form page (/Forms/Hotel, /Forms/Lunch, …) was never reported. The sweep
         // observes completion instead of depending on where it happened; the wizard hook stays for
@@ -347,6 +350,9 @@ public static class JobsServiceRegistration
         // speakers/sessions that disappeared from Sessionize (it never deletes them). Uses
         // the ring-exempt EngineAlertSender (registered above) so the ops mail delivers.
         services.AddScoped<SessionizeDisappearanceDetector>();
+        // §999 — the CEH-vs-Sessionize deviation mail (the other half of the import no longer
+        // overwriting CEH-owned fields). Registered in BOTH hosts for the §786.6 reason.
+        services.AddScoped<CommunityHub.Core.Reminders.SessionizeDeviationNotifier>();
         services.AddScoped<SessionizeApiImportService>();
 
         // --- Company Manager (sponsor contact source of truth) -------------

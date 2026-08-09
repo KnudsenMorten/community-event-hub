@@ -83,7 +83,10 @@
     .so-card .so-when { font-size: 12.5px; color: #5a6270; margin: 0 0 6px; }
     .so-card .so-speakers { font-size: 13px; color: #24292f; margin: 0 0 8px; }
     .so-card .so-speakers .lbl { color: #6a7280; }
-    .so-card .so-abstract { font-size: 13px; color: #4a5160; line-height: 1.5; margin: 0 0 10px; }
+    .so-card .so-abstract { font-size: 13px; color: #4a5160; line-height: 1.5; margin: 0 0 10px;
+        /* Â§981 â keep the paragraph breaks the abstract actually contains; .sd-abstract and
+           .mc-abstract already did this and the list card was the one that missed it. */
+        white-space: pre-wrap; }
     .so-card .so-links { display: flex; flex-wrap: wrap; gap: 12px; }
     .so-card .so-links a {
         font-size: 13px; font-weight: 600; color: var(--el-blue, #008BD2); text-decoration: none;

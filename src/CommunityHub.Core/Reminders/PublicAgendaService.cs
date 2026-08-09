@@ -86,8 +86,12 @@ public sealed class PublicAgendaService
         // speaker names come back as a raw list; the join + day grouping + ordering
         // happen client-side in the pure builder (after this materialization
         // boundary) so no un-translatable shape reaches the relational provider.
+        // 🔒 §972 — and never a TEST session. §299 4.5/b8 states a UsedForTesting session "never
+        // appears on any PUBLIC page"; this is a public page and it was not honouring that, so
+        // "Test Master Class" / "Test Session" sat in the published agenda. PublicSessionsService
+        // already filtered it in three places — the agenda was simply missed.
         var raw = await _db.Sessions
-            .Where(s => s.EventId == eventId && !s.IsServiceSession)
+            .Where(s => s.EventId == eventId && !s.IsServiceSession && !s.UsedForTesting)
             .Select(s => new RawAgendaSession(
                 s.Id,
                 s.Title,

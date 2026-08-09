@@ -321,11 +321,36 @@ public sealed class MasterClassSignupService
 
     // --- reads ---------------------------------------------------------------
 
-    public async Task<IReadOnlyList<McOption>> ListMasterClassesAsync(int eventId, CancellationToken ct = default)
+    /// <param name="excludeTestSessions">
+    /// §972 — drop Master Classes flagged <see cref="Session.UsedForTesting"/>. The attendee
+    /// SELECTION and WAITLIST surfaces pass <c>true</c>.
+    /// </param>
+    /// <remarks>
+    /// <para>🔴 <b>§972 (operator 2026-08-09): <i>"i would like to not show my test master class
+    /// anymore in prod"</i>.</b> <see cref="Session.UsedForTesting"/> already promised this — §299
+    /// 4.5/b8 states a flagged session <i>"never appears on any PUBLIC page"</i> and is hub-visible
+    /// only to ring 0/1 — and the Backstage push honours it in three places. <b>This query never
+    /// did.</b> It filtered <c>!IsServiceSession</c> and nothing else, so "Test Master Class" was
+    /// offered on the attendee selection step and the waitlist. The flag existed; one of its two
+    /// stated guarantees was simply unimplemented here.</para>
+    ///
+    /// <para>🔒 <b>Defaults to FALSE so no existing caller changes behaviour</b> (operator: <i>"no
+    /// changing of default behavior"</i>). The organizer Master Class page keeps seeing it — hiding a
+    /// row from the screen where its own flag is set and cleared is how a record becomes
+    /// unreachable — and every other caller is untouched until someone decides otherwise.</para>
+    ///
+    /// <para>⚠️ Keyed on <see cref="Session.UsedForTesting"/> ALONE, never
+    /// <see cref="Session.IsTestData"/>. IsTestData (§909) means "never announced on social media" —
+    /// a campaign property. Borrowing it for visibility would hide every session kept out of the SoMe
+    /// queue, a different and much larger set.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<McOption>> ListMasterClassesAsync(
+        int eventId, CancellationToken ct = default, bool excludeTestSessions = false)
     {
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
         var mcs = await _db.Sessions.AsNoTracking()
-            .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass && !s.IsServiceSession)
+            .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass && !s.IsServiceSession
+                        && (!excludeTestSessions || !s.UsedForTesting))
             .Select(s => new
             {
                 s.Id, s.Title, s.MasterClassCapacity, s.Abstract,

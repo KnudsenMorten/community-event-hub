@@ -201,8 +201,15 @@ public sealed class WebshopDraftInvoiceService
                    + $"(from company '{company.Name}') does not exist.";
         }
 
+        // §1017 — carry the pre/post-coupon line totals and the order's coupon codes through, so a
+        // discounted line SAYS it was discounted. ✅ The AMOUNT needs no change: WooCommerce's
+        // `price` is already the post-discount unit price (live-verified on order 10841 —
+        // subtotal 25000, total 24400, price 24400), so CEH has been billing the right figure all
+        // along. What the sponsor never got was the reason for it.
         var lines = order.LineItems
-            .Select(li => new WebshopOrderLine(li.ProductName, li.Quantity, li.UnitPrice))
+            .Select(li => new WebshopOrderLine(
+                li.ProductName, li.Quantity, li.UnitPrice,
+                li.LineSubtotal, li.LineTotal, order.CouponCodes))
             .ToList();
 
         if (lines.Count == 0)

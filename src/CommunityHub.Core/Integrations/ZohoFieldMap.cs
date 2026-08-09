@@ -117,6 +117,10 @@ public static class ZohoFieldMap
         public static Field Hall => Se("Room", new("Room", "venue", "Hall"));
         public static Field Speakers => Se("SessionSpeakers", new("SessionSpeakers", "speakers", "Speakers",
             Kind: FieldKind.Array));
+        // §1012 — named ...Field because the CEH side is the `SessionType` ENUM, and a property
+        // called SessionType next to it reads as the type rather than the mapping row.
+        // Live-verified values: BREAK / KEYNOTE / PRESENTATION / REGISTRATION / WELCOMENOTE.
+        public static Field SessionTypeField => Se("Type", new("Type", "session_type", "Session Type"));
         public static Field Tags => Se("Level", new("Level", "tags", "Tags",
             Capability.GuiOnly, FieldKind.Array,
             MergedFrom: new[] { "Level", "Tags", "(mandatory language)" },

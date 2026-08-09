@@ -877,6 +877,80 @@ longer misses files past the first page).
   refresh-token based. Config: a `zoho` block with the EU API domain, Backstage portal id + event
   id, the Bookings service-name regex and 2-day ticket-class regex, and KV secret names.
 
+#### Linked-session drift: how CEH reports what must be changed by hand (§302, §989, §1008)
+
+The Backstage sessions API is **create-only** — there is no update endpoint, and some fields are
+refused even on create. So once a session is linked (`Session.BackstageSessionId` is set), a change
+in CEH **cannot** be pushed; `SessionBackstagePushService` instead **diffs CEH against the live
+Backstage session** and mails an *ACTION NEEDED* line naming the fields in the labels the operator
+sees in the Backstage UI (Title / Session Time / Duration / Track / Hall / Session Description /
+Speakers).
+
+- **One mail per distinct difference, not per pass.** `DiffHash` (SHA-256 of the joined diff lines,
+  truncated) is stored on `Session.ZohoChangeNotifiedHash`. The mail goes out only when the hash
+  changes; when the diff set empties, the hash is reset to `null` (self-healing), so a fixed session
+  is silently forgotten and a later regression is reported afresh.
+- **Description drift (§989).** The abstract is **import-owned** — `SessionImportService` assigns
+  `Session.Abstract` on every run — so a speaker's rewrite lands in CEH silently while Backstage
+  keeps the old text. Both sides go through **`RichTextCompare`** (`Core/Integrations`), and a
+  difference produces the full CEH text as a paste block (§322m: the mail is the operator's
+  copy-paste source, so it is never clipped). Empty and stale are distinguished only in the wording.
+- 🔒 **Why the comparison is deliberately forgiving.** Backstage's rich-text editor **reformats what
+  it stores** — re-wrapping in `<p>`, converting spacing to `&nbsp;`, re-encoding typography. A
+  char-for-char compare would therefore differ for ever on a value nobody touched, producing an
+  ACTION line the operator **cannot close by acting**. `RichTextCompare.Comparable` strips tags to
+  spaces, decodes entities, folds typographic variants (curly quotes/dashes/ellipsis/nbsp/zero-width)
+  to ASCII, collapses whitespace and trims. Every fold removes a difference the **editor** made;
+  letter case, words and meaningful punctuation are left alone because those are **edits**.
+- **Speaker drift (§1008).** The agenda record's `speakers` array is read into
+  `ZohoClient.LiveSession.SpeakerRefs` as the RAW identifiers it carries (an id or an e-mail per
+  entry) and resolved to e-mails in `SessionBackstagePushService.BuildSpeakerDiff` against the live
+  `/speakers` roster (`ZohoSpeakerRoster`, fetched at most once per pass and only when a session
+  actually names a speaker by id). The diff is a set comparison on e-mail; the mail prints names,
+  with the address alongside because Backstage's picker lists people by name.
+  - 🔑 **Additions and removals are judged against DIFFERENT CEH sets, deliberately.** An *attach*
+    line names only a speaker the push engine itself would attach (categorised + active, kill switch
+    honoured) — attaching an e-mail in Backstage **invites that person** (§326bx), so the mail must
+    not instruct an invite the engine refuses. A *remove* line is judged against **every** CEH
+    `SessionSpeaker` link, ungated, so an uncategorised-but-real speaker is never reported as an
+    intruder. The gate exists to prevent a WRITE; a report is not a write.
+  - 🔒 **Four silences, all of them §594 guards:** an ABSENT `speakers` key (⇒ `SpeakerRefs` is
+    `null` — unreadable, exactly like tags; a present-but-empty array is a real "no speakers" and IS
+    compared); an unusable roster (the speakers pull rides the lenient pager, so an empty list may be
+    a failed read — §585); a single live reference that will not resolve; and a session CEH knows no
+    speakers for at all. Each returns no line rather than a wrong one.
+- **Common for All Tracks (§1011).** `Session.IsCommonForAllTracks` is the plenary marker and
+  **overrules `Session.Track`**. ✅ Live-verified (PROD, 2026-08-09, session `ELDK27 Welcome`): Zoho
+  has **no such field** — the record is `agenda, created_by, created_time, description, duration,
+  featured, hidden, id, language, last_modified_by, last_modified_time, session_type,
+  speaker_to_be_announced, speakers, start_time, title, track, venue, venue_to_be_announced`, and the
+  per-id GET returns the identical set (unlike the §623 sponsor record). **The chip IS `track: null`**
+  — every session showing it has a null track; 16 of 25 live sessions are track-less.
+  - ⇒ The diff expects **no track** for a ticked session: already null ⇒ **no line at all** (and so no
+    §1002 hourly re-mail); a track still set ⇒ a **closable** "clear the Track field" line.
+  - The **create still sends the track** (operator decision): the sessions API cannot update or
+    delete, so a refused create is worse than a create plus a `DescribeCreateGaps` line telling him
+    to clear it. `SessionImportService` also stops reporting a Sessionize **Track** deviation for a
+    ticked session — that field is exactly what the tick box overrules.
+- **Session type (§1012).** `ZohoOptions.SessionTypeMap` maps CEH `SessionType` → the Backstage
+  value, resolved **per session** on create (it was one hard-coded `PushSessionType` for every
+  session, so every CEH keynote was created as a Presentation), and `session_type` is now diffed.
+  ✅ Live-verified vocabulary: `BREAK`, `KEYNOTE`, `PRESENTATION`, `REGISTRATION`, `WELCOMENOTE`.
+  🔒 Only **Keynote** is mapped by default — guessing which CEH type means `WELCOMENOTE` or `BREAK`
+  would write a wrong type onto the public agenda through an API that cannot update it. Extend via
+  `Zoho__SessionTypeMap__<CehType>`; unmapped types keep `PushSessionType`.
+- ⚠️ **This is the §594 boundary, and it is the whole design.** Tags were once diffed the same way
+  and had to be removed: the agenda read returns **no `tags` property at all**, so every expected tag
+  was permanently "missing" and pasting them in could not clear the mail. Before adding a field to
+  this diff, confirm the agenda read actually returns it — an unclosable ACTION line costs more than
+  a missing one, because it teaches the operator to ignore the mechanism.
+- **Shared with the sponsor path.** `SponsorZohoSyncService.NeedsManualEntry` (§792, company
+  description / website / socials) uses the same normalizer, case-insensitively and with a trailing
+  slash trimmed for URLs. It had solved this first; the session path carried a weaker private copy
+  that stripped tags only, so `<p>&nbsp;</p>` — what the editor stores for a box the operator sees as
+  **empty** — read as a filled description and the gap was never reported (the §322l complaint).
+  One normalizer, two call-site policies.
+
 #### Signage agenda mirror (REQUIREMENTS §754, 2026-08-01)
 
 The venue screens are driven from a CEH table, not from Zoho at request time. `SignageAgendaSyncJob`
@@ -1686,9 +1760,21 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
   block in `event.<edition>.json` (`enabled` / `opensAtLocal` / `ticketUrl` / `afterOpen`), parsed onto
   `TicketSaleConfig` by the existing `EventEditionConfigLoader` (null when the block is absent). A pure,
   clock-injected **`TicketBannerBuilder.Build(TicketSaleConfig?, timezoneId, now)`** turns that into a
-  `TicketBannerView (Visible, Message, Href, Suppressed)`:
-  - **Before** `opensAtLocal` → `Visible`, plain text "Tickets on sale &lt;date&gt; at &lt;time&gt;
-    (&lt;zone&gt;)" with the date/time formatted from config (no link yet).
+  `TicketBannerView (Visible, Message, Href, Suppressed, OpensAt)`:
+  - **Before** `opensAtLocal` → `Visible`, plain text **"Tickets on sale in 2d 04:13:22"** — a
+    **LIVE COUNTDOWN** since §995 (no link yet). It replaced the absolute "…&lt;date&gt; at
+    &lt;time&gt; (&lt;zone&gt;)" copy, whose `(UTC+02:00)` label was the tell: an absolute time is
+    meaningless without a zone, and a duration needs none.
+    - 🔒 **`OpensAt` carries the INSTANT to the browser; the string is only the first paint.**
+      `_Layout` emits `data-ticket-countdown="<ISO-8601>"` and a small inline script re-renders the
+      span every second. A server-rendered duration would be stale the moment it was sent — this
+      banner sits on a long-lived, cacheable layout, so "in 2 days" would still say that tomorrow.
+    - Seconds are always shown (a minutes resolution ticking once a second looks frozen);
+      days are split out (`2d 04:13:22`, not `52:13:22`); `aria-live="off"` so it is not announced
+      every second; the script no-ops when the span is absent. At zero it says "Tickets are now on
+      sale" and stops — it cannot render the LINK (the URL is not in the DOM), so the next page load
+      produces the linked state.
+    - ⚠️ `OpensAt` is null in every other state, and a test pins that — nothing else may tick.
   - **At/after** the open moment → `Visible` "Tickets are now on sale" (an `Href` link when `ticketUrl`
     is set), **unless** `afterOpen=hide`, which returns `Suppressed` so the topbar renders nothing.
   - **Absent / disabled / unparseable** → the `Fallback` view (not visible, not suppressed) so
@@ -5145,6 +5231,118 @@ behaviour worth testing — does the message survive the redirect? — untestabl
 the filter is ever absent. The ADD form's typed coupon name rides along on a refusal, since it is the
 only input not re-rendered from its own row.
 
+### 21.11 The prepaid purchase now RAISES its own invoice (§990, 2026-08-09)
+
+🔴 **This reverses §21.3 for the button path, at the operator's explicit instruction.** §795.2 said
+*"the hub never raises this invoice"* and made `ErpInvoiceNumber` a human confirmation. The
+**Create Invoice** button on `/Organizer/CouponInvoicing` (was *"Buy tickets"*) now records the
+purchase **and** creates the e-conomic draft, writing `draft {n}` back into the purchase.
+
+- **The price is TYPED (`PoolUnitPriceDkk`), and that was the blocking design question.** A claim
+  invoice prices each ticket from Zoho's `base_price` **on the claim**; a prepaid pool exists
+  precisely *before* anybody claims, so there is no claim to read. Deriving it from other claims of
+  the class would bill one partner at another's negotiated rate; reading the public list price would
+  be wrong for exactly the partners who prepay. 🔒 **A zero or negative price is refused, never
+  sent** — e-conomic accepts a 0.00 line happily and only the recipient would ever notice.
+- 🔒 **The purchase is saved FIRST and is never rolled back by an invoicing failure.** The partner
+  agreed to buy the tickets; whether e-conomic answered a second later is a different fact. The
+  purchase **id is the invoice reference**, so it must exist first.
+- 🔒 **A hand-typed `Invoice no.` suppresses the draft.** That invoice already exists; raising a
+  second would bill the partner twice. The field stays editable and the **§795.2 chase is left in
+  place**, which is what covers an invoice raised outside CEH and a click where e-conomic was down.
+- **`references.other` = `CouponPrepaid-{purchaseId}`** — deliberately a *different* prefix from
+  `CouponTicket-`, so the "already invoiced" scan can never read a prepayment as covering the tickets
+  it later pays for.
+- **One line for the whole purchase** (`quantity = tickets bought`), not one per ticket: a claim line
+  names a person, and a prepayment names nobody yet. `ComposePrepaidDescription` omits the
+  attendee/e-mail/ticket-id labels for that reason.
+- Everything else is the §787 path **reused, not re-derived**: customer lookup, the DKK→customer
+  currency conversion with its §786.1(f) note, layout lookup, the §814 house heading and the §798.1
+  requester-as-Att rule.
+
+**Notes reach the invoice, on BOTH coupon types.** `CouponInvoiceLineComposer.ComposeSubHeading(name,
+notes)` appends the coupon's `Notes` to `notes.textLine1` in the webshop PO block shape (§786.1(e)) —
+blank prints **nothing**, not a bare `Notes:` label. 🔒 Deliberately the free-text header and **not**
+`references.other`, which carries the idempotency marker.
+
+**The promo code is mailed, because there is no API for it.** `CouponPoolZohoActionNotifier` mails the
+actionable mailbox with coupon name + ticket class + amount after every purchase. §787.14: Backstage
+exposes **no coupon endpoint**. §795.1 and §796 already warn when a code is *wrong*; nothing warned
+that a code did not exist **yet** — so a partner could be invoiced for tickets they had no way to
+claim. A **top-up** asks for the limit to be *raised to the new total*, since a code capped at the old
+number is §796 arriving from the other direction.
+
+### 20.2 One rule for rendering a speaker photo, enforced (§665, §993)
+
+`SpeakerPhotoUrl.Resolve(photoUrl, sharePointPath)` is the **only** way a speaker photo becomes a
+`src`. It prefers the hub's own stored copy (`/speaker-photo/{leaf}`), and returns **null** for a
+`sharepoint.com` link with no copy — an unfetchable document URL is treated as "no photo" rather than
+rendered as a link that can only break.
+
+🔴 **§993: the rule existed and five render sites bypassed it** — the three speaker FORM previews and
+**both PUBLIC pages** (`/Speakers`, `/Speakers/{id}`). A sponsor upload stores a SharePoint document
+URL in `PhotoUrl`, so those speakers rendered a broken image, publicly.
+
+- **Public pages resolve in the SERVICE.** `PublicSpeakerRow`/`PublicSpeakerDetail` expose
+  **`PhotoSrc`** (renamed from `PhotoUrl`) carrying an already-resolved value — the name states the
+  guarantee at the point of use. The resolver cannot run in SQL, so it is applied in memory after
+  materializing; the row also carries `PhotoStoredPath` purely to make that possible.
+- **Forms pass `PhotoStoredPath`** alongside the typed URL, and when nothing is resolvable they say
+  why in the speaker's own terms instead of rendering a broken icon.
+- 🔒 **Enforced by a SOURCE test** (`SpeakerPhotoPreviewUsesResolverTests`) that fails if any view
+  interpolates `PhotoUrl` into a `src`. A rendering test would pin today's pages and miss the next
+  one — which is how this happened. ⚠️ **The fix is never to open the SharePoint site.**
+
+### 20.1 Organizers are ANCHORED but never welcomed (§994, 2026-08-09)
+
+`WelcomeVariants.TemplateKeyFor` returns **null for Organizer** — organizers get no welcome mail (an
+operator decision from 2026-06-22) — while `GetStartedDigestBuilder`'s §738 gate is
+`if (p.WelcomeWithLoginSentAt is null) continue`. Together those two correct rules made an organizer
+**permanently unchaseable** about an unfinished wizard.
+
+`OrganizerWelcomeAnchorSeeder` runs in `ReminderJob` **immediately before the digest**, setting
+`WelcomeWithLoginSentAt = CreatedAt` on any active organizer that has none.
+
+- 🔑 **A sweep, not a creation hook** — the §720/§746 argument: organizers arrive from the organizer
+  page, imports and seeding, so hooking one path works today and breaks silently when a path is
+  added. "Which organizer has no anchor?" catches every path, including future ones.
+- 🔒 `CreatedAt`, **not "now"** — "now" restarts the cadence for someone who joined months ago.
+  Only ever fills a NULL. **Organizers only**: every other role's anchor is stamped by a welcome that
+  really was sent, and seeding one would fake it.
+- 🔑 An anchor grants **eligibility**, not a mail — the digest still skips a 100 %-complete wizard.
+
+### 21.13 Increase TO a total, and the reconcile line (§992, 2026-08-09)
+
+The pool's top-up form posts **`PoolTargetTotal`** (the new total) rather than a quantity to add;
+`OnPostAddTicketsAsync` derives `PoolQuantity = target − SUM(purchases)`. The new-pool form still
+posts a plain quantity, and one handler serves both (`PoolTargetTotal` null ⇒ old behaviour).
+
+- 🔑 **Why the semantics, not just the label.** The number typed is the **same number the operator
+  then sets as the promo code's max in Backstage**. An "add N" box makes a human do the arithmetic
+  twice across two systems, and the failure is silent until a partner cannot claim a paid ticket.
+- 🔴 **A target ≤ today's total is refused**, naming the current total. Each purchase is an invoiced
+  agreement, so "decrease" would delete billed money — and it must not be read as "add 3" either.
+- 🔒 Still **adds a purchase row**; §798.4's derived balance is untouched. The **coupon code never
+  changes**, which is the operator's reason for asking (order URLs are already in inboxes).
+- **`CouponPrepaidPurchase.UnitPriceDkk`** (migration `CouponPrepaidPurchaseUnitPrice`, additive +
+  nullable) stores the agreed price. It cannot be recovered otherwise: the price is agreed before any
+  claim exists and afterwards lives only on the e-conomic invoice. ⚠️ A purchase without one is
+  **excluded from the value total and the page says so** — a total that silently under-counts money
+  is worse than one that admits a gap.
+- **`InvoicesFor` now also resolves `CouponPrepaid-{purchaseId}`.** It matched only CLAIM references,
+  so §990's prepaid invoices were invisible on the page and "does what I billed match the code's
+  max?" could not be answered there. Built from **all** allocations, dormant included — a dormant pool
+  still records money that was billed.
+
+### 21.12 "No contacts" must not mean "could not read" (§991)
+
+The requester picker caught a per-customer contact-fetch failure, turned it into an empty list, and
+then chose its message from **`EconomicReachable` — a page-wide flag set by the CUSTOMER-LIST call**.
+So whenever the customer list loaded but one customer's contacts did not, the page stated as fact
+that the customer has no contacts, sending the operator to fix data that may be perfectly fine.
+`ContactLoadFailedFor` now records which customers failed and the page says which of the two it is —
+the §21.5 rule the invoice-number lookup already followed, applied where it was missing.
+
 ### 15.1 Job health on /Organizer/Jobs — two keys, one fallback (§786.8)
 
 A `JobHealthMarker` row is written under **two different keys depending on who writes it**:
@@ -5263,3 +5461,47 @@ correct URN still publishes as markup.
 
 🔒 **Scopes are fixed at consent.** Adding `r_organization_followers` required a fresh
 authorization-code round trip; a token refresh will never acquire a new scope.
+
+#### Session ownership: who writes what (§999/§1000/§1020, 2026-08-09)
+
+The one-way model that replaced the old two-way sync. **CEH is the owner.**
+
+| Field | Sessionize → CEH | CEH → Zoho | Zoho → CEH |
+|---|---|---|---|
+| Title, Abstract, Speakers | overwrites every run | compared → ops mail | 🛑 off |
+| Date/time, Room, Track, Tags | **create only**, then reported | compared → ops mail (tags excepted) | 🛑 off |
+| Level / Language | import-owned | manual after create | 🛑 off |
+
+- **Sessionize→CEH** (`SessionImportService`): on CREATE everything lands 1:1 and both ids are
+  stamped. On an EXISTING row only content is copied; the CEH-owned fields are compared and mailed
+  by `SessionizeDeviationNotifier` — **once per distinct disagreement** (§1024,
+  `Session.SessionizeDeviationNotifiedHash`), because that state is correct by design. Contrast the
+  §1002 CEH→Zoho mail, which re-sends **hourly** because it chases a wrong PUBLIC agenda.
+- **CEH→Zoho** (`SessionBackstagePushService`): create-only API, so a linked session is diffed and
+  reported. Fields: title, description, time, duration, track, hall, **speakers** (§1008),
+  **session type** (§1012). Tags are excluded — the agenda read does not return them (§594).
+- **Zoho→CEH** (`SessionChangeDetectionService`): 🛑 **permanently off in code (§1020)** — it returns
+  before reading anything, there is no feature switch, and re-enabling is a deploy. The engine and
+  its `[Function]` are kept (retiring the job would orphan a PROD health marker, §634) but its
+  detailed tests were deleted with the behaviour: **reviving it means rebuilding those first.**
+  🔒 Signage is unaffected — `SignageAgendaSyncService` mirrors the Backstage agenda into
+  `AgendaActivities` on its own timer, and Zoho remains 100% the owner there (§754).
+
+#### Identity across a rename: the Sessionize id, not the e-mail (§827/§1021, 2026-08-09)
+
+`SessionizeImportService` matches a speaker on the **stable Sessionize id first**, e-mail only as the
+fallback. §827 wrote the rule (*"e-mail is a MUTABLE ATTRIBUTE of a person; the Sessionize id IS the
+person"*) but kept testing e-mail first, so a stale row holding an address pre-empted the id match —
+measured in PROD, where a deactivated row absorbed a rename and the live row never learned it.
+🔒 A rename never STEALS an address another participant holds: the id match is abandoned and the row
+left untouched, because two records for one person is a **merge**, and which sessions, logins and
+Zoho ids survive is not something an importer may infer.
+
+#### Ticket-class names (§1019, 2026-08-09)
+
+`ZohoClient.GetTicketClassNamesAsync` (`GET …/ticket_classes`) is the authoritative id → name source
+and knows every class from the moment it is defined. The coupon page reads it and **heals the stored
+`CouponPrepaidAllocation.TicketClassLabel`**, which is what the invoice line and the two background
+mail services read — fixing them all at the source rather than teaching each to call Zoho.
+🔑 Claims and attendees were the earlier sources and both mean *"somebody already bought this
+class"*; a prepaid pool exists **before** anybody buys, which is why the id kept surfacing.

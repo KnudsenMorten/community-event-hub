@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations.Graphics;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Reminders;
@@ -14,8 +15,18 @@ public sealed record PublicSpeakerRow(
     int ParticipantId,
     string Name,
     string? Tagline,
-    string? PhotoUrl,
-    IReadOnlyList<PublicSpeakerSession> Sessions)
+    /// <summary>
+    /// §993 — ALREADY RESOLVED by <see cref="SpeakerPhotoUrl.Resolve"/> before this record leaves
+    /// the service, so a view can render it directly. Null means "no photo a browser can fetch",
+    /// which the pages already handle by showing the monogram.
+    /// </summary>
+    string? PhotoSrc,
+    IReadOnlyList<PublicSpeakerSession> Sessions,
+    /// <summary>
+    /// The hub's own stored copy, carried only so the projection can resolve
+    /// <see cref="PhotoSrc"/> in memory (the resolver cannot run in SQL). Not for rendering.
+    /// </summary>
+    string? PhotoStoredPath = null)
 {
     /// <summary>
     /// Up to two uppercase initials from the speaker name, for the monogram shown
@@ -41,7 +52,7 @@ public sealed record PublicSpeakerDetail(
     string Name,
     string? Tagline,
     string? Bio,
-    string? PhotoUrl,
+    string? PhotoSrc,
     IReadOnlyList<PublicSpeakerSession> Sessions)
 {
     /// <summary>Monogram initials for the no-photo fallback.</summary>
@@ -129,11 +140,18 @@ public sealed class PublicSpeakersService
                     .OrderBy(ss => ss.Session.StartsAt)
                     .ThenBy(ss => ss.Session.Title)
                     .Select(ss => new PublicSpeakerSession(ss.SessionId, ss.Session.Title))
-                    .ToList()))
+                    .ToList(),
+                sp.PhotoSharePointPath))
             .ToListAsync(ct);
 
         // Deterministic, human-friendly order: by display name.
+        // §993 — and RESOLVE the photo here, in memory, once the rows are materialized:
+        // SpeakerPhotoUrl.Resolve cannot run in SQL. A sponsor-uploaded photo's PhotoUrl is a
+        // SharePoint DOCUMENT url, so the PUBLIC lineup was rendering a broken image for exactly
+        // the speakers a sponsor had supplied. Resolving at the projection means the view record
+        // carries a URL a browser can fetch, and no view has to know the rule (§665).
         var ordered = rows
+            .Select(r => r with { PhotoSrc = SpeakerPhotoUrl.Resolve(r.PhotoSrc, r.PhotoStoredPath) })
             .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -171,6 +189,7 @@ public sealed class PublicSpeakersService
                 p.Tagline,
                 p.Biography,
                 p.PhotoUrl,
+                p.PhotoSharePointPath,
                 Sessions = _db.SessionSpeakers
                     .Where(ss => ss.ParticipantId == p.ParticipantId
                                  && ss.Session.EventId == eventId
@@ -189,7 +208,9 @@ public sealed class PublicSpeakersService
             sp.FullName,
             sp.Tagline,
             sp.Biography,
-            sp.PhotoUrl,
+            // §993 — resolved here for the same reason as the lineup: a sponsor-uploaded photo's
+            // PhotoUrl is a SharePoint document url and renders broken on this PUBLIC page.
+            SpeakerPhotoUrl.Resolve(sp.PhotoUrl, sp.PhotoSharePointPath),
             sp.Sessions);
     }
 }

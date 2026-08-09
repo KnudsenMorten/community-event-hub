@@ -725,4 +725,100 @@ public sealed class CouponInvoicingPoolPageTests
         Assert.False(model.EconomicReachable);
         Assert.Empty(Assert.Single(model.Rows, r => r.CouponName == "PARTNER-X").Invoices);
     }
+
+    // ---------------------------------------------------------------------
+    //  §992 — "increase TO a new total", not "add N"
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// 🔑 Operator 2026-08-09: *"lets say that the customer comes back and says, lets extend the 20
+    /// to 30, but i dont want to get a new coupon code … i need to then invoice him for 10 extra.
+    /// the amount must now reflect a max of 30"*.
+    /// </summary>
+    /// <remarks>
+    /// He types the NEW TOTAL — the same number he then sets as the code's max in Backstage — and CEH
+    /// derives the delta. With an "add N" box the arithmetic is done twice, by a human, and the two
+    /// systems disagree the first time he gets it wrong.
+    /// </remarks>
+    [Fact]
+    public async Task Increasing_to_a_new_total_invoices_only_the_difference()
+    {
+        using var db = NewDb();
+        var (org, _) = await SeedAsync(db);          // the pool already holds 5
+        var rule = await db.CouponInvoicingSettings.SingleAsync();
+
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.SettingId = rule.Id;
+        model.PoolTicketClassId = TwoDay;
+        model.PoolTargetTotal = 30;                  // "increase it to 30"
+        model.PoolUnitPriceDkk = 3495m;
+
+        await model.OnPostAddTicketsAsync(default);
+
+        // 🔒 Still ADDS A PURCHASE ROW; nothing edits a total (§798.4), so "which invoice covers
+        // which tickets" stays answerable and the balance stays derived.
+        var purchases = await db.CouponPrepaidPurchases.OrderBy(p => p.Id).ToListAsync();
+        Assert.Equal(2, purchases.Count);
+        Assert.Equal(5, purchases[0].Quantity);
+        Assert.Equal(25, purchases[1].Quantity);     // 30 − 5, not 30
+        Assert.Equal(3495m, purchases[1].UnitPriceDkk);
+        Assert.Equal(25 * 3495m, purchases[1].AgreedValueDkk);
+
+        await model.OnGetAsync(default);
+        var balance = Assert.Single(
+            Assert.Single(model.Rows, r => r.CouponName == "PARTNER-X").Pools).Balance;
+        Assert.Equal(30, balance.Purchased);         // the number he sets as the code's max
+    }
+
+    /// <summary>
+    /// 🔴 A pool cannot be REDUCED. Each purchase is an invoiced agreement, so "decrease to 3" would
+    /// mean deleting money that was billed. Refused with the current total named, never silently
+    /// applied — and never read as "add 3".
+    /// </summary>
+    [Theory]
+    [InlineData(5)]     // same as today
+    [InlineData(3)]     // lower than today
+    public async Task Increasing_to_a_total_at_or_below_todays_is_refused(int target)
+    {
+        using var db = NewDb();
+        var (org, _) = await SeedAsync(db);          // 5 already
+        var rule = await db.CouponInvoicingSettings.SingleAsync();
+
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.SettingId = rule.Id;
+        model.PoolTicketClassId = TwoDay;
+        model.PoolTargetTotal = target;
+
+        Assert.IsType<RedirectToPageResult>(await model.OnPostAddTicketsAsync(default));
+
+        // Nothing was bought, and the message names the number he has to beat.
+        Assert.Single(await db.CouponPrepaidPurchases.ToListAsync());
+        Assert.Contains("already covers 5", model.Error);
+    }
+
+    /// <summary>
+    /// 🔒 The NEW-pool form is unaffected: it posts `PoolQuantity` and no target, because there the
+    /// quantity IS the total. Both forms must keep working from one handler.
+    /// </summary>
+    [Fact]
+    public async Task A_plain_quantity_with_no_target_still_adds_that_many()
+    {
+        using var db = NewDb();
+        var (org, _) = await SeedAsync(db);
+        var rule = await db.CouponInvoicingSettings.SingleAsync();
+
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.SettingId = rule.Id;
+        model.PoolTicketClassId = TwoDay;
+        model.PoolQuantity = 25;
+        model.PoolTargetTotal = null;
+
+        await model.OnPostAddTicketsAsync(default);
+
+        var purchases = await db.CouponPrepaidPurchases.OrderBy(p => p.Id).ToListAsync();
+        Assert.Equal(25, purchases[1].Quantity);
+        // No price typed ⇒ nothing recorded, rather than a 0 that would understate the aggregate.
+        Assert.Null(purchases[1].UnitPriceDkk);
+        Assert.Null(purchases[1].AgreedValueDkk);
+    }
 }

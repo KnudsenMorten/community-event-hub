@@ -52,6 +52,22 @@
     {
         // Keep the fallback — the static literal renders below.
     }
+
+    // §1003 — the EVENT-start countdown target. Null once the event has begun (or when the
+    // edition config is unreadable), and the topbar then falls back to the ticket banner.
+    DateTimeOffset? eventStartsAt = null;
+    var eventCode = "The event";
+    try
+    {
+        var cfg = EventConfigLoader.Load(EventConfigOptions.EventConfigPath);
+        if (!string.IsNullOrWhiteSpace(cfg.Code)) eventCode = cfg.Code;
+        var starts = cfg.Dates?.EventStartsAt();
+        if (starts is { } s && s > Clock.GetUtcNow()) eventStartsAt = s;
+    }
+    catch
+    {
+        // A broken config must never 500 the site — no countdown, ticket banner as before.
+    }
 }
 <!DOCTYPE html>
 @* lang reflects the negotiated UI culture (en) so a screen reader announces the
@@ -196,6 +212,32 @@
         else if (ticketBanner.Visible && !string.IsNullOrEmpty(ticketBanner.Href))
         {
             <a class="ticket-info" href="@ticketBanner.Href" target="_blank" rel="noopener">@ticketBanner.Message &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+        }
+        else if (eventStartsAt is { } startsAt)
+        {
+            @* 🔴 §1003 — THE COUNTDOWN IS TO THE EVENT, NOT THE TICKET SALE. Operator 2026-08-09:
+               *"it was a count down for the event start date 9th feb 2027 at 9:00 - like 'ELDK27
+               starts in xxx'"*. §995 built it against ticketSale.opensAtLocal, which was the wrong
+               target — it counted down to a date that passes months before the event and then
+               stopped meaning anything. Segmented DAYS/HOURS/MINUTES/SECONDS per his mock-up. *@
+            <span class="ceh-countdown" data-event-countdown="@startsAt.ToString("o")" aria-live="off">
+                <span class="cd-label">@eventCode starts in</span>
+                <span class="cd-seg"><b data-cd="d">—</b><i>DAYS</i></span>
+                <span class="cd-seg"><b data-cd="h">—</b><i>HOURS</i></span>
+                <span class="cd-seg"><b data-cd="m">—</b><i>MINUTES</i></span>
+                <span class="cd-seg"><b data-cd="s">—</b><i>SECONDS</i></span>
+            </span>
+        }
+        else if (ticketBanner.Visible && ticketBanner.OpensAt is { } opensAt)
+        {
+            @* §995 — the LIVE countdown. The server-rendered text is the no-JS answer and the
+               first paint; the script below re-renders it every second from the machine-readable
+               instant. 🔒 The INSTANT is what crosses to the browser, never a pre-rendered
+               duration: this layout is long-lived and cacheable, so "in 2 days" would still say
+               that tomorrow. `aria-live="off"` because a value that changes every second must not
+               be announced every second. *@
+            <span class="ticket-info" data-ticket-countdown="@opensAt.ToString("o")"
+                  aria-live="off">@ticketBanner.Message</span>
         }
         else if (ticketBanner.Visible)
         {
@@ -770,6 +812,71 @@
     {
         <partial name="_AiHelperWidget" />
     }
+    @* §995 — tick the topbar ticket countdown. Deliberately tiny, dependency-free and inline:
+       it drives ONE span and must not wait on a bundle to stop showing a stale duration.
+       🔒 It no-ops when the span is absent (every state except before-open), so this costs
+       nothing on the pages that do not have one. *@
+    <script defer>
+        // §1003 — the EVENT countdown (segmented). Runs alongside the ticket one; only one of the
+        // two elements is ever rendered, so each no-ops when its element is absent.
+        (function () {
+            var box = document.querySelector('[data-event-countdown]');
+            if (!box) return;
+            var target = Date.parse(box.getAttribute('data-event-countdown'));
+            if (isNaN(target)) return;
+
+            var cells = {
+                d: box.querySelector('[data-cd="d"]'), h: box.querySelector('[data-cd="h"]'),
+                m: box.querySelector('[data-cd="m"]'), s: box.querySelector('[data-cd="s"]')
+            };
+            var two = function (n) { return (n < 10 ? '0' : '') + n; };
+
+            function tick() {
+                var ms = target - Date.now();
+                if (ms <= 0) { box.textContent = '@eventCode is live'; clearInterval(t); return; }
+                var s = Math.floor(ms / 1000);
+                var d = Math.floor(s / 86400); s -= d * 86400;
+                var h = Math.floor(s / 3600);  s -= h * 3600;
+                var m = Math.floor(s / 60);    s -= m * 60;
+                cells.d.textContent = d;
+                cells.h.textContent = two(h);
+                cells.m.textContent = two(m);
+                cells.s.textContent = two(s);
+            }
+            var t = setInterval(tick, 1000);
+            tick();
+        })();
+
+        (function () {
+            var el = document.querySelector('[data-ticket-countdown]');
+            if (!el) return;
+            var target = Date.parse(el.getAttribute('data-ticket-countdown'));
+            if (isNaN(target)) return;   // unparseable => leave the server-rendered text alone
+
+            var two = function (n) { return (n < 10 ? '0' : '') + n; };
+
+            function tick() {
+                var ms = target - Date.now();
+                if (ms <= 0) {
+                    // The sale just opened while the page was open. Say so rather than freezing at
+                    // zero; the next real page load renders the proper on-sale state (with its
+                    // link), which this cannot do because the URL is not in the DOM.
+                    el.textContent = '@CommunityHub.Core.Config.TicketBannerBuilder.OnSaleMessage';
+                    clearInterval(timer);
+                    return;
+                }
+                var s = Math.floor(ms / 1000);
+                var d = Math.floor(s / 86400); s -= d * 86400;
+                var h = Math.floor(s / 3600);  s -= h * 3600;
+                var m = Math.floor(s / 60);    s -= m * 60;
+                var hms = two(h) + ':' + two(m) + ':' + two(s);
+                el.textContent = 'Tickets on sale in ' + (d > 0 ? d + 'd ' + hms : hms);
+            }
+
+            var timer = setInterval(tick, 1000);
+            tick();
+        })();
+    </script>
     @* Render any page-defined @@section Scripts. Without this, every page that defines one
        (e.g. Organizer/Hotels) 500s on render: "section 'Scripts' has not been rendered". *@
     @await RenderSectionAsync("Scripts", required: false)

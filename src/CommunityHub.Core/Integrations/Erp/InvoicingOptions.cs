@@ -35,6 +35,54 @@ public sealed class InvoicingOptions
     public bool DryRun { get; set; } = true;
 
     /// <summary>
+    /// §1013c — the unit price (DKK, ex VAT) the prepaid-pool form PREFILLS. Operator 2026-08-09:
+    /// *"unit price is DKK 3000"*.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>A PREFILL, not a rule.</b> The field stays editable and the typed value is what
+    /// is billed — §992 chose a typed price deliberately, because a prepaid pool exists before any
+    /// claim, so there is no claim to read a price off, and deriving one from another partner's
+    /// past claims would bill this partner at that partner's negotiated rate. This only stops him
+    /// retyping the standard price every time.</para>
+    ///
+    /// <para>⚠️ <b>Zero disables the prefill</b> (the box opens empty, as it did before), so this
+    /// can be switched off with a setting rather than a deploy if a future edition prices
+    /// differently. It is config for the same reason the track map is: a price is an edition fact.</para>
+    /// </remarks>
+    public decimal DefaultPrepaidUnitPriceDkk { get; set; } = 3000m;
+
+    /// <summary>
+    /// 🔴 §1016d — how many days must pass before a coupon's accumulated claims are invoiced again.
+    /// Operator 2026-08-09: *"you must batch them to every 2 weeks"*. Default **14**.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>This paces the INVOICE, not the job.</b> The job must keep running often — it is
+    /// also what notices unmapped coupons and chases them — so slowing the schedule would delay
+    /// those too. The cadence therefore lives in the data (each coupon's own
+    /// <c>LastInvoicedAt</c>), which also means two partners' billing periods run on their own
+    /// clocks rather than all landing on whichever day the job happened to start.</para>
+    ///
+    /// <para>⚠️ <b>0 restores per-pass invoicing</b> (the old behaviour), so the batching can be
+    /// switched off with a setting if a period ever has to be closed early.</para>
+    /// </remarks>
+    public int CouponInvoiceIntervalDays { get; set; } = 14;
+
+    /// <summary>
+    /// §1016c — the "early bird" terms quoted in the prepaid claim-invite mail's *extend* paragraph.
+    /// Operator 2026-08-09: *"(DKK 3000/EURO390)"*, and *"config, defaulting to 3000 / 390"*.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Config rather than literals because these are EDITION facts — next year's prices are a
+    /// settings change, not a release. The EUR figure is a NEGOTIATED round number, not a live
+    /// conversion of the DKK one: it is what the partner is promised, so it must not move with an
+    /// exchange rate between the mail and the invoice.
+    /// </remarks>
+    public decimal ExtendTermsPriceDkk { get; set; } = 3000m;
+
+    /// <inheritdoc cref="ExtendTermsPriceDkk"/>
+    public decimal ExtendTermsPriceEur { get; set; } = 390m;
+
+    /// <summary>
     /// Reads the options SAFELY. 🔒 Use this, never <c>section.Bind(new InvoicingOptions())</c>.
     /// </summary>
     /// <remarks>
@@ -67,6 +115,45 @@ public sealed class InvoicingOptions
             options.DryRun = parsed;
         }
 
+        // §1013c — read the SAME defensive way as DryRun, and for the same reason: a typo'd app
+        // setting must leave the shipped default in place, never take the host down at startup.
+        // (Invariant culture — an app setting is not written in the reader's locale.)
+        var price = config.GetSection(SectionName)["DefaultPrepaidUnitPriceDkk"];
+        if (!string.IsNullOrWhiteSpace(price)
+            && decimal.TryParse(price.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var dkk)
+            && dkk >= 0m)
+        {
+            options.DefaultPrepaidUnitPriceDkk = dkk;
+        }
+
+        // §1016d — same defensive read. A malformed value keeps the fortnightly default rather
+        // than either failing the host or silently reverting to invoice-per-claim.
+        var days = config.GetSection(SectionName)["CouponInvoiceIntervalDays"];
+        if (!string.IsNullOrWhiteSpace(days)
+            && int.TryParse(days.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var d)
+            && d >= 0)
+        {
+            options.CouponInvoiceIntervalDays = d;
+        }
+
+        // §1016c — the extend-terms prices, read the same defensive way.
+        options.ExtendTermsPriceDkk =
+            Money(config, "ExtendTermsPriceDkk") ?? options.ExtendTermsPriceDkk;
+        options.ExtendTermsPriceEur =
+            Money(config, "ExtendTermsPriceEur") ?? options.ExtendTermsPriceEur;
+
         return options;
+
+        static decimal? Money(IConfiguration cfg, string key)
+        {
+            var raw = cfg.GetSection(SectionName)[key];
+            return !string.IsNullOrWhiteSpace(raw)
+                   && decimal.TryParse(raw.Trim(), System.Globalization.NumberStyles.Number,
+                       System.Globalization.CultureInfo.InvariantCulture, out var v)
+                   && v >= 0m
+                ? v : null;
+        }
     }
 }

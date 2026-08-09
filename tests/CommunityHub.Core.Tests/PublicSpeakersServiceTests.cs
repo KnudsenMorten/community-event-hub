@@ -46,12 +46,13 @@ public sealed class PublicSpeakersServiceTests
 
     private static SpeakerProfile Profile(
         CommunityHubDbContext db, int eventId, Participant p,
-        bool selected, string? tagline = null, string? photo = null)
+        bool selected, string? tagline = null, string? photo = null, string? storedPath = null)
     {
         var sp = new SpeakerProfile
         {
             EventId = eventId, Participant = p,
             SelectedForPublish = selected, Tagline = tagline, PhotoUrl = photo,
+            PhotoSharePointPath = storedPath,
         };
         db.SpeakerProfiles.Add(sp);
         return sp;
@@ -113,7 +114,7 @@ public sealed class PublicSpeakersServiceTests
         var only = Assert.Single(view!.Speakers);
         Assert.Equal("Selected Sam", only.Name);
         Assert.Equal("Cloud nerd", only.Tagline);
-        Assert.Equal("https://cdn.example.test/sam.jpg", only.PhotoUrl);
+        Assert.Equal("https://cdn.example.test/sam.jpg", only.PhotoSrc);
         Assert.DoesNotContain(view.Speakers, s => s.Name == "Hidden Hanna");
     }
 
@@ -198,7 +199,7 @@ public sealed class PublicSpeakersServiceTests
         var view = await svc.BuildAsync();
 
         var only = Assert.Single(view!.Speakers);
-        Assert.Null(only.PhotoUrl);
+        Assert.Null(only.PhotoSrc);
         Assert.Equal("AA", only.Initials);
     }
 
@@ -225,7 +226,7 @@ public sealed class PublicSpeakersServiceTests
         Assert.NotNull(detail);
         Assert.Equal("Detail Sam", detail!.Name);
         Assert.Equal("Cloud nerd", detail.Tagline);
-        Assert.Equal("https://cdn.example.test/sam.jpg", detail.PhotoUrl);
+        Assert.Equal("https://cdn.example.test/sam.jpg", detail.PhotoSrc);
         var only = Assert.Single(detail.Sessions);
         Assert.Equal("Sam's Talk", only.Title);
         Assert.Equal(s.Id, only.SessionId);
@@ -281,5 +282,63 @@ public sealed class PublicSpeakersServiceTests
         Assert.Equal("Public Community 2027", view!.EventDisplayName);
         var only = Assert.Single(view.Speakers);
         Assert.Equal("Active Anna", only.Name);
+    }
+
+    /// <summary>
+    /// 🔴 §993 — A SPONSOR-UPLOADED PHOTO MUST NOT REACH THE PUBLIC PAGES AS A SHAREPOINT LINK.
+    /// </summary>
+    /// <remarks>
+    /// The operator reported the broken image on the speaker WIZARD, but the same raw `PhotoUrl`
+    /// was rendered by `/Speakers` and `/Speakers/{id}` — so a sponsor-supplied speaker showed a
+    /// broken image on the PUBLIC lineup, which is worse than the form he was looking at.
+    /// §665's resolver prefers the hub's own copy, and it now runs at the projection so no view has
+    /// to know the rule.
+    /// </remarks>
+    [Fact]
+    public async Task A_sharepoint_photo_is_served_from_the_hubs_own_copy_on_the_public_pages()
+    {
+        using var db = TestDb.New();
+        var evt = NewEvent(active: true);
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+        var sam = Spk(db, evt.Id, "Sponsor Sam", "sam@example.test");
+        await db.SaveChangesAsync();
+        Profile(db, evt.Id, sam, selected: true,
+            // What a sponsor upload leaves behind: an unfetchable document URL PLUS the hub's copy.
+            photo: "https://contoso.sharepoint.com/sites/X/Shared%20Documents/General/sam.jpg",
+            storedPath: "speaker-42.jpg");
+        await db.SaveChangesAsync();
+
+        var svc = new PublicSpeakersService(db);
+
+        var row = Assert.Single((await svc.BuildAsync())!.Speakers);
+        Assert.Equal("/speaker-photo/speaker-42.jpg", row.PhotoSrc);
+        Assert.DoesNotContain("sharepoint.com", row.PhotoSrc);
+
+        var detail = await svc.GetByIdAsync(sam.Id);
+        Assert.Equal("/speaker-photo/speaker-42.jpg", detail!.PhotoSrc);
+    }
+
+    /// <summary>
+    /// 🔒 And with NO hub copy, a SharePoint link resolves to NOTHING rather than to a broken
+    /// image — the pages already fall back to the monogram, which is a better public face than a
+    /// broken-image icon.
+    /// </summary>
+    [Fact]
+    public async Task A_sharepoint_photo_with_no_copy_falls_back_to_the_monogram()
+    {
+        using var db = TestDb.New();
+        var evt = NewEvent(active: true);
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+        var sam = Spk(db, evt.Id, "Sponsor Sam", "sam@example.test");
+        await db.SaveChangesAsync();
+        Profile(db, evt.Id, sam, selected: true,
+            photo: "https://contoso.sharepoint.com/sites/X/Shared%20Documents/General/sam.jpg");
+        await db.SaveChangesAsync();
+
+        var row = Assert.Single((await new PublicSpeakersService(db).BuildAsync())!.Speakers);
+        Assert.Null(row.PhotoSrc);
+        Assert.Equal("SS", row.Initials);
     }
 }

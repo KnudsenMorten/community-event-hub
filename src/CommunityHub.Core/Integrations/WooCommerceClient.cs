@@ -20,12 +20,35 @@ namespace CommunityHub.Core.Integrations;
 /// depending on a price it never asked for. A zero therefore means NOT SUPPLIED — and the invoicing
 /// service refuses such a line rather than sending a customer a 0.00 row.</para>
 /// </param>
+/// <param name="LineSubtotal">
+/// §1017 — the line total BEFORE any coupon, i.e. list price × quantity. Compared against
+/// <paramref name="LineTotal"/> to know whether this line was discounted at all.
+/// </param>
+/// <param name="LineTotal">
+/// §1017 — the line total AFTER coupons. ✅ Live-verified on order 10841: subtotal 25000,
+/// total 24400 for the `free3extratickets` coupon.
+/// <para>🔒 <b>This, not <see cref="UnitPrice"/> × quantity, is the rounding-safe basis for an
+/// amount.</b> WooCommerce derives `price` as total/quantity, so a discount that does not divide
+/// evenly across a multi-unit line loses cents when re-multiplied.</para>
+/// </param>
 public sealed record WooLineItem(
     long ProductId,
     string ProductName,
     string CategoriesText,
     int Quantity = 1,
-    decimal UnitPrice = 0m);
+    decimal UnitPrice = 0m,
+    decimal LineSubtotal = 0m,
+    decimal LineTotal = 0m)
+{
+    /// <summary>§1017 — how much this line was reduced by coupons (0 when it was not).</summary>
+    public decimal DiscountAmount =>
+        LineSubtotal > 0m && LineTotal > 0m && LineSubtotal > LineTotal
+            ? LineSubtotal - LineTotal
+            : 0m;
+
+    /// <summary>§1017 — true when a coupon actually reduced this line.</summary>
+    public bool IsDiscounted => DiscountAmount > 0m;
+}
 
 /// <summary>A WooCommerce order, flattened to what the sponsor pipeline uses.</summary>
 public sealed record WooOrder(
@@ -35,7 +58,13 @@ public sealed record WooOrder(
     string BillingCompany,
     string? CompanyId,
     DateTimeOffset? CreatedAt,
-    IReadOnlyList<WooLineItem> LineItems);
+    IReadOnlyList<WooLineItem> LineItems,
+    /// <summary>
+    /// §1017 — the coupon codes applied to this order. WooCommerce reports coupons per ORDER while
+    /// the reduction lands per LINE, so this is the only place the CODE exists — and the code is
+    /// the thing a sponsor asks about when the total is not the list price.
+    /// </summary>
+    IReadOnlyList<string>? CouponCodes = null);
 
 /// <summary>WooCommerce REST settings. Keys come from Key Vault.</summary>
 public sealed class WooCommerceOptions
@@ -288,7 +317,22 @@ public sealed class WooCommerceClient
                     // ⚠️ Not "total": WooCommerce's `total` is the line total (unit × quantity), and
                     // billing that as a unit price would multiply a 2-item line by two a second
                     // time. `price` is per unit.
-                    UnitPrice: GetDecimal(item, "price")));
+                    //
+                    // ✅ §1017 — LIVE-VERIFIED 2026-08-09 that `price` is the DISCOUNTED unit price,
+                    // so a coupon is already reflected in what CEH bills. Order 10841
+                    // (coupon `free3extratickets`): line `subtotal` 25000, `total` 24400,
+                    // `price` 24400 — i.e. price = total / quantity, AFTER the discount. Order 10831
+                    // (no coupon, qty 3): price 200, subtotal 600, total 600. **The invoiced amount
+                    // was never wrong.**
+                    UnitPrice: GetDecimal(item, "price"),
+                    // §1017 — the PRE-discount line total and the POST-discount line total, kept so
+                    // the invoice can SHOW a discount rather than silently charging a lower number.
+                    // 🔒 `LineTotal` is also the rounding-safe basis for the amount: `price` is
+                    // derived as total/quantity, so a discount that does not divide evenly across a
+                    // multi-unit line (total 1000 over qty 3 ⇒ price 333.33 ⇒ 999.99) loses cents
+                    // when re-multiplied. Nothing bills from it yet — see §1017.
+                    LineSubtotal: GetDecimal(item, "subtotal"),
+                    LineTotal: GetDecimal(item, "total")));
             }
         }
 
@@ -331,7 +375,27 @@ public sealed class WooCommerceClient
                 ? GetString(billing, "company") : string.Empty,
             CompanyId: string.IsNullOrWhiteSpace(companyId) ? null : companyId,
             CreatedAt: created,
-            LineItems: lineItems);
+            LineItems: lineItems,
+            CouponCodes: ReadCouponCodes(order));
+    }
+
+    /// <summary>
+    /// §1017 — the order's applied coupon codes. ✅ Live-verified on order 10841:
+    /// <c>coupon_lines: [{ code: "free3extratickets", discount: "600" }]</c>. Empty when none.
+    /// </summary>
+    private static IReadOnlyList<string> ReadCouponCodes(JsonElement order)
+    {
+        if (!order.TryGetProperty("coupon_lines", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return Array.Empty<string>();
+
+        var codes = new List<string>();
+        foreach (var el in arr.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.Object) continue;
+            var code = GetString(el, "code");
+            if (!string.IsNullOrWhiteSpace(code)) codes.Add(code.Trim());
+        }
+        return codes;
     }
 
     private static string GetString(JsonElement e, string prop) =>

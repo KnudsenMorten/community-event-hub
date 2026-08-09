@@ -28,6 +28,7 @@ public sealed class ReminderJob
     private readonly AttendeePartyReminderBuilder _attendeePartyReminders;
     private readonly AttendeeMasterClassReminderBuilder _attendeeMcReminders;
     private readonly GetStartedDigestBuilder _getStartedDigests;
+    private readonly OrganizerWelcomeAnchorSeeder _organizerAnchors;
     private readonly GetStartedDeadlineReminderBuilder _getStartedDeadline;
     private readonly HotelCutoffReminderBuilder _hotelCutoffs;
     private readonly ReminderEngine _engine;
@@ -46,6 +47,7 @@ public sealed class ReminderJob
         AttendeePartyReminderBuilder attendeePartyReminders,
         AttendeeMasterClassReminderBuilder attendeeMcReminders,
         GetStartedDigestBuilder getStartedDigests,
+        OrganizerWelcomeAnchorSeeder organizerAnchors,
         GetStartedDeadlineReminderBuilder getStartedDeadline,
         HotelCutoffReminderBuilder hotelCutoffs,
         ReminderEngine engine,
@@ -63,6 +65,7 @@ public sealed class ReminderJob
         _attendeePartyReminders = attendeePartyReminders;
         _attendeeMcReminders = attendeeMcReminders;
         _getStartedDigests = getStartedDigests;
+        _organizerAnchors = organizerAnchors;
         _getStartedDeadline = getStartedDeadline;
         _hotelCutoffs = hotelCutoffs;
         _engine = engine;
@@ -132,6 +135,14 @@ public sealed class ReminderJob
             // gate + per-window dedup; ring-gated at the transport under 'welcome-email'
             // (ReminderMessage.FeatureKey), and the engine's delivery-outcome seam keeps a
             // ring-dropped digest out of the ledger so it retries once rings widen.
+            // §994 — organizers get NO welcome mail (WelcomeVariants returns null for Organizer), so
+            // §738's "never welcomed ⇒ never chased" gate made them permanently unchaseable. Seed
+            // the anchor from CreatedAt FIRST, so a new organizer is eligible on this very run
+            // instead of needing the §985a hand-backfill repeated for every one added.
+            // 🔒 Only fills a NULL, and eligibility is not a mail — the digest still skips a
+            // 100 %-complete wizard.
+            await _organizerAnchors.RunAsync(eventId, ct);
+
             var getStarted = await _getStartedDigests.BuildDueAsync(eventId, ct);
             sent += await _engine.SendDueAsync(eventId, getStarted, ct);
 

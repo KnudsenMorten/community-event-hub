@@ -120,6 +120,13 @@ public class EmailMagicLinkSenderCoverageTests
         var ev = NewEvent();
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
 
         // Two coordinator contacts of the same sponsor company + the assigned sponsor.
         Participant Sponsor(string email, bool coordinator) => new()
@@ -173,6 +180,13 @@ public class EmailMagicLinkSenderCoverageTests
         var ev = NewEvent();
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
 
         var speaker = new Participant
         {
@@ -215,6 +229,13 @@ public class EmailMagicLinkSenderCoverageTests
         var ev = NewEvent();
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
         var p = new Participant
         {
             EventId = ev.Id, Email = "person@example.com", FullName = "Sample Person",
@@ -249,6 +270,13 @@ public class EmailMagicLinkSenderCoverageTests
 
         var ev = NewEvent();
         db.Events.Add(ev);
+        await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
         await db.SaveChangesAsync();
         var p = new Participant
         {
@@ -308,6 +336,13 @@ public class EmailMagicLinkSenderCoverageTests
         var ev = NewEvent();
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
 
         var speaker = new Participant
         {
@@ -350,6 +385,167 @@ public class EmailMagicLinkSenderCoverageTests
     }
 
     // ----------------------------------------------------------------------
+    // §997 — the two defects the operator found in that same email.
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Drives the real approve→apply→email path and returns the rendered body, so both §997
+    /// assertions are made against the mail a speaker would actually receive.
+    /// </summary>
+    private static async Task<string> RenderScheduleChangeAsync(
+        ServiceProvider sp, CommunityHubDbContext db,
+        DateTimeOffset oldStart, DateTimeOffset oldEnd, string oldRoom,
+        DateTimeOffset newStart, DateTimeOffset newEnd, string newRoom)
+    {
+        var ev = NewEvent();
+        db.Events.Add(ev);
+        await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
+
+        var speaker = new Participant
+        {
+            EventId = ev.Id, Email = "speaker@example.com", FullName = "Sample Speaker",
+            Role = ParticipantRole.Speaker, IsActive = true,
+        };
+        db.Participants.Add(speaker);
+        await db.SaveChangesAsync();
+
+        var session = new Session
+        {
+            EventId = ev.Id, SessionizeId = "sz-1", Title = "ELDK27 Welcome",
+            BackstageSessionId = "bs-1",
+            BackstageStartsAt = oldStart, BackstageEndsAt = oldEnd, BackstageRoom = oldRoom,
+        };
+        db.Sessions.Add(session);
+        await db.SaveChangesAsync();
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = speaker.Id });
+        await db.SaveChangesAsync();
+
+        var sender = new CapturingEmailSender();
+        var svc = new SyncDeltaQueueService(
+            db, clock: new FixedClock(), audit: null, alerts: null, sender: sender,
+            context: null, templates: RealTemplatesWithMagic(sp));
+
+        var delta = await svc.EnqueueSessionUpdateAsync(
+            ev.Id, session.Id, session.Title, SessionSyncDirection.ZohoToCeh,
+            SyncDeltaQueueService.BuildSessionChanges(
+                oldStart, oldEnd, oldRoom, newStart, newEnd, newRoom));
+        await svc.ApproveAsync(delta.Id, "olivia@example.com");
+
+        return Assert.Single(sender.Messages).Html;
+    }
+
+    /// <summary>
+    /// 🔴 §997 — THE TIME MUST BE DANISH, NOT UTC.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-09: *"the time here is wrong as it is in wrong timezone. inside zoho the
+    /// session is 8:30-8:50 Danish time - but the mail doesn't reflect that"*. It printed
+    /// <c>07:30–07:50</c> — the raw UTC instant, one hour behind CET.
+    /// <para>⚠️ February is CET (+01:00), deliberately: a summer date would pass on a +02:00 bug
+    /// too, and this exact session is a February one.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Session_schedule_change_email_shows_the_time_in_DANISH_time_not_UTC()
+    {
+        await using var sp = BuildServices();
+        using var scope = sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+
+        // His case: Zoho holds 08:30–08:50 Danish on 10 Feb 2027 ⇒ 07:30–07:50 UTC (CET, +1).
+        var html = await RenderScheduleChangeAsync(sp, db,
+            oldStart: new DateTimeOffset(2027, 2, 10, 8, 0, 0, TimeSpan.Zero),
+            oldEnd: new DateTimeOffset(2027, 2, 10, 9, 0, 0, TimeSpan.Zero),
+            oldRoom: "Room-A1",
+            newStart: new DateTimeOffset(2027, 2, 10, 7, 30, 0, TimeSpan.Zero),
+            newEnd: new DateTimeOffset(2027, 2, 10, 7, 50, 0, TimeSpan.Zero),
+            newRoom: "Room-A1");
+
+        Assert.Contains("08:30–08:50", html);        // Danish wall time, as Zoho shows it
+        Assert.DoesNotContain("07:30–07:50", html);  // 🔴 the UTC instant he was sent
+        // The old value converts too — a half-converted table is worse than an unconverted one.
+        Assert.Contains("09:00–10:00", html);
+        // Said once, so the reader never has to guess which zone they are reading.
+        Assert.Contains("Danish time", html);
+    }
+
+    /// <summary>
+    /// 🔴 §997 — A ROW APPEARS ONLY WHEN THAT FIELD ACTUALLY CHANGED.
+    /// </summary>
+    /// <remarks>
+    /// Operator, on the same mail: *"i also dont understand the where change and see no
+    /// difference?"* — there was none. The template rendered both rows unconditionally, so an
+    /// unchanged room was printed struck through and then repeated verbatim. That is the §594 trust
+    /// failure aimed at a SPEAKER rather than the operator: an alert asserting a change that did not
+    /// happen teaches the reader to stop believing the alert.
+    /// </remarks>
+    [Fact]
+    public async Task A_time_only_change_does_not_print_a_Where_row()
+    {
+        await using var sp = BuildServices();
+        using var scope = sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+
+        var html = await RenderScheduleChangeAsync(sp, db,
+            oldStart: new DateTimeOffset(2027, 2, 10, 8, 0, 0, TimeSpan.Zero),
+            oldEnd: new DateTimeOffset(2027, 2, 10, 9, 0, 0, TimeSpan.Zero),
+            oldRoom: "Room-A1 Keynote-Floor 0-Max 1500",
+            newStart: new DateTimeOffset(2027, 2, 10, 7, 30, 0, TimeSpan.Zero),
+            newEnd: new DateTimeOffset(2027, 2, 10, 7, 50, 0, TimeSpan.Zero),
+            newRoom: "Room-A1 Keynote-Floor 0-Max 1500");   // unchanged
+
+        Assert.Contains("When", html);
+        Assert.DoesNotContain("Where", html);
+        // And the room is not printed at all — not struck through, not repeated.
+        Assert.DoesNotContain("Room-A1 Keynote-Floor 0-Max 1500", html);
+    }
+
+    /// <summary>The mirror case: a room-only move prints Where and NOT When.</summary>
+    [Fact]
+    public async Task A_room_only_change_does_not_print_a_When_row()
+    {
+        await using var sp = BuildServices();
+        using var scope = sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+
+        var start = new DateTimeOffset(2027, 2, 10, 8, 0, 0, TimeSpan.Zero);
+        var html = await RenderScheduleChangeAsync(sp, db,
+            oldStart: start, oldEnd: start.AddHours(1), oldRoom: "Room A",
+            newStart: start, newEnd: start.AddHours(1), newRoom: "Room B");
+
+        Assert.Contains("Where", html);
+        Assert.Contains("Room B", html);
+        Assert.DoesNotContain("When", html);
+    }
+
+    /// <summary>
+    /// 🔒 The rows are a RAW-HTML token, so the single-pass renderer must not leave a nested
+    /// <c>{{brandColor}}</c> as literal braces in a speaker's inbox (§726).
+    /// </summary>
+    [Fact]
+    public async Task The_change_table_leaves_no_unsubstituted_tokens()
+    {
+        await using var sp = BuildServices();
+        using var scope = sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+
+        var start = new DateTimeOffset(2027, 2, 10, 8, 0, 0, TimeSpan.Zero);
+        var html = await RenderScheduleChangeAsync(sp, db,
+            oldStart: start, oldEnd: start.AddHours(1), oldRoom: "Room A",
+            newStart: start.AddHours(2), newEnd: start.AddHours(3), newRoom: "Room B");
+
+        Assert.DoesNotContain("{{", html);
+        Assert.DoesNotContain("}}", html);
+    }
+
+
+    // ----------------------------------------------------------------------
     // SessionEvaluationMailService — the results mail to a speaker binds that
     // speaker's standing magic-link grant (the session-evaluation-results template
     // has no hub CTA today, so we assert the grant the seam minted, not a body link).
@@ -364,6 +560,13 @@ public class EmailMagicLinkSenderCoverageTests
 
         var ev = NewEvent();
         db.Events.Add(ev);
+        await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
         await db.SaveChangesAsync();
         var speaker = new Participant
         {
@@ -426,6 +629,13 @@ public class EmailMagicLinkSenderCoverageTests
         var ev = NewEvent();
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
+        await db.SaveChangesAsync();
 
         Participant Coord(string email) => new()
         {
@@ -468,6 +678,13 @@ public class EmailMagicLinkSenderCoverageTests
 
         var ev = NewEvent();
         db.Events.Add(ev);
+        await db.SaveChangesAsync();
+        // §1001 — open the speaker-notice quiet period; these tests are about the mail itself.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = ev.Id, Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
         await db.SaveChangesAsync();
 
         // An explicit recipient that is NOT a Participant in this edition.

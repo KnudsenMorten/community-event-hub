@@ -166,7 +166,8 @@ public sealed class MasterClassWaitlistFormService : IWizardFormService
     {
         var mine = await _signups.GetForAttendeeAsync(eventId, attendeeId, ct);
         var confirmed = mine.FirstOrDefault(x => x.Status == MasterClassSignupStatus.Confirmed);
-        var all = await _signups.ListMasterClassesAsync(eventId, ct);
+        // Â§972 â nor offered as something to join the WAITLIST for.
+        var all = await _signups.ListMasterClassesAsync(eventId, ct, excludeTestSessions: true);
 
         var pending = mine.FirstOrDefault(x =>
             x.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered);

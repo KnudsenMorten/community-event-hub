@@ -229,7 +229,23 @@ public sealed class SessionManagementService
         DateTimeOffset? startsAt = null,
         DateTimeOffset? endsAt = null,
         bool applySchedule = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        // §1011 — OPTIONAL and LAST so every existing call site still compiles. Null ⇒ leave the
+        // flag alone, which is what a caller that does not render the tick box means.
+        bool? isCommonForAllTracks = null,
+        // 🔴 §1005.3 — the fields CEH now OWNS (§999/§1000) but could not edit. Each is
+        // null-means-leave-alone, so a caller that does not render the input cannot blank a value
+        // it never showed. Blank-but-supplied DOES clear, which is how a wrong tag gets removed.
+        string? title = null,
+        string? sessionAbstract = null,
+        string? track = null,
+        string? level = null,
+        string? tags = null,
+        // 🔴 §1025 — the session's speakers. NULL = not supplied (leave the links alone); an EMPTY
+        // list = "he cleared them all", which is a real edit and must be distinguishable. The page
+        // tells the two apart with a hidden marker, because a multi-select posts nothing when
+        // nothing is ticked — the same trap as the §1011 checkbox.
+        IReadOnlyList<int>? speakerParticipantIds = null)
     {
         ValidateLengthMinutes(lengthMinutes);
 
@@ -252,11 +268,104 @@ public sealed class SessionManagementService
         // ❓OPEN-20: a REAL manual schedule change stamps the override flag so the
         // import never re-derives the date. Posting back the unchanged values is
         // NOT an override (the edit form always re-posts the current schedule).
-        if (applySchedule && (session.StartsAt != startsAt || session.EndsAt != endsAt))
+        // 🔴 §1022 — ENDS IS DERIVED: start + length. It is no longer something a human types.
+        //
+        // Operator 2026-08-09: *"ends should be a calculated field based on the length+start time"*.
+        //
+        // 🔑 WHY IT MATTERS BEYOND TIDINESS — stated from what was MEASURED, not from the screenshot.
+        //
+        // ✅ Checked in PROD 2026-08-09: NO session currently has `end−start ≠ LengthMinutes`
+        // (ELDK27 Welcome is #1: Length 20, 08:30→08:50, correct). So this fixes a LATENT hazard,
+        // not a live corruption — and saying so is the point, because the first draft of this
+        // comment asserted a live 20-vs-90 defect that the data does not support (§998: an
+        // unverified claim in a comment outlives everyone).
+        //
+        // ⚠️ The hazard is real: `SessionBackstagePushService.DurationMinutes` prefers **end−start**
+        // over `LengthMinutes`. So the moment the two disagree, the duration CEH pushes — and the
+        // duration the §1002 difference mail asks him to set in Zoho — comes from the field he did
+        // NOT think he was editing. Two fields that can disagree eventually will.
+        //
+        // 🔒 LENGTH WINS, deliberately. It is the §299.8/b7 source of truth for duration, it is a
+        // dropdown of configured values (so it cannot be a typo), and it is what the Zoho create
+        // sends. Deriving the other way — length from two typed timestamps — would re-admit exactly
+        // the drift this removes.
+        //
+        // ⚠️ The IMPORT path is untouched: Sessionize supplies both times and `LengthMinutes` is
+        // derived FROM them there, which is consistent. This governs only the manual edit, which is
+        // the only place a human could set the two independently.
+        var derivedEnd = startsAt is { } st && lengthMinutes > 0
+            ? st.AddMinutes(lengthMinutes)
+            : endsAt;
+        if (applySchedule && (session.StartsAt != startsAt || session.EndsAt != derivedEnd))
         {
             session.StartsAt = startsAt;
-            session.EndsAt = endsAt;
+            session.EndsAt = derivedEnd;
             session.IsDateOverridden = true;
+        }
+
+        // §1011 — "Common for All Tracks": overrules the track everywhere it is compared or
+        // pushed. The CEH Track value is deliberately LEFT AS IT IS rather than cleared — the
+        // create still sends it (operator decision: create-with-track-then-report), and untickng
+        // the box must restore the previous behaviour rather than leave the session track-less.
+        if (isCommonForAllTracks is { } common) session.IsCommonForAllTracks = common;
+
+        // 🔴 §1005.3 — the CEH-owned content fields.
+        //
+        // 🔒 A TITLE is never blanked. Everything downstream is keyed on it for a human — the ops
+        // mails, the agenda, the speaker's own page — and a session with no title reads as data
+        // loss. The other fields legitimately clear: removing a wrong tag or level IS an edit.
+        if (title is not null && !string.IsNullOrWhiteSpace(title)) session.Title = title.Trim();
+        if (sessionAbstract is not null)
+            session.Abstract = string.IsNullOrWhiteSpace(sessionAbstract) ? null : sessionAbstract.Trim();
+        if (track is not null)
+            session.Track = string.IsNullOrWhiteSpace(track) ? null : track.Trim();
+        if (tags is not null)
+            session.Tags = string.IsNullOrWhiteSpace(tags) ? null : tags.Trim();
+        if (level is not null)
+        {
+            session.Level = string.IsNullOrWhiteSpace(level) ? null : level.Trim();
+            // §299.8/b7 — the NUMERIC code is DERIVED, never typed, and every sort/comparison uses
+            // it (alphabetically "Black Belt" sorts before "Expert", which is wrong). Re-deriving
+            // here is what stops an edited label leaving a stale code behind it.
+            session.LevelCode = string.IsNullOrWhiteSpace(session.Level)
+                ? null
+                : _options is not null
+                    ? _options.DeriveLevelCode(session.Level)
+                    : Config.SessionOptionsService.DeriveLevelCode(
+                        session.Level, Array.Empty<Config.SessionLevelOption>());
+        }
+
+        // 🔴 §1025 — RECONCILE THE SPEAKER LINKS. Operator 2026-08-09: *"i am missing abiity to
+        // link/remove speakers inside ceh - both for existing + new session creation"*.
+        //
+        // ⚠️ ON AN IMPORTED SESSION THIS IS TEMPORARY, BY DESIGN — and the page says so rather than
+        // letting him find out. `SessionImportService` reconciles each imported session's links to
+        // EXACTLY the Sessionize speaker set on every run, and his own spec keeps speakers
+        // Sessionize-owned (*"session title, session description and linked speakers from
+        // Sessionize -> ceh"*). So a manual link sticks on a HUB-ADDED session and is replaced on an
+        // imported one. Silently accepting an edit that a background job will undo is worse than
+        // refusing it; telling him is better than both.
+        if (speakerParticipantIds is not null)
+        {
+            var wanted = speakerParticipantIds.Where(id => id > 0).Distinct().ToHashSet();
+
+            // 🔒 Only participants of THIS edition may be linked — a cross-edition id would attach
+            // somebody who cannot see the session and cannot be mailed about it.
+            var valid = await _db.Participants
+                .Where(p => p.EventId == eventId && wanted.Contains(p.Id))
+                .Select(p => p.Id)
+                .ToListAsync(ct);
+
+            var links = await _db.Set<SessionSpeaker>()
+                .Where(ss => ss.SessionId == session.Id)
+                .ToListAsync(ct);
+
+            foreach (var gone in links.Where(l => !valid.Contains(l.ParticipantId)))
+                _db.Set<SessionSpeaker>().Remove(gone);
+
+            var already = links.Select(l => l.ParticipantId).ToHashSet();
+            foreach (var add in valid.Where(id => !already.Contains(id)))
+                _db.Set<SessionSpeaker>().Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = add });
         }
 
         session.UpdatedAt = _clock.GetUtcNow();

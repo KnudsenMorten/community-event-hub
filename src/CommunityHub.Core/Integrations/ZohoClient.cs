@@ -266,6 +266,50 @@ public sealed class ZohoOptions
     public string PushSessionType { get; set; } = "PRESENTATION";
 
     /// <summary>
+    /// 🔴 §1012 — CEH <see cref="Domain.SessionType"/> → the Backstage <c>session_type</c> value.
+    /// Anything not mapped falls back to <see cref="PushSessionType"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"i need option in the session type to be able to select
+    /// Keynote"*, with screenshots of Backstage's own picker.</para>
+    ///
+    /// <para>🔑 <b>The gap was never the CEH dropdown.</b> <c>SessionType.Keynote</c> has existed
+    /// since the enum was written and the organizer page offers every value. The gap was HERE:
+    /// <see cref="PushSessionType"/> is ONE hard-coded string sent for EVERY session, so a CEH
+    /// keynote was created in Backstage as a Presentation and he retyped it by hand. That is
+    /// exactly what his two screenshots show — arrows on *Keynote* and on *Presentation*.</para>
+    ///
+    /// <para>✅ <b>LIVE-VERIFIED vocabulary (PROD agenda, 2026-08-09)</b> — the complete set of
+    /// values in use across both days: <c>BREAK</c>, <c>KEYNOTE</c>, <c>PRESENTATION</c>,
+    /// <c>REGISTRATION</c>, <c>WELCOMENOTE</c>. (*Closing* is already <c>KEYNOTE</c>;
+    /// *Pre-keynote* is <c>WELCOMENOTE</c>.) Backstage exposes no list endpoint for these, so
+    /// this is measured, not documented — which is why the map is CONFIG.</para>
+    ///
+    /// <para>🔒 <b>Deliberately minimal: only what he asked for.</b> Keynote is mapped; every
+    /// other CEH type keeps the configured default. Mapping Welcome→WELCOMENOTE and the service
+    /// sessions→BREAK is tempting and would be GUESSING at which CEH type he means by each —
+    /// and a wrong type on the public agenda is a change he then has to undo by hand on an API
+    /// that cannot update. Extendable without a deploy via
+    /// <c>Zoho__SessionTypeMap__&lt;CehType&gt;</c>, so adding one is an app-setting edit.</para>
+    /// </remarks>
+    public Dictionary<string, string> SessionTypeMap { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            [nameof(Domain.SessionType.Keynote)] = "KEYNOTE",
+        };
+
+    /// <summary>
+    /// §1012 — the Backstage <c>session_type</c> for a CEH session: its mapped value, else
+    /// <see cref="PushSessionType"/>. Never returns blank (Backstage rejects a create with no
+    /// type — live-verified 2026-06-25).
+    /// </summary>
+    public string ResolveSessionType(Domain.SessionType type) =>
+        SessionTypeMap.TryGetValue(type.ToString(), out var mapped)
+        && !string.IsNullOrWhiteSpace(mapped)
+            ? mapped.Trim()
+            : PushSessionType;
+
+    /// <summary>
     /// Sessionize→Zoho TRACK-NAME map (operator 2026-07-23): the Backstage tracks carry
     /// SHORTER names for the two AI tracks than Sessionize does — everything else matches
     /// by exact (case-insensitive) name. Resolution: exact → this map → CREATE-if-missing
@@ -1093,6 +1137,57 @@ public sealed class ZohoClient
     /// track NAME to the Backstage track ID the create/update endpoint requires. Small finite
     /// set; tolerant of id/name field aliases. Returns empty on auth/HTTP failure.
     /// </summary>
+    /// <summary>
+    /// 🔴 §1019 — the event's TICKET CLASSES, as <c>id → display name</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09, for the fourth time: *"no-one knows a id - it must be the ticket
+    /// class name"*.</para>
+    ///
+    /// <para>🔑 <b>Why the earlier fixes kept failing.</b> §1013b widened the name lookup from
+    /// CLAIMS to CLAIMS + ATTENDEES, which is still "somebody must already have BOUGHT this class".
+    /// A <b>prepaid pool is created before anybody buys</b> — that is what prepaid means — so for
+    /// exactly the case he was looking at there was nothing to learn the name from, and every
+    /// surface fell back to the 17-digit id. Widening the same kind of source again would have
+    /// failed the same way.</para>
+    ///
+    /// <para>✅ <b>This is the authoritative source and it exists before any sale.</b> Live-probed
+    /// 2026-08-09: <c>GET …/ticket_classes</c> → 200, <c>{"ticket_classes":[…]}</c>, 3 rows —
+    /// <c>14880000003485481 "1-day  (Main Event)"</c>, <c>14880000003485482 "2-day (Pre-day  +
+    /// Main Event)"</c>, <c>14880000003485483 "Test"</c>. (<c>ticketclasses</c>, <c>tickets</c> and
+    /// <c>ticket-classes</c> all 404 — the underscore spelling is the one.)</para>
+    ///
+    /// <para>🔒 Fail-soft: an unreadable endpoint returns EMPTY, never throws. A caller then keeps
+    /// whatever name it already had rather than losing one it could display — the same rule as
+    /// every other lookup here.</para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, string>> GetTicketClassNamesAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/ticket_classes";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return map;
+
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        if (!doc.RootElement.TryGetProperty("ticket_classes", out var arr)
+            || arr.ValueKind != JsonValueKind.Array)
+        {
+            return map;
+        }
+        foreach (var el in arr.EnumerateArray())
+        {
+            var id = GetString(el, "id");
+            // `name` is what the Backstage UI shows; `ticket_name` is the attendee-record spelling.
+            var name = FirstNonEmpty(GetString(el, "name"), GetString(el, "ticket_name"));
+            if (id.Length > 0 && name.Length > 0) map[id] = name.Trim();
+        }
+        return map;
+    }
+
     public async Task<IReadOnlyList<BackstageTrack>> GetTracksAsync(
         string accessToken, CancellationToken ct = default)
     {
@@ -1271,10 +1366,26 @@ public sealed class ZohoClient
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/sessions"
             + (startTime is null ? $"?day={day}" : string.Empty);
-        // Create-only field set — description is not accepted on create (see BuildSessionPayload).
+        // 🔴 §998 — DESCRIPTION IS SENT ON CREATE. This passed `includeDescription: false` on the
+        // strength of a comment that said the create refused it. Operator 2026-08-09 produced the
+        // official v3 create-a-session docs, which document `description` as a create field — and
+        // the code agreed with him: BuildSessionPayload has always been able to send it and
+        // DEFAULTS the flag to true. Only this one call site turned it off.
+        //
+        // ⚠️ The tell was in the neighbours. Every other claim in this method is stamped
+        // "LIVE-VERIFIED 2026-07-23" with the symptom that proved it (camelCase sessionType
+        // silently ignored; track rejects a name; venue + speakers accepted). The description
+        // exclusion carried NO verification — just an assertion, repeated in three comments that
+        // cited each other until it read as fact. That is §754.5 again ("this used to say the fetch
+        // was gated on a scope. It is not, and never was").
+        //
+        // 🔒 It self-verifies, which is why no throwaway test session was created: the sessions API
+        // has no delete, so a live probe would leave a real session on the public agenda for ever.
+        // If Zoho DOES refuse this, §989's drift check finds an empty description within 10 minutes
+        // and mails the paste text — i.e. exactly today's behaviour, plus one accurate mail.
         var payload = BuildSessionPayload(
             title, description, startTime, durationMinutes, trackId, sessionType,
-            includeDescription: false, venueId: venueId, speakerEmails: speakerEmails);
+            includeDescription: true, venueId: venueId, speakerEmails: speakerEmails);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
@@ -1357,11 +1468,19 @@ public sealed class ZohoClient
     ///
     /// <para>LIVE-VERIFIED 2026-07-23 (stage-2 pilot): the CREATE endpoint accepts ONLY the
     /// documented fields — an unknown key fails the whole call with HTTP 400 "Extra param
-    /// found". <c>description</c> is NOT accepted on create (<paramref name="includeDescription"/>
-    /// = false there); it is not settable via the API at all today, since the per-id session
-    /// update refuses PUT and PATCH alike (404 "Please provide valid method" — the sessions API
-    /// is CREATE-ONLY, exactly like the speakers API). Descriptions are entered manually in the
-    /// Backstage UI until Zoho ships an update method.</para>
+    /// found".</para>
+    ///
+    /// <para>🔴 §998 — <c>description</c> <b>IS</b> a documented create field and IS now sent.
+    /// This doc-comment previously said it was "NOT accepted on create"; that was never verified
+    /// (unlike every other claim here) and the official v3 create-a-session reference lists it.
+    /// <paramref name="includeDescription"/> stays as a parameter only because the unit tests
+    /// assert both payload shapes.</para>
+    ///
+    /// <para>🔒 Still true, and NOT what §998 changed: the sessions API is <b>CREATE-ONLY</b> — the
+    /// per-id update refuses PUT and PATCH alike (404 "Please provide valid method"), exactly like
+    /// the speakers API. So a description can be SET at create and never changed again from here;
+    /// an EXISTING session's description is still a manual edit in the Backstage UI, which is what
+    /// §989's drift mail exists to prompt.</para>
     ///
     /// <para>LIVE-VERIFIED 2026-07-23 (stage-2 pilot v2): the CREATE endpoint DOES accept
     /// <c>venue</c> (the Backstage HALL id, a string) and <c>speakers</c> (an array of speaker
@@ -2084,10 +2203,27 @@ public sealed class ZohoClient
     /// change-detection): title, start, duration minutes, the venue (hall) id, the
     /// track id, the description and the tag names (both GuiOnly — readable here,
     /// unwritable via the API; the ACTION mail is their only channel).</summary>
+    /// <param name="SpeakerRefs">
+    /// 🔴 §1008 — the session's ATTACHED SPEAKERS, as the raw identifiers the record carries
+    /// (an id or an e-mail per entry; object entries are reduced to their e-mail, else their id).
+    /// Resolving them to people is the caller's job — <c>SessionBackstagePushService</c> does it
+    /// against the <c>/speakers</c> roster.
+    ///
+    /// <para>🔒 <b>NULL means "the record carried no `speakers` key" — NOT "no speakers".</b> The
+    /// distinction is the whole §594 lesson: <c>tags</c> is absent from this record, so diffing it
+    /// manufactured a permanent false gap that mailed him forever. A caller must therefore treat
+    /// null as UNREADABLE and report nothing, and only an EMPTY LIST as a genuinely speaker-less
+    /// session. (`speakers` IS returned today — it is in the §594 key inventory and was re-verified
+    /// against the live agenda — but the shape must survive it going away.)</para>
+    /// </param>
     public sealed record LiveSession(
         string Id, string? Title, DateTimeOffset? StartTime, int? DurationMinutes,
         string? VenueId, string? TrackId,
-        string? Description = null, IReadOnlyList<string>? Tags = null);
+        string? Description = null, IReadOnlyList<string>? Tags = null,
+        IReadOnlyList<string>? SpeakerRefs = null,
+        /// <summary>§1012 — the live <c>session_type</c> (BREAK / KEYNOTE / PRESENTATION /
+        /// REGISTRATION / WELCOMENOTE, live-verified 2026-08-09). Readable ⇒ diffable.</summary>
+        string? SessionType = null);
 
     /// <summary>
     /// UNGATED live session map by id (§301b self-heal + §302 change-detection): every
@@ -2144,7 +2280,11 @@ public sealed class ZohoClient
                     VenueId: NullIf(FirstNonEmpty(GetString(s, "venue"), GetString(s, "hallId"), GetString(s, "hall"))),
                     TrackId: NullIf(GetString(s, "track")),
                     Description: NullIf(GetString(s, "description")),
-                    Tags: tags);
+                    Tags: tags,
+                    // §1008 — absent key ⇒ null (unreadable), present-but-empty ⇒ empty list
+                    // (genuinely no speakers). See the LiveSession.SpeakerRefs contract.
+                    SpeakerRefs: ReadSpeakerRefs(s),
+                    SessionType: NullIf(GetString(s, "session_type")));
             }
             if (dayCount == 0 && !any) break;   // probing mode: stop at the first empty day
         }
@@ -2266,6 +2406,48 @@ public sealed class ZohoClient
             }
         }
         return list;
+    }
+
+    /// <summary>
+    /// 🔴 §1008 — the RAW speaker identifiers on a live session, for the CEH↔Zoho diff.
+    /// </summary>
+    /// <remarks>
+    /// <para>Distinct from <see cref="ResolveSpeakerNames"/>, which exists to PRINT names on a
+    /// signage screen and therefore DROPS anything it cannot resolve. A diff must not drop: an
+    /// entry it cannot account for has to make the whole comparison unavailable, or the mail
+    /// reports a person as missing who is standing right there in Backstage. So this returns the
+    /// identifiers verbatim and leaves resolution — and the decision to give up — to the caller.</para>
+    ///
+    /// <para>🔒 Returns <c>null</c> when the record has no <c>speakers</c> key at all, and an empty
+    /// list when the key is present and empty. Callers rely on that difference (§594).</para>
+    /// </remarks>
+    private static IReadOnlyList<string>? ReadSpeakerRefs(JsonElement session)
+    {
+        if (!session.TryGetProperty("speakers", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var refs = new List<string>();
+        foreach (var el in arr.EnumerateArray())
+        {
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                var raw = (el.GetString() ?? string.Empty).Trim();
+                if (raw.Length > 0) refs.Add(raw);
+            }
+            else if (el.ValueKind == JsonValueKind.Object)
+            {
+                // E-mail first: it is the identity the CEH side is keyed on, so a record that
+                // carries one needs no roster lookup at all.
+                var token = FirstNonEmpty(
+                    GetString(el, "email"), GetString(el, "email_address"), GetString(el, "id"));
+                if (token.Length > 0) refs.Add(token.Trim());
+                // An object with NEITHER an e-mail nor an id is unaccountable — keep a marker so
+                // the caller's "any unresolved entry ⇒ report nothing" rule sees it instead of
+                // silently comparing against a short list.
+                else refs.Add("(unidentified speaker)");
+            }
+        }
+        return refs;
     }
 
     /// <summary>

@@ -758,8 +758,19 @@ public sealed class SyncDeltaQueueService
 
         // Email each speaker on the session. This is the same template the §38e engine used
         // to send inline — it now sends on APPROVE instead.
+        // 🔴 §1001 — THE QUIET PERIOD. Before the configured date a schedule change is APPLIED but
+        // NOT announced. Operator 2026-08-09: *"we make lots of schedule changes and we dont want
+        // to make unnessary noice to speakers."*
+        //
+        // 🔒 A missing settings row means SILENT, not "notify" — a row nobody has saved must never
+        // mail every speaker on the first agenda edit, which is the noise this removes.
+        var noticeSetting = await _db.SessionSourceSettings
+            .FirstOrDefaultAsync(s => s.EventId == delta.EventId, ct);
+        var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
+        var mayNotify = noticeSetting?.MayNotifySpeakers(today) == true;
+
         var emailedCount = 0;
-        if (_sender is not null && (timeChanged || roomChanged))
+        if (_sender is not null && (timeChanged || roomChanged) && mayNotify)
         {
             var speakers = await _db.SessionSpeakers
                 .Where(ss => ss.SessionId == session.Id)
@@ -777,7 +788,14 @@ public sealed class SyncDeltaQueueService
             }
         }
 
-        var msg = $"Applied to the session; {emailedCount} speaker email(s) sent.";
+        // §1001 — say WHY nobody was mailed. "0 emails sent" on a real change reads as a fault; the
+        // quiet period is a decision, and the message names the date it ends so it is checkable.
+        var msg = (timeChanged || roomChanged) && !mayNotify
+            ? "Applied to the session; speakers NOT notified — "
+              + (noticeSetting?.SpeakerScheduleNoticeFrom is { } from
+                  ? $"schedule notices begin {from:d MMM yyyy} (§1001 quiet period)."
+                  : "no notice-start date is set, so speaker notices are off (§1001).")
+            : $"Applied to the session; {emailedCount} speaker email(s) sent.";
         return (true, emailedCount > 0, msg);
     }
 
@@ -969,6 +987,14 @@ public sealed class SyncDeltaQueueService
                 tokens["newRoom"] = newRoomText;
                 tokens["timeChanged"] = timeChanged ? "yes" : "no";
                 tokens["roomChanged"] = roomChanged ? "yes" : "no";
+                // 🔴 §997 — the table body, built here so ONLY the changed rows appear. The
+                // template used to render both rows unconditionally, printing an unchanged room
+                // struck through and repeated. brandColor is read back from the token set because
+                // the renderer is single-pass (a {{token}} inside a value stays literal).
+                tokens["changeRowsHtml"] = BuildChangeRowsHtml(
+                    timeChanged, oldTime, newTime, roomChanged, oldRoomText, newRoomText,
+                    tokens.TryGetValue("brandColor", out var bc) && !string.IsNullOrWhiteSpace(bc)
+                        ? bc! : "#1565c0");
                 var rendered = _templates.Render(TemplateName, tokens);
                 await _sender.SendAsync(email, rendered.Subject, rendered.HtmlBody, ct);
             }
@@ -1023,14 +1049,83 @@ public sealed class SyncDeltaQueueService
         return i > 0 ? fullName[..i] : fullName;
     }
 
+    /// <summary>
+    /// 🔴 §997 — the When cell, in EVENT-LOCAL (Danish) time.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"the time here is wrong as it is in wrong timezone. inside zoho
+    /// the session is 8:30-8:50 Danish time - but the mail doesn't reflect that"*. It printed
+    /// <c>07:30–07:50</c> — the UTC instant, exactly one hour behind CET.</para>
+    ///
+    /// <para>🔑 <b>The values were never wrong; the RENDERING was.</b> These are
+    /// <c>DateTimeOffset</c>s read from Backstage, which returns UTC, and
+    /// <c>DateTimeOffset.ToString</c> formats whatever offset the value carries. Nothing converted
+    /// it to the zone the reader lives in.</para>
+    ///
+    /// <para>⚠️ This is <b>§305 in a new place</b> — that section is titled *"CRITICAL timezone
+    /// bug"* and says *"we use Danish timezone always … you must store in the integration, if the
+    /// different systems are presenting in different timezones."* §305 fixed the PARSE and the PUSH;
+    /// this mail is a PRESENTATION site that was never brought along, and
+    /// <see cref="EventTimezone"/> — the stated one authority — was sitting right there. The ops
+    /// drift mail already used it (<c>ToEventLocalString</c>); the speaker mail did not.</para>
+    ///
+    /// <para>🔒 The zone is NOT repeated per value — the template prints "All times are Danish
+    /// time" once under the table, so the two rows stay readable.</para>
+    /// </remarks>
     private static string FormatRange(DateTimeOffset? start, DateTimeOffset? end)
     {
         // §83: no synced time yet → a clear placeholder, never an empty cell.
         if (start is null) return "TBD";
-        var s = start.Value.ToString("ddd dd MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
+
+        var s = TimeZoneInfo.ConvertTime(start.Value, EventTimezone.Tz);
+        var text = s.ToString("ddd dd MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
         return end is { } e
-            ? $"{s}–{e.ToString("HH:mm", CultureInfo.InvariantCulture)}"
-            : s;
+            ? $"{text}–{TimeZoneInfo.ConvertTime(e, EventTimezone.Tz).ToString("HH:mm", CultureInfo.InvariantCulture)}"
+            : text;
+    }
+
+    /// <summary>
+    /// 🔴 §997 — the change table's rows, built server-side so ONLY the fields that actually
+    /// changed appear.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09, on a time-only change: *"i also dont understand the where change
+    /// and see no difference?"* — he was right, and there was none. The template rendered the
+    /// <b>When</b> and <b>Where</b> rows <b>unconditionally</b>, so a room that had not moved was
+    /// printed struck-through and then immediately repeated verbatim. The <c>timeChanged</c> /
+    /// <c>roomChanged</c> tokens were computed, passed, and never read.</para>
+    ///
+    /// <para>🔑 <b>This is the §594 trust failure in a participant mail.</b> An alert that asserts a
+    /// change which did not happen teaches the reader that the alert cannot be believed — and this
+    /// one goes to SPEAKERS, not to the operator who knows the system. A speaker seeing an
+    /// unchanged room struck through has to work out whether the hub is wrong or their memory is.</para>
+    ///
+    /// <para>🔒 Built as a RAW-HTML token (<c>…Html</c> suffix ⇒
+    /// <see cref="Email.EmailTemplateRenderer.RawHtmlTokens"/>) because the renderer substitutes in
+    /// one pass with no conditionals. Every interpolated VALUE is HTML-encoded here; only the markup
+    /// around them is ours.</para>
+    /// </remarks>
+    /// <param name="brandColor">
+    /// ⚠️ The RESOLVED colour, never the <c>{{brandColor}}</c> token: the renderer substitutes in
+    /// ONE pass, so a token inside a token VALUE reaches the reader as literal braces (§726).
+    /// </param>
+    private static string BuildChangeRowsHtml(
+        bool timeChanged, string oldTime, string newTime,
+        bool roomChanged, string oldRoom, string newRoom, string brandColor)
+    {
+        string Row(string label, string oldValue, string newValue) =>
+            "<tr>"
+            + "<td style=\"padding:10px 12px;border:1px solid #e5e7eb;background:#f9fafb;"
+            + "font-weight:bold;width:34%;\">" + Enc(label) + "</td>"
+            + "<td style=\"padding:10px 12px;border:1px solid #e5e7eb;\">"
+            + "<span style=\"color:#9ca3af;text-decoration:line-through;\">" + Enc(oldValue) + "</span><br>"
+            + "<strong style=\"color:" + Enc(brandColor) + ";\">" + Enc(newValue) + "</strong>"
+            + "</td></tr>";
+
+        var sb = new System.Text.StringBuilder();
+        if (timeChanged) sb.Append(Row("When", oldTime, newTime));
+        if (roomChanged) sb.Append(Row("Where", oldRoom, newRoom));
+        return sb.ToString();
     }
 
     /// <summary>

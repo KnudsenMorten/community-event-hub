@@ -125,6 +125,45 @@ public sealed class SessionChangeDetectionService
         // is SEEDED SILENTLY by design, and every real change is ENQUEUED for his approval rather
         // than applied. Nothing here writes to Zoho or auto-changes CEH.
 
+        // 🔴 §1000 — ZOHO → CEH IS OFF FOR SESSIONS. THIS RETURNS BEFORE READING ANYTHING.
+        //
+        // Operator 2026-08-09: *"We must disable the sync from zoho to CEH. It was originally made
+        // to support 2-way syncing, but i dont feel we can control this 100%, so I would rather
+        // make it one-way from ceh to zoho. ceh is the owner!"*
+        //
+        // ⚠️ IT COULD NOT BE TURNED OFF BY CONFIGURATION. The obvious move — set the edition's
+        // sync direction away from stage 3 — does nothing, because §576 DELETED that gate as
+        // unsatisfiable ("stage 3 was deleted long ago, stage 2 is permanent"). So this engine has
+        // been running on every 5-minute pass with no direction gate at all, and switching it off
+        // needs an explicit guard. That is what this is.
+        //
+        // 🔴🔴 §1020 — ZOHO→CEH IS OFF PERMANENTLY, IN CODE, WITH NO SWITCH. DO NOT ADD ONE.
+        //
+        // Operator 2026-08-09: *"Zoho→CEH kill switch - disable/remove this from settings totally
+        // and leave it off in the code. we cannot have anyone turn this on by mistake."*
+        //
+        // 🔑 §1000 turned this off with a FEATURE SWITCH, which left the two-way sync one click
+        // away from returning. Re-enabling it would silently make Backstage the writer of times and
+        // rooms again while CEH believes it owns the schedule (§999/§1000) — two writers, no
+        // detection, and the loser is whichever ran last. That is not a state anyone should be able
+        // to reach from a settings page, so THE SWITCH IS GONE and this returns before reading
+        // anything at all.
+        //
+        // ⚠️ The engine is deliberately NOT deleted. It is the only implementation of Zoho→CEH
+        // detection, it is heavily tested, and a future edition may genuinely want it — deleting it
+        // would mean rebuilding it from scratch and re-learning §553/§594. Re-enabling is therefore
+        // a DEPLOY (delete these lines), never a toggle, which is exactly what he asked for.
+        //
+        // 🔑 THIS DOES NOT AFFECT SIGNAGE. The venue screens read `AgendaActivities`, filled by
+        // SignageAgendaSyncService from the SAME Backstage agenda on its own timer. Zoho remains
+        // 100% the owner there, as the operator required. The two paths were kept separate on
+        // purpose (§754) and this touches only the `Sessions` one.
+        return Result.Inactive(
+            "Zoho→CEH session sync is PERMANENTLY OFF in code (§1020) — CEH owns the schedule "
+            + "(§1000). There is no setting for this; re-enabling it is a deploy. Signage keeps "
+            + "pulling the Backstage agenda separately and is unaffected.");
+#pragma warning disable CS0162 // Unreachable code — see §1020 above; kept, not deleted.
+
         // Pull the current agenda. Unavailable ⇒ no-op (never fake / never email).
         var pull = await PullAsync(ct);
         if (!pull.IsAvailable)
@@ -272,6 +311,7 @@ public sealed class SessionChangeDetectionService
         }
 
         return new Result(true, null, matched, seeded, changed, emailed, skipped, unmatched, Enqueued: enqueued);
+#pragma warning restore CS0162
     }
 
     /// <summary>

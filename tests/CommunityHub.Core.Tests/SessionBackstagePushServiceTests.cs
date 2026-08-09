@@ -370,8 +370,13 @@ public sealed class SessionBackstagePushServiceTests
             full, venueId: "hall-a", speakerEmails: new[] { "s@x.dk" });
         Assert.Contains("Expert (400)", fullGaps);
         Assert.Contains("AI, Security", fullGaps);
-        Assert.Contains("description/abstract", fullGaps);
         Assert.DoesNotContain("Gaps in CEH at create time", fullGaps);
+
+        // 🔴 §998 — THE DESCRIPTION IS NO LONGER A MANUAL STEP: it is sent on create. Telling him
+        // to paste something the hub already sent is the §594 failure in miniature — an action line
+        // that is satisfied before he reads it teaches him to skim the whole list, and this list is
+        // his ONLY notice of the fields that genuinely are manual forever.
+        Assert.DoesNotContain("description/abstract", fullGaps);
 
         // A room that CEH HAS but which did not resolve to a hall is a DIFFERENT problem from an
         // unset room, and must not be reported as "none".
@@ -426,7 +431,7 @@ public sealed class SessionBackstagePushServiceTests
 
         // POST to the sessions endpoint with the LIVE-VERIFIED stage-2 payload shape:
         // a timed session must NOT carry ?day= (400 "Extra param found" — the day derives
-        // from start_time) and description is NOT accepted on create.
+        // from start_time).
         var call = Assert.Single(SessionCalls(handler));
         Assert.Equal(HttpMethod.Post, call.Method);
         Assert.DoesNotContain("day=", call.Url);
@@ -434,7 +439,12 @@ public sealed class SessionBackstagePushServiceTests
         Assert.Equal("Talk A", doc.RootElement.GetProperty("title").GetString());
         Assert.Equal(50, doc.RootElement.GetProperty("duration").GetInt32());
         Assert.Equal("2027-02-10T09:00:00Z", doc.RootElement.GetProperty("start_time").GetString());
-        Assert.False(doc.RootElement.TryGetProperty("description", out _));
+        // 🔴 §998 — THE DESCRIPTION IS SENT. This asserted the opposite, on the strength of a
+        // comment that was never verified: `description` is a documented v3 create field (operator
+        // produced the reference 2026-08-09), and BuildSessionPayload could always send it — only
+        // the call site turned it off. Every neighbouring claim in that method carries a dated
+        // "LIVE-VERIFIED" note; this one carried none, which is exactly how it survived.
+        Assert.Equal("About Talk A", doc.RootElement.GetProperty("description").GetString());
         // Track NAME "Cloud" resolved to its Backstage track ID; session_type is sent.
         Assert.Equal("track-cloud", doc.RootElement.GetProperty("track").GetString());
         Assert.Equal("PRESENTATION", doc.RootElement.GetProperty("session_type").GetString());
@@ -1565,6 +1575,438 @@ public sealed class SessionBackstagePushServiceTests
         // moment they are actionable anyway, since the sessions API is create-only.
         Assert.DoesNotContain("Tags missing", html);
         Assert.DoesNotContain("paste the line below into the Tags box", html);
+    }
+
+    /// <summary>
+    /// §989/§983 — a CHANGED description is drift too, not only an empty one. The abstract is
+    /// import-owned (<c>SessionImportService</c> assigns it on every run), so a Sessionize edit
+    /// lands in CEH silently; before this, a non-blank live description was never compared and
+    /// Zoho stayed stale for ever with nothing telling him.
+    /// </summary>
+    [Fact]
+    public async Task Session_diff_reports_a_CHANGED_description_not_only_an_empty_one()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db, SessionSyncDirection.CehToZoho, SessionSyncDirection.SessionizeToCeh);
+        // track: null — the description is the only field under test here.
+        await SeedSessionAsync(db, "Talk A", backstageId: "bs-existing",
+            new DateTimeOffset(2027, 2, 10, 11, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 2, 10, 12, 0, 0, TimeSpan.Zero), track: null);
+
+        HttpResponseMessage Respond(HttpRequestMessage req, string _)
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.EndsWith("/agendas"))
+                return Json(HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.EndsWith("/sessions"))
+                // Everything matches EXCEPT the description, which is stale in Zoho.
+                return Json(HttpStatusCode.OK,
+                    "{\"sessions\":[{\"id\":\"bs-existing\",\"title\":\"Talk A\",\"start_time\":\"2027-02-10T11:00:00Z\","
+                    + "\"duration\":60,\"description\":\"<p>The abstract from before he edited it.</p>\"}]}");
+            return Json(HttpStatusCode.OK, "{\"status\":\"success\"}");
+        }
+        var (zoho, _) = NewZoho(Respond);
+        var (svc, mail) = NewSessionSvcWithChangeMail2(db, zoho);
+
+        var r = await svc.RunAsync(EventId);
+
+        Assert.Equal(1, r.Updated);
+        var (_, _, html, _) = Assert.Single(mail.Messages);
+        Assert.Contains("Session Description", html);
+        Assert.Contains("differs from CEH", html);   // not the "is empty" wording
+        Assert.Contains("About Talk A", html);       // the FULL CEH text to paste (§322m)
+    }
+
+    /// <summary>
+    /// 🔒 §989 — THE GUARD ON THE ABOVE. Zoho's rich-text editor re-wraps in &lt;p&gt;, converts
+    /// spacing to &amp;nbsp; and re-curls apostrophes on save, so the value it hands back is never
+    /// byte-identical to what was pasted in. If that counted as drift, EVERY session would be
+    /// mailed for ever and no paste could close it — §594 exactly. Nobody edited anything here.
+    /// </summary>
+    [Fact]
+    public async Task A_description_Zoho_merely_REFORMATTED_is_not_reported_as_drift()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db, SessionSyncDirection.CehToZoho, SessionSyncDirection.SessionizeToCeh);
+        // track: null — so ONLY the description can produce a diff, and a green run therefore
+        // means the reformatting was folded, not that some other field happened to match.
+        await SeedSessionAsync(db, "Talk A", backstageId: "bs-existing",
+            new DateTimeOffset(2027, 2, 10, 11, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 2, 10, 12, 0, 0, TimeSpan.Zero), track: null);
+        var session = db.Sessions.Single();
+        session.Abstract = "It's a deep dive - practical, and hands-on.";
+        await db.SaveChangesAsync();
+
+        HttpResponseMessage Respond(HttpRequestMessage req, string _)
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.EndsWith("/agendas"))
+                return Json(HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.EndsWith("/sessions"))
+                // Same words, put through the editor: tags, &nbsp;, curly apostrophe, en dash.
+                return Json(HttpStatusCode.OK,
+                    "{\"sessions\":[{\"id\":\"bs-existing\",\"title\":\"Talk A\",\"start_time\":\"2027-02-10T11:00:00Z\","
+                    + "\"duration\":60,\"description\":\"<p>It\\u2019s a deep dive \\u2013&nbsp;practical, and hands-on.</p>\"}]}");
+            return Json(HttpStatusCode.OK, "{\"status\":\"success\"}");
+        }
+        var (zoho, _) = NewZoho(Respond);
+        var (svc, mail) = NewSessionSvcWithChangeMail2(db, zoho);
+
+        var r = await svc.RunAsync(EventId);
+
+        Assert.True(mail.Messages.Count == 0,
+            "unexpected diff mail: " + string.Join(" || ", mail.Messages.Select(m => m.Item3)));
+        Assert.Equal(0, r.Updated);      // nothing notified
+    }
+
+    // ============ §1008: SPEAKERS are compared CEH↔Zoho =====================
+    //
+    // Operator 2026-08-09 called this the critical gap: the difference mail compared title, time,
+    // duration, track, hall and description — everything except WHO IS ON STAGE — while the live
+    // agenda record does return `speakers`. A speaker change in Sessionize therefore left the
+    // PUBLIC agenda wrong with nothing chasing it, which is precisely what §1002 exists to stop.
+
+    /// <summary>The live-agenda JSON for the one linked session, with the `speakers` fragment
+    /// under test spliced in. Title/time/duration/description all MATCH CEH, so the ONLY thing
+    /// that can produce a diff is the speaker set.</summary>
+    private static string OneLiveSessionJson(string? speakersFragment) =>
+        "{\"sessions\":[{\"id\":\"bs-existing\",\"title\":\"Talk A\",\"start_time\":\"2027-02-10T11:00:00Z\","
+        + "\"duration\":60,\"description\":\"<p>About Talk A</p>\""
+        + (speakersFragment is null ? "" : "," + speakersFragment)
+        + "}]}";
+
+    /// <summary>A linked session (CEH == Zoho on every other field) plus the live roster +
+    /// agenda the pass reads. Returns the ops-mail bodies the run produced (0 or 1).</summary>
+    private static async Task<IReadOnlyList<string>> RunSpeakerDiffAsync(
+        CommunityHubDbContext db, string? speakersFragment, string? rosterJson = null)
+    {
+        HttpResponseMessage Respond(HttpRequestMessage req, string _)
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (req.Method == HttpMethod.Get && path.EndsWith("/agendas"))
+                return Json(HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (req.Method == HttpMethod.Get && path.EndsWith("/sessions"))
+                return Json(HttpStatusCode.OK, OneLiveSessionJson(speakersFragment));
+            if (req.Method == HttpMethod.Get && path.EndsWith("/speakers"))
+                return Json(HttpStatusCode.OK, rosterJson ?? "{\"speakers\":[]}");
+            return Json(HttpStatusCode.OK, "{\"status\":\"success\"}");
+        }
+        var (zoho, handler) = NewZoho(Respond);
+        var (svc, mail) = NewSessionSvcWithChangeMail2(db, zoho);
+
+        await svc.RunAsync(EventId);
+
+        // The sessions API is create-only and this path is a REPORT — it must never write.
+        Assert.DoesNotContain(handler.Calls, c => c.Method != HttpMethod.Get);
+        return mail.Messages.Select(m => m.Item3).ToList();
+    }
+
+    /// <summary>Seeds the edition + the one linked session every §1008 test shares.</summary>
+    private static async Task<int> SeedLinkedSessionForSpeakerDiffAsync(CommunityHubDbContext db)
+    {
+        await SeedEditionAsync(db, SessionSyncDirection.CehToZoho, SessionSyncDirection.SessionizeToCeh);
+        // track: null — so a track difference can never be what turns a test green or red.
+        return await SeedSessionAsync(db, "Talk A", backstageId: "bs-existing",
+            new DateTimeOffset(2027, 2, 10, 11, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 2, 10, 12, 0, 0, TimeSpan.Zero), track: null);
+    }
+
+    [Fact]
+    public async Task Session_diff_reports_a_speaker_CEH_has_and_Zoho_does_not()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+
+        // The live session exists with NO speaker attached — the §571.3 case ("speaker to be
+        // announced" on the public agenda), which no field in the mail ever mentioned.
+        var html = Assert.Single(await RunSpeakerDiffAsync(db, "\"speakers\":[]"));
+
+        Assert.Contains("Speakers", html);                // the ZOHO GUI field name
+        Assert.Contains("attach in Backstage", html);     // the action, in his words
+        Assert.Contains("sam@x.dk", html);                // WHICH person — names repeat, addresses do not
+        Assert.DoesNotContain("remove in Backstage", html);
+    }
+
+    [Fact]
+    public async Task Session_diff_reports_a_speaker_Zoho_has_and_CEH_does_not()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+
+        // Zoho still carries the speaker this session USED to have, by Backstage id.
+        var html = Assert.Single(await RunSpeakerDiffAsync(
+            db, "\"speakers\":[\"bs-sp-old\"]",
+            "{\"speakers\":[{\"id\":\"bs-sp-old\",\"email\":\"gone@x.dk\",\"name\":\"Gone\",\"last_name\":\"Away\"}]}"));
+
+        Assert.Contains("attach in Backstage", html);
+        Assert.Contains("sam@x.dk", html);
+        Assert.Contains("remove in Backstage", html);
+        Assert.Contains("gone@x.dk", html);
+        Assert.Contains("Gone Away", html);               // Zoho's own name for a person CEH never knew
+    }
+
+    [Fact]
+    public async Task A_matching_speaker_set_is_never_reported()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+
+        // The `speakers` array carries e-mails here — no roster lookup is needed at all.
+        var mails = await RunSpeakerDiffAsync(db, "\"speakers\":[\"SAM@x.dk\"]");
+
+        Assert.True(mails.Count == 0, "unexpected diff mail: " + string.Join(" || ", mails));
+    }
+
+    /// <summary>
+    /// 🔒 §594 GUARD — a record with NO <c>speakers</c> key at all means the field is UNREADABLE,
+    /// not that the session has no speakers. Diffing an unreadable field is exactly what made the
+    /// tags mail unclosable: he did the work, the next pass reported it missing again, and the
+    /// mechanism lost his trust. `speakers` IS returned today; the guard is for the day it is not.
+    /// </summary>
+    [Fact]
+    public async Task A_live_record_with_no_speakers_key_reports_nothing()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+
+        var mails = await RunSpeakerDiffAsync(db, speakersFragment: null);
+
+        Assert.True(mails.Count == 0, "unexpected diff mail: " + string.Join(" || ", mails));
+    }
+
+    /// <summary>
+    /// 🔒 The same rule one level down: a speaker id the live roster cannot account for means the
+    /// comparison is only PARTLY understood, and a partly-understood set would report the
+    /// unresolved person's session as missing a speaker who is standing right there in Backstage.
+    /// </summary>
+    [Fact]
+    public async Task A_speaker_id_the_roster_cannot_resolve_reports_nothing()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+
+        // The roster answers, but knows nothing about bs-sp-mystery (a read that came back short,
+        // or a speaker added while the pass ran).
+        var mails = await RunSpeakerDiffAsync(
+            db, "\"speakers\":[\"bs-sp-mystery\"]",
+            "{\"speakers\":[{\"id\":\"bs-sp-other\",\"email\":\"other@x.dk\",\"name\":\"Other\",\"last_name\":\"Person\"}]}");
+
+        Assert.True(mails.Count == 0, "unexpected diff mail: " + string.Join(" || ", mails));
+    }
+
+    /// <summary>
+    /// 🔴 The kill switch must not turn the mail into "remove every speaker". `backstage-speaker-sync`
+    /// OFF empties the ATTACHABLE set (a create may invite nobody — §326bx), but CEH still KNOWS who
+    /// is on the session, so a live speaker who is correct must not be reported as an intruder.
+    /// That asymmetry is why additions and removals are judged against different CEH sets.
+    /// </summary>
+    [Fact]
+    public async Task The_speaker_sync_kill_switch_never_produces_a_remove_line()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sid = await SeedLinkedSessionForSpeakerDiffAsync(db);
+        await LinkSpeakerAsync(db, sid, "sam@x.dk");
+        var gate = await NewSpeakerAttachGateAsync(db);
+        var setting = db.FeatureSettings.Single(f => f.FeatureKey == "backstage-speaker-sync");
+        setting.Enabled = false;                       // the stop-everything control
+        await db.SaveChangesAsync();
+
+        HttpResponseMessage Respond(HttpRequestMessage req, string _)
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (req.Method == HttpMethod.Get && path.EndsWith("/agendas"))
+                return Json(HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (req.Method == HttpMethod.Get && path.EndsWith("/sessions"))
+                return Json(HttpStatusCode.OK, OneLiveSessionJson("\"speakers\":[\"sam@x.dk\"]"));
+            if (req.Method == HttpMethod.Get && path.EndsWith("/speakers"))
+                return Json(HttpStatusCode.OK, "{\"speakers\":[]}");
+            return Json(HttpStatusCode.OK, "{\"status\":\"success\"}");
+        }
+        var (zoho, _) = NewZoho(Respond);
+        var mail = new CapturingEmailSender();
+        var alerts = new CommunityHub.Core.Email.EngineAlertSender(
+            mail, new CommunityHub.Core.Email.EmailContextAccessor(), TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CommunityHub.Core.Email.EngineAlertSender>.Instance);
+        var svc = new SessionBackstagePushService(
+            db, zoho, new ZohoOptions(), tokenOverride: _ => Task.FromResult<string?>("tok"),
+            zohoChanges: new CommunityHub.Core.Email.ZohoChangeNotifier(alerts), gate: gate);
+
+        await svc.RunAsync(EventId);
+
+        Assert.True(mail.Messages.Count == 0,
+            "unexpected diff mail: " + string.Join(" || ", mail.Messages.Select(m => m.Item3)));
+    }
+
+    // ============ §1011/§1012: Common for All Tracks + the session type ======
+    //
+    // ✅ LIVE-VERIFIED against PROD 2026-08-09 (`GET /sessions?day=2`, ELDK27 Welcome
+    // 14880000004329032 — the session in his screenshot): Zoho has NO "common for all tracks"
+    // field. The chip IS `track: null`. Every session showing it has a null track and nothing else
+    // does. So the flag means "expect NO track over there" — and because `track` IS readable, this
+    // is a CLOSABLE check rather than the blind spot he expected to have to live with.
+
+    /// <summary>The live agenda for one linked session, with a track/type of the test's choosing.</summary>
+    private static string OneLiveSessionJson(string? trackJson, string sessionType) =>
+        "{\"sessions\":[{\"id\":\"bs-existing\",\"title\":\"Talk A\",\"start_time\":\"2027-02-10T11:00:00Z\","
+        + "\"duration\":60,\"description\":\"<p>About Talk A</p>\",\"speakers\":[],"
+        + $"\"session_type\":\"{sessionType}\","
+        + $"\"track\":{trackJson ?? "null"}}}]}}";
+
+    private static async Task<IReadOnlyList<string>> RunTrackDiffAsync(
+        CommunityHubDbContext db, string? liveTrackJson, string liveType = "PRESENTATION")
+    {
+        HttpResponseMessage Respond(HttpRequestMessage req, string _)
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (req.Method == HttpMethod.Get && path.EndsWith("/agendas"))
+                return Json(HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (req.Method == HttpMethod.Get && path.EndsWith("/sessions"))
+                return Json(HttpStatusCode.OK, OneLiveSessionJson(liveTrackJson, liveType));
+            if (req.Method == HttpMethod.Get && path.EndsWith("/speakers"))
+                return Json(HttpStatusCode.OK, "{\"speakers\":[]}");
+            return Json(HttpStatusCode.OK, "{\"status\":\"success\"}");
+        }
+        var (zoho, _) = NewZoho(Respond);
+        var (svc, mail) = NewSessionSvcWithChangeMail2(db, zoho);
+        await svc.RunAsync(EventId);
+        return mail.Messages.Select(m => m.Item3).ToList();
+    }
+
+    /// <summary>A linked session on the "Cloud" track, optionally marked common-for-all-tracks.</summary>
+    private static async Task SeedTrackedSessionAsync(CommunityHubDbContext db, bool common)
+    {
+        await SeedEditionAsync(db, SessionSyncDirection.CehToZoho, SessionSyncDirection.SessionizeToCeh);
+        await SeedSessionAsync(db, "Talk A", backstageId: "bs-existing",
+            new DateTimeOffset(2027, 2, 10, 11, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 2, 10, 12, 0, 0, TimeSpan.Zero), track: "Cloud");
+        var s = db.Sessions.Single();
+        s.IsCommonForAllTracks = common;
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task A_common_for_all_tracks_session_with_NO_track_in_Zoho_is_never_reported()
+    {
+        // 🔑 THE ONE HE ASKED FOR — and better than he asked for. He expected the field to be
+        // IGNORED because the API looked silent. It is not silent about the thing that matters, so
+        // this is a CONFIRMATION that Zoho is right, not an averted gaze. And because §1002
+        // re-mails an unresolved difference EVERY HOUR, a false line here would arrive 24× a day.
+        using var db = ScenarioFixture.NewDb();
+        await SeedTrackedSessionAsync(db, common: true);
+
+        var mails = await RunTrackDiffAsync(db, liveTrackJson: null);
+
+        Assert.True(mails.Count == 0, "unexpected diff mail: " + string.Join(" || ", mails));
+    }
+
+    [Fact]
+    public async Task A_common_for_all_tracks_session_WITH_a_track_in_Zoho_is_told_to_clear_it()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedTrackedSessionAsync(db, common: true);
+
+        var html = Assert.Single(await RunTrackDiffAsync(db, "\"track-cloud\""));
+
+        Assert.Contains("Track", html);
+        Assert.Contains("no track", html);                    // the target state, not "Cloud"
+        Assert.Contains("COMMON FOR ALL TRACKS", html);
+        Assert.Contains("clear the Track field", html);       // closable: doing it ends the mail
+        // 🔒 It must NOT ask him to SET the CEH track — that is the value being overruled.
+        Assert.DoesNotContain("→ 'Cloud'", html);
+    }
+
+    [Fact]
+    public async Task An_ordinary_session_still_has_its_track_compared()
+    {
+        // 🔒 The guard on the two above: the override must be scoped to the tick box. A fix that
+        // quietly stopped comparing tracks altogether would pass both of them.
+        using var db = ScenarioFixture.NewDb();
+        await SeedTrackedSessionAsync(db, common: false);
+
+        var html = Assert.Single(await RunTrackDiffAsync(db, liveTrackJson: null));
+
+        Assert.Contains("Track", html);
+        Assert.Contains("Cloud", html);                       // CEH's track is what Zoho should have
+    }
+
+    [Fact]
+    public async Task A_session_type_that_differs_from_Zoho_is_reported()
+    {
+        // §1012 — every session pushed BEFORE the per-session mapping went over as PRESENTATION,
+        // so the sessions that are wrong TODAY are only reachable through this diff.
+        using var db = ScenarioFixture.NewDb();
+        await SeedTrackedSessionAsync(db, common: false);
+        var s = db.Sessions.Single();
+        s.Type = SessionType.Keynote;
+        s.Track = null;                        // isolate: only the type may differ
+        await db.SaveChangesAsync();
+
+        var html = Assert.Single(await RunTrackDiffAsync(db, liveTrackJson: null, liveType: "PRESENTATION"));
+
+        Assert.Contains("Session Type", html);                // the ZOHO GUI field name
+        Assert.Contains("PRESENTATION", html);
+        Assert.Contains("KEYNOTE", html);                     // the live-verified API value
+    }
+
+    [Fact]
+    public async Task A_matching_session_type_is_not_reported()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedTrackedSessionAsync(db, common: false);
+        var s = db.Sessions.Single();
+        s.Type = SessionType.Keynote;
+        s.Track = null;
+        await db.SaveChangesAsync();
+
+        var mails = await RunTrackDiffAsync(db, liveTrackJson: null, liveType: "KEYNOTE");
+
+        Assert.True(mails.Count == 0, "unexpected diff mail: " + string.Join(" || ", mails));
+    }
+
+    [Fact]
+    public void An_unmapped_session_type_falls_back_to_the_configured_default()
+    {
+        // 🔒 §1012 is deliberately MINIMAL — only Keynote is mapped, because guessing which CEH
+        // type means WELCOMENOTE or BREAK would write a wrong type onto the public agenda via an
+        // API that cannot update it. Every other type must therefore keep today's behaviour
+        // exactly, or this change silently reclassifies the whole agenda.
+        var opts = new ZohoOptions();
+
+        Assert.Equal("KEYNOTE", opts.ResolveSessionType(SessionType.Keynote));
+        Assert.Equal(opts.PushSessionType, opts.ResolveSessionType(SessionType.TechnicalSession));
+        Assert.Equal(opts.PushSessionType, opts.ResolveSessionType(SessionType.MasterClass));
+        Assert.Equal(opts.PushSessionType, opts.ResolveSessionType(SessionType.Welcome));
+        Assert.Equal(opts.PushSessionType, opts.ResolveSessionType(SessionType.Other));
+    }
+
+    [Fact]
+    public void The_create_gap_mail_tells_him_to_clear_the_track_on_a_common_session()
+    {
+        // Operator decision 2026-08-09: create WITH the track, then report. The sessions API cannot
+        // update or delete, so the create mail is the cheapest — and only — actionable moment.
+        var common = new Session
+        {
+            EventId = EventId, Title = "Welcome", Track = "Cloud", Room = "Hall A",
+            IsCommonForAllTracks = true,
+        };
+
+        var gaps = SessionBackstagePushService.DescribeCreateGaps(
+            common, venueId: "hall-1", speakerEmails: new[] { "sam@x.dk" });
+
+        Assert.Contains("CLEAR the Track field", gaps);
+        Assert.Contains("Common for All Tracks", gaps);
+
+        // …and NOT on an ordinary session, or every create mail grows a line that does not apply.
+        var ordinary = new Session
+        {
+            EventId = EventId, Title = "Talk", Track = "Cloud", Room = "Hall A",
+        };
+        Assert.DoesNotContain("CLEAR the Track field",
+            SessionBackstagePushService.DescribeCreateGaps(
+                ordinary, venueId: "hall-1", speakerEmails: new[] { "sam@x.dk" }));
     }
 
     [Fact]

@@ -73,14 +73,30 @@ public sealed class SessionBackstagePushService
         Microsoft.Extensions.Logging.ILogger<SessionBackstagePushService>? logger = null,
         Config.RoomRegistryService? rooms = null,
         Email.ZohoChangeNotifier? zohoChanges = null,
-        Settings.FeatureGateService? gate = null)
+        Settings.FeatureGateService? gate = null,
+        // §1002 — optional so every existing construction site still compiles; the re-mail clock
+        // is the only thing that needs it.
+        TimeProvider? clock = null)
     {
         _db = db; _zoho = zoho; _zohoOptions = zohoOptions;
         _tokenOverride = tokenOverride; _queueFactory = queueFactory;
         _logger = logger; _rooms = rooms;
         _zohoChanges = zohoChanges;
         _gate = gate;
+        _clock = clock ?? TimeProvider.System;
     }
+
+    private readonly TimeProvider _clock;
+
+    /// <summary>
+    /// §1002 — how often an UNRESOLVED CEH↔Zoho difference is re-mailed.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-09 asked for hourly. The push job itself runs more often (creates should
+    /// not wait), so the cadence lives here rather than in the job schedule — otherwise slowing the
+    /// job to hourly would also delay every session create by up to an hour.
+    /// </remarks>
+    public static readonly TimeSpan ZohoDifferenceRemailInterval = TimeSpan.FromHours(1);
 
     /// <summary>
     /// The participant ids whose e-mails a session create may attach: an ORGANIZER-APPROVED
@@ -138,9 +154,9 @@ public sealed class SessionBackstagePushService
     /// telling him in a later mail is telling him after that moment has passed.
     ///
     /// Two different kinds of gap are reported, and the wording keeps them apart on purpose:
-    ///   • "the API cannot send it" — language / level / tags / description. CEH may well HAVE the
-    ///     value; the create payload has no field for it (see ZohoClient.BuildSessionPayload,
-    ///     where description is explicitly excluded on create). Nothing to fix in CEH.
+    ///   • "the API cannot send it" — language / level / tags. CEH may well HAVE the value; the
+    ///     create payload has no field for it. Nothing to fix in CEH.
+    ///     🔴 §998: DESCRIPTION IS NO LONGER IN THIS LIST — it is sent on create.
     ///   • "CEH has no value" — room, speakers. Fixable in CEH, but only BEFORE the create, which
     ///     is why silence here was expensive: §571.3 found all 9 sessions pushed with no venue and
     ///     "Master Class: AI low code" with no speaker at all, and he was told none of it.
@@ -156,7 +172,22 @@ public sealed class SessionBackstagePushService
         // quotes get caught by a drag-selection. The label already delimits it.
         manual.Add(Has(s.Level) ? $"level {s.Level!.Trim()}" : "level (none in CEH)");
         manual.Add("language");
-        if (Has(s.Abstract)) manual.Add("description/abstract");
+        // 🔴 §998 — the description is NO LONGER listed here: it is sent on create (the claim that
+        // the API refused it was never verified, and the official v3 reference documents it).
+        // Telling him to paste something the hub already sent is the §594 failure in miniature —
+        // an action line that is satisfied before he reads it teaches him to skim the list.
+        // 🔒 If Zoho ever does refuse it, §989's drift check reports the empty description within
+        // 10 minutes, which is a truer signal than a standing instruction here.
+
+        // 🔴 §1011 — a COMMON-FOR-ALL-TRACKS session is created WITH its track (operator decision
+        // 2026-08-09: create-with-track-then-report, rather than risk a refused create on an API
+        // that cannot delete). So the track is wrong the moment it lands, and this is the §574
+        // moment to say so — the cheapest one, since the sessions API can never update it.
+        if (s.IsCommonForAllTracks)
+        {
+            manual.Add("CLEAR the Track field — this session is Common for All Tracks "
+                + "(Backstage shows a track-less session that way)");
+        }
 
         // --- Genuinely absent, and only fixable BEFORE the create -------------------------
         if (!Has(s.Room)) missing.Add("no room set in CEH");
@@ -285,6 +316,8 @@ public sealed class SessionBackstagePushService
         var token = await GetTokenAsync(ct);
         if (token is null)
             return Result.Unavailable("No Zoho access token (token refresh failed).");
+
+        var now = _clock.GetUtcNow();   // §1002 — the re-mail clock for this pass
 
         // The first agenda day anchor: the edition's pre-day (master classes) when set,
         // else its start date. day index is 1-based (agenda day 0 is empty).
@@ -477,16 +510,44 @@ public sealed class SessionBackstagePushService
         // (INCIDENT FIX 2026-07-24: an attached e-mail makes Zoho create + INVITE the
         // speaker, so the ring scope must hold here too).
         var attachable = await AttachableSpeakerIdsAsync(eventId, ct);
-        var speakerEmailsBySession = (await _db.SessionSpeakers.AsNoTracking()
-                .Where(ss => ss.Session.EventId == eventId)
-                .Select(ss => new { ss.SessionId, ss.ParticipantId, ss.Participant.Email })
-                .ToListAsync(ct))
+        var links = await _db.SessionSpeakers.AsNoTracking()
+            .Where(ss => ss.Session.EventId == eventId)
+            .Select(ss => new { ss.SessionId, ss.ParticipantId, ss.Participant.Email, ss.Participant.FullName })
+            .ToListAsync(ct);
+        var speakerEmailsBySession = links
             .Where(x => attachable.Contains(x.ParticipantId))
             .GroupBy(x => x.SessionId)
             .ToDictionary(g => g.Key, g => NormalizeSpeakerEmails(g.Select(x => x.Email)));
 
-        // The required, event-specific session type (operator config; no enumerable list).
-        var sessionType = _zohoOptions.PushSessionType;
+        // 🔴 §1008 — the CEH side of the SPEAKER diff, from the SAME rows but UNGATED.
+        //
+        // 🔑 The two sets are different on purpose. `speakerEmailsBySession` is what a CREATE may
+        // ATTACH, and it is gated because an attached e-mail makes Zoho create + INVITE that person
+        // (§326bx: 19 speakers invited prematurely). This one is what CEH KNOWS about the session,
+        // and a report writes nothing — so gating it would make the mail tell him to REMOVE a
+        // speaker from the public agenda merely because their category is not set yet, or because
+        // the backstage-speaker-sync kill switch is off. Additions still come from the gated set;
+        // removals are judged against this one. See BuildSpeakerDiff.
+        var linkedSpeakersBySession = links
+            .GroupBy(x => x.SessionId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<SessionSpeakerRef>)g
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Email))
+                    .Select(x => new SessionSpeakerRef(
+                        x.Email.Trim().ToLowerInvariant(),
+                        string.IsNullOrWhiteSpace(x.FullName) ? x.Email.Trim() : x.FullName.Trim()))
+                    .DistinctBy(x => x.Email, StringComparer.OrdinalIgnoreCase)
+                    .ToList());
+
+        // The live Zoho speaker ROSTER, fetched lazily on the first linked session that needs it
+        // (a pass with only creates never pays for it) and once per pass thereafter.
+        ZohoSpeakerRoster? speakerRoster = null;
+
+        // §1012 — the session type is now resolved PER SESSION (`_zohoOptions.ResolveSessionType`)
+        // instead of one constant for the whole pass, so a CEH Keynote is created as a KEYNOTE
+        // rather than as a Presentation he then retypes by hand. Unmapped types keep the
+        // configured default, so this is a no-op for every type he has not mapped.
 
         int created = 0, updated = 0, failed = 0, skipped = 0, enqueued = 0;
         var items = new List<SessionPushResult>(sessions.Count);
@@ -542,7 +603,8 @@ public sealed class SessionBackstagePushService
 
                 var speakerEmails = speakerEmailsBySession.GetValueOrDefault(s.Id);
                 var res = await _zoho.CreateSessionAsync(
-                    token, day, s.Title, s.Abstract, s.StartsAt, duration, trackId, sessionType,
+                    token, day, s.Title, s.Abstract, s.StartsAt, duration, trackId,
+                    _zohoOptions.ResolveSessionType(s.Type),
                     venueId, speakerEmails is { Count: > 0 } ? speakerEmails : null, ct);
                 if (res.Ok)
                 {
@@ -593,9 +655,21 @@ public sealed class SessionBackstagePushService
 
                 if (!string.IsNullOrWhiteSpace(s.Room))
                     hallCache ??= ToNameIdCache(await _zoho.GetHallsAsync(token, ct));
-                var diffs = BuildLinkedSessionDiffs(s, live, duration, trackCache, hallCache);
+                // §1008 — the roster is only needed when the live record actually names speakers
+                // by id; a session with no speakers, or one that carries e-mails, resolves without
+                // it. Fetched at most once per pass either way.
+                if (live.SpeakerRefs is { Count: > 0 })
+                    speakerRoster ??= ZohoSpeakerRoster.From(await _zoho.GetBackstageSpeakersAsync(token, ct));
+                var diffs = BuildLinkedSessionDiffs(
+                    s, live, duration, trackCache, hallCache,
+                    speakerEmailsBySession.GetValueOrDefault(s.Id),
+                    linkedSpeakersBySession.GetValueOrDefault(s.Id),
+                    speakerRoster);
                 if (diffs.Count == 0)
                 {
+                    // §1002 — clear the re-mail clock too, or a session that is fixed and later
+                    // breaks again would be treated as "already reminded an hour ago".
+                    s.ZohoChangeNotifiedAt = null;
                     if (s.ZohoChangeNotifiedHash is not null) { s.ZohoChangeNotifiedHash = null; healed++; }
                     skipped++;
                     items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Skipped, s.BackstageSessionId,
@@ -603,10 +677,26 @@ public sealed class SessionBackstagePushService
                     continue;
                 }
 
+                // 🔴 §1002 — RE-MAIL EVERY HOUR UNTIL ZOHO MATCHES. Operator 2026-08-09: *"it is
+                // not a one time mai that dissapears, this is public information for 1500 people,
+                // which is incompliant/not valid. so we need difference mail at every run."*
+                //
+                // This REVERSES §302's one-mail-per-distinct-difference, and the reason changed
+                // rather than his mind: a single mail scrolls out of the inbox and leaves a WRONG
+                // PUBLIC AGENDA standing with nothing chasing it. An unresolved difference is now a
+                // recurring reminder, which is what an ACTION NEEDED item should have been.
+                //
+                // 🔑 BOTH conditions, not just the clock: a CHANGED difference still mails
+                // immediately (the hash), so a new problem never waits behind an old one's hourly
+                // slot; an UNCHANGED one re-mails once an hour. The push job runs more often than
+                // that, so the interval — not the job — sets the cadence he asked for.
                 var hash = DiffHash(diffs);
-                if (!string.Equals(hash, s.ZohoChangeNotifiedHash, StringComparison.Ordinal))
+                var due = s.ZohoChangeNotifiedAt is not { } last
+                          || now - last >= ZohoDifferenceRemailInterval;
+                if (!string.Equals(hash, s.ZohoChangeNotifiedHash, StringComparison.Ordinal) || due)
                 {
                     s.ZohoChangeNotifiedHash = hash;
+                    s.ZohoChangeNotifiedAt = now;
                     updated++;   // "updated" now counts change-NOTIFIED sessions (no API write exists)
                     // §322m: MULTI-LINE mail entry — one line per field, paste blocks on
                     // their own lines (ZohoChangeNotifier renders \n as <br/>).
@@ -700,7 +790,7 @@ public sealed class SessionBackstagePushService
 
         var ok = await _zoho.UpdateSessionAsync(
             token, session.BackstageSessionId!, session.Title, session.Abstract,
-            session.StartsAt, DurationMinutes(session), trackId, _zohoOptions.PushSessionType, ct);
+            session.StartsAt, DurationMinutes(session), trackId, _zohoOptions.ResolveSessionType(session.Type), ct);
         if (!ok) return (false, "Zoho session update failed (see logs).");
 
         session.UpdatedAt = DateTimeOffset.UtcNow;
@@ -807,7 +897,7 @@ public sealed class SessionBackstagePushService
 
         var res = await _zoho.CreateSessionAsync(
             token, DayIndex(firstDay, session.StartsAt), session.Title, session.Abstract,
-            session.StartsAt, DurationMinutes(session), trackId, _zohoOptions.PushSessionType,
+            session.StartsAt, DurationMinutes(session), trackId, _zohoOptions.ResolveSessionType(session.Type),
             venueId, speakerEmails.Count > 0 ? speakerEmails : null, ct);
         if (!res.Ok)
         {
@@ -916,7 +1006,10 @@ public sealed class SessionBackstagePushService
     /// </summary>
     private List<string> BuildLinkedSessionDiffs(
         Session s, ZohoClient.LiveSession live, int? duration,
-        Dictionary<string, string> trackCache, Dictionary<string, string>? hallCache)
+        Dictionary<string, string> trackCache, Dictionary<string, string>? hallCache,
+        IReadOnlyList<string>? attachableEmails = null,
+        IReadOnlyList<SessionSpeakerRef>? linkedSpeakers = null,
+        ZohoSpeakerRoster? roster = null)
     {
         static string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "(empty)" : v!;
         var diffs = new List<string>();
@@ -935,7 +1028,28 @@ public sealed class SessionBackstagePushService
         if (duration is { } d && live.DurationMinutes is { } ld && d != ld)
             diffs.Add($"{ZohoFieldMap.Session.Duration.GuiLabel}: '{ld}' → '{d}'");
 
-        if (!string.IsNullOrWhiteSpace(s.Track))
+        // 🔴 §1011 — "Common for All Tracks" OVERRULES the track, in BOTH directions.
+        //
+        // ✅ LIVE-VERIFIED (PROD, 2026-08-09): the Backstage chip IS `track: null` — there is no
+        // "common for all tracks" field on the record at all. So the correct Zoho state for a
+        // ticked session is simply NO TRACK, which is readable, which means this is a CLOSABLE
+        // check rather than the blind spot he expected to have to live with.
+        if (s.IsCommonForAllTracks)
+        {
+            // Already track-less over there ⇒ CONFIRMED CORRECT. No line, and — because §1002
+            // re-mails an unresolved difference every hour — no hourly reminder either. That is
+            // the outcome he asked for, arrived at by verifying rather than by not looking.
+            if (!string.IsNullOrWhiteSpace(live.TrackId))
+            {
+                var liveName = trackCache.FirstOrDefault(
+                    kv => string.Equals(kv.Value, live.TrackId, StringComparison.Ordinal)).Key;
+                diffs.Add(
+                    $"{ZohoFieldMap.Session.Track.GuiLabel}: '{Show(liveName ?? live.TrackId)}' → (no track)"
+                    + "\nThis session is COMMON FOR ALL TRACKS in CEH — clear the Track field in "
+                    + "Backstage. Backstage shows a session with no track as \"Common for All Tracks\".");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(s.Track))
         {
             var targetName = TargetTrackName(s.Track);
             if (trackCache.TryGetValue(targetName, out var targetId)
@@ -945,6 +1059,21 @@ public sealed class SessionBackstagePushService
                     kv => string.Equals(kv.Value, live.TrackId, StringComparison.Ordinal)).Key;
                 diffs.Add($"{ZohoFieldMap.Session.Track.GuiLabel}: '{Show(liveName ?? live.TrackId)}' → '{targetName}'");
             }
+        }
+
+        // 🔴 §1012 — SESSION TYPE. Returned on read (live-verified: BREAK / KEYNOTE / PRESENTATION
+        // / REGISTRATION / WELCOMENOTE), so a wrong type is reportable and closable — and until now
+        // nothing told him. This is the other half of resolving the type per session on create:
+        // every session pushed BEFORE §1012 went over as PRESENTATION and is still wrong today,
+        // and only a diff surfaces those.
+        // 🔒 A BLANK live type is "the record did not carry one" ⇒ report nothing (§594). Every
+        // live record observed does carry it, but an absent field must never read as a mismatch.
+        var wantedType = _zohoOptions.ResolveSessionType(s.Type);
+        if (!string.IsNullOrWhiteSpace(live.SessionType)
+            && !string.Equals(wantedType, live.SessionType, StringComparison.OrdinalIgnoreCase))
+        {
+            diffs.Add($"{ZohoFieldMap.Session.SessionTypeField.GuiLabel}: "
+                + $"'{Show(live.SessionType)}' → '{wantedType}'");
         }
 
         if (!string.IsNullOrWhiteSpace(s.Room) && hallCache is not null
@@ -964,15 +1093,37 @@ public sealed class SessionBackstagePushService
         // it useless for anything longer.
         // Tags: the DERIVED expected set (Session Level value-mapped + the mandatory
         // "Session Language: English" + Sessionize labels) minus what Zoho already has.
+        // §989 — a CHANGED description is now drift too, not only an EMPTY one. Both sides go
+        // through RichTextCompare, which folds exactly what the editor does to the text
+        // (tags, entities, nbsp, curly quotes, dashes, whitespace) and nothing a person does.
+        // That is what makes this closable, where a char-compare would have reproduced §594:
+        // he pastes CEH's text, the next pass normalizes both to the same string, the line
+        // clears, and `ZohoChangeNotifiedHash` is healed back to null.
+        //
+        // 🔑 The gap it closes (§983, operator: *"if changed in sessionize later … that wins and
+        // will be updated into ceh and then i get a delta notification to update zoho"*): the
+        // abstract is IMPORT-OWNED — `SessionImportService` assigns `session.Abstract` on every
+        // run — so a Sessionize edit landed in CEH silently and Zoho stayed stale for ever,
+        // because a non-blank live description was never looked at.
         if (!string.IsNullOrWhiteSpace(s.Abstract))
         {
-            var liveDesc = StripHtml(live.Description);
-            if (string.IsNullOrWhiteSpace(liveDesc))
-                // §322m: label line, then the FULL text as its own paste block.
-                diffs.Add($"{ZohoFieldMap.Session.Description.GuiLabel} is empty — paste the full text below into the Session Description box:\n{s.Abstract.Trim()}");
-            // A NON-blank live description is left alone: Zoho's rich-text editor
-            // reformats the text, so a char-compare would flag every session forever.
+            // Ordinal (case-SENSITIVE): the editor reformats markup, never letter case, so a
+            // case change here is a real edit. The sponsor path keeps OrdinalIgnoreCase for its
+            // URLs and company text (§792) — same normalizer, different call-site policy.
+            if (RichTextCompare.DiffersFromCeh(live.Description, s.Abstract, ignoreCase: false))
+            {
+                // §322m: label line, then the FULL text as its own paste block — the mail is his
+                // copy-PASTE source for the Backstage GUI, so it carries the whole abstract.
+                var label = RichTextCompare.IsEffectivelyBlank(live.Description)
+                    ? "is empty — paste the full text below into the Session Description box:"
+                    : "differs from CEH — replace it with the full text below:";
+                diffs.Add($"{ZohoFieldMap.Session.Description.GuiLabel} {label}\n{s.Abstract.Trim()}");
+            }
         }
+        // 🔴 §1008 — SPEAKERS. The one field on the agenda record that was never compared.
+        if (BuildSpeakerDiff(attachableEmails, linkedSpeakers, live.SpeakerRefs, roster) is { } speakerDiff)
+            diffs.Add(speakerDiff);
+
         // 🔒 §594 — TAGS ARE NOT DIFFED. THE AGENDA API DOES NOT RETURN THEM. DO NOT RE-ADD THIS.
         //
         // This block used to compare the derived expected tag set against `live.Tags` and mail
@@ -1006,15 +1157,145 @@ public sealed class SessionBackstagePushService
         return diffs;
     }
 
+    /// <summary>§1008 — one CEH-linked speaker, reduced to what the diff and the mail need.</summary>
+    internal sealed record SessionSpeakerRef(string Email, string Name);
+
+    /// <summary>
+    /// §1008 — the live Zoho speaker roster, indexed for the session-speaker diff: Backstage
+    /// speaker id → e-mail (the session's <c>speakers</c> array has been seen carrying either), and
+    /// e-mail → display name (so the mail names people, not addresses).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <see cref="IsUsable"/> is false for an EMPTY roster, and that is deliberate: the speakers
+    /// pull rides the LENIENT pager, which <c>yield break</c>s on a non-2xx — so "no speakers in
+    /// Zoho" and "the read failed" arrive as the same empty list (the §585 silent-empty failure).
+    /// An unusable roster makes the diff report NOTHING rather than guess.
+    /// </remarks>
+    internal sealed record ZohoSpeakerRoster(
+        IReadOnlyDictionary<string, string> EmailById,
+        IReadOnlyDictionary<string, string> NameByEmail)
+    {
+        public bool IsUsable => EmailById.Count > 0 || NameByEmail.Count > 0;
+
+        public static ZohoSpeakerRoster From(BackstageSpeakersResult result)
+        {
+            var byId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (result.IsAvailable)
+            {
+                foreach (var sp in result.Speakers)
+                {
+                    if (string.IsNullOrWhiteSpace(sp.Email)) continue;
+                    var mail = sp.Email!.Trim();
+                    if (!string.IsNullOrWhiteSpace(sp.SpeakerId)) byId[sp.SpeakerId.Trim()] = mail;
+                    if (!string.IsNullOrWhiteSpace(sp.Name)) names[mail] = sp.Name!.Trim();
+                }
+            }
+            return new ZohoSpeakerRoster(byId, names);
+        }
+    }
+
+    /// <summary>
+    /// 🔴 §1008 — the "Speakers: 'live' → 'CEH'" diff line for a linked session, or null when there
+    /// is nothing to say (or nothing that can be said safely).
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09 called this the critical gap: the difference mail compared title,
+    /// time, duration, track, hall and description — <b>everything except who is on stage</b> —
+    /// while the live agenda record does return <c>speakers</c>. A session whose speaker changed in
+    /// Sessionize therefore stayed wrong on the public agenda with nothing chasing it, which is the
+    /// exact failure §1002 exists to prevent for the other fields.</para>
+    ///
+    /// <para>🔑 <b>Additions and removals are judged against DIFFERENT CEH sets, and the asymmetry
+    /// is the point.</b> An ADD tells him to attach an e-mail in Backstage, and attaching one makes
+    /// Zoho invite that person (§326bx) — so it may only ever name a speaker the push engine itself
+    /// would attach (<paramref name="attachableEmails"/>: categorised + active, kill switch honoured).
+    /// A REMOVE tells him to take a name OFF a public agenda, so it is judged against every CEH
+    /// link (<paramref name="linkedSpeakers"/>) — otherwise an uncategorised-but-real speaker would
+    /// be reported as an intruder.</para>
+    ///
+    /// <para>🔒 <b>Four ways this reports NOTHING</b>, each of them a §594 permanent-false-gap
+    /// guard — a line he cannot satisfy is worse than no line:</para>
+    /// <list type="number">
+    /// <item><paramref name="liveRefs"/> is null — the record carried no <c>speakers</c> key, so
+    /// the field is unreadable, exactly like tags.</item>
+    /// <item>The roster is unusable (empty ⇒ possibly a failed read) while an id-shaped reference
+    /// needs resolving.</item>
+    /// <item>Any single live reference will not resolve to an e-mail — a partly-understood roster
+    /// would report the unresolved person as missing.</item>
+    /// <item>CEH knows of no speakers for the session at all — the same "only non-blank CEH values
+    /// are compared" rule the rest of this method follows.</item>
+    /// </list>
+    /// </remarks>
+    internal static string? BuildSpeakerDiff(
+        IReadOnlyList<string>? attachableEmails,
+        IReadOnlyList<SessionSpeakerRef>? linkedSpeakers,
+        IReadOnlyList<string>? liveRefs,
+        ZohoSpeakerRoster? roster)
+    {
+        if (liveRefs is null) return null;                       // guard 1 — unreadable field
+        if (linkedSpeakers is not { Count: > 0 }) return null;   // guard 4 — CEH has nothing to assert
+
+        // Resolve every live reference to an e-mail. An e-mail is already one; anything else is a
+        // Backstage speaker id and needs the roster.
+        var live = new List<string>();
+        foreach (var raw in liveRefs)
+        {
+            var token = raw.Trim();
+            if (token.Contains('@', StringComparison.Ordinal)) { live.Add(token.ToLowerInvariant()); continue; }
+            if (roster is not { IsUsable: true }) return null;   // guard 2 — cannot look
+            if (roster.EmailById.TryGetValue(token, out var mail)) live.Add(mail.ToLowerInvariant());
+            else return null;                                    // guard 3 — cannot account for it
+        }
+
+        var liveSet = new HashSet<string>(live, StringComparer.OrdinalIgnoreCase);
+        var linkedSet = linkedSpeakers.Select(x => x.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var wanted = (attachableEmails ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var additions = wanted.Where(e => !liveSet.Contains(e)).ToList();
+        var removals = liveSet.Where(e => !linkedSet.Contains(e)).ToList();
+        if (additions.Count == 0 && removals.Count == 0) return null;
+
+        // Display name for an e-mail: the CEH participant's name first (it is the name he
+        // recognises), then Zoho's, then the address itself.
+        var cehNames = linkedSpeakers.ToDictionary(x => x.Email, x => x.Name, StringComparer.OrdinalIgnoreCase);
+        string Name(string email) =>
+            cehNames.TryGetValue(email, out var n) && !string.IsNullOrWhiteSpace(n) ? n
+            : roster is not null && roster.NameByEmail.TryGetValue(email, out var z) ? z
+            : email;
+        string List(IEnumerable<string> emails)
+        {
+            var names = emails.Select(Name).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+            return names.Count == 0 ? "(none)" : string.Join(", ", names);
+        }
+
+        // The intended roster = what Zoho has, minus what should go, plus what is missing.
+        var intended = liveSet.Where(e => !removals.Contains(e, StringComparer.OrdinalIgnoreCase))
+            .Concat(additions)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        // §322m — label line first (the GUI result row shows only that), then the action lines.
+        // The e-mail rides along in brackets because the Backstage speaker picker lists people by
+        // name and two speakers can share one.
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{ZohoFieldMap.Session.Speakers.GuiLabel}: '{List(liveSet)}' → '{List(intended)}'");
+        if (additions.Count > 0)
+            sb.Append("\nattach in Backstage: ")
+              .Append(string.Join(", ", additions.OrderBy(Name, StringComparer.CurrentCultureIgnoreCase)
+                  .Select(e => $"{Name(e)} <{e}>")));
+        if (removals.Count > 0)
+            sb.Append("\nremove in Backstage: ")
+              .Append(string.Join(", ", removals.OrderBy(Name, StringComparer.CurrentCultureIgnoreCase)
+                  .Select(e => $"{Name(e)} <{e}>")));
+        return sb.ToString();
+    }
+
     // (§322l: the 200-char Clip() helper is gone — the ACTION mail now carries the FULL
     // description so it can be pasted straight into the Backstage GUI.)
 
-    /// <summary>Zoho's rich-text description arrives as HTML — reduce to text so an
-    /// "empty" description ("&lt;p&gt;&lt;/p&gt;") is recognised as blank.</summary>
-    private static string? StripHtml(string? html) =>
-        string.IsNullOrWhiteSpace(html)
-            ? html
-            : System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ").Trim();
+    // (§989: the private StripHtml is gone — it stripped TAGS ONLY, so "<p>&nbsp;</p>", which is
+    // what the editor stores for a field the operator sees as EMPTY, survived as the literal
+    // "&nbsp;" and read as a filled description. RichTextCompare is the one shared answer.)
 
     /// <summary>§302: the stable dedupe key of one diff set (same diff ⇒ same hash ⇒ no re-mail).</summary>
     private static string DiffHash(IReadOnlyList<string> diffs) =>

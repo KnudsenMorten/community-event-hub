@@ -94,6 +94,45 @@ public sealed record JobDescriptor(
     public bool IsIntervalDriven => DefaultIntervalMinutes is > 0;
 
     /// <summary>
+    /// 🔴 §1009b — the cadence to DISPLAY: derived from the number that actually paces the job,
+    /// so it cannot disagree with it. Falls back to the hand-written <see cref="Cadence"/> for
+    /// clock-anchored jobs, where the cron really is the schedule ("daily at 07:20 UTC").
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"if this is just text update, why dont you just take the value
+    /// for the setting instead of having these not relevant times when they are static text"*. He
+    /// is right, and it removes the whole class of bug rather than the twenty instances of it.</para>
+    ///
+    /// <para><b>What it replaces.</b> <see cref="Cadence"/> was hand-written text, and §869.3's bulk
+    /// conversion set <c>DefaultIntervalMinutes: 10</c> on nearly every job without touching it — so
+    /// the Jobs page printed "Hourly" over a 10-minute job on <b>20 jobs</b>. A test could only ever
+    /// have reported that drift; deriving the text means there is nothing to drift.</para>
+    ///
+    /// <para>⚠️ <b>This is the SHIPPED default.</b> An operator override
+    /// (<c>JobRunState.MinIntervalMinutes</c>) is what actually runs, and only the page can know it
+    /// — see <c>EffectiveCadenceWords</c>.</para>
+    /// </remarks>
+    public string CadenceWords =>
+        DefaultIntervalMinutes is { } m && m > 0 ? DescribeInterval(m) : Cadence;
+
+    /// <summary>
+    /// §1009b — the cadence in words for a given interval, so the page, the catalog and any test
+    /// all phrase it identically.
+    /// </summary>
+    public static string DescribeInterval(int minutes) => minutes switch
+    {
+        <= 0 => "Every tick",
+        1 => "Every minute",
+        60 => "Hourly",
+        1440 => "Daily",
+        10080 => "Weekly",
+        < 60 => $"Every {minutes} minutes",
+        _ when minutes % 1440 == 0 => $"Every {minutes / 1440} days",
+        _ when minutes % 60 == 0 => $"Every {minutes / 60} hours",
+        _ => $"Every {minutes} minutes",
+    };
+
+    /// <summary>
     /// §510/§878 — the floor for THIS job. Nothing runs more often than its base tick offers, so
     /// the UI must REJECT a smaller number rather than accept one that silently does nothing.
     /// </summary>
@@ -326,9 +365,21 @@ public static class JobCatalog
         // handed over: same 5-minute behaviour, now settable. Its twin
         // (SpeakerChangeDetectionJob) had been interval-driven since §543b — the pair reading
         // differently on the page was itself part of his complaint.
-        new JobDescriptor("SessionChangeDetectionJob", "Session change detection", "Every 5 minutes", "0 */5 * * * *",
-            "Zoho Backstage → CEH: detects session time/room changes and queues them for approval.",
-            FeatureKey: "session-change-alerts", DefaultIntervalMinutes: 10, System: JobSystem.Zoho),
+        // 🔴🔴 §1020 — PERMANENTLY INERT. `SessionChangeDetectionService` returns before reading
+        // anything (Zoho→CEH is off in code, with no switch — operator: *"we cannot have anyone turn
+        // this on by mistake"*), so this job ticks and does nothing.
+        //
+        // 🔒 The FeatureKey is REMOVED rather than repointed: `session-change-alerts` now controls
+        // the SPEAKER MAIL only, and leaving it here would make the Jobs page say this job is "off
+        // because its feature is off" — implying that turning the mail on would start the sync.
+        //
+        // ⚠️ The job is kept rather than deleted: §634 — retiring one leaves an orphan PROD health
+        // marker that the watchdog then reports as a silent job. Its description says plainly that
+        // it does nothing, which is cheaper than that alarm and honest on the page.
+        new JobDescriptor("SessionChangeDetectionJob", "Session change detection (retired)", "Every 5 minutes", "0 */5 * * * *",
+            "RETIRED (§1020): Zoho Backstage → CEH session sync is permanently off in code — the hub "
+            + "owns the schedule. This job still ticks but does nothing. Signage is unaffected.",
+            DefaultIntervalMinutes: 10, System: JobSystem.Zoho),
 
         // §754 — the venue screens. The 5-minute cadence is the operator's own spec (§4: a change
         // made in Backstage must reach the screens "within one polling cycle"), and it is the one

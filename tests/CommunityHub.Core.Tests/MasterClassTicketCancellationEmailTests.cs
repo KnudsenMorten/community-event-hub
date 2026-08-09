@@ -328,4 +328,51 @@ public sealed class MasterClassTicketCancellationEmailTests
         Assert.Contains("sign-in has been closed", m.Html);
         Assert.DoesNotContain("{{", m.Html);                        // no unresolved token
     }
+
+    /// <summary>
+    /// 🔴 §1015 — the sign-in line is a BULLET, not a paragraph after the list.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09, with a screenshot: *"the event hub sign-in has been closed should
+    /// be in the bullet above"*. Both statements answer the same "That means:" lead-in, so a
+    /// <c>&lt;p&gt;</c> sitting after <c>&lt;/ul&gt;</c> — directly beneath a ONE-item list — read as
+    /// a new, unrelated thought exactly where the eye expects item two.</para>
+    ///
+    /// <para>🔑 <b>The assertion is STRUCTURAL, deliberately.</b> The previous test asserted the
+    /// words were present, and they were present the whole time it was wrong — the defect was
+    /// entirely in where they sat. Checking the text again would pin nothing.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]    // still holds another ticket ⇒ "stays open"
+    [InlineData(false)]   // fully cancelled ⇒ "has been closed"
+    public async Task The_sign_in_line_is_a_bullet_inside_the_list(bool keepsAnotherTicket)
+    {
+        using var db = ScenarioFixture.NewDb();
+        var ev = await SeedEventAsync(db);
+        await SeedAttendeeAsync(db, ev, "p@x.dk");
+        if (keepsAnotherTicket)
+        {
+            // A SECOND, still-active ticket on the same address flips the wording to "stays open".
+            // Both wordings ride the same token, so both must be list items or the fix is half done.
+            await SeedAttendeeAsync(db, ev, "p@x.dk", mirror: MirrorState.Active);
+        }
+        var sender = new CapturingEmailSender();
+
+        await NewService(db, sender, templates: RealTemplates()).SendPendingTicketCancellationsAsync(ev);
+        var html = Assert.Single(sender.Messages).Html;
+
+        var phrase = keepsAnotherTicket ? "sign-in stays open" : "sign-in has been closed";
+        var at = html.IndexOf(phrase, StringComparison.Ordinal);
+        Assert.True(at > 0, $"'{phrase}' is missing from the mail entirely.");
+
+        // It is INSIDE the unordered list: the last <ul> before it is not yet closed.
+        var listEnd = html.IndexOf("</ul>", StringComparison.Ordinal);
+        Assert.True(listEnd > at,
+            "the sign-in line renders AFTER </ul> — it is a paragraph again, not a bullet.");
+
+        // …and it is a real <li>, not a <p> that merely happens to sit inside the list markup.
+        var liStart = html.LastIndexOf("<li", at, StringComparison.Ordinal);
+        var pStart = html.LastIndexOf("<p", at, StringComparison.Ordinal);
+        Assert.True(liStart > pStart, "the sign-in line is still wrapped in a <p>, not an <li>.");
+    }
 }

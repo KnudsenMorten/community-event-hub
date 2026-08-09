@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Integrations.Graphics;
 using CommunityHub.Core.Organizer;
 using CommunityHub.Core.Reminders;
@@ -52,6 +53,8 @@ public class SessionsModel : PageModel
     // §6.2 — the publisher's own version function, so "stale" on the grid means what it means to
     // the job that republishes.
     private readonly CommunityHub.Core.Evaluation.EvaluationReportBuilder? _reports;
+    /// <summary>§1004 — speaker notice on a CEH room/time edit; §1001 quiet period applies inside.</summary>
+    private readonly CommunityHub.Core.Integrations.Sessions.SessionScheduleChangeNotifier? _scheduleNotice;
 
     public SessionsModel(
         CommunityHubDbContext db,
@@ -80,8 +83,13 @@ public class SessionsModel : PageModel
         // §836 (operator 2026-08-05: "i also want for each sessions in my sessions when we will
         // announce the session"). OPTIONAL for the same reason as `decks`/`evalPdfs` above — absent
         // ⇒ the column reads "—", never a wrong date.
-        CommunityHub.Core.Integrations.SoMeAnnouncementQuery? announcements = null)
+        CommunityHub.Core.Integrations.SoMeAnnouncementQuery? announcements = null,
+        // §1004 — the speaker "your session moved" notice, which now fires from the CEH edit
+        // because CEH owns the schedule (§1000). OPTIONAL for the same reason as the rest: absent
+        // ⇒ the edit still saves and simply announces nothing.
+        CommunityHub.Core.Integrations.Sessions.SessionScheduleChangeNotifier? scheduleNotice = null)
     {
+        _scheduleNotice = scheduleNotice;
         _announcements = announcements;
         _db = db;
         _participant = participant;
@@ -167,11 +175,58 @@ public class SessionsModel : PageModel
     [BindProperty] public int EditLengthMinutes { get; set; }
     [BindProperty] public string? EditRoom { get; set; }
     [BindProperty] public string? EditEvaluationFormUrl { get; set; }
+
+    // 🔴 §1005.3 — EDIT EVERY FIELD. Operator 2026-08-09: *"i also need the ability to edit session
+    // and modify every all fields, with dropdowns for fields whre relevant"*.
+    //
+    // 🔑 This is LOAD-BEARING, not cosmetic. §999 made CEH the owner of date/time, room, track and
+    // tags, and §1000 made it the owner of the schedule outright — so a field CEH owns but cannot
+    // edit is a field that cannot be corrected ANYWHERE. Sessionize's copy is only reported now,
+    // and Backstage's is create-only.
+    [BindProperty] public string? EditTitle { get; set; }
+    [BindProperty] public string? EditAbstract { get; set; }
+    [BindProperty] public string? EditTrack { get; set; }
+    [BindProperty] public string? EditLevel { get; set; }
+    [BindProperty] public string? EditTags { get; set; }
+
+    /// <summary>§1025 — the speakers ticked on the edit panel.</summary>
+    [BindProperty] public List<int> EditSpeakerIds { get; set; } = new();
+
+    /// <summary>
+    /// 🔒 §1025 — proves the speaker picker was RENDERED, so "he unticked everyone" is
+    /// distinguishable from "this form does not carry speakers". Unticked boxes post nothing, so
+    /// without this an empty list would silently mean "leave them alone" and speakers could never
+    /// be REMOVED — which is half of what he asked for.
+    /// </summary>
+    [BindProperty] public bool EditSpeakersSubmitted { get; set; }
+
+    /// <summary>§1025 — the speakers ticked on the ADD form.</summary>
+    [BindProperty] public List<int> NewSpeakerIds { get; set; } = new();
+
+    /// <summary>
+    /// §1025 — every speaker in the edition, for the pickers. Ordered by name because that is how
+    /// he looks for a person; the id is shown too, since two people can share a display name.
+    /// </summary>
+    public IReadOnlyList<(int Id, string Name, string Email)> SpeakerPickList { get; private set; } =
+        Array.Empty<(int, string, string)>();
+
+    /// <summary>
+    /// §1023 — show TEST sessions in the grid. Off by default: a test session reaches no attendee
+    /// (§299 4.5), so it is rehearsal data padding the list and the count.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <c>SupportsGet</c> because this is a FILTER — it has to survive the grid's own
+    /// search/sort/page links, which are GETs, or ticking it would last exactly one click.
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public bool IncludeTestSessions { get; set; }
     /// <summary>❓OPEN-20 — optional MANUAL schedule edit (datetime-local, UTC wall
     /// time). Pre-filled with the current values; a CHANGED value sets
     /// IsDateOverridden so re-imports keep the manual date. Blank = leave as is.</summary>
     [BindProperty] public string? EditStartsAt { get; set; }
     [BindProperty] public string? EditEndsAt { get; set; }
+
+    /// <summary>§1011 — "Common for All Tracks": overrules the session's track.</summary>
+    [BindProperty] public bool EditIsCommonForAllTracks { get; set; }
 
     [BindProperty] public string? QrRoom { get; set; }
     [BindProperty] public string? QrTargetUrl { get; set; }
@@ -213,8 +268,22 @@ public class SessionsModel : PageModel
         DateTimeOffset? StartsAt = null,
         DateTimeOffset? EndsAt = null,
         bool IsDateOverridden = false,
-        bool UnknownRoom = false)
+        bool UnknownRoom = false,
+        /// <summary>§1011 — the plenary marker; overrules <c>Track</c>.</summary>
+        bool IsCommonForAllTracks = false,
+        /// <summary>§1011 — shown beside the tick box so he can see what it is overruling.</summary>
+        string? Track = null,
+        // §1005.3 — the rest of the now-editable fields, so the edit form renders their values.
+        string? Abstract = null,
+        string? Level = null,
+        string? Tags = null,
+        /// <summary>§1025 — the LINKED speaker participant ids, so the picker can pre-tick them.
+        /// The display names alone cannot: two people can share one.</summary>
+        IReadOnlyList<int>? SpeakerIdList = null)
     {
+        /// <summary>§1025 — never null, so the view can just call Contains.</summary>
+        public IReadOnlyList<int> SpeakerIds => SpeakerIdList ?? Array.Empty<int>();
+
         /// <summary>
         /// True when this session can be deleted with no attendee data loss
         /// (no questions, evaluations, or master-class signups of any state).
@@ -239,6 +308,56 @@ public class SessionsModel : PageModel
 
     /// <summary>§299.8/b7 — inclusive max for a custom length in minutes (config).</summary>
     public int MaxLengthMinutes => _sessionOptions.MaxMinutes;
+
+    // ---- §1005.3: the dropdown sources -------------------------------------------------
+    // 🔒 Config registries, not free text, "for fields whre relevant" — a room or track typed by
+    // hand is the §299.6/b5 drift that makes a session fail to resolve to a Backstage hall or
+    // track. Each list carries the CURRENT value even when config does not know it, so editing a
+    // session never silently rewrites a field the operator did not touch.
+
+    /// <summary>§1005.3 — the configured rooms, plus <paramref name="current"/> if it is unknown.</summary>
+    public SelectList RoomOptions(string? current) =>
+        OptionsWithCurrent(_roomRegistry.Rooms.Select(r => r.Name), current);
+
+    /// <summary>§1005.3 — the configured audience levels, plus the current value if unknown.</summary>
+    public SelectList LevelOptions(string? current) =>
+        OptionsWithCurrent(_sessionOptions.Levels.Select(l => l.Label), current);
+
+    /// <summary>
+    /// §1005.3 — the tracks. Sourced from the SESSIONS THEMSELVES rather than from config: tracks
+    /// arrive with the Sessionize import and there is no configured list of them, so the editable
+    /// set is what the edition actually uses.
+    /// </summary>
+    public SelectList TrackOptions(string? current) => OptionsWithCurrent(KnownTracks, current);
+
+    /// <summary>Distinct non-blank tracks in this edition, for the dropdown.</summary>
+    public IReadOnlyList<string> KnownTracks { get; private set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// A select list over <paramref name="values"/> with a blank "— none —" first, guaranteeing
+    /// <paramref name="current"/> is present and selected.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>The current value is always an option, even when config has never heard of it.</b>
+    /// Otherwise opening the editor on a session whose room was renamed in config would silently
+    /// re-point it at whatever happened to be first in the list — a change nobody made, on a field
+    /// that drives the public agenda.
+    /// </remarks>
+    private static SelectList OptionsWithCurrent(IEnumerable<string> values, string? current)
+    {
+        var list = values
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(current)
+            && !list.Contains(current.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            list.Insert(0, current.Trim());
+        }
+        list.Insert(0, string.Empty);   // "— none —"
+        return new SelectList(list, current ?? string.Empty);
+    }
 
     /// <summary>
     /// §326bk (operator 2026-07-25: "make this a simple dropdown — it is impossible to
@@ -324,7 +443,12 @@ public class SessionsModel : PageModel
         {
             await _mgmt.AddHubSessionAsync(
                 me.EventId, NewTitle ?? string.Empty, NewType, NewLengthMinutes,
-                day: NewDay, room: NewRoom, @abstract: NewAbstract, ct: ct);
+                day: NewDay, room: NewRoom, @abstract: NewAbstract,
+                // §1025 — link the chosen speakers as part of the create. The service already
+                // accepted this; the page simply never offered it, so a new hub session arrived
+                // with nobody on it and had to be edited immediately afterwards.
+                speakerParticipantIds: NewSpeakerIds.Where(id => id > 0).Distinct().ToList(),
+                ct: ct);
             Message = "Hub session added.";
         }
         catch (ArgumentException ex)
@@ -347,13 +471,16 @@ public class SessionsModel : PageModel
             // only a PARSEABLE posted value participates (blank = leave as is, so a
             // schedule can't be wiped by an untouched empty field). A real change
             // sets IsDateOverridden inside UpdateSessionAsync.
-            var startsAt = ParseLocalUtc(EditStartsAt);
-            var endsAt = ParseLocalUtc(EditEndsAt);
+            var startsAt = ParseEventLocal(EditStartsAt);
+            var endsAt = ParseEventLocal(EditEndsAt);
             var applySchedule = startsAt is not null || endsAt is not null;
 
+            // §1004 — capture the BEFORE values, including the room: CEH is now the schedule owner
+            // (§1000 disabled Zoho→CEH), so this edit is where a speaker-visible change happens and
+            // the "your session moved" notice has to fire from here or from nowhere at all.
             var current = await _db.Sessions.AsNoTracking()
                 .Where(s => s.Id == SessionId && s.EventId == me.EventId)
-                .Select(s => new { s.StartsAt, s.EndsAt })
+                .Select(s => new { s.StartsAt, s.EndsAt, s.Room })
                 .FirstOrDefaultAsync(ct);
 
             await _mgmt.UpdateSessionAsync(
@@ -362,8 +489,45 @@ public class SessionsModel : PageModel
                 startsAt: startsAt ?? current?.StartsAt,
                 endsAt: endsAt ?? current?.EndsAt,
                 applySchedule: applySchedule,
-                ct: ct);
+                ct: ct,
+                // §1011 — a checkbox posts nothing when UNticked, so the value is always
+                // meaningful here (false = he cleared it), never "not supplied".
+                isCommonForAllTracks: EditIsCommonForAllTracks,
+                // §1005.3 — the CEH-owned content fields. Every one is rendered by this form, so
+                // every one is meaningful on post: blank means "he cleared it", not "not supplied".
+                title: EditTitle,
+                sessionAbstract: EditAbstract ?? string.Empty,
+                track: EditTrack ?? string.Empty,
+                level: EditLevel ?? string.Empty,
+                tags: EditTags ?? string.Empty,
+                // §1025 — only when the picker was actually rendered; otherwise the links are left
+                // alone. An empty list from a rendered picker DOES mean "remove them all".
+                speakerParticipantIds: EditSpeakersSubmitted ? EditSpeakerIds : null);
             Message = "Session updated.";
+
+            // Read the AFTER values back rather than assuming the posted ones landed — the
+            // management service normalizes the room and may refuse a schedule it does not like,
+            // and a mail describing a change that was not saved is worse than no mail.
+            var after = await _db.Sessions.AsNoTracking()
+                .Where(s => s.Id == SessionId && s.EventId == me.EventId)
+                .Select(s => new { s.StartsAt, s.EndsAt, s.Room })
+                .FirstOrDefaultAsync(ct);
+
+            if (_scheduleNotice is not null && current is not null && after is not null)
+            {
+                var notice = await _scheduleNotice.NotifyAsync(
+                    me.EventId, SessionId,
+                    current.StartsAt, current.EndsAt, current.Room,
+                    after.StartsAt, after.EndsAt, after.Room, ct);
+
+                // 🔑 Say what happened to the speakers, on screen. "Session updated." alone leaves
+                // the organizer guessing whether 40 people were just e-mailed — and during the
+                // §1001 quiet period the answer is deliberately "no", which he should see.
+                if (notice.Sent > 0)
+                    Message += $" {notice.Sent} speaker(s) notified.";
+                else if (notice.Suppressed)
+                    Message += $" ({notice.Reason}).";
+            }
         }
         catch (ArgumentException ex)
         {
@@ -378,25 +542,51 @@ public class SessionsModel : PageModel
         return Page();
     }
 
-    /// <summary>Parse a posted <c>datetime-local</c> value ("yyyy-MM-ddTHH:mm") as a
-    /// UTC wall time (the same convention the stored schedule uses). Null when blank
-    /// or unparseable.</summary>
-    private static DateTimeOffset? ParseLocalUtc(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        return DateTime.TryParse(
-            value.Trim(),
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None,
-            out var dt)
-            ? new DateTimeOffset(dt, TimeSpan.Zero)
-            : null;
-    }
+    /// <summary>
+    /// 🔴 §1010 — parse a posted <c>datetime-local</c> value ("yyyy-MM-ddTHH:mm") as
+    /// <b>EVENT-LOCAL (Danish)</b> wall time. Null when blank or unparseable.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>THE BOX SAID UTC, DREW DANISH, AND SAVED UTC — so opening this editor and saving
+    /// ANY field moved the session one to two hours.</b> `datetime-local` always posts its
+    /// pre-filled value, so the round trip did not need him to touch the time at all: correcting a
+    /// room re-saved 09:00 Danish as 09:00Z, which is 10:00 (CET) or 11:00 (CEST).</para>
+    ///
+    /// <para>⚠️ <b>It was harmless once and is not any more.</b> §1000 made CEH the OWNER of the
+    /// schedule — so a shifted value is now pushed at the public agenda as a difference to apply,
+    /// and §1004 mails every speaker on the session that their time changed. What used to be a
+    /// display wart became a write that reaches 1500 attendees and 40 speakers.</para>
+    ///
+    /// <para>🔑 <b>This is §305 / §997 for the third time</b> — *"we use Danish timezone always"*.
+    /// §305 fixed the Sessionize PARSE, §997 fixed the speaker mail's RENDER, and this editor —
+    /// which is now the primary way a schedule is set — was never brought along.
+    /// <see cref="EventTimezone"/> is the one authority and was sitting right there; both halves
+    /// of this round trip go through it now, so they cannot disagree again.</para>
+    /// </remarks>
+    /// <remarks>
+    /// 🔒 Public so <c>OrganizerSessionScheduleTimezoneTests</c> exercises the REAL parse rather
+    /// than a copy of it. A test that re-implemented "call EventTimezone" would keep passing on the
+    /// day somebody changed this line back — which is precisely how the defect survived.
+    /// </remarks>
+    public static DateTimeOffset? ParseEventLocal(string? value) =>
+        EventTimezone.ParseEventLocal(value);
 
-    /// <summary>Format a stored schedule value for a <c>datetime-local</c> input.</summary>
-    public static string FormatLocalUtc(DateTimeOffset? value) =>
-        value?.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
-        ?? string.Empty;
+    /// <summary>
+    /// §1010 — format a stored schedule value for a <c>datetime-local</c> input, CONVERTED to
+    /// event-local (Danish) time.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The conversion is explicit rather than relying on the value's own offset. Sessionize rows
+    /// happen to carry the Danish offset (§305), so printing the raw value looked right — but a row
+    /// written by this very form carried offset ZERO and drew one to two hours early. The two
+    /// sources rendered differently in the same column, which is exactly the kind of difference
+    /// nobody sees until a speaker asks why their session moved.
+    /// </remarks>
+    public static string FormatEventLocal(DateTimeOffset? value) =>
+        value is { } v
+            ? TimeZoneInfo.ConvertTime(v, EventTimezone.Tz)
+                .ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
 
     /// <summary>
     /// Delete a session (REQUIREMENTS §21 organizer "Sessions delete / CRUD gap").
@@ -651,7 +841,14 @@ public class SessionsModel : PageModel
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         var q = _db.Sessions
-            .Where(s => s.EventId == eventId && !s.IsServiceSession);
+            .Where(s => s.EventId == eventId && !s.IsServiceSession)
+            // 🔴 §1023 — TEST SESSIONS ARE HIDDEN BY DEFAULT (operator 2026-08-09: *"make a filter
+            // (tick) to include test sessions and exclude them by default"*).
+            //
+            // 🔑 They were always in the grid, so the count at the top and every scan down the list
+            // included rows that reach no attendee (§299 4.5: a TEST session never appears on the
+            // public agenda). The organizer's list should show the event, not the rehearsal.
+            .Where(s => IncludeTestSessions || !s.UsedForTesting);
         if (FilterType is not null) q = q.Where(s => s.Type == FilterType);
         // §299.8/b7: the length filter matches the source-of-truth MINUTES; legacy
         // rows without minutes answer via the derived bucket (full-day rows match
@@ -713,6 +910,7 @@ public class SessionsModel : PageModel
                 s.Id, s.Title, s.Type, s.Length, s.LengthMinutes, s.Room, s.IsHubAdded,
                 s.RoomQrUrl, s.EvaluationFormUrl, s.EvaluationEmailedAt,
                 s.PublicSlug, s.UsedForTesting, s.StartsAt, s.EndsAt, s.IsDateOverridden,
+                s.IsCommonForAllTracks, s.Track, s.Abstract, s.Level, s.Tags,
                 // Engagement counts so the grid can offer a SAFE delete only when
                 // there is no attendee data to lose (matches SessionDeletionService).
                 // MC seats are CEH-owned now (MasterClassSignup), not Zoho bookings.
@@ -744,10 +942,41 @@ public class SessionsModel : PageModel
             // §299.6/b5: warn-only badge — a non-blank room not in the registry.
             UnknownRoom: !string.IsNullOrWhiteSpace(r.Room)
                          && _roomRegistry.HasEntries
-                         && !_roomRegistry.IsKnown(r.Room))).ToList();
+                         && !_roomRegistry.IsKnown(r.Room),
+            IsCommonForAllTracks: r.IsCommonForAllTracks,
+            Track: r.Track,
+            Abstract: r.Abstract,
+            Level: r.Level,
+            Tags: r.Tags,
+            // §1025 — the ids behind the names, for the picker's pre-ticking.
+            SpeakerIdList: r.SpeakerKeys.Select(k => k.ParticipantId).ToList())).ToList();
 
+        // §1025 — the speaker picker's options: everyone in the edition who IS a speaker. Read from
+        // SpeakerProfiles rather than from Role, so a person who also holds another role (an
+        // organizer who speaks) is still offered.
+        SpeakerPickList = (await _db.SpeakerProfiles.AsNoTracking()
+                .Where(sp => sp.EventId == eventId)
+                .Join(_db.Participants, sp => sp.ParticipantId, p => p.Id,
+                    (sp, p) => new { p.Id, p.FullName, p.Email })
+                .ToListAsync(ct))
+            .Select(x => (x.Id, Name: string.IsNullOrWhiteSpace(x.FullName) ? x.Email : x.FullName, x.Email))
+            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // §1005.3 — the tracks this edition actually uses, for the Track dropdown. There is no
+        // configured track list (they arrive with the import), so the sessions ARE the list.
+        KnownTracks = await _db.Sessions
+            .Where(s => s.EventId == eventId && s.Track != null && s.Track != "")
+            .Select(s => s.Track!)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync(ct);
+
+        // §1023 — the headline count obeys the same test-session filter as the grid, or the page
+        // says "13 sessions" over a list of 11 and the reader has to work out which is lying.
         TotalCount = await _db.Sessions
-            .CountAsync(s => s.EventId == eventId && !s.IsServiceSession, ct);
+            .CountAsync(s => s.EventId == eventId && !s.IsServiceSession
+                             && (IncludeTestSessions || !s.UsedForTesting), ct);
         HubAddedCount = await _db.Sessions
             .CountAsync(s => s.EventId == eventId && s.IsHubAdded && !s.IsServiceSession, ct);
 

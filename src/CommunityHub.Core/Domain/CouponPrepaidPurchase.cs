@@ -44,6 +44,34 @@ public class CouponPrepaidPurchase
     /// </remarks>
     public string? ErpInvoiceNumber { get; set; }
 
+    /// <summary>
+    /// 🔴 §1013a — TRUE once <see cref="ErpInvoiceNumber"/> is a BOOKED invoice number rather than
+    /// a provisional draft number. Null/false ⇒ the number is a draft and can still change.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"bug: you mentioned invoice 182, but the actual number is 170"*,
+    /// then *"i have sent invoice now and it got invoice 170"*.</para>
+    ///
+    /// <para>✅ <b>LIVE-VERIFIED against e-conomic (agreement 1685551, 2026-08-09):</b>
+    /// <c>/invoices/drafts</c> held ONE draft (178, a webshop order) and <b>no</b>
+    /// <c>CouponPrepaid-*</c> draft; <c>/invoices/booked</c> held <c>bookedInvoiceNumber</c>
+    /// <b>170</b> for <c>CouponPrepaid-1</c>. <b>CEH had stored 182.</b></para>
+    ///
+    /// <para>🔑 <b>Nothing misread anything.</b> e-conomic numbers a DRAFT from one series and
+    /// re-numbers it from another when a human books it, so the number CEH captured at creation was
+    /// right at that moment and became a dead reference the instant he booked it. The defect was
+    /// that nothing ever went back for the new one — and the warning was already written down, on
+    /// <c>EconomicInvoiceReference.IsBooked</c>: *"A DRAFT number is provisional and is replaced
+    /// when a human books the invoice."* Known, and not acted on.</para>
+    ///
+    /// <para>⚠️ This flag is why storing the bare digits is safe. He asked for "182", not
+    /// "draft 182" — but the word was the only thing telling him the number was provisional, so
+    /// dropping it WITHOUT this flag (and without
+    /// <see cref="Integrations.Erp.CouponPrepaidInvoiceNumberRefresher"/> keeping it current) would
+    /// have made a dead number look authoritative.</para>
+    /// </remarks>
+    public bool ErpInvoiceIsBooked { get; set; }
+
     public DateTimeOffset? ErpInvoiceConfirmedAt { get; set; }
     public string? ErpInvoiceConfirmedByEmail { get; set; }
 
@@ -52,6 +80,25 @@ public class CouponPrepaidPurchase
 
     /// <summary>What was agreed, the PO number, who asked for it.</summary>
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// §992 — the agreed unit price in DKK for THIS purchase, as the organizer typed it.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Stored because it cannot be recovered from anywhere else.</b> A claim invoice
+    /// prices each ticket from Zoho's <c>base_price</c> on the claim; a prepaid purchase is agreed
+    /// BEFORE anybody claims, and the rate is usually negotiated. Once the click is over, the number
+    /// exists only on the e-conomic invoice — so without this column the page can list what was
+    /// bought but never what it was worth.</para>
+    ///
+    /// <para>⚠️ Null for every purchase recorded before §992, and for one whose invoice was raised
+    /// by hand. The aggregate says so rather than treating a missing price as 0 — a total that
+    /// silently under-counts is worse than one that admits a gap.</para>
+    /// </remarks>
+    public decimal? UnitPriceDkk { get; set; }
+
+    /// <summary>§992 — the agreed value of this purchase in DKK, or null when the price is unknown.</summary>
+    public decimal? AgreedValueDkk => UnitPriceDkk is { } p ? p * Quantity : null;
 
     /// <summary>When the purchase was recorded — the clock the reminder's grace period runs on.</summary>
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

@@ -108,6 +108,14 @@ Everything listed is live in the product today; nothing here is planned or parti
 | 79 | [Track announcements wait for the line-up, not for a date](#79-track-announcements-wait-for-the-line-up-not-for-a-date--2026-08-07) | 2026-08-07 |
 | 80 | [A test account is marked as one, whatever you call it](#80-a-test-account-is-marked-as-one-whatever-you-call-it--2026-08-07) | 2026-08-07 |
 | 81 | [Your test accounts stop ordering lunch](#81-your-test-accounts-stop-ordering-lunch--2026-08-07) | 2026-08-07 |
+| 82 | [Add somebody the sync has not heard of yet](#82-add-somebody-the-sync-has-not-heard-of-yet--2026-08-07) | 2026-08-07 |
+| 83 | [A step that is not finished tells you what is missing](#83-a-step-that-is-not-finished-tells-you-what-is-missing--2026-08-07) | 2026-08-07 |
+| 84 | [Move a batch of volunteer tasks into the right category](#84-move-a-batch-of-volunteer-tasks-into-the-right-category--2026-08-07) | 2026-08-07 |
+| 85 | [Told when a session description no longer matches the public site](#85-told-when-a-session-description-no-longer-matches-the-public-site--2026-08-09) | 2026-08-09 |
+| 86 | [Prepaid partner tickets: one click records, invoices and tells you what is left to do](#86-prepaid-partner-tickets-one-click-records-invoices-and-tells-you-what-is-left-to-do--2026-08-09) | 2026-08-09 |
+| 87 | [Extend a prepaid block without changing the coupon code](#87-extend-a-prepaid-block-without-changing-the-coupon-code--2026-08-09) | 2026-08-09 |
+| 88 | [Speaker photos show up, wherever they came from](#88-speaker-photos-show-up-wherever-they-came-from--2026-08-09) | 2026-08-09 |
+| 89 | [The header counts down to the ticket sale](#89-the-header-counts-down-to-the-ticket-sale--2026-08-09) | 2026-08-09 |
 
 ---
 
@@ -3530,3 +3538,306 @@ task changes where it sits in your structure, not who is doing it.
 its name, its lead and supervisor, and how much is inside — so a category with a handful of tasks is
 no longer pushed off the screen by the one holding a hundred. Your category's own settings stay
 visible either way.
+
+## 85. Told when a session description no longer matches the public site *(✅ 2026-08-09)*
+
+Session abstracts are owned by the call-for-speakers system: when a speaker rewrites theirs, the next
+import brings the new text into the hub automatically. The public event site is a different story —
+its session description can only be edited by hand, so the moment an abstract changes anywhere else,
+the two quietly stop matching and nothing says so.
+
+**Now they don't stay out of step silently.** The hub compares each linked session's description
+against the one live on the public event site, and when they differ it emails you an **action line
+carrying the full, current text** — ready to paste straight into the site's description box. Paste
+it, and the line disappears on the next pass.
+
+**It knows the difference between an edit and a rewrap.** Rich-text editors reformat what you save
+them — they re-wrap paragraphs, swap spaces for non-breaking ones and turn straight quotes into
+curly ones — so a naive comparison would report every session as changed, for ever, no matter what
+you pasted. The comparison looks past all of that and reacts only to the words actually changing.
+A description that is *empty* on the public site is still reported the same way, and now an
+apparently-empty box really is treated as empty even when the editor left invisible markup behind
+it — previously that could hide a genuinely missing description from the report.
+
+**One mail per change, not one per check.** The check runs on the regular sync, but you are told
+once per distinct set of differences — and the moment the site matches the hub again, the reminder
+clears itself.
+
+## 86. Prepaid partner tickets: one click records, invoices and tells you what is left to do *(✅ 2026-08-09)*
+
+When a partner pays up front for a block of tickets, three things have to happen: the hub has to know
+about the allocation, finance has to raise the invoice, and the promo code has to exist so the
+partner can actually claim what they bought. Only the first was one click. The other two were
+remembered, or not.
+
+**Recording the purchase now raises the invoice.** Enter the ticket class, how many, and the agreed
+unit price, and the button — now **Create Invoice** — records the allocation, creates the draft
+invoice in the finance system and fills in its number for you. If you already raised the invoice
+yourself, type its number instead and no second one is created.
+
+**The price is asked for, because it cannot be known.** A prepaid block exists *before* anybody
+claims a ticket, so there is no claimed ticket to read a price from — and a prepaid rate is usually
+negotiated rather than the public one. So it is a field you fill in, and nothing is invoiced until
+you do: a blank or zero price is refused rather than sent as a 0.00 invoice.
+
+**Your notes reach the invoice.** The note on a coupon — a purchase-order number, a reference the
+partner's finance team needs, anything else — is printed on the invoice it produces. That applies to
+**both** billing types: the prepaid invoice and the invoice raised when tickets are claimed. A blank
+note prints nothing at all, rather than an empty heading.
+
+**And you are told about the one step the hub cannot do.** The public event site has no way to create
+a promo code programmatically, so that stays manual — and now it is a mail rather than something to
+remember: which code, which ticket class, and the total it has to allow. Top up a block later and the
+mail asks for the limit to be *raised* to the new total, because a code still capped at the old number
+leaves a partner who has paid unable to claim.
+
+**A smaller honesty fix rides along:** when the finance system could not be read for a particular
+customer, the requester picker said *"no contacts on this customer"* — stating as fact something it
+did not know, and sending you to fix data that was fine. It now says which of the two happened.
+
+## 87. Extend a prepaid block without changing the coupon code *(✅ 2026-08-09)*
+
+A partner buys 20 prepaid tickets, and the code goes out in their own mailing to their own people.
+Then they come back and want 30. Issuing a second code is not an option — the first one is already
+embedded in order links sitting in other people's inboxes.
+
+**So you raise the ceiling instead.** The pool has an **Increase to** box: type the new total — 30 —
+and the hub works out that 10 are new, records them as their own purchase and invoices only those 10.
+**The code itself never changes**, so every link already sent keeps working.
+
+**You type the number you are going to type anyway.** The new total is the same figure you then set
+as the code's maximum on the public event site, so there is no arithmetic to do twice and no way for
+the two systems to end up disagreeing. The pool shows it back to you in one line: *set the promo
+code's max to 30 tickets* — alongside how many purchases make it up and what they are worth.
+
+**A block can grow, never shrink.** Each purchase is an invoiced agreement, so a total at or below
+today's is refused rather than quietly applied — with the current figure named so you can see what
+you are working from. Removing an allocation outright is still its own separate action.
+
+**And the invoices are all in one place.** Every invoice raised against a coupon — both the ones
+created when tickets are claimed and the prepaid ones — is now listed on the coupon with its number
+and whether it is still a draft. Previously the prepaid ones were missing from that list, which made
+the one thing you actually want to check — does what I have billed match what the code allows? —
+impossible to do on the page.
+
+*Purchases recorded before prices were captured show no value, and the total says so rather than
+counting them as zero.*
+
+## 88. Speaker photos show up, wherever they came from *(✅ 2026-08-09)*
+
+When a sponsor uploads a headshot for their speaker, the hub saves its own copy — but the link it
+recorded pointed back at the internal document library it came from. That link needs a corporate
+sign-in and isn't an image address at all, so the picture rendered as a broken icon: on the speaker's
+own profile form, directly above the line promising a copy had been saved, and **on the public
+speaker lineup and speaker pages**.
+
+**Now every place that shows a speaker photo uses the hub's own copy.** The public lineup, the
+speaker detail page, the profile form and the onboarding wizard all resolve the photo the same way,
+so a sponsor-supplied headshot appears exactly like one imported from the call-for-speakers system.
+
+**And when there is genuinely nothing to show, it says so instead of showing a broken picture.** On
+the public pages the speaker's initials appear, as they always have for someone with no photo. On the
+speaker's own form there's a plain explanation — the link needs a sign-in, so it won't work for the
+programme either, please paste a public one — which is something the speaker can actually act on.
+
+*No internal document library was made public to achieve this.*
+
+## 89. The header counts down to the ticket sale *(✅ 2026-08-09)*
+
+The bar at the top of every page used to announce the sale as an absolute moment — a date, a time,
+and a timezone offset. That asks the reader to do two jobs before they learn anything: convert the
+time out of a zone that may not be theirs, then work out how far away it is. The offset in brackets
+was the giveaway — it was only there because an absolute time means nothing without one.
+
+**It is now a live countdown.** *Tickets on sale in 2d 04:13:22*, ticking once a second, in every
+visitor's own sense of time rather than the event's. No zone to convert, nothing to work out.
+
+**It switches by itself.** When the countdown reaches zero the bar says the tickets are on sale, and
+from the next page load it becomes the link straight to them — the same behaviour the banner always
+had, now with no stale date sitting in front of it.
+
+**Nothing else in the header moved.** The *Visit event site* button stays exactly where it was.
+
+*The countdown runs in your browser, so it stays correct on a page that has been open a while.
+Without JavaScript it still shows the remaining time as at page load.*
+
+## 90. Told when the public agenda names the wrong speakers *(✅ 2026-08-09)*
+
+The hub already tells you when a session's **title, time, duration, track, hall or description** has
+drifted away from what the public event site shows. It said nothing about the one thing an attendee
+looks at first: **who is speaking.** A speaker swapped in the call-for-speakers system, or a second
+speaker added late, landed in the hub quietly — and the public agenda kept announcing the old
+line-up, with nothing chasing it.
+
+**Speakers are now compared too.** Every session the hub has already published is checked against the
+live agenda, and where the two disagree the same action mail spells out what to do — by name, with
+the e-mail address alongside, because the speaker picker lists people by name and two people can
+share one:
+
+> **Speakers:** 'Alice Doe' → 'Alice Doe, Carol Ray'
+> attach in Backstage: Carol Ray &lt;carol@example.com&gt;
+> remove in Backstage: Dan Bo &lt;dan@example.com&gt;
+
+**It only asks for what it is safe to ask for.** A speaker it suggests you *attach* is always one the
+hub itself would have attached — attaching somebody on the event site invites them, so a person who
+is not approved for that yet is never named in an attach line. A speaker it suggests you *remove* is
+judged against everyone the hub knows on the session, so a real speaker is never reported as an
+intruder just because their category has not been filled in yet.
+
+**It stays quiet when it cannot be certain.** If the live agenda does not report a session's speakers
+at all, or names one the hub cannot identify, the line is not written. A reminder you cannot satisfy
+is worse than no reminder — you would do the work and be asked again on the next pass.
+
+**Unresolved differences keep reminding you** on the same hourly cadence as the other fields, and
+clear themselves the moment the agenda matches.
+
+## 91. Mark a session as common to every track *(✅ 2026-08-09)*
+
+Some sessions belong to no single track because they belong to all of them — the welcome, the
+keynote, the closing, the breaks. Until now the hub insisted every session had a track, and kept
+reporting the plenary ones as mismatched against the public event site.
+
+**There is now a "Common for All Tracks" tick box** on each session in the organizer sessions page.
+Ticked, it **overrules the track** everywhere the track is compared: the call-for-speakers system no
+longer reports a track disagreement for that session, and the public-site check stops asking you to
+set one.
+
+**And it checks the right thing rather than looking away.** The public event platform has no
+"common for all tracks" setting of its own — it simply shows a session with **no track** that way. So
+the hub compares against exactly that: a ticked session whose track is already cleared on the event
+site is **confirmed correct and never mentioned again**, and one that still carries a track gets a
+single, closable line telling you to clear it. Clearing it ends the reminder for good.
+
+*When the hub first creates such a session it still sends the track, because the event platform's
+session API cannot be corrected afterwards and a refused create cannot be undone. The creation email
+tells you to clear the Track field, in the same message as everything else you must set by hand.*
+
+## 92. Your keynotes arrive as keynotes *(✅ 2026-08-09)*
+
+Every session the hub created on the public event site went over as a **Presentation**, whatever it
+actually was — so each keynote had to be retyped by hand after creation, and nothing ever told you
+which ones were still wrong.
+
+**The session type now travels with the session.** A session marked as a keynote in the hub is
+created as a **Keynote** on the event site. And because the type can be read back, a session whose
+type does not match is now reported in the same action email as every other difference — which is the
+only way to find the ones that were created wrong before this existed.
+
+*Types the hub has not been told how to translate keep the configured default rather than being
+guessed at — a wrong type on a live agenda cannot be corrected through the API. New translations are
+a settings change, not a new release.*
+
+## 93. Prepaid ticket invoices: the right number, the right ticket name *(✅ 2026-08-09)*
+
+Three things about the prepaid-partner invoice were quietly wrong, and all three are the kind you
+only notice when you quote something to a customer.
+
+**The invoice number now follows the invoice.** Your accounting system gives a draft invoice one
+number and then **renumbers it when you book it** — so the number the hub captured when it created
+the draft stopped existing the moment you booked it. The hub now re-checks each prepaid invoice
+against your accounting system and stores the **current** number, so what you read is what your
+partner sees. It also records whether that number is a booked invoice or still a draft, so a
+provisional number can no longer pass for a final one.
+
+- *A number you typed in yourself is never touched.* The lookup can only match invoices the hub
+  itself raised, so an invoice you created by hand stays exactly as you entered it.
+- *An invoice it cannot find is left alone, not blanked.* If the accounting system is unreachable, or
+  an invoice has been deleted or credited, the hub keeps what it had rather than guessing — "I
+  couldn't look" and "it's gone" are different answers.
+
+**The ticket class shows its name, not its id.** Pools and invoice lines showed a 17-digit internal
+identifier where they should have said *2-day ticket*. The cause was that names were only learned
+from tickets people had already claimed — and a **prepaid** pool exists precisely before anybody has
+claimed anything. Names now come from every ticket ever sold, so a pool is named correctly from the
+moment you create it, and existing pools correct themselves.
+
+**The unit price is prefilled.** The pool form opens with the standard price already filled in
+instead of an example that was not the real one. It stays fully editable — the price you type is
+always the price that is billed — and the standard price is a setting, not something baked into a
+release.
+
+## 94. Tell a partner their coupon is ready — in one click *(✅ 2026-08-09)*
+
+Every coupon notification the hub sent went to the organizer team: create the promo code, book this
+draft, map this coupon. Nothing ever reached the **partner** — so once the pool was recorded, the
+invoice raised and the code created, the person actually waiting to claim was told by hand, or not
+at all.
+
+**There is now a "Notify requester" button on each coupon.** It writes the whole email for you —
+their claim link with the promo code already in it, the ticket class by name, and the invoice
+details — addressed to the requester contact you picked for that customer.
+
+**It writes the right letter for the agreement.** A partner who **pre-paid** for a block is told how
+many claims they hold, that the block can be extended later on the same early-bird terms, and which
+invoice was sent. A partner billed **as tickets are claimed** gets neither a count nor an extend
+offer — they have not bought anything yet — and is told how often they will be invoiced instead.
+
+**You see it before they do.** The button shows the finished email — recipient, subject and full
+body — and sends only when you press Send on that exact text. Nothing goes out on a timer, and the
+page records when each partner was last notified so nobody sends it twice.
+
+**It refuses to send something wrong.** If the invoice is still a draft in your accounting system,
+the button stops and says so — a draft is renumbered when you book it, so quoting that number would
+send your partner looking for an invoice that does not exist. Same if the requester has no email
+address on file, or has not been chosen yet.
+
+*The billing frequency in the letter is read from that coupon's own billing period, so the promise
+and the system cannot drift apart.*
+
+## 95. Edit any session properly, and see who is on it *(✅ 2026-08-09)*
+
+The organizer sessions page was hard to use for the one thing it is for. The edit control was a
+disclosure caret in a full-width strip under each row — it read as a separator, not a button — and
+even once found it edited only a few fields.
+
+**Edit is now a plain button in the row**, like the participants list. The panel edits **every field
+the hub owns**: title, abstract, type, length, schedule, room, track, level and tags — with
+dropdowns for room, track and level so a name cannot drift from a typo, and each list always
+contains the current value so opening the form can never silently re-point something.
+
+**You can add and remove a session's speakers**, both when editing and when creating a session in
+the hub. *On a session that came from the call-for-speakers system, that system owns the speaker
+list and will replace your change at the next import — the panel says so, in place, rather than
+letting you discover it.*
+
+**The end time is calculated** from the start plus the length, and updates as you change either. It
+cannot disagree with the length any more, which matters because the duration published to the event
+site is derived from it.
+
+**The page shows the event, not the rehearsal.** Test sessions are hidden unless you tick to include
+them, and the count at the top obeys the same filter. The grid also lost six columns that belonged
+elsewhere, and the "add a session" form moved below the list — so the filter now sits directly above
+the thing it filters.
+
+## 96. Webshop coupons appear on the invoice *(✅ 2026-08-09)*
+
+When a sponsor order carries a discount coupon, the amount invoiced was already correct — but the
+invoice said nothing about **why** it was lower than the product price, and neither the coupon code
+nor the discount appeared anywhere. A number a customer cannot reconcile is a phone call.
+
+The invoice line now spells it out: *"Coupon free3extratickets: list 25000.00 EUR − 600.00 EUR
+discount"*. Orders without a coupon are completely unchanged.
+
+## 97. A ticket class is called by its name, everywhere *(✅ 2026-08-09)*
+
+Prepaid pools, invoice lines, organizer emails and the coupon page could all end up showing a
+17-digit internal identifier instead of *"2-day ticket"*. It happened for exactly the cases that
+matter most: a **prepaid** pool is created *before* anybody has bought that ticket class, and the
+name was only ever learned from tickets already sold.
+
+Names now come from the event platform's own ticket-class list, which knows every class from the
+moment it is defined. Existing pools correct themselves, so the emails and invoices that read from
+them follow — no identifier reaches a person again.
+
+## 98. The hub owns the schedule, and cannot be switched out of it *(✅ 2026-08-09)*
+
+The hub is the single owner of session times, rooms, tracks and tags. The event platform never
+writes back into it — and that is now fixed in the code with **no setting at all**, so it cannot be
+re-enabled by mistake. If the two disagree, the hub is right and the event platform is what needs
+correcting; you get told what to change there.
+
+*The venue signage screens are unaffected and still read the event platform's own agenda directly,
+including breaks, lunch and the party that the session list does not model.*
+
+*What remains in settings is a separate switch that controls only one thing: whether a speaker is
+emailed when an organizer moves their session.*

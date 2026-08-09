@@ -60,12 +60,11 @@
             </span>
         </label>
     }
-    else if (Model.PreDayAutoCounted)
-    {
-        <p style="color:#15803d;font-size:13px;margin:8px 0 14px;">
-            ✓ Your <strong>pre-day / Master Class lunch</strong> is automatically counted — no need to tick it.
-        </p>
-    }
+    @* §979 (operator 2026-08-09): *"remove this text, as it doesnt show that so no reason to
+       mention it - not relevant"*. The note explained why a pre-day lunch tick is absent — but the
+       form does not show a pre-day row at all, so it answered a question the reader never had and
+       introduced a concept ("Master Class lunch") the page otherwise never mentions.
+       PreDayAutoCounted is left on the model: it still drives the branch above. *@
 </fieldset>
 
 <label for="Notes">@Localizer["Lunch.NotesLabel"]</label>

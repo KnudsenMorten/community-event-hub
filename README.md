@@ -548,6 +548,25 @@ Community Event Hub is the **behind-the-scenes self-service companion** to your 
 - **The Hub owns the operational layer** — crew sign-in, self-service forms, tasks & reminders, sponsor deliverables, volunteer planning, exports and the organizer back office.
 - **Data flows where it makes sense, not in circles.** The Hub **embeds** safely inside a Backstage portal as a seamless panel; it **pulls** accepted speakers and sessions from the **Sessionize** API and master-class bookings from **Zoho Booking** (those systems stay source-of-truth); it can **push** approved speaker bios out to Backstage speaker pages (off until you explicitly approve a line-up); and a speaker's **preferred email** is honoured by both the Hub *and* Backstage. Attendees are synced in for visibility with deep links back, but bookings are always managed at the source.
 
+### One-way by design: the Hub owns the schedule
+
+Sessions have exactly **one owner, and it is the Hub**. The call-for-speakers system keeps the
+*content* — title, abstract and the speaker line-up are copied in on every import — while the
+**schedule, room, track and tags belong to the Hub** the moment a session exists there. Neither of
+the other systems ever writes those back.
+
+- If the call-for-speakers system disagrees, you get **one email** telling you what differs. Nothing
+  is changed; the Hub's value may well be the right one, and you decide.
+- If the public event site disagrees, you get an **action email** naming the field and the value to
+  set — because that platform's session API can create a session but never update one, so a person
+  has to make the change there. That one **keeps reminding you** until it matches, because a wrong
+  public agenda is not something to tell someone once.
+- The event platform **never writes back into the Hub.** That is fixed in the code with no setting,
+  so it cannot be switched on by accident.
+
+*The venue signage screens are the deliberate exception: they mirror the event platform's own agenda
+directly, including the breaks, meals and party the session list does not model.*
+
 ![The Hub embedded inside the public event portal](docs/img/image2.png)
 *The Hub embeds seamlessly inside the public event portal — sign-in works inside the iframe.*
 

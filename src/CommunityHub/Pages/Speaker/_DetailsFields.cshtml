@@ -59,13 +59,32 @@
 <label asp-for="PhotoUrl">Photo URL</label>
 <input type="url" inputmode="url" asp-for="PhotoUrl" placeholder="https://…/your-photo.jpg" />
 <span asp-validation-for="PhotoUrl" class="error"></span>
-@if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+@* 🔴 §993 — RENDER THE HUB'S OWN COPY, NOT THE TYPED URL. This img used to take the raw
+   PhotoUrl, so a sponsor-uploaded photo — whose PhotoUrl is a SharePoint DOCUMENT
+   url — rendered as a broken-image icon directly above the line saying a copy had been saved.
+   §665's SpeakerPhotoUrl.Resolve is the one rule for this and prefers the stored copy; the
+   sponsor-session form has used it since it was written, and these preview sites never did. *@
+@{
+    var shownPhoto = CommunityHub.Core.Integrations.Graphics.SpeakerPhotoUrl.Resolve(
+        Model.PhotoUrl, Model.PhotoStoredPath);
+}
+@if (!string.IsNullOrWhiteSpace(shownPhoto))
 {
-    <img src="@Model.PhotoUrl" alt="Your speaker photo" style="max-width:160px;border-radius:10px;margin-top:8px;" />
+    <img src="@shownPhoto" alt="Your speaker photo" style="max-width:160px;border-radius:10px;margin-top:8px;" />
 }
 @if (!string.IsNullOrWhiteSpace(Model.PhotoStoredPath))
 {
     <p style="color:#6b7280;font-size:12px;margin-top:6px;">A copy of your photo has been saved for the event programme.</p>
+}
+else if (string.IsNullOrWhiteSpace(shownPhoto) && !string.IsNullOrWhiteSpace(Model.PhotoUrl))
+{
+    @* ⚠️ Says the true thing instead of showing a broken icon. Resolve returns null only when the
+       link needs a Microsoft sign-in AND no copy was saved — so the hub has nothing usable, and
+       the speaker is the only person who can fix it. A broken icon reads as a fault in the hub. *@
+    <p style="color:#b45309;font-size:12px;margin-top:6px;">
+        We can&rsquo;t show this photo: the link points somewhere that needs a Microsoft sign-in,
+        so it won&rsquo;t open for the programme either. Please paste a public image link.
+    </p>
 }
 
 <h3 style="color:var(--el-darkblue);margin-top:20px;">Microsoft accreditation <span style="color:#c0392b;">*</span></h3>

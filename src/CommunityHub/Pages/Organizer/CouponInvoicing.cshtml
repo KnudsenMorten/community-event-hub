@@ -81,6 +81,45 @@
     <div class="card"><p role="alert" class="error" style="margin:0;">@Model.Error</p></div>
 }
 
+@* 🔴 §1016c — THE PREVIEW. Operator 2026-08-09: *"preview is fine and then a send mail. then it is
+   safe"* — and it has to carry the weight, because this mail is deliberately ring-EXEMPT (his
+   decision: the recipient is an e-conomic contact, not a participant, so the ring gate could only
+   ever have dropped it silently). What protects a paying partner from a mis-click is that the exact
+   text, and the exact address, are on screen before anything is sent. *@
+@if (Model.Invite is { } claimInvite)
+{
+    <div class="card" style="border:2px solid #1565c0;">
+        <h2 style="margin:0 0 4px;font-size:16px;">
+            Claim invite &mdash; @claimInvite.CouponName
+            <span style="font-weight:normal;color:#6b7280;font-size:13px;">
+                (@(claimInvite.IsPrepaid ? "prepaid" : "ad-hoc") wording)
+            </span>
+        </h2>
+        @if (claimInvite.Blocker is { } blocked)
+        {
+            <p role="alert" class="error" style="margin:8px 0;">@blocked</p>
+        }
+        else
+        {
+            <p style="margin:8px 0;font-size:14px;">
+                <strong>To:</strong> @claimInvite.ToName &lt;@claimInvite.ToEmail&gt;<br />
+                <strong>Subject:</strong> @claimInvite.Subject
+            </p>
+            <div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;background:#fff;
+                        max-height:420px;overflow:auto;">
+                @Html.Raw(claimInvite.Html)
+            </div>
+            <form method="post" asp-page-handler="SendInvite" style="margin-top:12px;">
+                <input type="hidden" name="InviteSettingId" value="@claimInvite.SettingId" />
+                <button type="submit" class="btn">Send this email to @claimInvite.ToEmail</button>
+                <span style="font-size:12px;color:#6b7280;margin-left:8px;">
+                    This goes to the partner. There is no undo.
+                </span>
+            </form>
+        }
+    </div>
+}
+
 @* §798.2 — THE ADD FORM IS AT THE TOP. Operator 2026-08-04: *"can the add a single coupn be added
    to top instead of bottom to avoid scrolling"*. With a real list of coupons it sat below every
    row, so adding one meant scrolling past all of them. Mapping a code BEFORE it is used is also the
@@ -217,7 +256,7 @@
                 {
                     var p = view.Balance;
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:3px 0;">
-                        <span style="min-width:90px;">@(p.Label ?? p.TicketClassId)</span>
+                        <span style="min-width:90px;">@Model.TicketClassDisplay(p.TicketClassId, p.Label)</span>
                         <span>
                             <strong style="font-size:17px;color:@(p.IsOversubscribed ? "#c8322a" : p.IsLow ? "#b45309" : "#1E7A3C");">
                                 @p.Remaining
@@ -281,6 +320,15 @@
                                 <span style="min-width:150px;">
                                     <strong>@buy.Quantity</strong> ticket(s)
                                     <span class="ci-meta">&middot; @buy.CreatedAt.UtcDateTime.ToString("dd MMM yyyy")</span>
+                                    @* §992 — what this purchase was WORTH. Null on anything bought
+                                       before the price was captured, and on a hand-raised invoice. *@
+                                    @if (buy.AgreedValueDkk is { } v)
+                                    {
+                                        <span class="ci-meta">
+                                            &middot; @buy.Quantity &times; @buy.UnitPriceDkk?.ToString("0.##") =
+                                            <strong>@v.ToString("N2") DKK</strong>
+                                        </span>
+                                    }
                                 </span>
                                 <div>
                                     <label for="pin-@buy.Id">e-conomic invoice no.</label>
@@ -301,23 +349,66 @@
                         }
                     </div>
 
+                    @* 🔑 §992 — THE RECONCILE LINE. Operator 2026-08-09: *"the amount must now reflect
+                       a max of 30"* / *"so the counter matches the max number inside zoho"*. This is
+                       the number he types into Backstage as the code's limit, said once, in one
+                       place, so the two systems cannot drift through arithmetic done twice. *@
+                    var purchasedTotal = view.Purchases.Sum(x => x.Quantity);
+                    var valued = view.Purchases.Where(x => x.AgreedValueDkk is not null).ToList();
+                    var valueTotal = valued.Sum(x => x.AgreedValueDkk!.Value);
+                    var unpriced = view.Purchases.Count - valued.Count;
+                    <div style="margin:0 0 8px 0;padding:8px 10px;border-radius:8px;background:#eff6ff;">
+                        <span>Set the promo code&rsquo;s max in Backstage to
+                            <strong>@purchasedTotal</strong> ticket(s)</span>
+                        <span class="ci-meta">
+                            &middot; @view.Purchases.Count purchase(s)
+                            @if (valued.Count > 0)
+                            {
+                                <text>&middot; agreed value <strong>@valueTotal.ToString("N2") DKK</strong></text>
+                            }
+                            @* ⚠️ A total that silently under-counts is worse than one that admits a
+                               gap — purchases from before the price was captured have none. *@
+                            @if (unpriced > 0)
+                            {
+                                <text>&middot; @unpriced purchase(s) have no price recorded, so they
+                                are NOT in that total</text>
+                            }
+                        </span>
+                    </div>
+
                     <div class="ci-actions" style="margin:0 0 8px 0;">
-                        @* 🔴 §798.4 — TOP UP: same coupon code, more tickets, its own invoice. *@
+                        @* 🔴 §992 — INCREASE TO A NEW TOTAL (was "Buy more (add N)"). He types the
+                           same number he sets in Backstage; CEH works out the delta and invoices
+                           only that. It still adds a PURCHASE ROW — nothing edits a total, so
+                           "which invoice covers which tickets" stays answerable (§798.4). *@
                         <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin:0;">
                             <input type="hidden" name="SettingId" value="@r.Setting!.Id" />
                             <input type="hidden" name="PoolTicketClassId" value="@p.TicketClassId" />
                             <div>
-                                <label for="top-@p.AllocationId">Buy more (same code)</label>
-                                <input id="top-@p.AllocationId" type="number" name="PoolQuantity" min="1"
-                                       placeholder="25" style="width:90px;" />
+                                <label for="top-@p.AllocationId">Increase to (new total)</label>
+                                <input id="top-@p.AllocationId" type="number" name="PoolTargetTotal"
+                                       min="@(purchasedTotal + 1)" placeholder="@(purchasedTotal + 10)"
+                                       style="width:110px;" />
+                            </div>
+                            <div>
+                                <label for="toppr-@p.AllocationId">Unit price (DKK)</label>
+                                <input id="toppr-@p.AllocationId" type="number" name="PoolUnitPriceDkk"
+                                       min="0" step="0.01" value="@Model.DefaultUnitPriceDkk" placeholder="@Model.DefaultUnitPriceDkk" style="width:120px;" />
                             </div>
                             <div>
                                 <label for="topinv-@p.AllocationId">Invoice no. (optional)</label>
                                 <input id="topinv-@p.AllocationId" type="text" name="PoolErpInvoiceNumber"
                                        maxlength="60" style="width:140px;" />
                             </div>
-                            <button type="submit" class="btn">Add tickets</button>
+                            <button type="submit" class="btn">Increase &amp; invoice</button>
                         </form>
+                        <div class="ci-meta" style="flex-basis:100%;margin:-4px 0 4px 0;">
+                            Enter the <strong>new total</strong>, not how many to add &mdash; the same
+                            number you then set as the code&rsquo;s max in Backstage. This pool covers
+                            <strong>@purchasedTotal</strong> today, so entering @(purchasedTotal + 10)
+                            invoices the 10 extra. <strong>The code itself never changes</strong>, so
+                            order links already sent out keep working.
+                        </div>
 
                         <form method="post" asp-page-handler="SetPoolThreshold" class="ci-grid" style="margin:0;">
                             <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
@@ -415,7 +506,7 @@
                 @foreach (var view in r.DormantPools)
                 {
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:3px 0;">
-                        <span style="min-width:90px;">@(view.Balance.Label ?? view.Balance.TicketClassId)</span>
+                        <span style="min-width:90px;">@Model.TicketClassDisplay(view.Balance.TicketClassId, view.Balance.Label)</span>
                         <span class="ci-meta">
                             @view.Balance.Purchased bought in @view.Purchases.Count purchase(s)
                             @{
@@ -456,13 +547,21 @@
                         }
                         @foreach (var pv in r.Pools.Where(pv => !Model.TicketClassLabels.ContainsKey(pv.Balance.TicketClassId)))
                         {
-                            <option value="@pv.Balance.TicketClassId">@(pv.Balance.Label ?? pv.Balance.TicketClassId)</option>
+                            <option value="@pv.Balance.TicketClassId">@Model.TicketClassDisplay(pv.Balance.TicketClassId, pv.Balance.Label)</option>
                         }
                     </select>
                 </div>
                 <div>
                     <label for="pq-@r.Setting.Id">Tickets bought</label>
                     <input id="pq-@r.Setting.Id" type="number" name="PoolQuantity" min="1" placeholder="50" style="width:110px;" />
+                </div>
+                @* §990 — the price the hub cannot know. A prepaid pool exists BEFORE anybody
+                   claims, so there is no claim to read a price off. *@
+                <div>
+                    <label for="pp-@r.Setting.Id">Unit price (DKK)</label>
+                    <input id="pp-@r.Setting.Id" type="number" name="PoolUnitPriceDkk" min="0" step="0.01"
+                           value="@Model.DefaultUnitPriceDkk" placeholder="@Model.DefaultUnitPriceDkk"
+                           style="width:120px;" />
                 </div>
                 <div>
                     <label for="pinv-@r.Setting.Id">Invoice no. (optional)</label>
@@ -472,8 +571,16 @@
                     <label for="pt-@r.Setting.Id">Warn at</label>
                     <input id="pt-@r.Setting.Id" type="number" name="PoolThreshold" min="0" placeholder="5" style="width:90px;" />
                 </div>
-                <button type="submit" class="btn">Buy tickets</button>
+                <button type="submit" class="btn">Create Invoice</button>
             </form>
+            @* ⚠️ Says what the button DOES, because it now writes to a finance system. Filling in
+               "Invoice no." deliberately suppresses the draft — that invoice already exists. *@
+            <p class="ci-meta" style="margin:4px 0 0;">
+                Records the tickets, creates the e-conomic draft invoice and fills in its number.
+                Enter an <strong>Invoice no.</strong> instead if you already raised it by hand.
+                You will also get an e-mail to create the promo code in Backstage &mdash; there is no
+                coupon API, so that step stays manual.
+            </p>
         }
 
         <form method="post" asp-page-handler="Save">
@@ -548,8 +655,13 @@
                     {
                         @* ⚠️ Says WHY it is empty. "No contacts" and "e-conomic could not be read"
                            are different problems and only one of them is fixable here. *@
+                        @* §991 — a PER-CUSTOMER read failure used to fall through to "no contacts
+                           on this customer", because the flag consulted was the page-wide one set
+                           by the CUSTOMER-LIST call. That stated as fact something the page did
+                           not know, and sent him to fix data that may be perfectly fine. *@
                         <span class="ci-meta">
                             @(Model.EconomicReachable
+                              && !Model.ContactLoadFailedFor.Contains(r.ErpCustomerNumber!.Value)
                                 ? "no contacts on this customer"
                                 : "e-conomic could not be read")
                             @if (r.Setting?.RequesterName is { Length: > 0 } who)
@@ -564,9 +676,49 @@
                     <input id="note-@r.CouponName" type="text" name="Notes"
                            value="@(r.Setting?.Notes ?? "")" maxlength="400" style="width:100%;" />
                 </div>
+                @* §1016d — the billing PERIOD, per coupon. Claims accumulate and are invoiced
+                   together once this many days have passed since the last invoice for this
+                   coupon; blank uses the edition default, 0 invoices on every pass. *@
+                <div style="flex:0 1 150px;">
+                    <label for="ivl-@r.CouponName">Invoice every (days)</label>
+                    <input id="ivl-@r.CouponName" type="number" name="InvoiceIntervalDays" min="0" step="1"
+                           value="@(r.Setting?.InvoiceIntervalDays?.ToString() ?? "")"
+                           placeholder="@Model.DefaultInvoiceIntervalDays" style="width:100%;" />
+                    <span style="display:block;font-size:11.5px;color:#6b7280;">
+                        Claims are batched into one invoice. Blank = @Model.DefaultInvoiceIntervalDays;
+                        0 = invoice each claim.
+                        @if (r.Setting?.LastInvoicedAt is { } li)
+                        {
+                            <text>Last invoiced @li.ToString("d MMM yyyy").</text>
+                        }
+                    </span>
+                </div>
                 <button type="submit" class="btn">Save</button>
             </div>
         </form>
+        @* 🔴 §1016c — TELL THE REQUESTER. The only coupon mail that leaves the building: every
+           other one goes to info@ and asks an organizer to do something. Preview first, always —
+           it reaches a paying partner and there is no undo. *@
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+            <form method="post" asp-page-handler="PreviewInvite" style="display:inline;">
+                <input type="hidden" name="InviteSettingId" value="@(r.Setting?.Id ?? 0)" />
+                <button type="submit" class="btn" @(r.Setting is null ? "disabled" : "")>
+                    Notify requester&hellip;
+                </button>
+            </form>
+            @if (r.Setting?.ClaimInviteSentAt is { } sent)
+            {
+                <span style="font-size:11.5px;color:#6b7280;">
+                    Sent @sent.ToString("d MMM yyyy HH:mm")
+                    @(string.IsNullOrWhiteSpace(r.Setting.ClaimInviteSentToEmail)
+                        ? "" : $"to {r.Setting.ClaimInviteSentToEmail}")
+                </span>
+            }
+            else
+            {
+                <span style="font-size:11.5px;color:#6b7280;">Not yet notified.</span>
+            }
+        </div>
 
         @if (r.Setting is not null)
         {

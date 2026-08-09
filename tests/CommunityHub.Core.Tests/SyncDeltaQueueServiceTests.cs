@@ -51,6 +51,16 @@ public sealed class SyncDeltaQueueServiceTests
             Id = EventId, CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true,
             StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
         });
+        // §1001 — speaker schedule notices are OFF until a start date is set, and these tests are
+        // about the mail itself, so the quiet period is opened here. 🔑 The default had to be
+        // "silent": a settings row nobody has saved must not mail every speaker on the first
+        // agenda edit, which is exactly the noise the operator asked to remove.
+        db.SessionSourceSettings.Add(new SessionSourceSetting
+        {
+            EventId = EventId,
+            Source = SessionSourceKinds.Default,
+            SpeakerScheduleNoticeFrom = new DateOnly(2020, 1, 1),
+        });
         await db.SaveChangesAsync();
     }
 

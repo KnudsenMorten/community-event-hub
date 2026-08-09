@@ -67,10 +67,19 @@
                            maxlength="1000" style="width:100%;max-width:960px;"
                            placeholder="https://…" />
                 </p>
-                @if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+                @* §993 — the hub's own copy wins (§665). See _DetailsFields.cshtml. *@
+                var shownPhoto = CommunityHub.Core.Integrations.Graphics.SpeakerPhotoUrl
+                    .Resolve(Model.PhotoUrl, Model.PhotoStoredPath);
+                @if (!string.IsNullOrWhiteSpace(shownPhoto))
                 {
-                    <img src="@Model.PhotoUrl" alt="@Localizer["Onboard.PictureAlt"].Value"
+                    <img src="@shownPhoto" alt="@Localizer["Onboard.PictureAlt"].Value"
                          style="max-width:160px;height:auto;border-radius:8px;" />
+                }
+                else if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+                {
+                    <p style="color:#b45309;font-size:12px;">
+                        @Localizer["SpeakerForm.PhotoUnfetchable"]
+                    </p>
                 }
             }
             else if (step == OnboardingStep.Hotel)

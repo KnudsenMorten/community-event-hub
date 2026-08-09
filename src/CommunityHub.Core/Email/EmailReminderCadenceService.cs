@@ -305,9 +305,27 @@ public sealed class EmailReminderCadenceService
         bool firstSendAtAnchor = false)
     {
         // Never repeats: due only if it has never been sent AND the anchor has matured.
+        //
+        // 🔴 §968b — AND NOT ON THE ANCHOR DAY ITSELF, unless the caller says the anchor IS the send
+        // date. Operator 2026-08-08: *"you cannot send both a welcome mail and then a reminder on
+        // the same day"*.
+        //
+        // The trap: "once only" is an offered cadence (a null/0 interval — §881: *"this role hears it
+        // once, ever"*), and for a welcome-anchored chase like the get-started digest this branch
+        // returned true when `today == anchor` — i.e. the SAME DAY as the welcome, which is the day
+        // the welcome itself already nudged them. §232's whole point is that the welcome is the
+        // day-0 nudge; a repeating cadence honours that automatically (`today - anchor >= every`),
+        // and only this branch did not.
+        //
+        // 🔒 `firstSendAtAnchor` keeps the legitimate case working: a DEADLINE-anchored one-shot
+        // (§326b) is *supposed* to fire on its date, because its anchor is the reminder date rather
+        // than a welcome.
         if (intervalDays is not int every || every <= 0)
         {
-            return lastSent is null && today.DayNumber >= anchor.DayNumber;
+            if (lastSent is not null) return false;
+            return firstSendAtAnchor
+                ? today.DayNumber >= anchor.DayNumber
+                : today.DayNumber > anchor.DayNumber;
         }
 
         if (lastSent is DateOnly sent)

@@ -177,7 +177,46 @@ public sealed class SessionizeImportService
             var fullName = $"{s.FirstName} {s.LastName}".Trim();
             profileWrites[s.Email] = s;
 
-            if (existing.TryGetValue(s.Email, out var participant))
+            // 🔴🔴 §1021 — THE SESSIONIZE ID IS TRIED **FIRST**. E-MAIL IS THE FALLBACK.
+            //
+            // §827 already wrote the rule down — *"e-mail is a MUTABLE ATTRIBUTE of a person; the
+            // Sessionize id IS the person"* — and then kept testing e-mail first anyway, so a stale
+            // row holding an address could PRE-EMPT the id match. That is not theoretical:
+            //
+            //   Measured in PROD 2026-08-09. One speaker, two participants sharing Sessionize id
+            //   a09f9626…: #41 thomas@impnd.com (organizer-DEACTIVATED 4 Aug, and the row that
+            //   still holds session 15) and #110 thomas.martinsen@hey.com (active, no sessions).
+            //   He renamed himself in Sessionize BACK to thomas@impnd.com. The importer looked that
+            //   address up, hit the DEACTIVATED #41, took this branch, updated a name and stopped —
+            //   so the live row #110 never learned the new address, nothing pushed to Zoho, and the
+            //   operator saw the import do nothing at all.
+            //
+            // 🔑 Trying the id first makes the LIVE row win, because `participantBySessionizeId`
+            // already prefers a non-deactivated one. E-mail then only decides for a speaker whose
+            // id we have never seen.
+            var matchedById =
+                !string.IsNullOrWhiteSpace(s.SessionizeId)
+                && participantBySessionizeId.TryGetValue(s.SessionizeId, out var byId)
+                && byId.DeactivatedByOrganizerAt is null
+                    ? byId : null;
+
+            // 🔒 A RENAME MAY NOT STEAL AN ADDRESS ANOTHER PARTICIPANT STILL HOLDS. The e-mail is
+            // the login identity and is unique per edition, so writing it would either throw on
+            // SaveChanges or fuse two people's logins. When the target address already belongs to
+            // somebody else, the id match is abandoned and we fall through to the e-mail branch,
+            // which touches only that row's name.
+            //
+            // ⚠️ That is Thomas exactly: #41 holds thomas@impnd.com and #110 carries the same
+            // Sessionize id. Two hub records for one person is a MERGE, and a merge decides which
+            // sessions, logins and Zoho ids survive — never something an importer should infer.
+            if (matchedById is not null
+                && existing.TryGetValue(s.Email, out var holder)
+                && holder.Id != matchedById.Id)
+            {
+                matchedById = null;
+            }
+
+            if (existing.TryGetValue(s.Email, out var participant) && matchedById is null)
             {
                 if (participant.FullName != fullName
                     && !string.IsNullOrWhiteSpace(fullName))
@@ -190,7 +229,7 @@ public sealed class SessionizeImportService
                     skipped++;
                 }
             }
-            else if (!string.IsNullOrWhiteSpace(s.SessionizeId)
+            else if (matchedById is not null
                      && participantBySessionizeId.TryGetValue(s.SessionizeId, out var placeholder)
                      // 🔴 §827 — THE `IsPlaceholderEmail` GUARD USED TO BE HERE, AND IT FORKED PEOPLE.
                      //

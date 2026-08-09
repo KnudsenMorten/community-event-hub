@@ -108,10 +108,22 @@ public sealed class JobSilenceDetector
                 continue;   // no marker at all — this job simply does not report health.
             }
 
+            // 🔴 §1009b — the alert quotes `CadenceWords`, DERIVED from the interval that actually
+            // paces the job, not the hand-written `Cadence` text.
+            //
+            // Operator 2026-08-09: *"if this is just text update, why dont you just take the value
+            // for the setting instead of having these not relevant times when they are static
+            // text"*. §869.3 set `DefaultIntervalMinutes: 10` on nearly every job and left the old
+            // words in place, so these alerts told him a job "runs hourly" when it runs every ten
+            // minutes — on the ONE surface where the stale text still reached a human (the Jobs page
+            // renders `EffectiveIntervalMinutes` and was always correct).
+            //
+            // 🔑 Deriving it means there is nothing left to drift, which is better than a test that
+            // reports the drift after the fact.
             if (last is null)
             {
                 flagged.Add(new Silent(job.FunctionName, SilenceKind.NeverSucceeded,
-                    $"{job.Title} has never recorded a success, though it is scheduled {job.Cadence.ToLowerInvariant()}."));
+                    $"{job.Title} has never recorded a success, though it is scheduled {job.CadenceWords.ToLowerInvariant()}."));
                 continue;
             }
 
@@ -124,14 +136,35 @@ public sealed class JobSilenceDetector
             if (since > tolerance)
             {
                 flagged.Add(new Silent(job.FunctionName, SilenceKind.Stale,
-                    $"{job.Title} last succeeded {(int)since.TotalHours}h ago, but runs {job.Cadence.ToLowerInvariant()}."));
+                    $"{job.Title} last succeeded {(int)since.TotalHours}h ago, but runs {job.CadenceWords.ToLowerInvariant()}."));
             }
         }
 
         // Markers with no job behind them. Tonight's rename (§595 ErpWebshopReconcileJob →
         // ErpSyncCustomerContactJob) left one, and an orphan quietly stops being watched.
+        // 🔴 §976 — A PER-ENTITY MARKER IS NOT AN ORPHAN. Some jobs write one health marker PER
+        // SUBJECT, keyed `<jobKey>:<id>` — the ERP/webshop company sync writes `erp-webshop-cm:<companyId>`,
+        // one per company. Those are instances of a live job, not leftovers from a rename.
+        //
+        // ⚠️ Measured on PROD 2026-08-09: **53 of the 54** "look asleep" lines in the operator's
+        // alert were `erp-webshop-cm:<id>`, all updated THAT DAY. The mail was ~98% false positives
+        // and growing by one per company for ever — and an alert that is mostly noise is one nobody
+        // reads, which is exactly what a watchdog cannot afford (§545 made this one deliberately
+        // un-silenceable, so its signal quality is the ONLY thing protecting it).
+        //
+        // 🔑 The prefix is checked against the catalog rather than the key being skipped for merely
+        // containing a colon: `foo:1` with no `foo` job IS a genuine orphan and must still flag.
+        static string MarkerRoot(string key)
+        {
+            var i = key.IndexOf(':');
+            return i > 0 ? key[..i] : key;
+        }
+
         foreach (var key in lastSuccessByKey.Keys
-                     .Where(k => !known.Contains(k) && !NonTimerHealthReporters.Contains(k)))
+                     .Where(k => !known.Contains(k)
+                                 && !NonTimerHealthReporters.Contains(k)
+                                 && !known.Contains(MarkerRoot(k))
+                                 && !NonTimerHealthReporters.Contains(MarkerRoot(k))))
         {
             flagged.Add(new Silent(key, SilenceKind.OrphanedMarker,
                 $"'{key}' reports health but matches no job in the catalog — most likely left behind "

@@ -105,12 +105,140 @@ public sealed class CouponDraftInvoiceServiceTests
 
     private static CouponDraftInvoiceService NewService(
         CommunityHubDbContext db, FakeInvoiceClient invoices, bool dryRun = false,
-        IFxRateProvider? fx = null) =>
+        IFxRateProvider? fx = null,
+        // §1016d — 0 keeps the PRE-EXISTING per-pass behaviour, so every test written before the
+        // billing period existed still describes the same run. Only the §1016d tests set a period.
+        int intervalDays = 0) =>
         new(db, invoices, fx ?? new FakeFx(canQuote: false),
             new EconomicErpOptions { InvoiceLayoutNameLike = "Dansk" },
-            new InvoicingOptions { DryRun = dryRun },
+            new InvoicingOptions { DryRun = dryRun, CouponInvoiceIntervalDays = intervalDays },
             new FixedClock(Now),
             NullLogger<CouponDraftInvoiceService>.Instance);
+
+    // ================= §1016d: the fortnightly billing period ==================
+    //
+    // Operator 2026-08-09: *"the claim gets registered so fx a ticket claim for 2 tickets decreases
+    // from 20 to 18. But we dont want to invoice customer for every single claim; that creates to
+    // many invoices. therefore you must batch them to every 2 weeks and remember when the last
+    // invoice was sent for this coupon, so you know the 'catch-up' to invoice."*
+    //
+    // 🔑 The CLAIM was never the problem — the balance always moved immediately, and still does.
+    // What ran too often was the INVOICE: the job passes every ~10 minutes and billed whatever was
+    // new, so a coupon claimed on ten different days produced ten invoices.
+
+    /// <summary>Seeds an invoiceable ad-hoc coupon, optionally already invoiced / with its own period.</summary>
+    private static async Task SeedBillablePartnerAsync(
+        CommunityHubDbContext db, DateTimeOffset? lastInvoicedAt = null,
+        DateTimeOffset? firstSeen = null, int? perCouponDays = null)
+    {
+        db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
+        {
+            EventId = EventId, CouponName = "PARTNER-X",
+            BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
+            ErpCustomerNumber = 4242,
+            LastInvoicedAt = lastInvoicedAt,
+            FirstSeenClaimedAt = firstSeen,
+            InvoiceIntervalDays = perCouponDays,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Claims_wait_for_the_billing_period_instead_of_invoicing_immediately()
+    {
+        // Invoiced 3 days ago, period 14 ⇒ the new claims accumulate. Not a problem, not an alert:
+        // reporting this would be alerting him about the system doing exactly what he asked for.
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: Now.AddDays(-3));
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        var result = await NewService(db, client, intervalDays: 14).RunAsync(EventId);
+
+        Assert.Equal(0, result.Created);
+        Assert.Empty(client.Created);
+        Assert.Empty(result.Problems);          // waiting is not a fault
+    }
+
+    [Fact]
+    public async Task The_whole_catch_up_is_invoiced_together_when_the_period_opens()
+    {
+        // 🔑 The "catch-up" needs no bookkeeping of its own: `pending` is already every claim not
+        // yet on a booked or draft invoice, so when the window opens the batch IS everything since
+        // the last invoice — including anything an earlier failed pass left behind.
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: Now.AddDays(-15));
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        var result = await NewService(db, client, intervalDays: 14).RunAsync(EventId);
+
+        Assert.Equal(1, result.Created);
+        var invoice = Assert.Single(client.Created);
+        Assert.Equal(2, invoice.Lines.Count);   // BOTH accumulated claims, on ONE invoice
+
+        // …and the clock restarts, so the next fortnight is measured from now.
+        Assert.Equal(Now, (await db.CouponInvoicingSettings.SingleAsync()).LastInvoicedAt);
+    }
+
+    [Fact]
+    public async Task A_never_invoiced_coupon_measures_the_period_from_its_first_claim()
+    {
+        // Otherwise claim #1 would get an invoice to itself and only the REST would ever be batched
+        // — which is the "too many invoices" complaint, just moved one claim later.
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: null, firstSeen: Now.AddDays(-2));
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        Assert.Equal(0, (await NewService(db, client, intervalDays: 14).RunAsync(EventId)).Created);
+    }
+
+    [Fact]
+    public async Task A_per_coupon_period_overrides_the_edition_default()
+    {
+        // Operator 2026-08-09: *"maybe the internal days could be a field that could be adjusted pr
+        // coupon"*. A billing period is negotiated per partner; one global number would force the
+        // strictest partner's terms onto everybody. Here: default 14 would WAIT, this partner's 2
+        // does not.
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: Now.AddDays(-3), perCouponDays: 2);
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        Assert.Equal(1, (await NewService(db, client, intervalDays: 14).RunAsync(EventId)).Created);
+    }
+
+    [Fact]
+    public async Task A_per_coupon_period_of_zero_invoices_every_pass()
+    {
+        // 0 means the same thing on both settings — "no batching" — so the two cannot be read
+        // differently. This is the escape hatch for closing a period early.
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: Now.AddDays(-1), perCouponDays: 0);
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        Assert.Equal(1, (await NewService(db, client, intervalDays: 14).RunAsync(EventId)).Created);
+    }
+
+    /// <summary>
+    /// 🔒 A DRY RUN must NOT stamp the clock. It writes no invoice, so stamping would push the next
+    /// REAL invoice out by a whole fortnight — silently, and only visible a partner-complaint later.
+    /// </summary>
+    [Fact]
+    public async Task A_dry_run_never_starts_the_billing_clock()
+    {
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        await SeedBillablePartnerAsync(db, lastInvoicedAt: Now.AddDays(-15));
+        var client = new FakeInvoiceClient(customer: Customer());
+
+        await NewService(db, client, dryRun: true, intervalDays: 14).RunAsync(EventId);
+
+        Assert.Empty(client.Created);
+        Assert.Equal(Now.AddDays(-15), (await db.CouponInvoicingSettings.SingleAsync()).LastInvoicedAt);
+    }
 
     /// <summary>
     /// 🔴 THE ONE THAT PROTECTS THE PARTNER'S INVOICE: bill `base_price`, never `total`.
@@ -448,5 +576,60 @@ public sealed class CouponDraftInvoiceServiceTests
         Assert.Empty(client.Created);                       // nothing was written...
         Assert.Single(result.WouldCreateOrEmpty);           // ...but it is reported as a would-create
         Assert.Empty(result.CreatedDraftsOrEmpty);          // 🔒 and nothing is announced
+    }
+
+    /// <summary>
+    /// §990 item 2 — the coupon's NOTES print on the AD-HOC (claim) invoice too. Operator
+    /// 2026-08-09: *"the notes must be added to the invoice, bth fo the prepaid invoice and the
+    /// ad-hoc biling invoice, as it can be for eample purchase order number"*. The note is a
+    /// property of the AGREEMENT, so every invoice that agreement produces carries it — one type
+    /// carrying it and the other not is exactly the drift worth a test.
+    /// </summary>
+    [Fact]
+    public async Task The_coupon_notes_are_printed_on_the_ad_hoc_invoice()
+    {
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
+        {
+            EventId = EventId, CouponName = "PARTNER-X",
+            BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
+            ErpCustomerNumber = 4242,
+            Notes = "PO 4711 - registration fee",
+        });
+        await db.SaveChangesAsync();
+
+        var client = new FakeInvoiceClient(customer: Customer());
+        await NewService(db, client).RunAsync(EventId);
+
+        var invoice = Assert.Single(client.Created);
+        Assert.Contains("Coupon tickets: PARTNER-X", invoice.TextLine1);
+        Assert.Contains(CouponInvoiceLineComposer.NotesLabel, invoice.TextLine1);
+        Assert.Contains("PO 4711 - registration fee", invoice.TextLine1);
+
+        // 🔒 NOT in references.other — that is the idempotency marker the "already invoiced" scan
+        // reads, and operator prose there would either overwrite it or force a substring match.
+        Assert.DoesNotContain("PO 4711", invoice.OtherReference);
+    }
+
+    /// <summary>A coupon with no notes prints no label — an empty "Notes:" reads as a fault.</summary>
+    [Fact]
+    public async Task No_notes_prints_no_label_on_the_ad_hoc_invoice()
+    {
+        using var db = NewDb();
+        await SeedOrderAsync(db);
+        db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
+        {
+            EventId = EventId, CouponName = "PARTNER-X",
+            BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
+            ErpCustomerNumber = 4242,
+        });
+        await db.SaveChangesAsync();
+
+        var client = new FakeInvoiceClient(customer: Customer());
+        await NewService(db, client).RunAsync(EventId);
+
+        var invoice = Assert.Single(client.Created);
+        Assert.DoesNotContain(CouponInvoiceLineComposer.NotesLabel, invoice.TextLine1);
     }
 }

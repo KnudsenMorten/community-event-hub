@@ -216,10 +216,47 @@ public sealed class CouponDraftInvoiceService
                 continue;
             }
 
+            // 🔴 §1016d — BATCH THE BILLING PERIOD. Operator 2026-08-09: *"we dont want to invoice
+            // customer for every single claim; that creates to many invoices. therefore you must
+            // batch them to every 2 weeks and remember when the last invoice was sent for this
+            // coupon, so you know the 'catch-up' to invoice."*
+            //
+            // 🔑 The CLAIM was never the problem — the balance has always moved the instant a
+            // ticket is claimed (20 → 18), and nothing here changes that. What ran too often was
+            // the INVOICE: this job passes every ~10 minutes and billed whatever was new, so a
+            // coupon claimed on ten different days produced ten invoices.
+            //
+            // 🔒 The "catch-up" needs no bookkeeping of its own. `pending` is ALREADY "every claim
+            // not yet on a booked or draft invoice" (§787's per-claim reference interlock), so when
+            // the window opens the batch is automatically everything since the last invoice —
+            // including anything a failed earlier pass left behind. This gate decides only WHEN.
+            //
+            // ⚠️ Measured from FirstSeenClaimedAt when the coupon has never been invoiced, so the
+            // FIRST batch accumulates too; otherwise claim #1 would get an invoice to itself.
+            if (!IsBillingPeriodDue(rule, out var dueAt))
+            {
+                _log.LogInformation(
+                    "§1016d: coupon '{Coupon}' has {Count} claim(s) waiting for its billing period "
+                    + "(next invoice on or after {Due:yyyy-MM-dd}).", couponName, pending.Count, dueAt);
+                // NOT a problem and NOT skipped-with-a-complaint: the claims are safe, counted and
+                // will be billed together. Reporting it would alert him about the system working.
+                continue;
+            }
+
             try
             {
                 var outcome = await InvoiceCouponAsync(rule, pending, wouldCreate, createdDrafts, ct);
-                if (outcome is null) created++;
+                if (outcome is null)
+                {
+                    created++;
+                    // 🔒 STAMPED ONLY ON A REAL CREATE. A dry run composes everything and writes
+                    // nothing, so stamping it would push the next REAL invoice out by a fortnight.
+                    if (!_invoicing.DryRun)
+                    {
+                        rule.LastInvoicedAt = _clock.GetUtcNow();
+                        await _db.SaveChangesAsync(ct);
+                    }
+                }
                 else { skipped += pending.Count; problems.Add(outcome); }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -257,6 +294,44 @@ public sealed class CouponDraftInvoiceService
     }
 
     /// <summary>Invoices one coupon's pending claims. Null on success, else the human reason.</summary>
+    /// <summary>
+    /// 🔴 §1016d — is this coupon's billing period open? Batches claims into ONE invoice per
+    /// <see cref="InvoicingOptions.CouponInvoiceIntervalDays"/> (default 14) instead of one per
+    /// claim.
+    /// </summary>
+    /// <param name="dueAt">When the period next opens, for the log line.</param>
+    /// <remarks>
+    /// <para>🔒 <b>Each coupon runs on its OWN clock</b>, anchored to its last invoice, so two
+    /// partners' billing periods do not collapse onto whichever day the job happened to start.</para>
+    ///
+    /// <para>⚠️ <b>An interval of 0 restores per-pass invoicing</b> — the pre-§1016d behaviour —
+    /// so a period can be closed early with a setting rather than a deploy.</para>
+    ///
+    /// <para>⚠️ <b>A coupon with NO anchor at all invoices now.</b> Neither timestamp set means the
+    /// row predates this bookkeeping; holding its claims back for a fortnight on the strength of a
+    /// missing value would delay real money for a reason nobody could see. It stamps
+    /// <c>LastInvoicedAt</c> on the way out, so it is anchored from then on.</para>
+    /// </remarks>
+    internal bool IsBillingPeriodDue(CouponInvoicingSetting rule, out DateTimeOffset dueAt)
+    {
+        dueAt = default;
+        // §1016d — THIS coupon's own period wins over the edition default (operator 2026-08-09:
+        // *"maybe the internal days could be a field that could be adjusted pr coupon"*). A billing
+        // period is negotiated per partner, so one global number forces the strictest partner's
+        // terms onto everybody. A NEGATIVE override is treated as unset — it is a number typed into
+        // a form, and a typo must fall back to the default rather than silently change the terms.
+        var days = rule.InvoiceIntervalDays is { } perCoupon && perCoupon >= 0
+            ? perCoupon
+            : _invoicing.CouponInvoiceIntervalDays;
+        if (days <= 0) return true;                       // batching switched off
+
+        var anchor = rule.LastInvoicedAt ?? rule.FirstSeenClaimedAt;
+        if (anchor is null) return true;                  // no anchor ⇒ bill now, and anchor it
+
+        dueAt = anchor.Value.AddDays(days);
+        return _clock.GetUtcNow() >= dueAt;
+    }
+
     private async Task<string?> InvoiceCouponAsync(
         CouponInvoicingSetting rule, IReadOnlyList<CouponClaim> claims,
         List<string> wouldCreate, List<CreatedDraftInvoice> createdDrafts, CancellationToken ct)
@@ -335,7 +410,9 @@ public sealed class CouponDraftInvoiceService
             // §814 — the HOUSE heading, the same one the webshop invoices carry and the one he
             // approved on the first invoice he sent. The coupon name moves to the line below.
             Heading: _options.InvoiceHeading,
-            TextLine1: CouponInvoiceLineComposer.ComposeSubHeading(rule.CouponName),
+            // §990 — the coupon's own notes ride here (a PO number, or whatever the partner needs
+            // on the document). Blank prints nothing.
+            TextLine1: CouponInvoiceLineComposer.ComposeSubHeading(rule.CouponName, rule.Notes),
             Lines: composed.Select(l => new EconomicInvoiceLine(
                 l.LineNumber, l.Description, l.Quantity, l.UnitNetPrice, l.ProductNumber)).ToList(),
             // §811(c) — the second employee reference; both must appear on the invoice.

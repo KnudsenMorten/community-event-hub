@@ -4,10 +4,19 @@ namespace CommunityHub.Core.Integrations.Erp;
 
 /// <summary>One webshop order line, as the invoice composer needs it. Prices are in EUR — the
 /// webshop's own currency — and are converted per invoice currency by the caller.</summary>
+/// <param name="LineSubtotalEur">§1017 — the line total BEFORE coupons (0 ⇒ not supplied).</param>
+/// <param name="LineTotalEur">§1017 — the line total AFTER coupons (0 ⇒ not supplied).</param>
+/// <param name="CouponCodes">§1017 — the order's coupon codes, for the invoice's discount note.</param>
 public sealed record WebshopOrderLine(
     string ProductName,
     decimal Quantity,
-    decimal UnitPriceEur);
+    decimal UnitPriceEur,
+    // 🔒 Defaulted so every existing construction site — and every test written before §1017 —
+    // still compiles and still means exactly what it meant: no subtotal/total supplied ⇒ no
+    // discount note, and the line reads as it always did.
+    decimal LineSubtotalEur = 0m,
+    decimal LineTotalEur = 0m,
+    IReadOnlyList<string>? CouponCodes = null);
 
 /// <summary>One composed e-conomic draft-invoice line, ready to serialize.</summary>
 /// <param name="LineNumber">1-based; also used as the sort key.</param>
@@ -158,13 +167,62 @@ public static class WebshopInvoiceLineComposer
     /// The web order number and order date are deliberately absent: they are on line 1, and
     /// repeating them per row is the redundancy he asked to remove.
     /// </summary>
-    public static string ComposeProductDescription(string productName, string? conversionNote)
+    public static string ComposeProductDescription(string productName, string? conversionNote) =>
+        ComposeProductDescription(productName, conversionNote, null);
+
+    /// <summary>
+    /// 🔴 §1017 — the same product row, but SAYING SO when a coupon reduced it.
+    /// </summary>
+    /// <param name="discountNote">
+    /// A line like <c>"Coupon free3extratickets: list 25000.00 EUR − 600.00 EUR discount"</c>, or
+    /// null when nothing was discounted.
+    /// </param>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"my invoice solution from cm weborders, must support coupons +
+    /// discounts … it is in the order api, can you validate and extend the erp invoicing to support
+    /// that"*.</para>
+    ///
+    /// <para>✅ <b>The VALIDATION came back: the amount was never wrong.</b> WooCommerce's line
+    /// <c>price</c> is the DISCOUNTED unit price — live-verified on order 10841, where the
+    /// <c>free3extratickets</c> coupon gives <c>subtotal</c> 25000, <c>total</c> 24400 and
+    /// <c>price</c> 24400. CEH bills <c>price × quantity</c>, so it has been charging the
+    /// post-discount figure all along.</para>
+    ///
+    /// <para>🔑 <b>What WAS missing is the EXPLANATION.</b> The sponsor received an invoice for
+    /// 24 400 against a 25 000 product with nothing saying why, and neither the coupon code nor the
+    /// discount appeared anywhere. That is the §594 trust problem pointed at a customer instead of
+    /// at the operator: a number they cannot reconcile is a number they have to ring up about.</para>
+    /// </remarks>
+    public static string ComposeProductDescription(
+        string productName, string? conversionNote, string? discountNote)
     {
         var name = (productName ?? string.Empty).Trim();
+        var sb = new System.Text.StringBuilder(name);
+        if (!string.IsNullOrWhiteSpace(discountNote)) sb.Append(BlockSeparator).Append(discountNote);
+        if (!string.IsNullOrEmpty(conversionNote)) sb.Append(BlockSeparator).Append(conversionNote);
+        return sb.ToString();
+    }
 
-        return string.IsNullOrEmpty(conversionNote)
-            ? name
-            : name + BlockSeparator + conversionNote;
+    /// <summary>
+    /// §1017 — the discount note for a line, or null when no coupon touched it.
+    /// </summary>
+    /// <param name="couponCodes">
+    /// The order's coupon codes. Named because *which* coupon is the thing a sponsor asks about —
+    /// and it is the only place the code appears at all, since WooCommerce reports coupons per
+    /// ORDER while the reduction lands per LINE.
+    /// </param>
+    public static string? ComposeDiscountNote(
+        decimal lineSubtotal, decimal lineTotal, string currency, IReadOnlyList<string>? couponCodes)
+    {
+        if (lineSubtotal <= 0m || lineTotal <= 0m || lineSubtotal <= lineTotal) return null;
+
+        var cur = (currency ?? string.Empty).Trim();
+        var codes = couponCodes?.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).ToList();
+        var prefix = codes is { Count: > 0 } ? $"Coupon {string.Join(", ", codes)}: " : "Discount: ";
+
+        return prefix
+            + $"list {lineSubtotal.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} {cur}"
+            + $" − {(lineSubtotal - lineTotal).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} {cur} discount";
     }
 
     /// <summary>
@@ -210,9 +268,15 @@ public static class WebshopInvoiceLineComposer
             lineNumber++;
             var (converted, note) = convert(line.UnitPriceEur);
 
+            // 🔴 §1017 — the discount note is built in the WEBSHOP's currency (EUR), because that
+            // is the currency the sponsor sees in the shop and on the order confirmation. The
+            // AMOUNT is still converted as before; only the explanation quotes the original.
             composed.Add(new ComposedInvoiceLine(
                 lineNumber,
-                ComposeProductDescription(line.ProductName, note),
+                ComposeProductDescription(
+                    line.ProductName, note,
+                    ComposeDiscountNote(
+                        line.LineSubtotalEur, line.LineTotalEur, "EUR", line.CouponCodes)),
                 line.Quantity,
                 converted,
                 productNumber));

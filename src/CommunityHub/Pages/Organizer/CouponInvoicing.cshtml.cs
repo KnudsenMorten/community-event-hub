@@ -42,14 +42,75 @@ public class CouponInvoicingModel : PageModel
     public CouponInvoicingModel(
         ICurrentParticipantAccessor participant, CommunityHubDbContext db, TimeProvider clock,
         IEconomicContactAdminClient? economic = null,
-        IEconomicInvoiceClient? invoices = null)
+        IEconomicInvoiceClient? invoices = null,
+        // §990 — the prepaid "Create Invoice" path. Optional so the page still constructs (and every
+        // existing test still builds it) when e-conomic is not wired up at all.
+        CouponPrepaidInvoiceService? prepaidInvoices = null,
+        CouponPoolZohoActionNotifier? zohoAction = null,
+        ILogger<CouponInvoicingModel>? log = null,
+        // §1013a — keeps a stored draft number current once he books it. Optional for the same
+        // reason as the rest: the page must still construct with no e-conomic wiring at all.
+        CouponPrepaidInvoiceNumberRefresher? invoiceNumbers = null,
+        // §1013c — the standard prepaid unit price, so he stops retyping it. Optional: the page
+        // must still construct in the tests that build it with no invoicing wiring.
+        InvoicingOptions? invoicing = null,
+        // §1016a — the "a new draft invoice exists" ops mail. It was registered in this host and
+        // resolved by nobody, which is exactly why the prepaid button announced nothing.
+        DraftInvoiceCreatedNotifier? draftNotices = null,
+        // §1016c — the partner-facing claim invite: the sender, the ambient mail context, and the
+        // edition config that supplies the ticket base URL.
+        CommunityHub.Core.Email.IEmailSender? emailSender = null,
+        CommunityHub.Core.Email.IEmailContextAccessor? emailContext = null,
+        CommunityHub.Core.Config.EventEditionConfig? editionConfig = null,
+        // 🔴 §1019 — Backstage's own ticket-class list, so a class can be NAMED before anybody has
+        // bought one. Optional: with no Zoho wiring the page falls back to the attendee/claim
+        // mirrors exactly as before.
+        CommunityHub.Core.Integrations.ZohoClient? zoho = null)
     {
         _participant = participant;
         _db = db;
         _clock = clock;
         _economic = economic;
         _invoices = invoices;
+        _prepaidInvoices = prepaidInvoices;
+        _zohoAction = zohoAction;
+        _log = log;
+        _invoiceNumbers = invoiceNumbers;
+        _invoicing = invoicing;
+        _draftNotices = draftNotices;
+        _emailSender = emailSender;
+        _emailContext = emailContext;
+        _editionConfig = editionConfig;
+        _zoho = zoho;
     }
+
+    private readonly CommunityHub.Core.Integrations.ZohoClient? _zoho;
+
+    private readonly CommunityHub.Core.Email.IEmailSender? _emailSender;
+    private readonly CommunityHub.Core.Email.IEmailContextAccessor? _emailContext;
+    private readonly CommunityHub.Core.Config.EventEditionConfig? _editionConfig;
+    private readonly DraftInvoiceCreatedNotifier? _draftNotices;
+    private readonly InvoicingOptions? _invoicing;
+
+    /// <summary>
+    /// §1013c — the unit price the pool forms PREFILL (DKK, ex VAT). Operator 2026-08-09:
+    /// *"unit price is DKK 3000"*. Empty string when the prefill is switched off (0) or invoicing
+    /// options are not wired, so the box simply opens blank as it did before.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 A prefill only — §992 keeps the price TYPED, because a prepaid pool exists before any
+    /// claim and deriving a price from another partner's claims would bill this one at that one's
+    /// negotiated rate. This removes the retyping, not the decision.
+    /// </remarks>
+    public string DefaultUnitPriceDkk =>
+        _invoicing is { DefaultPrepaidUnitPriceDkk: > 0m } o
+            ? o.DefaultPrepaidUnitPriceDkk.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
+
+    private readonly CouponPrepaidInvoiceNumberRefresher? _invoiceNumbers;
+    private readonly CouponPrepaidInvoiceService? _prepaidInvoices;
+    private readonly CouponPoolZohoActionNotifier? _zohoAction;
+    private readonly ILogger<CouponInvoicingModel>? _log;
 
     /// <summary>
     /// §787.13 — the e-conomic customers, BY NAME, straight from the API.
@@ -212,6 +273,189 @@ public class CouponInvoicingModel : PageModel
             || HasUnbilledPool;
     }
 
+    // ===================== §1016c: tell the requester =========================
+    //
+    // Operator 2026-08-09: *"can you also make a button which will notify the requester, that he can
+    // now use the coupon code"*. Every other coupon mail goes to info@/mok@ and tells an ORGANIZER
+    // to act; nothing ever reached the person actually waiting to claim.
+
+    [BindProperty] public int InviteSettingId { get; set; }
+
+    /// <summary>§1016c — the composed mail, shown for approval before anything is sent.</summary>
+    /// <param name="Blocker">Why it cannot be sent, or null when it can.</param>
+    public sealed record InvitePreview(
+        int SettingId, string CouponName, string? ToEmail, string? ToName,
+        string Subject, string Html, bool IsPrepaid, string? Blocker);
+
+    /// <summary>The preview currently on screen (null unless he just asked for one).</summary>
+    public InvitePreview? Invite { get; private set; }
+
+    /// <summary>
+    /// §1016c — compose the claim invite and show it. Sends NOTHING.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Preview-then-confirm IS the safety on this mail</b> (operator 2026-08-09: *"preview is
+    /// fine and then a send mail. then it is safe"*), and it has to be, because the ring gate
+    /// cannot help here — see <see cref="OnPostSendInviteAsync"/>.
+    /// </remarks>
+    public async Task<IActionResult> OnPostPreviewInviteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        await LoadAsync(me.EventId, ct);
+        Invite = await BuildInviteAsync(me.EventId, InviteSettingId, ct);
+        if (Invite?.Blocker is { } why) Error = why;
+        return Page();
+    }
+
+    /// <summary>
+    /// §1016c — SEND the previewed claim invite to the partner.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>RING-EXEMPT, and that is a decision, not an oversight.</b> Operator 2026-08-09:
+    /// *"i accept that we turn off the ring gate for this"* · *"no ring-gate"*.</para>
+    ///
+    /// <para>🔑 <b>The ring gate could not have gated this mail — only killed it.</b> Rings resolve
+    /// an address to a PARTICIPANT of the edition; this recipient is an e-conomic CONTACT at a
+    /// partner company and is not a participant, so <c>BrevoEmailSender</c>'s unknown-recipient rule
+    /// FAILS CLOSED and would have dropped every send silently. "Ring-gated" would have meant "a
+    /// button that never works".</para>
+    ///
+    /// <para>🔒 <b>What protects it instead is stricter than a ring, not weaker.</b> A ring is a
+    /// rollout control for BULK, AUTOMATED sends. This is organizer-only, one coupon at a time,
+    /// composed and shown in full — recipient, subject and body — and sent only by a second,
+    /// deliberate click on that exact text. Nothing here can fire on a timer.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostSendInviteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var preview = await BuildInviteAsync(me.EventId, InviteSettingId, ct);
+        if (preview is null) return RedirectWithFlash(null, "That coupon no longer exists.");
+        if (preview.Blocker is { } why) return RedirectWithFlash(null, why);
+        if (_emailSender is null)
+            return RedirectWithFlash(null, "No email sender is configured on this host.");
+
+        try
+        {
+            // §707.2 — the mail carries its own identity. RingExempt per the operator's decision
+            // above; the category keeps it in the ledger like every other send.
+            using (_emailContext?.Set(new CommunityHub.Core.Email.EmailContext(
+                       "coupon-claim-invite", me.EventId, null, preview.ToName ?? preview.ToEmail,
+                       RingExempt: true)))
+            {
+                await _emailSender.SendAsync(preview.ToEmail!, preview.Subject, preview.Html, ct);
+            }
+
+            var rule = await _db.CouponInvoicingSettings
+                .FirstOrDefaultAsync(c => c.Id == InviteSettingId && c.EventId == me.EventId, ct);
+            if (rule is not null)
+            {
+                rule.ClaimInviteSentAt = _clock.GetUtcNow();
+                rule.ClaimInviteSentToEmail = preview.ToEmail;
+                await _db.SaveChangesAsync(ct);
+            }
+
+            return RedirectWithFlash(
+                $"Claim invite sent to {preview.ToEmail}.", null);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError(ex, "§1016c: could not send the claim invite for setting {Id}.", InviteSettingId);
+            return RedirectWithFlash(null, $"The mail could not be sent: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// §1016c — compose the invite for one coupon, or explain why it cannot be sent. Shared by the
+    /// preview and the send so the mail he approves is byte-for-byte the mail that goes.
+    /// </summary>
+    private async Task<InvitePreview?> BuildInviteAsync(int eventId, int settingId, CancellationToken ct)
+    {
+        var rule = await _db.CouponInvoicingSettings
+            .FirstOrDefaultAsync(c => c.Id == settingId && c.EventId == eventId, ct);
+        if (rule is null) return null;
+
+        var ev = await _db.Events.AsNoTracking()
+            .Where(e => e.Id == eventId)
+            .Select(e => new { e.DisplayName, e.Code })
+            .FirstOrDefaultAsync(ct);
+
+        // The prepaid pool (if any) supplies the quantity and the invoice number this mail quotes.
+        var pool = await _db.CouponPrepaidAllocations.AsNoTracking()
+            .Where(a => a.EventId == eventId && a.CouponInvoicingSettingId == rule.Id)
+            .Select(a => new
+            {
+                a.TicketClassId,
+                a.TicketClassLabel,
+                Quantity = a.Purchases.Sum(p => (int?)p.Quantity) ?? 0,
+                // 🔒 §1013a — the number is refreshed on page load, so by here it is the BOOKED
+                // number when one exists rather than the dead draft number.
+                Invoice = a.Purchases
+                    .Where(p => p.ErpInvoiceNumber != null)
+                    .OrderByDescending(p => p.Id)
+                    .Select(p => new { p.ErpInvoiceNumber, p.ErpInvoiceIsBooked })
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var classLabel = pool is null
+            ? "tickets"
+            : TicketClassDisplay(pool.TicketClassId, pool.TicketClassLabel);
+
+        var invite = CouponClaimInviteComposer.From(
+            rule,
+            eventDisplayName: ev?.DisplayName ?? "the event",
+            ticketClassLabel: classLabel,
+            ticketBaseUrl: _editionConfig?.TicketSale?.TicketUrl ?? string.Empty,
+            defaultIntervalDays: DefaultInvoiceIntervalDays,
+            extendDkk: _invoicing?.ExtendTermsPriceDkk ?? 3000m,
+            extendEur: _invoicing?.ExtendTermsPriceEur ?? 390m,
+            prepaidQuantity: rule.IsPrepaid && pool is { Quantity: > 0 } ? pool.Quantity : null,
+            invoiceNumber: rule.IsPrepaid ? pool?.Invoice?.ErpInvoiceNumber : null);
+
+        var (subject, html) = CouponClaimInviteComposer.Build(invite);
+
+        // --- who it goes to, and every reason it cannot ----------------------------------
+        string? email = null, name = rule.RequesterName;
+        string? blocker = null;
+        if (rule.ErpCustomerNumber is { } cust && rule.RequesterContactNumber is { } contact)
+        {
+            await LoadContactsAsync(new[] { cust }, ct);
+            ContactsByCustomer.TryGetValue(cust, out var contacts);
+            var match = contacts?.FirstOrDefault(c => c.ContactNumber == contact);
+            email = match?.Email;
+            name = match?.Name ?? name;
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                blocker = contacts is null || contacts.Count == 0
+                    ? "e-conomic could not be reached, so the requester's email address is unknown."
+                    : $"The requester ({name ?? "contact " + contact}) has no email address in e-conomic.";
+            }
+        }
+        else
+        {
+            blocker = "This coupon has no requester contact, so there is nobody to notify. "
+                    + "Pick the customer and the requester above first.";
+        }
+
+        // 🔒 A provisional DRAFT number must never be quoted to a partner — they would look for an
+        // invoice that does not exist under it (§1013a: the draft was 182, the real one 170).
+        if (blocker is null && rule.IsPrepaid && pool?.Invoice is { ErpInvoiceIsBooked: false, ErpInvoiceNumber: not null })
+        {
+            blocker = $"Invoice {pool.Invoice.ErpInvoiceNumber} is still a DRAFT in e-conomic. "
+                    + "Book it first — a draft is renumbered when booked, so the partner would be "
+                    + "given a number that will not exist.";
+        }
+
+        return new InvitePreview(
+            rule.Id, rule.CouponName, email, name, subject, html, rule.IsPrepaid, blocker);
+    }
+
     public IReadOnlyList<Row> Rows { get; private set; } = Array.Empty<Row>();
     public int AttentionCount => Rows.Count(r => r.NeedsAttention);
 
@@ -226,6 +470,30 @@ public class CouponInvoicingModel : PageModel
     /// ⚠️ Display and discovery only. Everything MATCHES on the id (§787.16); a class renamed in
     /// Backstage changes this label and nothing else.
     /// </remarks>
+    /// <summary>
+    /// 🔴 §1013b — the ticket class's DISPLAY NAME ("2-day ticket"), never its 17-digit Backstage
+    /// id. Live label first, then whatever the pool stored, then — only if nothing knows it — the
+    /// id itself.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The <paramref name="stored"/> value is IGNORED when it is just the id. Pools created
+    /// before their class had ever been claimed stored the id AS the label, so accepting it would
+    /// keep printing that id on the invoice and on the page for ever — which is the complaint.
+    /// </remarks>
+    public string TicketClassDisplay(string classId, string? stored = null)
+    {
+        if (TicketClassLabels.TryGetValue(classId, out var live)
+            && !string.IsNullOrWhiteSpace(live)
+            && !string.Equals(live, classId, StringComparison.Ordinal))
+        {
+            return live;
+        }
+        return !string.IsNullOrWhiteSpace(stored)
+               && !string.Equals(stored, classId, StringComparison.Ordinal)
+            ? stored!
+            : classId;
+    }
+
     public IReadOnlyDictionary<string, string> TicketClassLabels { get; private set; }
         = new Dictionary<string, string>();
 
@@ -241,12 +509,45 @@ public class CouponInvoicingModel : PageModel
     public IReadOnlyDictionary<int, IReadOnlyList<EconomicContactRow>> ContactsByCustomer
     { get; private set; } = new Dictionary<int, IReadOnlyList<EconomicContactRow>>();
 
+    /// <summary>
+    /// §991 — the customers whose contact fetch FAILED, as opposed to returning nothing.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>The page used to assert "no contacts on this customer" for both.</b> The per-customer
+    /// catch in <see cref="LoadContactsAsync"/> turns a failure into an empty list, and the message
+    /// then decided which of the two it was from <see cref="EconomicReachable"/> — a PAGE-WIDE flag
+    /// set by the CUSTOMER-LIST call. So whenever the customer list loaded but one customer's
+    /// contacts did not, the page stated as fact that a customer has no contacts. Operator
+    /// 2026-08-09 reported exactly that line on a customer.
+    ///
+    /// <para>⚠️ It is the §21.5 rule the invoice-number lookup already follows — *"distinguishes
+    /// 'no invoice carries this reference' from 'the finance system could not be read'"* — and it
+    /// matters more here, because "no contacts" reads as a data-entry job in e-conomic and sends him
+    /// off to fix something that may not be broken.</para>
+    /// </remarks>
+    public IReadOnlySet<int> ContactLoadFailedFor { get; private set; } = new HashSet<int>();
+
     [BindProperty] public int SettingId { get; set; }
     [BindProperty] public string? CouponName { get; set; }
     [BindProperty] public CouponBillingType BillingType { get; set; }
     [BindProperty] public int? ErpCustomerNumber { get; set; }
     [BindProperty] public int? RequesterContactNumber { get; set; }
     [BindProperty] public string? Notes { get; set; }
+
+    /// <summary>
+    /// §1016d — THIS coupon's billing period in days, overriding the edition default (14).
+    /// Blank ⇒ use the default; <c>0</c> ⇒ invoice every pass (no batching).
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-09: *"maybe the internal days could be a field that could be adjusted pr
+    /// coupon"*. A billing period is negotiated with a partner, so one global number would force
+    /// the strictest partner's terms onto everybody.
+    /// </remarks>
+    [BindProperty] public int? InvoiceIntervalDays { get; set; }
+
+    /// <summary>§1016d — the edition default, shown as the placeholder so a blank box is not blank
+    /// in meaning: it says which number is in force when nothing is typed.</summary>
+    public int DefaultInvoiceIntervalDays => _invoicing?.CouponInvoiceIntervalDays ?? 14;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -361,6 +662,10 @@ public class CouponInvoicingModel : PageModel
                 RequesterContactNumber = requester,
                 RequesterName = requesterName,
                 Notes = string.IsNullOrWhiteSpace(Notes) ? null : Notes.Trim(),
+                // §1016d — a NEGATIVE typed value is treated as unset, not as an error: this is a
+                // number in a form, and a typo must fall back to the edition default rather than
+                // silently change a partner's billing terms.
+                InvoiceIntervalDays = InvoiceIntervalDays is >= 0 ? InvoiceIntervalDays : null,
                 CreatedAt = now,
                 UpdatedAt = now,
                 LastUpdatedByEmail = me.Email,
@@ -376,6 +681,7 @@ public class CouponInvoicingModel : PageModel
             existing.RequesterContactNumber = requester;
             existing.RequesterName = requesterName;
             existing.Notes = string.IsNullOrWhiteSpace(Notes) ? null : Notes.Trim();
+            existing.InvoiceIntervalDays = InvoiceIntervalDays is >= 0 ? InvoiceIntervalDays : null;
             existing.UpdatedAt = now;
             existing.LastUpdatedByEmail = me.Email;
             Message = $"'{name}' updated.";
@@ -411,6 +717,28 @@ public class CouponInvoicingModel : PageModel
     [BindProperty] public int? PoolThreshold { get; set; }
 
     /// <summary>
+    /// §990 — the agreed unit price, in DKK, for the tickets being bought.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <b>Typed, because the hub genuinely cannot know it.</b> A claim invoice prices each ticket
+    /// from Zoho's <c>base_price</c> on the claim; a prepaid pool exists BEFORE anybody claims, so
+    /// there is no claim to read. Deriving it from other claims of the class would bill one partner
+    /// at another's negotiated rate. Operator chose this (2026-08-09).
+    /// </remarks>
+    [BindProperty] public decimal? PoolUnitPriceDkk { get; set; }
+
+    /// <summary>
+    /// §992 — the NEW TOTAL the coupon should allow, for the "Increase to" form. When set, the
+    /// quantity bought is derived as <c>target − already purchased</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 He types the same number he then sets as the code's max in Backstage, so the two systems
+    /// cannot disagree through arithmetic done twice. Null on the "new pool" form, where the quantity
+    /// IS the total.
+    /// </remarks>
+    [BindProperty] public int? PoolTargetTotal { get; set; }
+
+    /// <summary>
     /// §794/§798.4 — buy tickets into a pool: the first purchase, or a TOP-UP of an existing one.
     /// </summary>
     /// <remarks>
@@ -436,15 +764,6 @@ public class CouponInvoicingModel : PageModel
             return RedirectWithFlash(Message, Error);
         }
 
-        // ⚠️ A purchase of 0 or fewer is not an agreement. Removing a pool is its own button, so
-        // "quantity 0" no longer has to double as delete — which it did before §798.4 and which
-        // would now be ambiguous with "add nothing".
-        if (PoolQuantity <= 0)
-        {
-            Error = "How many tickets did the partner buy? Use 'Remove allocation' to delete a pool.";
-            return RedirectWithFlash(Message, Error);
-        }
-
         var rule = await _db.CouponInvoicingSettings
             .FirstOrDefaultAsync(c => c.Id == SettingId && c.EventId == me.EventId, ct);
         if (rule is null)
@@ -457,6 +776,45 @@ public class CouponInvoicingModel : PageModel
             .Include(a => a.Purchases)
             .FirstOrDefaultAsync(
                 a => a.CouponInvoicingSettingId == rule.Id && a.TicketClassId == classId, ct);
+
+        // §992 — INCREASE TO A NEW TOTAL, rather than "add N". Operator 2026-08-09: *"lets say that
+        // the customer comes back and says, lets extend the 20 to 30 … now we need a increase button
+        // in ceh, so we can increase from 20 to 30. i need to then invoice him for 10 extra. the
+        // amount must now reflect a max of 30"*.
+        //
+        // 🔑 The number he types is the SAME NUMBER HE SETS IN BACKSTAGE — the code's max. That is
+        // the whole point: with an "add N" box he has to do the arithmetic twice and the two systems
+        // disagree the moment he gets it wrong. CEH derives the delta and invoices only that.
+        //
+        // 🔒 It still ADDS A PURCHASE ROW; it does not edit a total. "50 in January on 20147, 25 more
+        // in March on 20233" stays answerable, and the balance keeps the §794.4 property of being
+        // derived (purchased = SUM(purchases)) rather than accumulated.
+        var alreadyBought = pool?.Purchases.Sum(p => p.Quantity) ?? 0;
+        if (PoolTargetTotal is { } target)
+        {
+            if (target <= alreadyBought)
+            {
+                // ⚠️ Refused, never silently reduced. Purchases are a money record; "decreasing" one
+                // would mean deleting an agreement that was invoiced. Removing is its own button.
+                Error = alreadyBought == 0
+                    ? "Enter the new total number of tickets the code should allow."
+                    : $"This pool already covers {alreadyBought} ticket(s). Enter a HIGHER new total "
+                      + $"to increase it — a pool cannot be reduced, because each purchase is an "
+                      + $"invoiced agreement. Use 'Remove allocation' to delete the pool entirely.";
+                return RedirectWithFlash(Message, Error);
+            }
+
+            PoolQuantity = target - alreadyBought;
+        }
+
+        // ⚠️ A purchase of 0 or fewer is not an agreement. Removing a pool is its own button, so
+        // "quantity 0" no longer has to double as delete — which it did before §798.4 and which
+        // would now be ambiguous with "add nothing".
+        if (PoolQuantity <= 0)
+        {
+            Error = "How many tickets did the partner buy? Use 'Remove allocation' to delete a pool.";
+            return RedirectWithFlash(Message, Error);
+        }
 
         var now = _clock.GetUtcNow();
         var isTopUp = pool is not null;
@@ -484,7 +842,7 @@ public class CouponInvoicingModel : PageModel
             pool.LastUpdatedByEmail = me.Email;
         }
 
-        pool.Purchases.Add(new CouponPrepaidPurchase
+        var purchase = new CouponPrepaidPurchase
         {
             Quantity = PoolQuantity,
             // 🔒 The invoice number is OPTIONAL here on purpose: he agrees the tickets first and
@@ -496,15 +854,127 @@ public class CouponInvoicingModel : PageModel
             ErpInvoiceConfirmedByEmail = string.IsNullOrWhiteSpace(PoolErpInvoiceNumber)
                 ? null : me.Email,
             Notes = string.IsNullOrWhiteSpace(PoolPurchaseNotes) ? null : PoolPurchaseNotes.Trim(),
+            // §992 — kept so the page can total what the pool is WORTH, not just how many tickets it
+            // holds. Nothing else records it: the price is agreed before any claim exists.
+            UnitPriceDkk = PoolUnitPriceDkk is > 0m ? PoolUnitPriceDkk : null,
             CreatedAt = now,
             CreatedByEmail = me.Email,
-        });
+        };
+        pool.Purchases.Add(purchase);
 
+        // 🔒 SAVED FIRST, AND NEVER ROLLED BACK BY WHAT FOLLOWS. The partner agreed to buy the
+        // tickets; whether e-conomic answered a second later is a different fact. The purchase id
+        // is also the invoice's reference (§990), so it has to exist before the invoice does.
         await _db.SaveChangesAsync(ct);
+
+        // 🔴 §1013b — the LIVE label wins over the stored one, and the raw id is the last resort.
+        // A pool created before the class had ever been claimed stored the 17-digit id AS its
+        // label, so trusting the stored value would keep printing that id on the invoice for ever.
+        // Storing the improvement back means the pool heals itself the first time it is touched.
+        var classLabel = TicketClassDisplay(classId, pool.TicketClassLabel);
+        if (!string.Equals(pool.TicketClassLabel, classLabel, StringComparison.Ordinal))
+            pool.TicketClassLabel = classLabel;
+        var bought = pool.Purchases.Sum(p => p.Quantity);
 
         Message = isTopUp
             ? $"'{rule.CouponName}': {PoolQuantity} more ticket(s) added to the pool."
             : $"'{rule.CouponName}': pool created with {PoolQuantity} ticket(s).";
+
+        // §990 — CREATE THE INVOICE. Only when the organizer did not already type a number: a
+        // hand-entered number means the invoice exists in e-conomic already, and raising a second
+        // one would bill the partner twice for the same tickets.
+        string? invoiceNote = null;
+        if (purchase.ErpInvoiceNumber is { Length: > 0 } typed)
+        {
+            invoiceNote = $"Invoice {typed} was entered by hand — no draft was created.";
+        }
+        else if (_prepaidInvoices is null)
+        {
+            invoiceNote = "No invoice was created (e-conomic invoicing is not wired up on this host).";
+            Error = "The tickets are recorded, but no invoice could be created — e-conomic invoicing "
+                  + "is not configured here. Raise it by hand and enter the number.";
+        }
+        else
+        {
+            var result = await _prepaidInvoices.CreateForPurchaseAsync(
+                rule, classLabel, purchase.Id, PoolQuantity, PoolUnitPriceDkk ?? 0m, ct);
+
+            if (result.DraftNumber is { } draft)
+            {
+                // 🔴 §1013a/d — the BARE number, plus a flag saying it is not booked yet.
+                //
+                // Operator 2026-08-09: *"dont store the DRAFT 182 - just the invoice ID"*. The word
+                // was doing real work (§795.4: a draft number is provisional), so dropping it is
+                // only safe because ErpInvoiceIsBooked now carries that meaning as data AND
+                // CouponPrepaidInvoiceNumberRefresher replaces the number with the BOOKED one the
+                // moment he books it. Without those two, "182" would sit there looking
+                // authoritative long after e-conomic had renumbered it to 170.
+                purchase.ErpInvoiceNumber = draft.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                purchase.ErpInvoiceIsBooked = false;
+                purchase.ErpInvoiceConfirmedAt = now;
+                purchase.ErpInvoiceConfirmedByEmail = me.Email;
+                await _db.SaveChangesAsync(ct);
+
+                invoiceNote = $"e-conomic draft {draft} was created for these tickets.";
+                Message += $" e-conomic draft {draft} created.";
+
+                // 🔴 §1016a — ANNOUNCE IT. Operator 2026-08-09: *"i did not get any emails about a
+                // new invoice was created"*. DraftInvoiceCreatedNotifier existed and had exactly
+                // two callers — CouponInvoiceJob and WebshopInvoiceJob — so the one invoice path a
+                // HUMAN triggers, by clicking a button labelled "Create Invoice", was the only one
+                // that announced nothing. It was even registered in this host's DI and resolved by
+                // nobody.
+                //
+                // 🔑 The tell was already here: this handler composes `invoiceNote` and posts it
+                // inside the NEIGHBOURING coupon mail. Somebody saw that the invoice fact needed to
+                // travel and attached it to the mail next door instead of sending the one built for
+                // it — so the fact arrived, in the wrong envelope, and the real mail never fired.
+                if (_draftNotices is not null && result.Created_ is { } createdDraft)
+                {
+                    try
+                    {
+                        await _draftNotices.NotifyAsync(
+                            "Prepaid coupon tickets", new[] { createdDraft }, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Same rule as the coupon mail below: a mail failure must never look like
+                        // the purchase or the invoice failed. Both really happened.
+                        _log?.LogError(ex,
+                            "§1016a: could not mail the draft-invoice notice for purchase {Purchase}.",
+                            purchase.Id);
+                    }
+                }
+            }
+            else
+            {
+                // 🔒 The tickets stay. The §795.2 chase keeps asking for a number, which is exactly
+                // the right outcome for an invoice that still has to be raised by hand.
+                invoiceNote = result.WouldCreate
+                    ? "No invoice was created — the hub is in dry-run mode."
+                    : "No invoice was created — raise it by hand and enter the number.";
+                Error = result.Problem;
+            }
+        }
+
+        // §990 — Backstage has NO coupon API (§787.14), so the promo code is a manual step. Mailed
+        // whatever happened with the invoice: the partner cannot claim a ticket without the code,
+        // and that is true even on a run where the invoicing failed.
+        if (_zohoAction is not null)
+        {
+            try
+            {
+                await _zohoAction.NotifyAsync(
+                    rule.CouponName, classLabel, PoolQuantity, bought, isTopUp, invoiceNote, ct);
+            }
+            catch (Exception ex)
+            {
+                // A mail failure must not look like the purchase failed.
+                _log?.LogError(ex,
+                    "§990: could not mail the Backstage promo-code action for coupon {Coupon}.",
+                    rule.CouponName);
+            }
+        }
 
         return RedirectWithFlash(Message, Error);
     }
@@ -707,6 +1177,30 @@ public class CouponInvoicingModel : PageModel
 
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
+        // 🔴 §1013a — REFRESH THE STORED INVOICE NUMBERS FIRST, so the page can never show him a
+        // draft number that e-conomic has already replaced (he saw 182 for an invoice booked as
+        // 170). Runs here rather than on a timer because this page IS where he reads them, and a
+        // number that is correct only after the next job run is a number he will quote wrongly in
+        // between. Fail-soft, like every other e-conomic call on this page.
+        if (_invoiceNumbers is not null)
+        {
+            try
+            {
+                var refreshed = await _invoiceNumbers.RefreshAsync(eventId, ct);
+                if (refreshed.Updated > 0)
+                {
+                    _log?.LogInformation(
+                        "§1013a: refreshed {Count} prepaid invoice number(s) from e-conomic.",
+                        refreshed.Updated);
+                }
+            }
+            catch (Exception ex)
+            {
+                // A stale number is a nuisance; a page that will not open is worse.
+                _log?.LogWarning(ex, "§1013a: prepaid invoice-number refresh failed.");
+            }
+        }
+
         // §787.13 — the customer list by NAME, from the API. Fail-soft: e-conomic being unreachable
         // must not take down a page whose main job (the mapping) lives in our own database.
         if (_economic is not null)
@@ -741,14 +1235,106 @@ public class CouponInvoicingModel : PageModel
         TotalClaims = claims.Count;
 
         // §794 — the classes actually seen, so the pool editor offers them by name.
-        TicketClassLabels = claims
-            .Where(c => c.TicketClassId.Length > 0)
-            .GroupBy(c => c.TicketClassId, StringComparer.Ordinal)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Select(x => x.TicketClassName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
-                     ?? g.Key,
-                StringComparer.Ordinal);
+        //
+        // 🔴 §1013b — THE ATTENDEE MIRROR IS THE BROADER SOURCE, AND IT GOES FIRST.
+        //
+        // Operator 2026-08-09: *"dont show the ticket class id, but the actual ticket class
+        // displayname like 2-day ticket"* — on the page AND on the invoice.
+        //
+        // 🔑 The cause: this dictionary was built from CLAIMS only, and a prepaid pool exists
+        // precisely BEFORE anybody claims (that is what prepaid means). So for exactly the pools
+        // this page is about, the class had no label and everything downstream fell back to
+        // `classId` — a 17-digit Backstage number that lands on a customer's invoice line.
+        // `Attendee` carries TicketClassId + TicketClassName for every ticket ever sold, claimed or
+        // not, so it answers for classes the claim list has never seen.
+        var attendeeClasses = await _db.Attendees
+            .Where(a => a.EventId == eventId
+                        && a.TicketClassId != null && a.TicketClassName != null)
+            .Select(a => new { a.TicketClassId, a.TicketClassName })
+            .Distinct()
+            .ToListAsync(ct);
+
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // 🔴 §1019 — BACKSTAGE'S OWN TICKET-CLASS LIST FIRST. Operator 2026-08-09, fourth time:
+        // *"no-one knows a id - it must be the ticket class name"*.
+        //
+        // 🔑 Why the previous two fixes were not enough: claims, then claims + attendees, are both
+        // "somebody must already have BOUGHT this class". A PREPAID POOL IS CREATED BEFORE ANYBODY
+        // BUYS — that is what prepaid means — so in exactly the case he kept hitting there was
+        // nothing to learn the name from, and the id showed through. This endpoint knows every
+        // class from the moment it is defined, so it is the one source that cannot be empty when a
+        // pool is created. Fail-soft: unreadable ⇒ fall through to the mirrors below.
+        if (_zoho is not null)
+        {
+            try
+            {
+                var token = await _zoho.GetAccessTokenAsync(ct);
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    foreach (var kv in await _zoho.GetTicketClassNamesAsync(token!, ct))
+                        labels[kv.Key] = kv.Value;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning(ex, "§1019: could not read Backstage ticket classes.");
+            }
+        }
+
+        // The attendee mirror FILLS GAPS ONLY — it must never overwrite the Backstage name above.
+        // A ticket_name copied onto an attendee record is a snapshot taken at purchase; the class
+        // list is the current truth, and a renamed class would otherwise keep its old name here.
+        foreach (var a in attendeeClasses)
+        {
+            if (string.IsNullOrWhiteSpace(a.TicketClassId) || string.IsNullOrWhiteSpace(a.TicketClassName))
+                continue;
+            if (labels.ContainsKey(a.TicketClassId!)) continue;
+            labels[a.TicketClassId!] = a.TicketClassName!.Trim();
+        }
+        // Claims fill any gap the attendee mirror does not cover (and never overwrite it).
+        foreach (var g in claims.Where(c => c.TicketClassId.Length > 0)
+                     .GroupBy(c => c.TicketClassId, StringComparer.Ordinal))
+        {
+            if (labels.ContainsKey(g.Key)) continue;
+            var name = g.Select(x => x.TicketClassName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+            labels[g.Key] = string.IsNullOrWhiteSpace(name) ? g.Key : name!.Trim();
+        }
+        TicketClassLabels = labels;
+
+        // 🔴 §1019 — HEAL THE STORED LABELS, so the id cannot reach a human anywhere.
+        //
+        // Operator 2026-08-09: *"so mails, erp integration, etc must use the ticket class name; not
+        // the id"* — and the page alone could not deliver that. `CouponPrepaidBillingReminderService`
+        // and `CouponPrepaidLowBalanceAlertService` are BACKGROUND jobs with no page context: both
+        // print `TicketClassLabel ?? TicketClassId`, so they show the id whenever the stored label
+        // is missing. The same stored label is what reaches the e-conomic invoice line.
+        //
+        // ⇒ Writing the real Backstage name onto the allocation once fixes every consumer at the
+        // source, instead of teaching three services to call Zoho separately.
+        var stale = await _db.CouponPrepaidAllocations
+            .Where(a => a.EventId == eventId)
+            .ToListAsync(ct);
+        var healed = 0;
+        foreach (var a in stale)
+        {
+            if (!labels.TryGetValue(a.TicketClassId, out var real) || string.IsNullOrWhiteSpace(real))
+                continue;
+            // Replace a MISSING label, and one that is merely the id wearing a label's clothes.
+            if (string.Equals(a.TicketClassLabel, real, StringComparison.Ordinal)) continue;
+            if (!string.IsNullOrWhiteSpace(a.TicketClassLabel)
+                && !string.Equals(a.TicketClassLabel, a.TicketClassId, StringComparison.Ordinal))
+            {
+                continue;   // a real, different name — somebody meant it; leave it alone
+            }
+            a.TicketClassLabel = real;
+            healed++;
+        }
+        if (healed > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            _log?.LogInformation("§1019: named {Count} ticket class(es) from Backstage.", healed);
+        }
 
         var byCoupon = claims
             .GroupBy(c => c.CouponName, StringComparer.OrdinalIgnoreCase)
@@ -770,6 +1356,17 @@ public class CouponInvoicingModel : PageModel
         var claimsByCoupon = claims
             .GroupBy(c => c.CouponName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<CouponClaim>)g.ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        // §992 — every PURCHASE id per coupon, so `InvoicesFor` can also find the prepaid invoices
+        // (`CouponPrepaid-{purchaseId}`). Built from ALL allocations, dormant included: a dormant
+        // pool still records money that was billed, and hiding its invoice would misstate the total.
+        var purchaseIdsByCoupon = settings
+            .Where(s => allocations.ContainsKey(s.Id))
+            .ToDictionary(
+                s => s.CouponName,
+                s => (IReadOnlyList<int>)allocations[s.Id]
+                    .SelectMany(a => a.Purchases).Select(p => p.Id).ToList(),
                 StringComparer.OrdinalIgnoreCase);
 
         // 🔴 §799 — a pool only counts while the coupon is ACTUALLY prepaid. Operator 2026-08-04:
@@ -833,10 +1430,23 @@ public class CouponInvoicingModel : PageModel
         IReadOnlyList<EconomicInvoiceReference> InvoicesFor(string couponName)
         {
             if (invoiceRefs.Count == 0) return Array.Empty<EconomicInvoiceReference>();
-            if (!claimsByCoupon.TryGetValue(couponName, out var mine)) return Array.Empty<EconomicInvoiceReference>();
 
-            return mine
-                .Select(c => c.Reference)
+            // The CLAIM invoices (§795.4) — one reference per claimed ticket on this coupon.
+            var references = claimsByCoupon.TryGetValue(couponName, out var mine)
+                ? mine.Select(c => c.Reference)
+                : Enumerable.Empty<string>();
+
+            // 🔴 §992 — and the PREPAID invoices, which were invisible here. `InvoicesFor` matched
+            // only claim references, so a coupon's prepayments — the very invoices §990 now creates —
+            // never appeared in "e-conomic invoices" and the operator could not reconcile what he had
+            // billed against the code's max. Their reference is per PURCHASE (`CouponPrepaid-{id}`).
+            if (purchaseIdsByCoupon.TryGetValue(couponName, out var purchaseIds))
+            {
+                references = references.Concat(
+                    purchaseIds.Select(CouponPrepaidInvoiceService.ReferenceFor));
+            }
+
+            return references
                 .Distinct(StringComparer.Ordinal)
                 .SelectMany(r => invoiceRefs.TryGetValue(r, out var found)
                     ? found : Enumerable.Empty<EconomicInvoiceReference>())
@@ -891,6 +1501,7 @@ public class CouponInvoicingModel : PageModel
         if (_economic is null) return;
 
         var map = ContactsByCustomer.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var failed = new HashSet<int>(ContactLoadFailedFor);
         foreach (var number in customerNumbers.Distinct().Where(n => n > 0))
         {
             if (map.ContainsKey(number)) continue;
@@ -899,14 +1510,23 @@ public class CouponInvoicingModel : PageModel
                 map[number] = (await _economic.ListContactsAsync(number, ct))
                     .OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
                     .ToList();
+                failed.Remove(number);
             }
-            catch
+            catch (Exception ex)
             {
+                // §991 — still fail-soft (one bad customer must not empty every other dropdown),
+                // but REMEMBER that it failed. An empty list is no longer allowed to be read as
+                // "this customer has no contacts", which is what the page said before.
                 map[number] = Array.Empty<EconomicContactRow>();
+                failed.Add(number);
+                _log?.LogWarning(ex,
+                    "§991: could not read e-conomic contacts for customer {Customer}; the picker "
+                    + "will say so rather than claim the customer has none.", number);
             }
         }
 
         ContactsByCustomer = map;
+        ContactLoadFailedFor = failed;
     }
 
     /// <summary>

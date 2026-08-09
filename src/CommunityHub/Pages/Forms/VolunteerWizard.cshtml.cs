@@ -79,7 +79,19 @@ public class VolunteerWizardModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
-        await EnsureVolunteerTaskExistsAsync(me.EventId, me.ParticipantId, ct);
+
+        // 🔴 §980 (operator 2026-08-09): *"this task shows up for an organizer, it is a volunteer
+        // only task"*. This ran for ANYONE who opened the page — so an organizer glancing at the
+        // volunteer wizard was silently given "Complete the Volunteer shifts sign-up" as a PENDING
+        // task on their own hub, which they can never legitimately complete.
+        //
+        // ⚠️ Creating work as a side effect of a GET is what made it invisible: nothing was
+        // submitted, nothing was clicked, and a task appeared. The page stays viewable by other
+        // roles (organizers need to see what volunteers are asked); only the task creation is gated.
+        if (me.Role == ParticipantRole.Volunteer)
+        {
+            await EnsureVolunteerTaskExistsAsync(me.EventId, me.ParticipantId, ct);
+        }
 
         // Pre-fill from an existing submission so the wizard edits it.
         var existing = await _db.VolunteerAvailabilities.FirstOrDefaultAsync(

@@ -71,6 +71,16 @@
                     }
                 </select>
             </div>
+            @* 🔴 §1023 — TEST SESSIONS ARE OUT BY DEFAULT (operator 2026-08-09: *"make a filter
+               (tick) to include test sessions and exclude them by default"*). A TEST session never
+               reaches an attendee (§299 4.5), so it is rehearsal data padding the list and the
+               count above. *@
+            <div style="flex:0 1 auto;align-self:center;">
+                <label for="IncludeTestSessions" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" asp-for="IncludeTestSessions" id="IncludeTestSessions" value="true" />
+                    <span>Include TEST sessions</span>
+                </label>
+            </div>
             <!-- Reset to page 1 + keep current sort whenever the filter changes. -->
             <input type="hidden" asp-for="Sort" />
             <input type="hidden" asp-for="Desc" />
@@ -89,6 +99,426 @@
             <span style="color:#6b7280;"> — ID, title, type, length, room, track, schedule, speakers + their emails, hub-added, slug, Sessionize id.</span>
         </p>
 
+
+        @* 🔴 §1005.1 — THE ROOM-QR BLOCK IS REMOVED (operator 2026-08-09: *"remove this"*).
+           The handler `ProvisionQr` and the service behind it are LEFT IN PLACE deliberately: the
+           requirement says to strip the PAGE back, and deleting a working seam is a different and
+           larger change than hiding a control he does not use. Re-add the form to bring it back. *@
+
+        <!-- ---- Session list ------------------------------------------------ -->
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">All sessions</h3>
+        @if (Model.Rows.Count == 0)
+        {
+            <p style="color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</p>
+        }
+        else
+        {
+            <p role="status">
+                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
+            </p>
+            @* Bulk-select: ticked row checkboxes are plain (NOT inside a form, since
+               each row already hosts its own per-action forms — nested forms are
+               invalid). The bulk button collects the checked ids into a hidden
+               POST form built in JS and submits to the BulkDelete handler, gated by
+               the shared confirm modal (live count). The hidden form carries the
+               grid-state fields so the organizer stays on the same page. *@
+            <form method="post" id="sessionBulkForm" asp-page-handler="BulkDelete" hidden>
+                @{ GridStateFields(); }
+                <div id="sessionBulkIds"></div>
+                @* §334: the typed phrase travels with the bulk POST and is verified SERVER-side. *@
+                <input type="hidden" name="confirmPhrase" id="sessionBulkPhrase" value="" />
+            </form>
+            <!-- Bulk action bar (stacks on a phone, inline on wider screens). The
+                 button is type=button: it opens the confirm modal with the live
+                 selected-row count, then submits to the BulkDelete handler. No
+                 destructive bulk op on a single click; the server re-validates. -->
+            <div class="bulk-bar"
+                 style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                        padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
+                <button type="button" id="bulkDeleteSessionsBtn"
+                        style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;"
+                        aria-haspopup="dialog">@Localizer["Sessions.BulkDelete"]</button>
+                <span style="font-size:12.5px;color:#6b7280;">@Localizer["Sessions.BulkDeleteHint"]</span>
+            </div>
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-size:13px;color:#7f1d1d;">Arm bulk delete (required)</summary>
+                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                    CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                    "Deletes every ticked session that has no attendee engagement. Sessions with questions, evaluations or bookings are refused and reported.",
+                    FieldName: "sessionBulkPhraseInput", InputId: "sessionBulkPhraseInput"))" />
+            </details>
+            <div style="overflow-x:auto;">
+            <table>
+                <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Sessions for this edition</caption>
+                <thead>
+                    <tr>
+                        <th scope="col" style="width:32px;">
+                            <input type="checkbox" id="selectAllSessions" aria-label="@Localizer["OrgGrid.SelectAll"]"
+                                   onclick="for(const c of document.querySelectorAll('.sessionChk'))c.checked=this.checked;" />
+                        </th>
+                        @* §769.10 — the CEH session id. It names every derived file
+                           ({id} - Title_v3.pdf, session-{id}.gif, session-{id}-…-qr.png), so it is
+                           the way back from a file in the library to the session it belongs to. *@
+                        <th scope="col" style="width:56px;" title="CEH session id — the key in every generated file name. Searchable.">ID</th>
+                        <th scope="col" aria-sort="@Model.AriaSort("title")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                               asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@(Model.SortIndicator("title"))</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("type")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                               asp-route-Search="@Model.Search" asp-route-Sort="type" asp-route-Desc="@Model.NextDescFor("type")" asp-route-PageNo="1">Type@(Model.SortIndicator("type"))</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("length")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                               asp-route-Search="@Model.Search" asp-route-Sort="length" asp-route-Desc="@Model.NextDescFor("length")" asp-route-PageNo="1">Length@(Model.SortIndicator("length"))</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("room")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                               asp-route-Search="@Model.Search" asp-route-Sort="room" asp-route-Desc="@Model.NextDescFor("room")" asp-route-PageNo="1">Room@(Model.SortIndicator("room"))</a>
+                        </th>
+                        <th scope="col">Speakers</th>
+                        @* 🔴 §1005.1 — QR · Evaluation · Slides · Deck · Graphic · Announced REMOVED
+                           (operator 2026-08-09: *"remove this"*). Each still has its own home:
+                           slides/deck/graphic on the speaker + graphics pages, announcements on the
+                           social queue, evaluation on /Organizer/Evaluations. This grid is for
+                           finding and editing a session. *@
+                        @* 🔴 §1005.2 — a REAL EDIT BUTTON IN THE ROW. It was a "▼ Edit & evaluation"
+                           disclosure caret in a full-width row underneath, which reads as a
+                           separator rather than a control: *"i just found the edit - it is VERY hard
+                           to see the button. add it to the row like the participant view"*. *@
+                        <th scope="col" style="width:64px;">Edit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr>
+                        <td>
+                            @* Only offer bulk-select on rows that are SAFE to delete; a
+                               session with attendee data has no checkbox (it would be
+                               blocked anyway), keeping the bulk bar honest. *@
+                            @if (r.CanDelete)
+                            {
+                                <input class="sessionChk" type="checkbox" name="SelectedIds" value="@r.Id"
+                                       aria-label="Select @r.Title" />
+                            }
+                        </td>
+                        @* §769.10 — monospace so ids line up and are easy to read off against a
+                           file name in the document library. *@
+                        <td style="font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#374151;">@r.Id</td>
+                        <td>
+                            @r.Title
+                            @if (r.IsHubAdded)
+                            {
+                                <span title="Added in the hub"
+                                      style="font-size:11px;background:#eef6ff;color:#1d4ed8;border-radius:4px;padding:1px 5px;margin-left:4px;">hub</span>
+                            }
+                            @if (r.UsedForTesting)
+                            {
+                                <span title="Test session — hidden from public pages and never synced to the public agenda; hub-visible to ring 0/1 only"
+                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">TEST</span>
+                            }
+                        </td>
+                        <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Type)</td>
+                        <td>@CommunityHub.Pages.Organizer.SessionsModel.DisplayLength(r.LengthMinutes, r.Length)</td>
+                        <td>
+                            @(r.Room ?? "—")
+                            @if (r.UnknownRoom)
+                            {
+                                @* §299.6/b5: warn-only — the room is not in the config
+                                   registry (sessionRooms); names must be byte-identical
+                                   across systems. Nothing is blocked. *@
+                                <span title="This room name is not in the configured room registry (sessionRooms). Room names must be byte-identical across systems — check for a typo/rename."
+                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">unknown room</span>
+                            }
+                        </td>
+                        <td>@(r.Speakers.Count == 0 ? "—" : string.Join(", ", r.Speakers))</td>
+                        @* 🔴 §1005.2 — the Edit button, in the row. *@
+                        <td style="white-space:nowrap;">
+                            <button type="button" class="btn-secondary" style="font-size:12px;"
+                                    onclick="var d=document.getElementById('edit-@r.Id'); d.open=true; d.scrollIntoView({block:'center'});">
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                    <!-- Edit row (Type/Length/Room/eval form) -->
+                    <tr>
+                        @* ⚠️ KEEP THIS IN STEP WITH THE HEADER: 8 columns since §1005 removed six
+                           (QR/Evaluation/Slides/Deck/Graphic/Announced) and added Edit. A short
+                           colspan leaves the edit drawer misaligned under the last column. *@
+                        <td colspan="8" style="background:#fafafa;">
+                            @* §1005.2 — id so the row's Edit button can open this. The <details>
+                               stays as the container (it keeps the drawer collapsed by default and
+                               works with no JS); what changed is that there is now a real, visible
+                               control that opens it. *@
+                            <details id="edit-@r.Id">
+                                <summary style="cursor:pointer;font-size:13px;">Edit session</summary>
+                                <div style="padding:8px 0 0;">
+                                    <form method="post" asp-page-handler="ToggleTest" style="display:inline;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        <button type="submit" class="btn-secondary" style="font-size:12px;"
+                                                title="A test session never reaches the public pages or the public agenda; inside the hub it is visible to ring 0/1 only.">
+                                            @(r.UsedForTesting ? "Remove TEST flag" : "Mark as TEST session")
+                                        </button>
+                                    </form>
+                                </div>
+                                <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
+                                    <form method="post" asp-page-handler="Edit"
+                                          style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        @* 🔴 §1005.3 — TITLE and ABSTRACT. Operator 2026-08-09:
+                                           *"i also need the ability to edit session and modify every
+                                           all fields"*. Load-bearing since §999/§1000 made CEH the
+                                           owner: Sessionize's copy is only REPORTED now and the
+                                           Backstage API is create-only, so a field CEH cannot edit
+                                           cannot be corrected anywhere at all. *@
+                                        <label for="EditTitle_@r.Id">Title</label>
+                                        <input id="EditTitle_@r.Id" name="EditTitle" maxlength="400"
+                                               required value="@r.Title" />
+                                        <label for="EditAbstract_@r.Id">Abstract</label>
+                                        <textarea id="EditAbstract_@r.Id" name="EditAbstract" rows="4"
+                                                  maxlength="4000">@r.Abstract</textarea>
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                            <div style="flex:1 1 120px;">
+                                                <label for="EditType_@r.Id">Type</label>
+                                                <select id="EditType_@r.Id" name="EditType" asp-items="Model.TypeOptions"></select>
+                                            </div>
+                                            <div style="flex:1 1 120px;">
+                                                <label for="EditLength_@r.Id">Length</label>
+                                                @* §326bk: same plain dropdown as the add form. The row's CURRENT
+                                                   length is always offered even when config does not list it, so
+                                                   re-saving an imported session never rounds its length. *@
+                                                @{
+                                                    var curLen = r.LengthMinutes
+                                                        ?? (r.Length == CommunityHub.Core.Domain.SessionLength.FullDay
+                                                            ? 420 : (int)r.Length);
+                                                }
+                                                <select id="EditLength_@r.Id" name="EditLengthMinutes" required
+                                                        asp-items="Model.LengthOptions(curLen)"></select>
+                                            </div>
+                                        </div>
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                            <div style="flex:1 1 150px;">
+                                                <label for="EditStartsAt_@r.Id">Starts (Danish time)</label>
+                                                @* ❓OPEN-20: a CHANGED value marks the schedule as manually owned
+                                                   (IsDateOverridden) so a re-import keeps the manual date.
+                                                   🔴 §1010: the label said UTC, the box drew Danish and the save
+                                                   parsed UTC — so saving ANY field moved the session 1–2 hours.
+                                                   Both halves go through EventTimezone now. *@
+                                                <input id="EditStartsAt_@r.Id" name="EditStartsAt" type="datetime-local"
+                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatEventLocal(r.StartsAt)" />
+                                            </div>
+                                            <div style="flex:1 1 150px;">
+                                                @* 🔴 §1022 — ENDS IS DERIVED (start + length), not typed.
+                                                   DurationMinutes prefers end−start over LengthMinutes,
+                                                   so if the two ever disagree the duration pushed to Zoho
+                                                   comes from the field nobody thought they were editing.
+                                                   Disabled rather than hidden: he still needs to SEE the
+                                                   end time, and a disabled input posts nothing, so the
+                                                   value can only ever come from the calculation. *@
+                                                <label for="EditEndsAt_@r.Id">Ends (Danish time) — calculated</label>
+                                                <input id="EditEndsAt_@r.Id" type="datetime-local" disabled
+                                                       title="Calculated from Starts + Length. Change the length to change the end."
+                                                       style="background:#f3f4f6;color:#6b7280;"
+                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatEventLocal(r.EndsAt)" />
+                                                @* Recompute as he types, so a "calculated" field is
+                                                   never showing a stale value while he edits. The
+                                                   SAVE does the same sum server-side — this is only
+                                                   the readout, and it degrades to the stored value
+                                                   with no JS. *@
+                                                <script>
+                                                    (function () {
+                                                        var s = document.getElementById('EditStartsAt_@r.Id');
+                                                        var l = document.getElementById('EditLength_@r.Id');
+                                                        var e = document.getElementById('EditEndsAt_@r.Id');
+                                                        if (!s || !l || !e) return;
+                                                        function calc() {
+                                                            var mins = parseInt(l.value, 10);
+                                                            if (!s.value || isNaN(mins)) return;
+                                                            var d = new Date(s.value);
+                                                            if (isNaN(d.getTime())) return;
+                                                            d.setMinutes(d.getMinutes() + mins);
+                                                            var p = function (n) { return String(n).padStart(2, '0'); };
+                                                            e.value = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+                                                                + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+                                                        }
+                                                        s.addEventListener('change', calc);
+                                                        l.addEventListener('change', calc);
+                                                    })();
+                                                </script>
+                                            </div>
+                                        </div>
+                                        @* 🔴 §1011 — "Common for All Tracks" OVERRULES the track.
+                                           Live-verified: Backstage has no such field — it renders a
+                                           session with NO track exactly that way, so ticking this
+                                           means "expect no track over there" and the difference
+                                           check verifies it instead of nagging hourly. *@
+                                        <label for="EditCommon_@r.Id"
+                                               style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+                                            <input id="EditCommon_@r.Id" name="EditIsCommonForAllTracks"
+                                                   type="checkbox" value="true" checked="@r.IsCommonForAllTracks"
+                                                   style="margin-top:2px;" />
+                                            <span>
+                                                <strong>Common for All Tracks</strong>
+                                                <span style="display:block;color:#6b7280;font-size:11.5px;">
+                                                    Plenary — overrules the track@(string.IsNullOrWhiteSpace(r.Track) ? "" : $" ({r.Track})").
+                                                    Backstage shows a track-less session this way; clear its Track field there.
+                                                </span>
+                                            </span>
+                                        </label>
+                                        @if (r.IsDateOverridden)
+                                        {
+                                            <span style="font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:4px;padding:2px 6px;align-self:flex-start;"
+                                                  title="An organizer set this schedule manually; the Sessionize re-import keeps it (skips the StartsAt/EndsAt refresh).">
+                                                manual date — import won't overwrite
+                                            </span>
+                                        }
+                                        @* §1005.3 — DROPDOWNS "for fields whre relevant". Room and
+                                           Track resolve to a Backstage hall / track by EXACT name
+                                           (§299.6/b5), so a hand-typed one is the drift that makes
+                                           a push silently land without a venue. Each list always
+                                           contains the CURRENT value, so opening this form can
+                                           never silently re-point a field nobody touched. *@
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                            <div style="flex:1 1 140px;">
+                                                <label for="EditRoom_@r.Id">Room</label>
+                                                <select id="EditRoom_@r.Id" name="EditRoom"
+                                                        asp-items="Model.RoomOptions(r.Room)"></select>
+                                            </div>
+                                            <div style="flex:1 1 140px;">
+                                                <label for="EditTrack_@r.Id">Track</label>
+                                                <select id="EditTrack_@r.Id" name="EditTrack"
+                                                        asp-items="Model.TrackOptions(r.Track)"></select>
+                                            </div>
+                                            <div style="flex:1 1 140px;">
+                                                <label for="EditLevel_@r.Id">Level</label>
+                                                <select id="EditLevel_@r.Id" name="EditLevel"
+                                                        asp-items="Model.LevelOptions(r.Level)"></select>
+                                            </div>
+                                        </div>
+                                        @* Tags stay FREE TEXT: they are a comma-separated set with
+                                           no configured vocabulary, and Zoho neither accepts nor
+                                           returns them (§594) — so there is no list to pick from. *@
+                                        <label for="EditTags_@r.Id">Tags (comma separated)</label>
+                                        <input id="EditTags_@r.Id" name="EditTags" maxlength="1000" value="@r.Tags" />
+
+                                        @* 🔴 §1025 — LINK / REMOVE SPEAKERS. A checkbox list rather
+                                           than a multi-select: multi-select needs ctrl-click to add a
+                                           second person and silently drops the rest if you miss it,
+                                           which on a phone is unusable. *@
+                                        <input type="hidden" name="EditSpeakersSubmitted" value="true" />
+                                        <label>Speakers</label>
+                                        @if (!r.IsHubAdded)
+                                        {
+                                            @* Honest, not decorative: the import reconciles an
+                                               imported session's links to exactly the Sessionize set
+                                               on every run, so a manual change here is temporary.
+                                               Saying so beats letting him discover it. *@
+                                            <span style="font-size:11.5px;color:#92400e;background:#fef3c7;
+                                                         border-radius:4px;padding:4px 8px;">
+                                                This session comes from Sessionize, which owns its speaker
+                                                list — a change here is replaced at the next import.
+                                                Change it in Sessionize to make it stick.
+                                            </span>
+                                        }
+                                        <div style="max-height:180px;overflow:auto;border:1px solid #e5e7eb;
+                                                    border-radius:6px;padding:6px 8px;">
+                                            @if (Model.SpeakerPickList.Count == 0)
+                                            {
+                                                <span class="muted" style="font-size:12.5px;">
+                                                    No speakers in this edition yet.
+                                                </span>
+                                            }
+                                            @foreach (var sp in Model.SpeakerPickList)
+                                            {
+                                                <label style="display:flex;align-items:center;gap:6px;font-size:13px;
+                                                              padding:2px 0;cursor:pointer;">
+                                                    <input type="checkbox" name="EditSpeakerIds" value="@sp.Id"
+                                                           checked="@r.SpeakerIds.Contains(sp.Id)" />
+                                                    <span>@sp.Name <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
+                                                </label>
+                                            }
+                                        </div>
+                                        <div><button type="submit">Save</button></div>
+                                    </form>
+                                    @* 🔴 §1005.1 — REMOVED (operator 2026-08-09): the HappyOrNot
+                                       results + "email results to speakers" form, the QR-code
+                                       evaluation URL, the Attendee-evaluation (QR) block and the
+                                       Master-class management block.
+
+                                       ⚠️ Each was checked for another home BEFORE the control was
+                                       deleted, not after — removing the ONLY way to do something is
+                                       a different change from removing a duplicate, and the page
+                                       gives no clue which is which. Master-class seats and waitlist
+                                       live on /Organizer/MasterClasses; evaluation results and the
+                                       attendee QR live on /Organizer/Evaluations. The handlers stay
+                                       wired so nothing is destroyed by hiding a control. *@
+                                <!-- ---- Delete this session (§21 CRUD gap) ---- -->
+                                <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
+                                    <strong style="color:#b91c1c;font-size:13px;">@Localizer["Sessions.Delete"]</strong>
+                                    @if (r.CanDelete)
+                                    {
+                                        <p style="font-size:12.5px;color:#6b7280;margin:6px 0;">
+                                            Remove this @(r.IsHubAdded ? "hub-added" : "imported") session.
+                                            @if (!r.IsHubAdded)
+                                            {
+                                                <text>It came from Sessionize, so a re-import will recreate it unless removed there too.</text>
+                                            }
+                                        </p>
+                                        <form method="post" asp-page-handler="Delete">
+                                            <input type="hidden" name="SessionId" value="@r.Id" />
+                                            <button type="submit"
+                                                    style="background:#b91c1c;"
+                                                    data-ceh-confirm="confirmDeleteSession"
+                                                    data-ceh-summary="@r.Title">
+                                                @Localizer["Sessions.Delete"]
+                                            </button>
+                                        </form>
+                                    }
+                                    else
+                                    {
+                                        <p style="font-size:12.5px;color:#9ca3af;margin:6px 0;" role="note">
+                                            This session has attendee data
+                                            (@(r.QuestionCount) question(s), @(r.EvaluationCount) evaluation(s), @(r.SignupCount) master-class signup(s))
+                                            and cannot be deleted. Handle that data first.
+                                        </p>
+                                    }
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+
+            @if (Model.Paging.TotalPages > 1)
+            {
+                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
+                    @if (Model.Paging.HasPrevious)
+                    {
+                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
+                    }
+                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
+                    @if (Model.Paging.HasNext)
+                    {
+                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength" asp-route-IncludeTestSessions="@Model.IncludeTestSessions"
+                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
+                    }
+                </nav>
+            }
+
+        @* 🔴 §1023 — THE ADD FORM MOVED TO THE BOTTOM (operator 2026-08-09: *"move the add a hub
+           session to the bottom so filter is close to the view"*). Adding a session is rare;
+           finding one is what this page is for, so the filter now sits directly above the grid it
+           filters instead of being pushed a screen away by a form nobody opened. *@
         <!-- ---- Add a hub-only session ------------------------------------- -->
         <h3 style="color:var(--el-darkblue);margin-top:14px;">Add a hub session</h3>
         <p style="font-size:13px;color:#6b7280;">
@@ -147,533 +577,33 @@
                            list="registryRoomNames" />
                 </div>
             </div>
+            @* 🔴 §1025 — SPEAKERS ON THE CREATE. The service always accepted them; the form simply
+               never offered them, so every new hub session arrived with nobody on it and had to be
+               edited immediately afterwards. A hub-added session is never touched by the import, so
+               these links are permanent. *@
+            <div>
+                <label>Speakers (optional)</label>
+                <div style="max-height:160px;overflow:auto;border:1px solid #e5e7eb;border-radius:6px;
+                            padding:6px 8px;max-width:520px;">
+                    @if (Model.SpeakerPickList.Count == 0)
+                    {
+                        <span class="muted" style="font-size:12.5px;">No speakers in this edition yet.</span>
+                    }
+                    @foreach (var sp in Model.SpeakerPickList)
+                    {
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer;">
+                            <input type="checkbox" name="NewSpeakerIds" value="@sp.Id" />
+                            <span>@sp.Name <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
+                        </label>
+                    }
+                </div>
+            </div>
             <div>
                 <label for="NewAbstract">Abstract (optional)</label>
                 <textarea asp-for="NewAbstract" id="NewAbstract" rows="2" maxlength="8000"></textarea>
             </div>
             <div><button type="submit">Add session</button></div>
         </form>
-
-        <!-- ---- Provision a room QR ----------------------------------------- -->
-        <h3 style="color:var(--el-darkblue);margin-top:14px;">Provision a room QR code</h3>
-        <p style="font-size:13px;color:#6b7280;">
-            Each physical room gets one QR linked to the room. The QR image is stored on
-            SharePoint and its URL is stamped onto every session in that room, so each
-            speaker can download it (drop into their PowerPoint).
-            <em>SharePoint storage is operator-configured; until it is wired this reports
-            that no QR was generated rather than faking a link.</em>
-        </p>
-        <form method="post" asp-page-handler="ProvisionQr" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:22px;">
-            @{ GridStateFields(); }
-            <div style="flex:1 1 160px;min-width:140px;">
-                <label for="QrRoom">Room</label>
-                <input asp-for="QrRoom" id="QrRoom" maxlength="200" placeholder="e.g. Room A" required />
-            </div>
-            <div style="flex:2 1 260px;min-width:200px;">
-                <label for="QrTargetUrl">Room link the QR points to</label>
-                <input asp-for="QrTargetUrl" id="QrTargetUrl" type="url" maxlength="2000"
-                       placeholder="https://…" required />
-            </div>
-            <div style="flex:0 0 auto;"><button type="submit">Provision QR</button></div>
-        </form>
-
-        <!-- ---- Session list ------------------------------------------------ -->
-        <h3 style="color:var(--el-darkblue);margin-top:14px;">All sessions</h3>
-        @if (Model.Rows.Count == 0)
-        {
-            <p style="color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</p>
-        }
-        else
-        {
-            <p role="status">
-                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
-            </p>
-            @* Bulk-select: ticked row checkboxes are plain (NOT inside a form, since
-               each row already hosts its own per-action forms — nested forms are
-               invalid). The bulk button collects the checked ids into a hidden
-               POST form built in JS and submits to the BulkDelete handler, gated by
-               the shared confirm modal (live count). The hidden form carries the
-               grid-state fields so the organizer stays on the same page. *@
-            <form method="post" id="sessionBulkForm" asp-page-handler="BulkDelete" hidden>
-                @{ GridStateFields(); }
-                <div id="sessionBulkIds"></div>
-                @* §334: the typed phrase travels with the bulk POST and is verified SERVER-side. *@
-                <input type="hidden" name="confirmPhrase" id="sessionBulkPhrase" value="" />
-            </form>
-            <!-- Bulk action bar (stacks on a phone, inline on wider screens). The
-                 button is type=button: it opens the confirm modal with the live
-                 selected-row count, then submits to the BulkDelete handler. No
-                 destructive bulk op on a single click; the server re-validates. -->
-            <div class="bulk-bar"
-                 style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
-                        padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
-                <button type="button" id="bulkDeleteSessionsBtn"
-                        style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;"
-                        aria-haspopup="dialog">@Localizer["Sessions.BulkDelete"]</button>
-                <span style="font-size:12.5px;color:#6b7280;">@Localizer["Sessions.BulkDeleteHint"]</span>
-            </div>
-            <details style="margin-bottom:12px;">
-                <summary style="cursor:pointer;font-size:13px;color:#7f1d1d;">Arm bulk delete (required)</summary>
-                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
-                    CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
-                    "Deletes every ticked session that has no attendee engagement. Sessions with questions, evaluations or bookings are refused and reported.",
-                    FieldName: "sessionBulkPhraseInput", InputId: "sessionBulkPhraseInput"))" />
-            </details>
-            <div style="overflow-x:auto;">
-            <table>
-                <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Sessions for this edition</caption>
-                <thead>
-                    <tr>
-                        <th scope="col" style="width:32px;">
-                            <input type="checkbox" id="selectAllSessions" aria-label="@Localizer["OrgGrid.SelectAll"]"
-                                   onclick="for(const c of document.querySelectorAll('.sessionChk'))c.checked=this.checked;" />
-                        </th>
-                        @* §769.10 — the CEH session id. It names every derived file
-                           ({id} - Title_v3.pdf, session-{id}.gif, session-{id}-…-qr.png), so it is
-                           the way back from a file in the library to the session it belongs to. *@
-                        <th scope="col" style="width:56px;" title="CEH session id — the key in every generated file name. Searchable.">ID</th>
-                        <th scope="col" aria-sort="@Model.AriaSort("title")">
-                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@(Model.SortIndicator("title"))</a>
-                        </th>
-                        <th scope="col" aria-sort="@Model.AriaSort("type")">
-                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="type" asp-route-Desc="@Model.NextDescFor("type")" asp-route-PageNo="1">Type@(Model.SortIndicator("type"))</a>
-                        </th>
-                        <th scope="col" aria-sort="@Model.AriaSort("length")">
-                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="length" asp-route-Desc="@Model.NextDescFor("length")" asp-route-PageNo="1">Length@(Model.SortIndicator("length"))</a>
-                        </th>
-                        <th scope="col" aria-sort="@Model.AriaSort("room")">
-                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="room" asp-route-Desc="@Model.NextDescFor("room")" asp-route-PageNo="1">Room@(Model.SortIndicator("room"))</a>
-                        </th>
-                        <th scope="col">Speakers</th>
-                        <th scope="col">QR</th>
-                        <th scope="col">Evaluation</th>
-                        @* §322h: public /Sessions/Slides views+downloads (one number). *@
-                        <th scope="col" title="Slides opened on the public Session slides page (views + downloads)">Slides</th>
-                        @* §769.4 / work-order §6.2 — the point of the column: which sessions still
-                           have NO deck, before the deadline. *@
-                        <th scope="col" title="Uploaded presentation — final and preview, with version and upload date">Deck</th>
-                        @* §769.5 / §6.2 — the promo graphic, and whether it has been RELEASED. *@
-                        <th scope="col" title="Session promo graphic: generated, released to the speakers, or not built yet">Graphic</th>
-                        @* §836 (operator 2026-08-05: "i also want for each sessions in my sessions
-                           when we will announce the session"). Held posts show too — this is the
-                           ORGANIZER's grid, and "planned but not approved yet" is exactly what he
-                           needs to see here. *@
-                        <th scope="col" title="When this session's announcement goes out on LinkedIn">Announced</th>
-                    </tr>
-                </thead>
-                <tbody>
-                @foreach (var r in Model.Rows)
-                {
-                    <tr>
-                        <td>
-                            @* Only offer bulk-select on rows that are SAFE to delete; a
-                               session with attendee data has no checkbox (it would be
-                               blocked anyway), keeping the bulk bar honest. *@
-                            @if (r.CanDelete)
-                            {
-                                <input class="sessionChk" type="checkbox" name="SelectedIds" value="@r.Id"
-                                       aria-label="Select @r.Title" />
-                            }
-                        </td>
-                        @* §769.10 — monospace so ids line up and are easy to read off against a
-                           file name in the document library. *@
-                        <td style="font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#374151;">@r.Id</td>
-                        <td>
-                            @r.Title
-                            @if (r.IsHubAdded)
-                            {
-                                <span title="Added in the hub"
-                                      style="font-size:11px;background:#eef6ff;color:#1d4ed8;border-radius:4px;padding:1px 5px;margin-left:4px;">hub</span>
-                            }
-                            @if (r.UsedForTesting)
-                            {
-                                <span title="Test session — hidden from public pages and never synced to the public agenda; hub-visible to ring 0/1 only"
-                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">TEST</span>
-                            }
-                        </td>
-                        <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Type)</td>
-                        <td>@CommunityHub.Pages.Organizer.SessionsModel.DisplayLength(r.LengthMinutes, r.Length)</td>
-                        <td>
-                            @(r.Room ?? "—")
-                            @if (r.UnknownRoom)
-                            {
-                                @* §299.6/b5: warn-only — the room is not in the config
-                                   registry (sessionRooms); names must be byte-identical
-                                   across systems. Nothing is blocked. *@
-                                <span title="This room name is not in the configured room registry (sessionRooms). Room names must be byte-identical across systems — check for a typo/rename."
-                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">unknown room</span>
-                            }
-                        </td>
-                        <td>@(r.Speakers.Count == 0 ? "—" : string.Join(", ", r.Speakers))</td>
-                        <td>
-                            @if (!string.IsNullOrWhiteSpace(r.RoomQrUrl))
-                            {
-                                <a asp-page-handler="DownloadQr" asp-route-id="@r.Id">Download QR</a>
-                            }
-                            else
-                            {
-                                <span style="color:#9ca3af;">none</span>
-                            }
-                        </td>
-                        <td style="font-size:12px;">
-                            @if (r.EvaluationEmailedAt is not null)
-                            {
-                                <span style="color:#059669;">emailed</span>
-                            }
-                            else
-                            {
-                                <span style="color:#9ca3af;">—</span>
-                            }
-                            @* §769.6 / §6.2 — the evaluation ARTEFACTS, folded into this column
-                               rather than two more columns: the grid already has ten and a phone
-                               has ~360px. Printed QR first (needed BEFORE the session), then the
-                               result PDFs (which only exist after it). *@
-                            @{
-                                var hasQr = Model.QrSessionIds.Contains(r.Id);
-                                Model.EvalResultKinds.TryGetValue(r.Id, out var kinds);
-                            }
-                            <br />
-                            @if (!Model.QrReadable)
-                            {
-                                <span style="color:#9ca3af;" title="The QR folder cannot be read, so this is unknown — NOT 'no QR'.">QR unknown</span>
-                            }
-                            else if (hasQr)
-                            {
-                                <span style="color:#065f46;" title="A printed evaluation QR exists for this session.">QR ready</span>
-                            }
-                            else
-                            {
-                                <span style="color:#92400e;" title="No printed evaluation QR for this session yet.">no QR</span>
-                            }
-                            @if (kinds is { Count: > 0 })
-                            {
-                                <span style="color:#6b7280;"> &middot; results: @string.Join(" + ", kinds.Select(k => k.ToString().ToLowerInvariant()))</span>
-                            }
-                            @* §6.2 — STALE: ratings have arrived since the published report was
-                               produced, so the PDF on file no longer reflects the scores. Only ever
-                               shown for a report that WAS published — "not published yet" is a
-                               different fact and the column above already carries it. *@
-                            @if (Model.StaleReportSessionIds.Contains(r.Id))
-                            {
-                                <br />
-                                <span style="color:#b91c1c;font-weight:600;"
-                                      title="More ratings have arrived since this session's report was published. The next publish will supersede it.">results stale</span>
-                            }
-                        </td>
-                        <td>@(Model.SlideStats.TryGetValue(r.Id, out var slHits) ? slHits : 0)</td>
-                        @* §769.4 / §6.2 — deck state. "unknown" is deliberately NOT "missing": if the
-                           library cannot be read, saying "missing" would send the organizer chasing
-                           speakers who have all uploaded. *@
-                        <td style="font-size:12px;white-space:nowrap;">
-                            @if (!Model.DecksReadable)
-                            {
-                                <span style="color:#9ca3af;" title="The document library cannot be read from this host, so deck state is unknown — this is NOT 'no deck'.">unknown</span>
-                            }
-                            else
-                            {
-                                Model.DeckStates.TryGetValue(r.Id, out var deck);
-                                if (deck is null || deck.NothingUploaded)
-                                {
-                                    <span style="color:#b91c1c;font-weight:600;" title="No presentation uploaded for this session.">none</span>
-                                }
-                                else
-                                {
-                                    @if (deck.Final is { } fin)
-                                    {
-                                        <span style="color:#065f46;" title="@fin.DisplayName">final v@fin.Version</span>
-                                        @if (fin.UploadedAt is { } fu)
-                                        {
-                                            <span style="color:#6b7280;"> @fu.UtcDateTime.ToString("dd MMM")</span>
-                                        }
-                                    }
-                                    else
-                                    {
-                                        <span style="color:#92400e;" title="Only a preview deck so far — the final is still missing.">preview only</span>
-                                    }
-                                    @if (deck.Preview is { } prev && deck.Final is not null)
-                                    {
-                                        <br />
-                                        <span style="color:#6b7280;" title="@prev.DisplayName">preview v@prev.Version</span>
-                                    }
-                                }
-                            }
-                        </td>
-                        @* §769.5 / §6.2 — promo graphic. "generated" and "released" are different
-                           facts: the engine renders, an organizer releases, and only the second one
-                           means the speakers can see it. *@
-                        <td style="font-size:12px;white-space:nowrap;">
-                            @if (!Model.GraphicStates.TryGetValue(r.Id, out var gfx))
-                            {
-                                <span style="color:#9ca3af;" title="No promo graphic has been built for this session yet.">not built</span>
-                            }
-                            else
-                            {
-                                @if (gfx.Released)
-                                {
-                                    <span style="color:#065f46;font-weight:600;" title="@gfx.FileName">released</span>
-                                }
-                                else
-                                {
-                                    <span style="color:#92400e;" title="Built, but not yet released — the speakers cannot see it.">awaiting release</span>
-                                }
-                                @if (gfx.Variant is { } v)
-                                {
-                                    <span style="color:#6b7280;"> @v.TrimStart('.')</span>
-                                }
-                                @if (gfx.OrganizerOverridden)
-                                {
-                                    <br />
-                                    <span style="color:#3730a3;" title="An organizer replaced the generated artwork — the engine will not regenerate over it.">your own artwork</span>
-                                }
-                                @* §6.2 — STALE: the session changed after this picture was made, so
-                                   the graphic advertises a session that no longer exists in that
-                                   form. It is a promise, not a guess: the same comparison the sweep
-                                   makes, so the next sweep WILL replace it. *@
-                                @if (gfx.IsStale)
-                                {
-                                    <br />
-                                    <span style="color:#b91c1c;font-weight:600;"
-                                          title="The session's title or line-up changed after this graphic was generated. The next graphics sweep will rebuild it.">stale</span>
-                                }
-                            }
-                        </td>
-                        @* §836 — when this session's announcement runs. A session can be announced
-                           more than once, so every date is listed rather than only the first. *@
-                        <td style="white-space:nowrap;">
-                            @if (!Model.Announcements.TryGetValue(r.Id, out var posts) || posts.Count == 0)
-                            {
-                                <span class="muted" title="No announcement post is scheduled for this session yet.">—</span>
-                            }
-                            else
-                            {
-                                foreach (var post in posts.OrderBy(p => p.ScheduledAtUtc))
-                                {
-                                    <div>
-                                        @* §844.5 — Danish date, day first. *@
-                                        <strong>@CommunityHub.Core.Integrations.SoMeDisplayTime.ShortDate(post.ScheduledAtUtc)</strong>
-                                        @if (post.IsPublished)
-                                        {
-                                            <span class="set-tag on" title="Published on LinkedIn.">sent</span>
-                                        }
-                                        else if (post.IsApproved)
-                                        {
-                                            <span class="set-tag on" title="Approved — it will publish on this date.">approved</span>
-                                        }
-                                        else
-                                        {
-                                            @* 🔒 §824.21a — held is the safety model. Showing a date
-                                               without this badge would read as "it is going out". *@
-                                            <span class="set-tag off" title="Planned but NOT approved — it will not publish until you turn it on in the queue.">held</span>
-                                        }
-                                    </div>
-                                }
-                            }
-                        </td>
-                    </tr>
-                    <!-- Edit row (Type/Length/Room/eval form) -->
-                    <tr>
-                        @* ⚠️ KEEP THIS IN STEP WITH THE HEADER: 13 columns since §836 added
-                           "Announced" (12 before). A short colspan leaves the edit drawer
-                           misaligned under the last column. *@
-                        <td colspan="13" style="background:#fafafa;">
-                            <details>
-                                <summary style="cursor:pointer;font-size:13px;">Edit &amp; evaluation</summary>
-                                <div style="padding:8px 0 0;">
-                                    <form method="post" asp-page-handler="ToggleTest" style="display:inline;">
-                                        <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                        <button type="submit" class="btn-secondary" style="font-size:12px;"
-                                                title="A test session never reaches the public pages or the public agenda; inside the hub it is visible to ring 0/1 only.">
-                                            @(r.UsedForTesting ? "Remove TEST flag" : "Mark as TEST session")
-                                        </button>
-                                    </form>
-                                </div>
-                                <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
-                                    <form method="post" asp-page-handler="Edit"
-                                          style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
-                                        <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                            <div style="flex:1 1 120px;">
-                                                <label for="EditType_@r.Id">Type</label>
-                                                <select id="EditType_@r.Id" name="EditType" asp-items="Model.TypeOptions"></select>
-                                            </div>
-                                            <div style="flex:1 1 120px;">
-                                                <label for="EditLength_@r.Id">Length</label>
-                                                @* §326bk: same plain dropdown as the add form. The row's CURRENT
-                                                   length is always offered even when config does not list it, so
-                                                   re-saving an imported session never rounds its length. *@
-                                                @{
-                                                    var curLen = r.LengthMinutes
-                                                        ?? (r.Length == CommunityHub.Core.Domain.SessionLength.FullDay
-                                                            ? 420 : (int)r.Length);
-                                                }
-                                                <select id="EditLength_@r.Id" name="EditLengthMinutes" required
-                                                        asp-items="Model.LengthOptions(curLen)"></select>
-                                            </div>
-                                        </div>
-                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                            <div style="flex:1 1 150px;">
-                                                <label for="EditStartsAt_@r.Id">Starts (UTC)</label>
-                                                @* ❓OPEN-20: a CHANGED value marks the schedule as manually owned
-                                                   (IsDateOverridden) so a re-import keeps the manual date. *@
-                                                <input id="EditStartsAt_@r.Id" name="EditStartsAt" type="datetime-local"
-                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatLocalUtc(r.StartsAt)" />
-                                            </div>
-                                            <div style="flex:1 1 150px;">
-                                                <label for="EditEndsAt_@r.Id">Ends (UTC)</label>
-                                                <input id="EditEndsAt_@r.Id" name="EditEndsAt" type="datetime-local"
-                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatLocalUtc(r.EndsAt)" />
-                                            </div>
-                                        </div>
-                                        @if (r.IsDateOverridden)
-                                        {
-                                            <span style="font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:4px;padding:2px 6px;align-self:flex-start;"
-                                                  title="An organizer set this schedule manually; the Sessionize re-import keeps it (skips the StartsAt/EndsAt refresh).">
-                                                manual date — import won't overwrite
-                                            </span>
-                                        }
-                                        <label for="EditRoom_@r.Id">Room</label>
-                                        <input id="EditRoom_@r.Id" name="EditRoom" maxlength="200" value="@r.Room"
-                                               list="registryRoomNames" />
-                                        <label for="EditEval_@r.Id">QR-code evaluation form URL</label>
-                                        <input id="EditEval_@r.Id" name="EditEvaluationFormUrl" type="url"
-                                               maxlength="2000" value="@r.EvaluationFormUrl" placeholder="https://…" />
-                                        <div><button type="submit">Save</button></div>
-                                    </form>
-                                    <form method="post" asp-page-handler="EmailEval"
-                                          style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
-                                        <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                        <label for="EvalResults_@r.Id">HappyOrNot results (paste, then email to speakers)</label>
-                                        <textarea id="EvalResults_@r.Id" name="EvalResultsText" rows="3"
-                                                  placeholder="e.g. 86% happy (42 votes)"></textarea>
-                                        <div><button type="submit">Email results to speakers</button></div>
-                                    </form>
-                                </div>
-
-                                <!-- ---- Public attendee evaluate link (room QR target) ---- -->
-                                <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
-                                    <strong style="color:var(--el-darkblue);font-size:13px;">Attendee evaluation (QR)</strong>
-                                    <div style="padding-top:8px;display:flex;flex-direction:column;gap:6px;max-width:520px;">
-                                        <span style="font-size:12.5px;color:#6b7280;">
-                                            Public, no-login rating page for attendees (1–5 smiley + comment).
-                                            Point this room's QR here, or share the link directly. Results roll up in
-                                            <a asp-page="/Organizer/SessionFeedback">Session feedback</a>.
-                                        </span>
-                                        <form method="post" asp-page-handler="ShowEvaluateLink">
-                                            <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                            <button type="submit">Show evaluate link</button>
-                                        </form>
-                                        @if (Model.EvaluateLinkSessionId == r.Id && !string.IsNullOrWhiteSpace(Model.EvaluateLink))
-                                        {
-                                            <input type="text" readonly value="@Model.EvaluateLink"
-                                                   aria-label="Public evaluate URL (QR target)"
-                                                   onclick="this.select()"
-                                                   style="font-size:12.5px;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;" />
-                                        }
-                                    </div>
-                                </div>
-
-                                @if (r.Type == CommunityHub.Core.Domain.SessionType.MasterClass)
-                                {
-                                    <!-- ---- Master class management (§ 6c) ---- -->
-                                    <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
-                                        <strong style="color:var(--el-darkblue);font-size:13px;">Master class management</strong>
-                                        <div style="display:flex;flex-wrap:wrap;gap:18px;padding-top:8px;">
-                                            <!-- Public logistics link -->
-                                            <form method="post" asp-page-handler="ShowPublicLink"
-                                                  style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:6px;">
-                                                <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                                <span style="font-size:12.5px;color:#6b7280;">Public logistics page — share with attendees / link from Backstage.</span>
-                                                <div><button type="submit">Show public link</button></div>
-                                                @if (Model.PublicLinkSessionId == r.Id && !string.IsNullOrWhiteSpace(Model.PublicLink))
-                                                {
-                                                    <input type="text" readonly value="@Model.PublicLink"
-                                                           aria-label="Public logistics URL"
-                                                           onclick="this.select()"
-                                                           style="font-size:12.5px;background:#f3f4f6;" />
-                                                }
-                                                else if (!string.IsNullOrWhiteSpace(r.PublicSlug))
-                                                {
-                                                    <a asp-page="/MasterClass/Index" asp-route-slug="@r.PublicSlug"
-                                                       target="_blank" rel="noopener" style="font-size:12.5px;">Open public page ↗</a>
-                                                }
-                                            </form>
-                                            <span style="flex:1 1 280px;min-width:240px;font-size:12px;color:#9ca3af;">
-                                                Master Class seats &amp; waitlist are managed on
-                                                <a asp-page="/Organizer/MasterClasses">Master Classes</a>.
-                                            </span>
-                                        </div>
-                                    </div>
-                                }
-
-                                <!-- ---- Delete this session (§21 CRUD gap) ---- -->
-                                <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
-                                    <strong style="color:#b91c1c;font-size:13px;">@Localizer["Sessions.Delete"]</strong>
-                                    @if (r.CanDelete)
-                                    {
-                                        <p style="font-size:12.5px;color:#6b7280;margin:6px 0;">
-                                            Remove this @(r.IsHubAdded ? "hub-added" : "imported") session.
-                                            @if (!r.IsHubAdded)
-                                            {
-                                                <text>It came from Sessionize, so a re-import will recreate it unless removed there too.</text>
-                                            }
-                                        </p>
-                                        <form method="post" asp-page-handler="Delete">
-                                            <input type="hidden" name="SessionId" value="@r.Id" />
-                                            <button type="submit"
-                                                    style="background:#b91c1c;"
-                                                    data-ceh-confirm="confirmDeleteSession"
-                                                    data-ceh-summary="@r.Title">
-                                                @Localizer["Sessions.Delete"]
-                                            </button>
-                                        </form>
-                                    }
-                                    else
-                                    {
-                                        <p style="font-size:12.5px;color:#9ca3af;margin:6px 0;" role="note">
-                                            This session has attendee data
-                                            (@(r.QuestionCount) question(s), @(r.EvaluationCount) evaluation(s), @(r.SignupCount) master-class signup(s))
-                                            and cannot be deleted. Handle that data first.
-                                        </p>
-                                    }
-                                </div>
-                            </details>
-                        </td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-            </div>
-
-            @if (Model.Paging.TotalPages > 1)
-            {
-                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
-                    @if (Model.Paging.HasPrevious)
-                    {
-                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
-                           asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
-                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
-                    }
-                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
-                    @if (Model.Paging.HasNext)
-                    {
-                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
-                           asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
-                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
-                    }
-                </nav>
-            }
-
             @* Shared accessible confirm modal (§21) — gates every session delete with
                a clear summary. The trigger's data-ceh-summary names the session. *@
             <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(

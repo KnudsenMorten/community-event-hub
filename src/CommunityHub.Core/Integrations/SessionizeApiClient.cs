@@ -72,6 +72,89 @@ public sealed class SessionizeApiOptions
     /// Default <c>SpeakersEmails</c> (the Sessionize standard secured-email view).
     /// </summary>
     public string EmailsView { get; set; } = "SpeakersEmails";
+
+    /// <summary>
+    /// §971 — TRACK RENAMES, APPLIED AT IMPORT. Sessionize track label ⇒ the name CEH stores.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: he renamed a track in Zoho — <i>"Data Compliance &amp; Security"</i>
+    /// became <i>"Data Compliance"</i> — and wants any Sessionize session on the old label to carry
+    /// the new one <b>inside CEH and onward to Zoho</b>.</para>
+    ///
+    /// <para>🔑 <b>Renamed on the way IN, not on the way out</b>, and that is the whole design. CEH
+    /// then holds one name, so the organizer grid, the agenda, the public programme, the graphics and
+    /// the Zoho push all say the same thing. <see cref="ZohoClient.TrackNameMap"/> (§2026-07-23) is
+    /// the OTHER hop and stays what it is: it rewrites a name only as it is pushed to Backstage,
+    /// which leaves CEH showing the Sessionize spelling — right for the two AI tracks, where Zoho
+    /// deliberately carries a shorter name, and wrong here, where the rename is the actual fact.</para>
+    ///
+    /// <para>🔒 <b>EMPTY BY DEFAULT — the labels are EDITION facts, not code.</b> Populated from
+    /// <c>integrations.&lt;edition&gt;.json → sessionize.trackAliases</c>, or an app setting
+    /// (<c>Sessionize__TrackAliases__&lt;from&gt;</c>). A rename is then a config edit, exactly as
+    /// §323 intends for a Sessionize label change; hardcoding ELDK's tracks in Core would break the
+    /// evergreen rule and put the next edition's rename in a deploy.</para>
+    ///
+    /// <para>⚠️ Applies to sessions imported or re-imported AFTER it is set. Sessions already stored
+    /// under the old label are corrected by the next sync of those sessions, not retroactively by
+    /// setting this alone — check the grid rather than assuming.</para>
+    /// </remarks>
+    public Dictionary<string, string> TrackAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// §971 — the same map as ONE app-setting value, e.g.
+    /// <c>Sessionize__TrackAliasesJson = {"Data Compliance &amp; Security":"Data Compliance"}</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>This exists because the per-key form cannot be set safely here.</b> Config reaches this
+    /// app through AZURE APP SETTINGS — there is no <c>AddJsonFile</c>, so
+    /// <c>integrations.&lt;edition&gt;.json</c> is reference documentation, not a live source
+    /// (verified 2026-08-09: <c>Sessionize__EndpointId</c> is an app setting). The nested form would
+    /// therefore need a setting literally named
+    /// <c>Sessionize__TrackAliases__Data Compliance &amp; Security</c> — an environment-variable name
+    /// containing spaces and an ampersand. One JSON string sidesteps that entirely, and keeps a
+    /// rename to a single setting rather than one per track.
+    /// ⚠️ Invalid JSON is IGNORED rather than thrown — a malformed alias must not take the import
+    /// down — but it is also therefore SILENT, so verify the rename landed on a real session.
+    /// </remarks>
+    public string TrackAliasesJson { get; set; } = string.Empty;
+
+    private IReadOnlyDictionary<string, string>? _resolvedAliases;
+
+    /// <summary>
+    /// The alias map actually used: <see cref="TrackAliases"/> plus anything in
+    /// <see cref="TrackAliasesJson"/> (the JSON wins on a clash — it is the deployable one).
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Computed here rather than merged by each host after <c>Bind()</c>. A "remember to call
+    /// Normalize()" step in two registrations is precisely the two-copies drift this codebase keeps
+    /// getting bitten by — one of them eventually does not.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> ResolvedTrackAliases
+    {
+        get
+        {
+            if (_resolvedAliases is not null) return _resolvedAliases;
+
+            var merged = new Dictionary<string, string>(TrackAliases, StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(TrackAliasesJson))
+            {
+                try
+                {
+                    var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(TrackAliasesJson);
+                    if (parsed is not null)
+                    {
+                        foreach (var (from, to) in parsed)
+                        {
+                            if (!string.IsNullOrWhiteSpace(from) && !string.IsNullOrWhiteSpace(to))
+                                merged[from.Trim()] = to.Trim();
+                        }
+                    }
+                }
+                catch (JsonException) { /* see the ⚠️ above: ignored, never fatal */ }
+            }
+            return _resolvedAliases = merged;
+        }
+    }
 }
 
 /// <summary>
@@ -413,7 +496,9 @@ public sealed class SessionizeApiClient
                 $"Could not reach the Sessionize API: {ex.Message}");
         }
 
-        return ParseSessions(json);
+        // §971 — the live pull carries the edition's track renames; ParseSessions itself stays
+        // usable without them (tests, ad-hoc parsing), where the map is simply absent.
+        return ParseSessions(json, _options.ResolvedTrackAliases);
     }
 
     /// <summary>
@@ -426,7 +511,12 @@ public sealed class SessionizeApiClient
     ///    are flattened down onto each session).
     /// Public + static so it is unit-testable without a network call.
     /// </summary>
-    public static SessionizeSessionsParseResult ParseSessions(string json)
+    /// <param name="trackAliases">
+    /// §971 — optional Sessionize-track rename map (<see cref="SessionizeApiOptions.TrackAliases"/>).
+    /// Null/empty ⇒ labels pass through untouched, so every existing caller is unaffected.
+    /// </param>
+    public static SessionizeSessionsParseResult ParseSessions(
+        string json, IReadOnlyDictionary<string, string>? trackAliases = null)
     {
         var sessions = new List<SessionizeSession>();
         var warnings = new List<string>();
@@ -468,7 +558,7 @@ public sealed class SessionizeApiClient
                 // All view: a flat sessions array.
                 foreach (var sess in flat.EnumerateArray())
                 {
-                    AddSession(ParseOneSession(sess, categoryItemNames, roomNames), seen);
+                    AddSession(ParseOneSession(sess, categoryItemNames, roomNames, trackAliases), seen);
                 }
             }
             else if (root.ValueKind == JsonValueKind.Array)
@@ -484,7 +574,7 @@ public sealed class SessionizeApiClient
                     }
                     foreach (var sess in grouped.EnumerateArray())
                     {
-                        AddSession(ParseOneSession(sess, categoryItemNames, roomNames), seen);
+                        AddSession(ParseOneSession(sess, categoryItemNames, roomNames, trackAliases), seen);
                     }
                 }
             }
@@ -526,7 +616,8 @@ public sealed class SessionizeApiClient
     private static SessionizeSession ParseOneSession(
         JsonElement sess,
         IReadOnlyDictionary<string, CategoryItem> categoryItemNames,
-        IReadOnlyDictionary<string, string> roomNames)
+        IReadOnlyDictionary<string, string> roomNames,
+        IReadOnlyDictionary<string, string>? trackAliases = null)
     {
         var speakerIds = new List<string>();
         if (sess.TryGetProperty("speakers", out var sp)
@@ -578,8 +669,10 @@ public sealed class SessionizeApiClient
                 if (group.Contains(SessionizeFieldMap.FormatKeyword))
                     formatLabel ??= cat.Name;
                 // "Suggested Event Track" and a plainly-titled "Track" both map to Track.
+                // §971: and a renamed track is normalised HERE, on the way in, so CEH stores one
+                // name and every downstream reader (grid, agenda, graphics, Zoho push) agrees.
                 else if (group.Contains(SessionizeFieldMap.TrackKeyword))
-                    track ??= cat.Name;
+                    track ??= ApplyTrackAlias(cat.Name, trackAliases);
                 else if (group.Contains(SessionizeFieldMap.LevelKeyword))
                     level ??= cat.Name;
                 // §299.8/b7: a "Tags" group (any title containing the tag keyword)
@@ -843,6 +936,28 @@ public sealed class SessionizeApiClient
         && (v.ValueKind == JsonValueKind.True
             || (v.ValueKind == JsonValueKind.String
                 && bool.TryParse(v.GetString(), out var b) && b));
+
+    /// <summary>
+    /// §971 — map a Sessionize track label through <see cref="SessionizeApiOptions.TrackAliases"/>.
+    /// Unmapped labels pass through untouched, so an empty map is a true no-op.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Trimmed and case-insensitive, because the alias is typed by a human into config and the
+    /// label is typed by a human into Sessionize. A rename that fails to match because one side has
+    /// a trailing space would be invisible: the session simply keeps the old track and nothing
+    /// reports it.
+    /// </remarks>
+    internal static string ApplyTrackAlias(
+        string label, IReadOnlyDictionary<string, string>? aliases)
+    {
+        var name = (label ?? string.Empty).Trim();
+        if (name.Length == 0) return name;
+        return aliases is { Count: > 0 }
+            && aliases.TryGetValue(name, out var mapped)
+            && !string.IsNullOrWhiteSpace(mapped)
+                ? mapped.Trim()
+                : name;
+    }
 
     private static string? NullIfEmpty(string s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();

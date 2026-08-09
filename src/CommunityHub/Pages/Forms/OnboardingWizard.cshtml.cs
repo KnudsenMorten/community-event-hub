@@ -72,6 +72,9 @@ public class OnboardingWizardModel : PageModel
     // --- Step 2: picture ----------------------------------------------------
     [BindProperty] public string? PhotoUrl { get; set; }
 
+    /// <summary>§993 — the hub's own stored copy, for the PREVIEW only (never bound).</summary>
+    public string? PhotoStoredPath { get; private set; }
+
     // --- Step 3: hotel ------------------------------------------------------
     [BindProperty] public bool NeedsRoom { get; set; }
     [BindProperty] public string? HotelNotes { get; set; }
@@ -284,6 +287,8 @@ public class OnboardingWizardModel : PageModel
         Biography = profile?.Biography;
         Tagline = profile?.Tagline;
         PhotoUrl = profile?.PhotoUrl;
+        // §993 — so the preview renders the hub's copy rather than an unfetchable link.
+        PhotoStoredPath = profile?.PhotoSharePointPath;
 
         var hotel = await _db.HotelBookings.AsNoTracking().FirstOrDefaultAsync(
             h => h.EventId == me.EventId && h.ParticipantId == me.ParticipantId, ct);

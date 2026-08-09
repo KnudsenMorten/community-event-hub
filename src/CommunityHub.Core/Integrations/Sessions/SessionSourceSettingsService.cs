@@ -202,6 +202,58 @@ public sealed class SessionSourceSettingsService
     /// default of the shipped source) so flipping the stage alone is safe. Returns the
     /// stored direction.
     /// </summary>
+    /// <summary>
+    /// §1001 — the date speaker schedule-notices begin, seeding the default on first read.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Seeded on READ, not by a migration.</b> The default is *event start − 60 days*
+    /// (the operator's number), and a migration cannot compute it — the event dates live in another
+    /// table and an edition created later would get nothing. Reading it here means every edition
+    /// gets a sensible date the first time the page is opened, including future ones.</para>
+    ///
+    /// <para>🔒 Returns null (⇒ silent) when the edition has no start date to count back from.
+    /// Silence is the safe failure: the alternative mails every speaker on the first agenda edit.</para>
+    /// </remarks>
+    public async Task<DateOnly?> GetSpeakerNoticeFromAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var row = await _db.SessionSourceSettings
+            .FirstOrDefaultAsync(s => s.EventId == eventId, ct);
+        if (row?.SpeakerScheduleNoticeFrom is { } already) return already;
+
+        var start = await _db.Events.AsNoTracking()
+            .Where(e => e.Id == eventId).Select(e => (DateOnly?)e.StartDate)
+            .FirstOrDefaultAsync(ct);
+        if (start is not { } s) return null;
+
+        var seeded = s.AddDays(-SessionSourceSetting.DefaultSpeakerNoticeDaysBeforeEvent);
+        if (row is null)
+        {
+            row = new SessionSourceSetting { EventId = eventId, Source = SessionSourceKinds.Default };
+            _db.SessionSourceSettings.Add(row);
+        }
+        row.SpeakerScheduleNoticeFrom = seeded;
+        await _db.SaveChangesAsync(ct);
+        return seeded;
+    }
+
+    /// <summary>§1001 — set the date speaker schedule-notices begin. Null switches them off.</summary>
+    public async Task SetSpeakerNoticeFromAsync(
+        int eventId, DateOnly? from, string? byEmail, CancellationToken ct = default)
+    {
+        var row = await _db.SessionSourceSettings
+            .FirstOrDefaultAsync(s => s.EventId == eventId, ct);
+        if (row is null)
+        {
+            row = new SessionSourceSetting { EventId = eventId, Source = SessionSourceKinds.Default };
+            _db.SessionSourceSettings.Add(row);
+        }
+        row.SpeakerScheduleNoticeFrom = from;
+        row.UpdatedByEmail = byEmail;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<SessionSyncDirection> SetSyncDirectionAsync(
         int eventId, SessionSyncDirection direction, string? byEmail, CancellationToken ct = default)
     {

@@ -69,6 +69,28 @@
             gap: 16px; flex-wrap: wrap; text-align: center;
         }
         .topbar .ticket-info { font-weight: 600; }
+
+        /* §1003 — the segmented event countdown ("183 DAYS | 22 HOURS | …"), his mock-up.
+           Mobile-first: the segments wrap on ~360px rather than shrinking the digits, and the
+           whole block sits in the existing flex topbar which already wraps. */
+        .ceh-countdown { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-weight:600; }
+        .ceh-countdown .cd-label { white-space:nowrap; }
+        .ceh-countdown .cd-seg {
+            display:flex; flex-direction:column; align-items:center; line-height:1.05;
+            padding:0 10px; border-left:1px solid rgba(255,255,255,.35);
+        }
+        /* The first segment has no divider — a leading rule reads as a cut-off column. */
+        .ceh-countdown .cd-seg:first-of-type { border-left:0; padding-left:0; }
+        .ceh-countdown .cd-seg b { font-size:1.15rem; font-variant-numeric:tabular-nums; }
+        /* tabular-nums stops the row jittering every second as digit widths change. */
+        .ceh-countdown .cd-seg i {
+            font-style:normal; font-size:.62rem; letter-spacing:.08em; opacity:.85;
+        }
+        @@media (max-width: 480px) {
+            .ceh-countdown { gap:6px; }
+            .ceh-countdown .cd-seg { padding:0 6px; }
+            .ceh-countdown .cd-seg b { font-size:1rem; }
+        }
         /* When the ticket banner is a link (sale open + ticketUrl set) it uses
            the same .ticket-info class but is an <a>: keep it readable on the
            blue bar (white, underlined) instead of inheriting default link blue.

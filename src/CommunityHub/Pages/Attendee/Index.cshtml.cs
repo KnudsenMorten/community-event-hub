@@ -99,7 +99,9 @@ public class IndexModel : PageModel
         Confirmed = mine.FirstOrDefault(s => s.Status == MasterClassSignupStatus.Confirmed);
         Pending = mine.FirstOrDefault(s =>
             s.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered);
-        Options = await _svc.ListMasterClassesAsync(a.EventId, ct);
+        // §972 — the attendee hub offers these cards for selection and for joining a waitlist,
+        // so a TEST Master Class must not appear here either.
+        Options = await _svc.ListMasterClassesAsync(a.EventId, ct, excludeTestSessions: true);
         if (Confirmed is not null)
         {
             // Mint (idempotently) the comm-page slug so we can link the attendee to the

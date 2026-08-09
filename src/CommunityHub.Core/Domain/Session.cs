@@ -105,6 +105,42 @@ public class Session
     public string? Track { get; set; }
 
     /// <summary>
+    /// 🔴 §1011 — this session belongs to <b>every</b> track, so it has no track of its own:
+    /// the plenary marker (welcome, keynote, closing, breaks). Ticked, it <b>OVERRULES</b>
+    /// <see cref="Track"/> everywhere the track is compared or pushed.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"I need the ability to overrule the track with an extra field
+    /// Common for all Tracks which can be ticked of."*</para>
+    ///
+    /// <para>✅ <b>LIVE-VERIFIED against PROD, 2026-08-09</b> (`GET /sessions?day=2`, session
+    /// *ELDK27 Welcome* `14880000004329032`, the one in his screenshot): <b>Zoho has NO
+    /// "common for all tracks" field.</b> The complete record is <c>agenda, created_by,
+    /// created_time, description, duration, featured, hidden, id, language, last_modified_by,
+    /// last_modified_time, session_type, speaker_to_be_announced, speakers, start_time, title,
+    /// track, venue, venue_to_be_announced</c>, and the per-id GET returns the IDENTICAL set —
+    /// unlike the §623 sponsor record, there is no second place to look.</para>
+    ///
+    /// <para>🔑 <b>The chip IS <c>track: null</c>.</b> "Common for All Tracks" is not a field at
+    /// all — it is how Backstage RENDERS a session with no track. Every session carrying the chip
+    /// has a null track and nothing else does (*ELDK27 Welcome* and *Pre-keynote* null; all 8
+    /// master classes carry a real track id; 16 of 25 live sessions are track-less).</para>
+    ///
+    /// <para>⇒ This flag therefore needs no Zoho field — it means "expect NO track over there".
+    /// And because <c>track</c> IS readable, the difference check can <b>verify</b> that rather
+    /// than ignore it: ticked + null is confirmed-correct and mails nothing; ticked + a track id
+    /// is a <b>closable</b> "clear the track" line. He had asked, reasonably, for the field to be
+    /// ignored if the API were silent — it is not silent about the thing that matters.</para>
+    ///
+    /// <para>⚠️ <b>The create still sends the track</b> (operator decision 2026-08-09). Zoho's
+    /// create REQUIRES a session type and has been observed to require a track; the 16 track-less
+    /// sessions above were all made by hand in the GUI and are no evidence about the API. So a
+    /// ticked session is created WITH its track and the create mail tells him to clear it — the
+    /// sessions API cannot delete, so a refused create is cheaper to avoid than to recover from.</para>
+    /// </remarks>
+    public bool IsCommonForAllTracks { get; set; }
+
+    /// <summary>
     /// Audience level label (§154), sourced from the Sessionize "Level" category
     /// GROUP, e.g. "Expert (400)". Import-owned (refreshed each pull). Null when the
     /// source carries no level for the session.
@@ -351,7 +387,42 @@ public class Session
     /// operator: "I don't want an email at every sync"). Cleared when the diff
     /// disappears, so a LATER change mails again. Null = up to date / never notified.
     /// </summary>
-    public string? ZohoChangeNotifiedHash { get; set; }
+/// <summary>
+    /// §1002 — when the outstanding CEH↔Zoho difference for this session was last mailed.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Operator 2026-08-09: *"i need the check between ceh and zoho to run every 1 hour and send
+    /// email of every missing change … it is not a one time mai that dissapears, this is public
+    /// information for 1500 people, which is incompliant/not valid."*
+    /// <para>This REVERSES §302, where he asked for one mail per distinct difference. The reason
+    /// changed, not his mind: a single mail that scrolls out of the inbox leaves a WRONG PUBLIC
+    /// AGENDA in place with nothing chasing it. A difference is now re-mailed every hour until
+    /// Zoho matches — the hash still forces an IMMEDIATE mail when the difference itself changes,
+    /// so a new problem never waits up to an hour behind an old one.</para>
+    /// </remarks>
+    public DateTimeOffset? ZohoChangeNotifiedAt { get; set; }
+
+        public string? ZohoChangeNotifiedHash { get; set; }
+
+    /// <summary>
+    /// 🔴 §1024 — the dedupe key for the SESSIONIZE→CEH deviation mail (§999): the same set of
+    /// disagreements is reported <b>once</b>, not on every import pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"lets leave it for now, as it is a good reminder to validate
+    /// again, but only 1 time mail"*. He kept the mail — it is a useful prompt to go and check —
+    /// but a standing disagreement that CEH is deliberately winning is not news twice.</para>
+    ///
+    /// <para>🔑 <b>Deliberately NOT the §1002 treatment.</b> The CEH↔Zoho difference re-mails every
+    /// hour because it describes a <b>wrong public agenda</b> that somebody must go and fix. This
+    /// one describes a state that is CORRECT by design — CEH owns the schedule and Sessionize is
+    /// simply out of date — so the right cadence is once, and again only if the disagreement
+    /// CHANGES.</para>
+    ///
+    /// <para>🔒 Cleared when the deviation goes away, so a later re-occurrence mails again rather
+    /// than being silently swallowed by a stale hash.</para>
+    /// </remarks>
+    public string? SessionizeDeviationNotifiedHash { get; set; }
 
     /// <summary>
     /// The LAST-KNOWN Backstage start time for this session (the value CEH stored on

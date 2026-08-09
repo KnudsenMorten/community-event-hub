@@ -290,6 +290,9 @@ builder.Services.AddSingleton<CommunityHub.Core.Email.EngineAlertSender>();
 // OPTIONAL into every Zoho-writing service (push/provision/sync/profile engines).
 builder.Services.AddSingleton<CommunityHub.Core.Email.ZohoChangeNotifier>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.SessionizeDisappearanceDetector>();
+// §999 — deviation mail; /Organizer/Jobs can trigger the import from the web host too.
+builder.Services.AddScoped<CommunityHub.Core.Reminders.SessionizeDeviationNotifier>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionScheduleChangeNotifier>();
 builder.Services.AddScoped<SessionizeApiImportService>();
 // §198: the organizer "trigger import now" page depends on the import seam; map it to
 // the concrete service so the on-demand button runs the SAME import as the timer job.
@@ -1327,6 +1330,15 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.WebshopDraftInvoic
 // a service present in one and missing in the other deploys green and then fails on the first tick.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponDraftInvoiceService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponMappingAlertService>();
+// §990 — the PREPAID half: the "Create Invoice" button on /Organizer/CouponInvoicing raises the
+// draft, and the notifier asks for the Backstage promo code (no coupon API — §787.14). Page-driven,
+// so the web host is the only one that resolves them; they are registered here for the same reason
+// as the line above — a missing registration is a green deploy and a 500 on the first click.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidInvoiceService>();
+// §1013a — replaces a stored DRAFT invoice number with the BOOKED one once a human books it in
+// e-conomic (the two come from different number series, so the draft number dies on booking).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidInvoiceNumberRefresher>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPoolZohoActionNotifier>();
 // §795.2/§795.3 — same rule, same reason: /Organizer/Jobs can trigger CouponInvoiceJob from HERE,
 // which resolves both of these. Registered in one host only, that is a green deploy and a 500 on
 // the first trigger.

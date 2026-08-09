@@ -103,7 +103,9 @@ public class MyMasterClassModel : PageModel
         Confirmed = mine.FirstOrDefault(s => s.Status == MasterClassSignupStatus.Confirmed);
         Waitlists = mine.Where(s => s.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered)
             .OrderBy(s => s.WaitlistPosition ?? int.MaxValue).ToList();
-        Options = await _svc.ListMasterClassesAsync(a.EventId, ct);
+        // §972 — this page IS the chooser (section 2 lists every Master Class with live
+        // availability, pick or join-waitlist per card), so a TEST Master Class must not appear.
+        Options = await _svc.ListMasterClassesAsync(a.EventId, ct, excludeTestSessions: true);
         return a;
     }
 

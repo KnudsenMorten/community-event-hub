@@ -122,4 +122,70 @@ public static class CouponInvoiceLineComposer
     /// </remarks>
     public static string ComposeSubHeading(string couponName) =>
         string.Create(CultureInfo.InvariantCulture, $"Coupon tickets: {couponName}");
+
+    /// <summary>§990 — the label the coupon's free-text notes print under on the invoice.</summary>
+    /// <remarks>
+    /// Neutral on purpose. The webshop invoice labels its block <c>PurchaseOrder Info:</c> because
+    /// that field IS a PO; this one is whatever the partner needs on their invoice — operator
+    /// 2026-08-09: *"it can be for eample purchase order number or other relevant info needed"* — so
+    /// a PO-specific label would be wrong for most of what goes in it.
+    /// </remarks>
+    public const string NotesLabel = "Notes:";
+
+    /// <summary>
+    /// §990 — the sub-heading (<c>notes.textLine1</c>) WITH the coupon's own notes appended as their
+    /// own block. Used by BOTH coupon invoice types (prepaid and ad-hoc), which is the whole point:
+    /// the note is a property of the AGREEMENT, so it belongs on every invoice that agreement
+    /// produces.
+    /// </summary>
+    /// <remarks>
+    /// <para>Shape is the webshop PO block exactly (§786.1(e)) — a blank row, the label, then the
+    /// text on its own line — because these invoices leave the same company and a second layout for
+    /// the same idea is how two documents start looking unrelated.</para>
+    ///
+    /// <para>⚠️ <b>Blank notes print NOTHING</b>, not a bare <c>Notes:</c> label. The §786.1
+    /// reasoning applies unchanged: an empty labelled block reads to a customer as text that failed
+    /// to load rather than text that was never entered, and that is a support call about a fault
+    /// that did not happen.</para>
+    ///
+    /// <para>🔒 <b>Deliberately the free-text header, not <c>references.other</c>.</b> That field
+    /// carries the idempotency marker every "already invoiced" check scans for (§787.3/§817.1);
+    /// putting operator prose there would either overwrite the interlock or force it onto a
+    /// substring match.</para>
+    /// </remarks>
+    public static string ComposeSubHeading(string couponName, string? notes)
+    {
+        var head = ComposeSubHeading(couponName);
+        var text = (notes ?? string.Empty).Trim();
+
+        return text.Length == 0
+            ? head
+            : head + WebshopInvoiceLineComposer.BlockSeparator
+                   + NotesLabel + WebshopInvoiceLineComposer.NewLine + text;
+    }
+
+    /// <summary>
+    /// §990 — the description block for a PREPAID ticket purchase: one line covering N tickets of a
+    /// class, rather than the one-line-per-attendee shape a claim invoice has.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <b>Why it cannot reuse <see cref="ComposeTicketDescription"/>.</b> That block names an
+    /// attendee, an e-mail and a Zoho ticket id — a prepaid purchase has **none of them**, because
+    /// nobody has claimed a ticket yet; that is what "prepaid" means. Rendering it with those fields
+    /// blank would put empty labels on a partner's invoice.
+    /// </remarks>
+    public static string ComposePrepaidDescription(
+        string ticketClassLabel, string couponName, int quantity, string? conversionNote)
+    {
+        var parts = new List<string>
+        {
+            string.Create(CultureInfo.InvariantCulture, $"Prepaid tickets: {quantity}"),
+            $"Ticket Class: {ticketClassLabel}",
+            $"Coupon: {couponName}",
+        };
+
+        if (!string.IsNullOrEmpty(conversionNote)) parts.Add(conversionNote);
+
+        return string.Join(WebshopInvoiceLineComposer.NewLine, parts);
+    }
 }

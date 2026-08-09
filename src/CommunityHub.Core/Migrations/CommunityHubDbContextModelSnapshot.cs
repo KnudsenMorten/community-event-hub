@@ -436,6 +436,12 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("BillingType")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("ClaimInviteSentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ClaimInviteSentToEmail")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("CouponName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -453,7 +459,13 @@ namespace CommunityHub.Core.Migrations
                     b.Property<DateTimeOffset?>("FirstSeenClaimedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("InvoiceIntervalDays")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("LastAlertedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("LastInvoicedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<string>("LastUpdatedByEmail")
@@ -574,6 +586,9 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
 
+                    b.Property<bool>("ErpInvoiceIsBooked")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ErpInvoiceNumber")
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
@@ -587,6 +602,9 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("UnitPriceDkk")
+                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 
@@ -3711,6 +3729,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsCommonForAllTracks")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsDateOverridden")
                         .HasColumnType("bit");
 
@@ -3781,6 +3802,9 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("SessionizeDeviationNotifiedHash")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("SessionizeId")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -3813,6 +3837,9 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<bool>("UsedForTesting")
                         .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("ZohoChangeNotifiedAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("ZohoChangeNotifiedHash")
                         .HasColumnType("nvarchar(max)");
@@ -4004,6 +4031,9 @@ namespace CommunityHub.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateOnly?>("SpeakerScheduleNoticeFrom")
+                        .HasColumnType("date");
 
                     b.Property<int>("SpeakerSyncDirection")
                         .ValueGeneratedOnAdd()

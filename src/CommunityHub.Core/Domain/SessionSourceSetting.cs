@@ -54,6 +54,49 @@ public class SessionSourceSetting
     /// </summary>
     public SessionSyncDirection SpeakerSyncDirection { get; set; } = SessionSyncDirection.SessionizeToCeh;
 
+    /// <summary>
+    /// §1001 — the date from which a room/time change starts NOTIFYING SPEAKERS. Before it,
+    /// schedule changes are applied silently. Null ⇒ notifications are off entirely.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-09: *"we need to define a date in the settings which is where
+    /// notifications starts to flow to speakers in case of room or session time changes … Before
+    /// that date, no session notifications must go to speakers … reason we make lots of schedule
+    /// changes and we dont want to make unnessary noice to speakers."*</para>
+    ///
+    /// <para>🔑 <b>The quiet period is the point, not a side effect.</b> Building the agenda means
+    /// moving sessions repeatedly, and a speaker mailed on every move learns to ignore the mail
+    /// before the one that matters arrives. The gate protects the CREDIBILITY of the notification,
+    /// which is the same §594 reasoning applied to timing rather than to content.</para>
+    ///
+    /// <para>🔒 <b>The change still APPLIES during the quiet period</b> — only the mail is withheld.
+    /// The hub, the public agenda and the speaker's own page always show the truth; nobody is
+    /// looking at a stale schedule, they are simply not being pinged about each step.</para>
+    ///
+    /// <para>⚠️ <b>A DATE, not "days before".</b> Stored absolute so it cannot silently move when
+    /// the event dates are edited — an organizer who set "quiet until 12 Dec" means that day. It is
+    /// SEEDED at event start − 60 days (the operator's number) and is editable from there.</para>
+    ///
+    /// <para>🗑 There was a date gate here once (§38e) and §234 deleted it as dead code — it was a
+    /// hardcoded constant tied to a go-live that had passed. This one is operator-set, which is why
+    /// it is a settings field and not a <c>const</c>.</para>
+    /// </remarks>
+    public DateOnly? SpeakerScheduleNoticeFrom { get; set; }
+
+    /// <summary>§1001 — the default quiet period: notifications begin 60 days before the event.</summary>
+    public const int DefaultSpeakerNoticeDaysBeforeEvent = 60;
+
+    /// <summary>
+    /// §1001 — true when a speaker may be told about a schedule change right now.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 A NULL date means SILENT, deliberately. The alternative — null meaning "always notify" —
+    /// would make a settings row that has never been saved mail every speaker on the first agenda
+    /// edit, which is the exact noise the operator asked to remove. Silence is the safe failure.
+    /// </remarks>
+    public bool MayNotifySpeakers(DateOnly today) =>
+        SpeakerScheduleNoticeFrom is { } from && today >= from;
+
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public string? UpdatedByEmail { get; set; }
 }

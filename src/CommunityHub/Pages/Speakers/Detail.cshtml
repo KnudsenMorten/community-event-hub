@@ -64,9 +64,9 @@
         <a class="spd-back" href="/Speakers">&larr; @Localizer["SpeakerDetail.BackToSpeakers"]</a>
 
         <div class="spd-top">
-            @if (!string.IsNullOrWhiteSpace(sp.PhotoUrl))
+            @if (!string.IsNullOrWhiteSpace(sp.PhotoSrc))
             {
-                <img class="spd-photo" src="@sp.PhotoUrl"
+                <img class="spd-photo" src="@sp.PhotoSrc"
                      alt="@Localizer["Speakers.PhotoAlt", sp.Name]"
                      loading="lazy" width="96" height="96" />
             }

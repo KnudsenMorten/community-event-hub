@@ -86,9 +86,9 @@
                 @foreach (var s in view.Speakers)
                 {
                     <li class="spk-card">
-                        @if (!string.IsNullOrWhiteSpace(s.PhotoUrl))
+                        @if (!string.IsNullOrWhiteSpace(s.PhotoSrc))
                         {
-                            <img class="spk-photo" src="@s.PhotoUrl"
+                            <img class="spk-photo" src="@s.PhotoSrc"
                                  alt="@Localizer["Speakers.PhotoAlt", s.Name]"
                                  loading="lazy" width="64" height="64" />
                         }

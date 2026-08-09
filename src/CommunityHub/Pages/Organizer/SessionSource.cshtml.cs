@@ -48,6 +48,12 @@ public class SessionSourceModel : PageModel
     public SyncStageState SessionStage { get; private set; } = new(SessionSyncDirection.SessionizeToCeh, false);
     public SyncStageState SpeakerStage { get; private set; } = new(SessionSyncDirection.SessionizeToCeh, false);
 
+    /// <summary>§1001 — the date speaker room/time notices begin. Null ⇒ notices are off.</summary>
+    public DateOnly? SpeakerNoticeFrom { get; private set; }
+
+    /// <summary>§1001 — the posted date (ISO, or blank to switch notices off).</summary>
+    [BindProperty] public string? NoticeFrom { get; set; }
+
     /// <summary>§551 — the edition this page is reading, shown alongside a NOT-CONFIGURED warning.
     /// The leading hypothesis for the silent revert is a settings row that belongs to a DIFFERENT
     /// edition, so the edition id is the first thing worth seeing.</summary>
@@ -172,8 +178,44 @@ public class SessionSourceModel : PageModel
         ActiveDirection = SessionStage.Effective;
         ActiveSpeakerDirection = SpeakerStage.Effective;
 
+        // §1001 — seeds event-start − 60 days on first read, so the field is never blank on a
+        // page nobody has saved yet (blank means "notices off", which would be a surprise).
+        SpeakerNoticeFrom = await _settings.GetSpeakerNoticeFromAsync(me.EventId, ct);
+
         BuildOptions();
         return Page();
+    }
+
+    /// <summary>
+    /// §1001 — set the date speaker room/time notices start flowing. Blank switches them off.
+    /// </summary>
+    public async Task<IActionResult> OnPostSetNoticeFromAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var raw = (NoticeFrom ?? string.Empty).Trim();
+        DateOnly? parsed = null;
+        if (raw.Length > 0)
+        {
+            if (!DateOnly.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var d))
+            {
+                // ⚠️ Refused rather than silently ignored: a typo that quietly left the old date in
+                // place would be discovered only by speakers not getting mailed.
+                return RedirectToPage(new { msg = "That date could not be read — nothing changed." });
+            }
+            parsed = d;
+        }
+
+        await _settings.SetSpeakerNoticeFromAsync(me.EventId, parsed, me.Email, ct);
+        return RedirectToPage(new
+        {
+            msg = parsed is { } p
+                ? $"Speakers will be told about room/time changes from {p:d MMM yyyy}."
+                : "Speaker room/time notices are OFF — changes apply silently.",
+        });
     }
 
     public async Task<IActionResult> OnPostSetDirectionAsync(int stage, CancellationToken ct)

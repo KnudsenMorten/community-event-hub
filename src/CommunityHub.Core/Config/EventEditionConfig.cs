@@ -326,6 +326,40 @@ public sealed class EditionDates
     [JsonPropertyName("day2")]      public string Day2     { get; set; } = string.Empty;
     [JsonPropertyName("timezone")]  public string Timezone { get; set; } = string.Empty;
     [JsonPropertyName("lockDate")]  public string LockDate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §1003 — the time on <see cref="Day1"/> the event actually opens, as Danish wall time
+    /// ("09:00"). Drives the topbar "<c>&lt;code&gt; starts in …</c>" countdown.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Configured, not hardcoded: <see cref="Day1"/> is a DATE, and a countdown needs a moment.
+    /// Defaulting to midnight would have the countdown hit zero nine hours before anyone arrives.
+    /// Blank ⇒ <see cref="DefaultStartTime"/>.
+    /// </remarks>
+    [JsonPropertyName("day1StartTimeLocal")] public string Day1StartTimeLocal { get; set; } = string.Empty;
+
+    /// <summary>The assumed opening time when the edition config does not state one.</summary>
+    public const string DefaultStartTime = "09:00";
+
+    /// <summary>
+    /// §1003 — the absolute moment the event starts, or null when <see cref="Day1"/> is unusable.
+    /// </summary>
+    public DateTimeOffset? EventStartsAt()
+    {
+        if (!DateOnly.TryParse(Day1, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var day))
+            return null;
+
+        var raw = string.IsNullOrWhiteSpace(Day1StartTimeLocal) ? DefaultStartTime : Day1StartTimeLocal.Trim();
+        if (!TimeOnly.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var time))
+            time = TimeOnly.Parse(DefaultStartTime, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Danish wall time → the real offset for that date (CET in February), via the §305 authority.
+        var wall = DateTime.SpecifyKind(day.ToDateTime(time), DateTimeKind.Unspecified);
+        var tz = Integrations.EventTimezone.Tz;
+        return new DateTimeOffset(wall, tz.GetUtcOffset(wall));
+    }
     // NOTE: the role-tagged KEY-DATES / schedule now lives in the ScheduleEntries DB
     // table (organizer-editable at /Organizer/Schedule, seeded from a 6-day default).
     // It is no longer a static edition-config list.

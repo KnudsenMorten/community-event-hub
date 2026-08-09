@@ -555,19 +555,22 @@ public sealed class SponsorZohoSyncService
     /// <para>🔒 A scheme difference (<c>http</c> vs <c>https</c>) IS reported — that is a real
     /// mismatch he wants to fix, not formatting noise.</para>
     /// </remarks>
+    /// <remarks>
+    /// §989: the normalization moved to the shared <see cref="RichTextCompare"/> — the session
+    /// path needed the same answer and had a weaker private copy of it. Behaviour here is
+    /// unchanged except that an editor-blank Zoho value ("&lt;p&gt;&amp;nbsp;&lt;/p&gt;") now
+    /// counts as blank, which is what it looks like to him.
+    /// </remarks>
     private static bool NeedsManualEntry(string? inZoho, string? inCeh)
     {
-        if (string.IsNullOrWhiteSpace(inCeh)) return false;          // nothing to paste
-        if (string.IsNullOrWhiteSpace(inZoho)) return true;          // blank in Zoho
+        if (string.IsNullOrWhiteSpace(inCeh)) return false;            // nothing to paste
+        if (RichTextCompare.IsEffectivelyBlank(inZoho)) return true;   // blank in Zoho
         return !string.Equals(Comparable(inZoho), Comparable(inCeh), StringComparison.OrdinalIgnoreCase);
 
-        static string Comparable(string s)
-        {
-            var text = System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", " ");
-            text = System.Net.WebUtility.HtmlDecode(text);
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-            return text.Trim().TrimEnd('/');
-        }
+        // The trailing slash is a URL concern local to THIS call site (website/social fields),
+        // so it is trimmed AFTER normalization rather than baked into the shared normalizer —
+        // "<p>https://x.example/</p>" has to reach the slash with its tags already gone.
+        static string Comparable(string? s) => RichTextCompare.Comparable(s).TrimEnd('/');
     }
 
     /// <summary>

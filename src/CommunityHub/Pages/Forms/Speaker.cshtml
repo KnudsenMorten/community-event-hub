@@ -152,10 +152,21 @@
                            placeholder="https://…/your-photo.jpg" />
                     <span asp-validation-for="PhotoUrl" class="error"></span>
                     <p style="color:#6b7280;font-size:12px;">@Localizer["SpeakerForm.PhotoNote"]</p>
-                    @if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+                    @* §993 — the hub's own copy wins (§665). See _DetailsFields.cshtml. *@
+                    @{
+                        var shownPhoto = CommunityHub.Core.Integrations.Graphics.SpeakerPhotoUrl
+                            .Resolve(Model.PhotoUrl, Model.PhotoStoredPath);
+                    }
+                    @if (!string.IsNullOrWhiteSpace(shownPhoto))
                     {
-                        <img src="@Model.PhotoUrl" alt="@Localizer["SpeakerForm.PhotoAlt"]"
+                        <img src="@shownPhoto" alt="@Localizer["SpeakerForm.PhotoAlt"]"
                              style="max-width:160px;border-radius:10px;margin-top:8px;" />
+                    }
+                    else if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+                    {
+                        <p style="color:#b45309;font-size:12px;margin-top:6px;">
+                            @Localizer["SpeakerForm.PhotoUnfetchable"]
+                        </p>
                     }
                 </section>
             </div>

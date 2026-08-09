@@ -29,10 +29,13 @@ public sealed class JobSilenceAlertJob
     private readonly EngineAlertSender _alerts;
     private readonly ILogger<JobSilenceAlertJob> _log;
 
+    private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
+
     public JobSilenceAlertJob(
-        JobSilenceDetector detector, EngineAlertSender alerts, ILogger<JobSilenceAlertJob> log)
+        JobSilenceDetector detector, EngineAlertSender alerts, ILogger<JobSilenceAlertJob> log,
+        Microsoft.Extensions.Configuration.IConfiguration config)
     {
-        _detector = detector; _alerts = alerts; _log = log;
+        _detector = detector; _alerts = alerts; _log = log; _config = config;
     }
 
     [Function("JobSilenceAlertJob")]
@@ -41,11 +44,38 @@ public sealed class JobSilenceAlertJob
         [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
+        // 🛑 §977 — OPERATOR OFF SWITCH. 2026-08-09: *"i dont want any emails which tells me 'i did
+        // nothing' or 'i did not find anything in last 300 runs' or whatever it sends. it is just
+        // noice"*.
+        //
+        // ⚠️ §545 deliberately made this watchdog un-gateable by a FEATURE flag, on the reasoning
+        // that the thing which notices silence must not be silenceable by the same switch that
+        // silences everything else. That reasoning still holds for feature gates — this is a
+        // separate, explicit operator switch, and he is the audience the mail exists for. An alert
+        // its only reader has asked to stop is not protection; it is noise that trains him to ignore
+        // the inbox the REAL alerts arrive in.
+        //
+        // 🔒 Default TRUE, so no other deployment changes behaviour; ELDK27 PROD sets it false.
+        // The detector still runs and still logs — only the MAIL stops, so the signal is in App
+        // Insights for anyone who goes looking.
+        var alertsEnabled = !string.Equals(
+            _config["Alerts:JobSilenceEnabled"], "false", StringComparison.OrdinalIgnoreCase);
+
         var silent = await _detector.DetectAsync(ct);
 
         if (silent.Count == 0)
         {
             _log.LogInformation("JobSilenceAlertJob: every scheduled job is reporting healthy.");
+            return;
+        }
+
+        if (!alertsEnabled)
+        {
+            _log.LogInformation(
+                "JobSilenceAlertJob: {Count} job(s) look asleep, but Alerts:JobSilenceEnabled=false — logged, not mailed.",
+                silent.Count);
+            foreach (var s in silent)
+                _log.LogInformation("JobSilenceAlertJob (not mailed): {Kind} — {Detail}", s.Kind, s.Detail);
             return;
         }
 

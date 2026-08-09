@@ -29,12 +29,20 @@ namespace CommunityHub.Core.Reminders;
 /// a missed run self-heals. The ledger is written only on REAL delivery (the engine's
 /// <see cref="IEmailDeliveryOutcome"/> seam), so a ring-dropped digest retries once rings widen.</para>
 ///
-/// <para><b>Double-nag guard.</b> Party sign-up and Master Class selection already have
-/// their OWN §232 biweekly cadences (<see cref="AttendeePartyReminderBuilder"/> /
-/// <see cref="AttendeeMasterClassReminderBuilder"/>). When those are the ONLY open steps,
-/// the digest is SKIPPED for that person — the dedicated cadence covers them (this also
-/// naturally excludes attendees, whose whole wizard is masterclass+party). Suspended 1-day
-/// attendees (§242, deactivated) are excluded by the Active filter.</para>
+/// <para>🔴 <b>THE DOUBLE-NAG GUARD IS GONE (§968, 2026-08-08) — and it had become a HOLE.</b>
+/// It used to skip anyone whose ONLY open steps were <c>party</c> / <c>masterclass</c>, on the
+/// grounds that those "ride their own §232 cadence" in
+/// <see cref="AttendeePartyReminderBuilder"/> / <see cref="AttendeeMasterClassReminderBuilder"/>.
+/// <b>Both of those were retired on 2026-07-31 (§733.1) and now return nothing at all</b> — so the
+/// digest was deferring to cadences that no longer existed, and somebody owing only a party answer
+/// or a Master Class choice was chased by <b>nothing</b>, for ever, while their wizard sat at 90%.
+/// ⚠️ It also *"naturally excluded attendees, whose whole wizard is masterclass+party"* — i.e. the
+/// entire attendee population was silently outside the digest.</para>
+///
+/// <para>🔑 Two halves of one decision moved on different days and the gap between them was silent —
+/// the §939 / §945 shape again. §733.1 retired the dedicated chasers *because* the wizard digest was
+/// to be the single chase; this line is the other half of that sentence, finally applied. Suspended
+/// 1-day attendees (§242, deactivated) are still excluded by the Active filter.</para>
 ///
 /// <para><b>Delivery.</b> ONE digest email (<c>getstarted-digest</c> template) listing the
 /// open step TITLES (the same resx strings the wizard pages show) + a single magic-link
@@ -48,11 +56,6 @@ public sealed class GetStartedDigestBuilder
 
     /// <summary>Days between repeats — every 2 weeks (§232).</summary>
     public const int IntervalDays = 14;
-
-    /// <summary>Wizard steps that already have their own §232 cadence (party + Master
-    /// Class) — when these are the ONLY open steps the digest is skipped (no double-nag).</summary>
-    private static readonly HashSet<string> SelfNaggingStepKeys =
-        new(StringComparer.OrdinalIgnoreCase) { "party", "masterclass" };
 
     /// <summary>The wizard-step titles come from the SAME shared resource the wizard
     /// pages render (SharedResource.resx), so email and GUI never drift.</summary>
@@ -176,8 +179,10 @@ public sealed class GetStartedDigestBuilder
             var (openKeys, titlePrefix, route) = wizard.Value;
             if (openKeys.Count == 0) continue;                  // 100% complete — digest stops
 
-            // Double-nag guard: party/Master-Class-only leftovers ride their own cadence.
-            if (openKeys.All(k => SelfNaggingStepKeys.Contains(k))) continue;
+            // 🔴 §968 — NO STEP IS EXEMPT. There used to be a skip here for people whose only open
+            // steps were party / Master Class, deferring to dedicated chasers that were retired the
+            // same week (§733.1) — so those people, and every attendee, were chased by nothing.
+            // Operator 2026-08-08: *"they must be reminded like everyone else"*.
 
             var firstName = string.IsNullOrWhiteSpace(p.FullName)
                 ? "there"

@@ -537,8 +537,12 @@ public sealed class SpeakerPresentationService
             .FirstOrDefaultAsync(ct);
         if (eventId is null) return Array.Empty<PublicSessionSlides>();
 
+        // 🔒 §972 — and never a TEST session. This feeds the PUBLIC /Sessions/Slides catalogue, and
+        // §299 4.5/b8 says a UsedForTesting session "never appears on any PUBLIC page". It filtered
+        // only IsServiceSession, so a test session's preview/final slides were publicly listed —
+        // the same miss as the public agenda and the Master Class list.
         var sessions = await _db.Sessions
-            .Where(s => s.EventId == eventId && !s.IsServiceSession)
+            .Where(s => s.EventId == eventId && !s.IsServiceSession && !s.UsedForTesting)
             .Select(s => new
             {
                 s.Id,

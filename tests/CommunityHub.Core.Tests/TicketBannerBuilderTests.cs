@@ -35,22 +35,37 @@ public sealed class TicketBannerBuilderTests
             AfterOpen = afterOpen,
         };
 
+    /// <summary>
+    /// §995 — BEFORE the sale, the banner is a COUNTDOWN, not an absolute date.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Operator 2026-08-09: the countdown *"should replace the text Tickets on sale 11 Aug 2026
+    /// at 08:00 (UTC+02:00)"*. This test used to assert exactly that string — it is updated rather
+    /// than deleted because the ASSERTION is what changed, not the state machine: before-open is
+    /// still visible, still link-less, and still computed from config against the edition timezone.
+    /// ⚠️ The absolute date/zone must be GONE: leaving it alongside the countdown was the thing he
+    /// was asking to be rid of.
+    /// </remarks>
     [Fact]
-    public void Before_open_shows_the_sale_date_and_time_in_edition_local_wall_time()
+    public void Before_open_counts_down_instead_of_printing_the_date()
     {
-        // One day before the open moment.
+        // Exactly one day before the open moment.
         var now = OpenMomentUtc.AddDays(-1);
 
         var view = TicketBannerBuilder.Build(Cfg(), Tz, now);
 
         Assert.True(view.Visible);
         Assert.False(view.Suppressed);
-        Assert.Null(view.Href); // no link before the sale opens
-        // Danish wall time = 08:00 (UTC+2 in August). The date/time read from
-        // config, never a hardcoded literal.
-        Assert.Contains("11 Aug 2026", view.Message);
-        Assert.Contains("08:00", view.Message);
-        Assert.Contains("UTC+02:00", view.Message);
+        Assert.Null(view.Href);                       // no link before the sale opens
+        Assert.Equal("Tickets on sale in 1d 00:00:00", view.Message);
+
+        // 🔒 The absolute date and its offset label are gone — that is the whole ask.
+        Assert.DoesNotContain("11 Aug 2026", view.Message);
+        Assert.DoesNotContain("UTC+", view.Message);
+
+        // 🔑 The INSTANT rides along so the layout can tick it live. A server-rendered duration is
+        // stale the second it is sent, and this banner sits on a cacheable, long-lived layout.
+        Assert.Equal(OpenMomentUtc, view.OpensAt);
     }
 
     [Fact]
@@ -62,7 +77,38 @@ public sealed class TicketBannerBuilderTests
 
         Assert.True(view.Visible);
         Assert.Null(view.Href); // link only appears once open
-        Assert.Contains("08:00", view.Message);
+        Assert.Equal("Tickets on sale in 00:01:00", view.Message);
+    }
+
+    /// <summary>
+    /// 🔒 The countdown format itself. Seconds are ALWAYS shown because the browser re-renders this
+    /// once a second — a smallest unit of minutes looks frozen for 59 seconds at a time, which
+    /// reads as broken rather than as a slow clock. Days are split out rather than rolled into
+    /// hours: "52:13:22" is a number the reader has to divide.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 0, 0, 5, "00:00:05")]
+    [InlineData(0, 4, 13, 22, "04:13:22")]
+    [InlineData(0, 23, 59, 59, "23:59:59")]
+    [InlineData(1, 0, 0, 0, "1d 00:00:00")]
+    [InlineData(2, 4, 13, 22, "2d 04:13:22")]
+    [InlineData(367, 1, 2, 3, "367d 01:02:03")]
+    public void The_countdown_format_keeps_seconds_and_splits_days(
+        int d, int h, int m, int s, string expected) =>
+        Assert.Equal(expected, TicketBannerBuilder.FormatCountdown(new TimeSpan(d, h, m, s)));
+
+    /// <summary>A negative span is a guard, not a display case — the caller is in the on-sale state.</summary>
+    [Fact]
+    public void A_negative_remaining_span_renders_as_zero_rather_than_a_minus_sign() =>
+        Assert.Equal("00:00:00", TicketBannerBuilder.FormatCountdown(TimeSpan.FromSeconds(-30)));
+
+    /// <summary>🔒 OpensAt is set ONLY in the before-open state — nothing else may tick.</summary>
+    [Fact]
+    public void OpensAt_is_null_once_the_sale_is_open()
+    {
+        Assert.Null(TicketBannerBuilder.Build(Cfg(), Tz, OpenMomentUtc).OpensAt);
+        Assert.Null(TicketBannerBuilder.Build(Cfg(afterOpen: "hide"), Tz, OpenMomentUtc).OpensAt);
+        Assert.Null(TicketBannerBuilder.Fallback.OpensAt);
     }
 
     [Fact]
@@ -169,7 +215,12 @@ public sealed class TicketBannerBuilderTests
 
         Assert.True(before.Visible);
         Assert.Null(before.Href);
-        Assert.Contains("UTC+01:00", before.Message); // winter offset proven
+        // §995 — the winter offset is now proven by the resolved INSTANT rather than by an
+        // "(UTC+01:00)" label in the copy (the countdown carries no zone, which is the point of
+        // it). This is the stronger assertion of the two: it pins the value the whole state
+        // machine and the browser countdown run on, not how it was rendered.
+        Assert.Equal(atOpen, before.OpensAt);         // 08:00 CET == 07:00Z
+        Assert.Equal("Tickets on sale in 00:00:01", before.Message);
         // The boundary is the winter-offset moment, so 07:00Z is "open".
         Assert.Equal(TicketBannerBuilder.OnSaleMessage, open.Message);
     }

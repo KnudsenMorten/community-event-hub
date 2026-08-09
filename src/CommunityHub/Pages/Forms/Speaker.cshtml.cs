@@ -90,6 +90,12 @@ public class SpeakerModel : PageModel
     [StringLength(1000, ErrorMessage = "That photo URL is too long.")]
     public string? PhotoUrl { get; set; }
 
+    /// <summary>
+    /// §993 — the hub's own stored copy of the photo (<c>SpeakerProfile.PhotoSharePointPath</c>),
+    /// for the PREVIEW only. Never bound: the speaker types a URL, the hub owns the copy.
+    /// </summary>
+    public string? PhotoStoredPath { get; private set; }
+
     public DateTimeOffset? LastSessionizeImportAt { get; private set; }
     public DateTimeOffset? BioLastEditedBySpeakerAt { get; private set; }
 
@@ -122,6 +128,7 @@ public class SpeakerModel : PageModel
             LinkedIn = profile.LinkedIn;
             Twitter = profile.Twitter;
             PhotoUrl = profile.PhotoUrl;
+            PhotoStoredPath = profile.PhotoSharePointPath;   // §993
             LastSessionizeImportAt = profile.LastSessionizeImportAt;
             BioLastEditedBySpeakerAt = profile.BioLastEditedBySpeakerAt;
         }
@@ -185,6 +192,8 @@ public class SpeakerModel : PageModel
         LinkedIn = profile.LinkedIn;
         Twitter = profile.Twitter;
         PhotoUrl = profile.PhotoUrl;
+        // §993 — the hub's own copy, so the preview renders it instead of an unfetchable link.
+        PhotoStoredPath = profile.PhotoSharePointPath;
         LastSessionizeImportAt = profile.LastSessionizeImportAt;
         BioLastEditedBySpeakerAt = profile.BioLastEditedBySpeakerAt;
 

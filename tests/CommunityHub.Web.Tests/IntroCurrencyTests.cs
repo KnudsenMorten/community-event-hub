@@ -42,6 +42,50 @@ public sealed class IntroCurrencyTests
     {
         [14] = "Bilingual UI — the intro itself is published in English only, so a passage about the "
              + "language switcher would be describing something the reader cannot see on the page.",
+        [85] = "Session-description drift to the public event site — a refinement of the change "
+             + "reporting the intro already describes (the hub tells you what to fix in Backstage), "
+             + "not a new capability a reader would recognise as separate. It changes WHICH "
+             + "differences are reported, which is an accuracy improvement rather than something "
+             + "the customer chooses or operates.",
+        [86] = "Prepaid coupon invoicing — an ORGANIZER-only finance workflow on "
+             + "/Organizer/CouponInvoicing (raise the draft, print the notes, chase the promo code). "
+             + "The intro is written for speakers/sponsors/volunteers/attendees, none of whom ever "
+             + "see this page or the invoice it raises.",
+        [87] = "Extending a prepaid block — the same ORGANIZER-only coupon page as §86, and a "
+             + "refinement of it rather than a separate capability. No participant role sees it.",
+        [88] = "Speaker photos rendering correctly — a defect fix, not a capability. The intro "
+             + "already describes the speaker profile and the public lineup; a passage saying the "
+             + "pictures now load would be describing the absence of a bug.",
+        [89] = "The topbar ticket countdown — site chrome the reader sees on every page of the hub "
+             + "itself, so the intro describing it would be narrating the page it is printed on.",
+        [90] = "Session-SPEAKER drift to the public event site — the §85 decision, for the sibling "
+             + "field. It is an ORGANIZER-only ops mail (info@) about what to correct in Backstage; "
+             + "no speaker, sponsor, volunteer or attendee ever sees it, and for them the outcome is "
+             + "simply that the public agenda is right, which the intro already promises.",
+        [91] = "\"Common for All Tracks\" — an ORGANIZER tick box on /Organizer/Sessions plus the "
+             + "drift check behind it. A reader of the intro sees only the RESULT (the plenary "
+             + "sessions are not filed under one track on the agenda), never the control.",
+        [92] = "Session type reaching Backstage as Keynote — the same §85/§90 class: it changes "
+             + "which differences the organizer is told about and what the create sends. The "
+             + "attendee-visible outcome is an agenda that says Keynote, which needs no passage.",
+        [95] = "The organizer sessions page — editing, speaker linking, the calculated end time and "
+             + "the test-session filter. Entirely an ORGANIZER admin surface; a speaker sees the "
+             + "RESULT (their session details are right) on their own page, which the intro covers.",
+        [96] = "Webshop coupon discounts printed on the ERP invoice — a finance document for a "
+             + "SPONSOR's accounts payable, not a hub page. No intro reader ever sees it.",
+        [97] = "Ticket-class names instead of ids — a correctness fix across organizer pages, "
+             + "invoices and ops mail. For an intro reader nothing changes: they never saw an id.",
+        [98] = "The hub owning the schedule, with no switch to reverse it — an integration "
+             + "ownership rule between the hub, the event platform and the call-for-speakers tool. "
+             + "The reader's outcome is simply that the public agenda is correct.",
+        [94] = "The 'notify requester' button — an ORGANIZER control on /Organizer/CouponInvoicing. "
+             + "The mail it sends goes to a PARTNER's billing contact, who is not a hub participant "
+             + "and never reads the intro; for everyone the intro IS written for, this changes "
+             + "nothing they can see or operate.",
+        [93] = "Prepaid coupon invoicing corrections — the §86/§87 decision again. This is the "
+             + "ORGANIZER-only /Organizer/CouponInvoicing page and the accounting draft behind it; "
+             + "no speaker, sponsor, volunteer or attendee sees the page, the invoice number or the "
+             + "unit-price field.",
     };
 
     /// <summary>

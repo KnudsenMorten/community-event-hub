@@ -91,7 +91,8 @@ public sealed class MasterClassFormService : IWizardFormService
         var mine = await _signups.GetForAttendeeAsync(eventId, a.Id, ct);
         model.Fill(
             notEligible: false,
-            await _signups.ListMasterClassesAsync(eventId, ct),
+            // Â§972 â a TEST Master Class is never offered to an attendee for selection.
+            await _signups.ListMasterClassesAsync(eventId, ct, excludeTestSessions: true),
             mine.FirstOrDefault(s => s.Status == MasterClassSignupStatus.Confirmed),
             mine.FirstOrDefault(s =>
                 s.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered));
@@ -177,7 +178,8 @@ public sealed class MasterClassFormService : IWizardFormService
         var mine = await _signups.GetForAttendeeAsync(eventId, attendeeId, ct);
         model.Fill(
             notEligible: false,
-            await _signups.ListMasterClassesAsync(eventId, ct),
+            // Â§972 â a TEST Master Class is never offered to an attendee for selection.
+            await _signups.ListMasterClassesAsync(eventId, ct, excludeTestSessions: true),
             mine.FirstOrDefault(x => x.Status == MasterClassSignupStatus.Confirmed),
             mine.FirstOrDefault(x =>
                 x.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered));

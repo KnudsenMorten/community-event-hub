@@ -51,7 +51,10 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
         SessionizeImportService import,
         SessionImportService sessions,
         SessionSourceResolver sessionSource,
-        SessionizeDisappearanceDetector? disappearance = null)
+        SessionizeDisappearanceDetector? disappearance = null,
+        // §999 — optional so every existing construction site (and test) still compiles; a null
+        // notifier means the deviations are returned in the result and simply not mailed.
+        SessionizeDeviationNotifier? deviations = null)
     {
         _client = client;
         _options = options;
@@ -59,7 +62,10 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
         _sessions = sessions;
         _sessionSource = sessionSource;
         _disappearance = disappearance;
+        _deviations = deviations;
     }
+
+    private readonly SessionizeDeviationNotifier? _deviations;
 
     /// <summary>
     /// Pull speakers from the Sessionize API and upsert them for the edition.
@@ -115,6 +121,15 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
             sessionResult = await _sessions.ImportSessionsAsync(
                 eventId, sessionFetch.Sessions, sessionFetch.LinkSpeakers,
                 sessionFetch.Warnings, ct);
+
+            // §999 — the import no longer overwrites the CEH-owned fields, so the disagreement has
+            // to be TOLD to somebody or it is simply lost. Best-effort: a mail failure must never
+            // fail the import, which has already written the content fields successfully.
+            if (_deviations is not null && sessionResult.DeviationsOrEmpty.Count > 0)
+            {
+                try { await _deviations.NotifyAsync(sessionResult.DeviationsOrEmpty, ct); }
+                catch { /* reported by the sender; the import stands */ }
+            }
         }
 
         // §58 NEVER-AUTO-DELETE disappearance alert. Compare the CEH entities LINKED to

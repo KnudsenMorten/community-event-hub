@@ -189,3 +189,41 @@
         </div>
     }
 </div>
+
+@* 🔴 §1001 — THE SPEAKER QUIET PERIOD. Operator 2026-08-09: "we make lots of schedule changes
+   and we dont want to make unnessary noice to speakers." The change is still APPLIED before this
+   date — only the e-mail is withheld — so nobody is ever looking at a stale schedule. *@
+<h2 style="margin-top:28px;">Speaker notices about room &amp; time changes</h2>
+<div class="ss-card">
+    <p class="ss-note">
+        When a session&rsquo;s <strong>room or time</strong> changes, the speakers on it are e-mailed.
+        Before the date below, <strong>no notice is sent</strong> &mdash; the change still applies
+        everywhere (the hub, the public agenda, calendar files), it is just not announced. That keeps
+        the notice worth reading while the agenda is still being built.
+    </p>
+    <form method="post" asp-page-handler="SetNoticeFrom" class="ss-grid" style="margin-top:8px;">
+        <div>
+            <label for="noticeFrom">Notices start on</label>
+            <input id="noticeFrom" type="date" name="NoticeFrom"
+                   value="@(Model.SpeakerNoticeFrom?.ToString("yyyy-MM-dd"))" />
+        </div>
+        <button type="submit">Save</button>
+    </form>
+    <p class="ss-note" style="margin-top:6px;">
+        @if (Model.SpeakerNoticeFrom is { } from)
+        {
+            <text>
+                Defaults to <strong>60 days before the event</strong>. Speakers
+                @(DateOnly.FromDateTime(DateTime.UtcNow) >= from
+                    ? "ARE being notified of room/time changes now."
+                    : $"are NOT being notified yet — notices begin {from:d MMM yyyy}.")
+            </text>
+        }
+        else
+        {
+            @* Blank is a real setting, not a missing one, so it says what it does. *@
+            <text><strong>Notices are OFF.</strong> Room and time changes apply silently until a
+            date is set here.</text>
+        }
+    </p>
+</div>
