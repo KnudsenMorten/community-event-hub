@@ -205,7 +205,12 @@ public sealed class SponsorOrderPullService
             var companyTier = BoothTier.None;
             // §299 b9: did ANY line classify as a speaking-session product? Stamped onto
             // SponsorInfo.HasSponsorSession below so the §292 session wizard step appears.
+            // 🔑 §1034 — this IS the "HasExhibitorSession" flag he asked for; it already existed
+            // under this name and 6 source files read it, so it keeps the name rather than
+            // acquiring a second one that means the same thing.
             var companyHasSession = false;
+            // 🔴 §1034 — did the company buy any SPONSORSHIP at all? See the classification below.
+            var companyIsSponsor = false;
             // §299 b10: lines no classification rule matched — surfaced to organizers.
             var unmatchedLines = new List<string>();
 
@@ -215,6 +220,21 @@ public sealed class SponsorOrderPullService
                 {
                     var cls = classifier.Classify(item.CategoriesText, item.ProductName);
                     if (cls.Kind == SponsorProductKind.Session) companyHasSession = true;
+                    // 🔴 §1034 — IS THIS A SPONSORSHIP PRODUCT, OR JUST SOMETHING THEY BOUGHT?
+                    // Operator 2026-08-10: *"we have the definitions based on the webshop products
+                    // they buy"*. Booth, session, branded feature and pre-day are sponsorships;
+                    // `Addon` (booth furniture, TV rental, extra staff tickets — and TICKET
+                    // PACKAGES, which is what a coupon customer buys) is not, and neither is a
+                    // product no rule matched. ⚠️ Unmatched deliberately does NOT make a sponsor:
+                    // it already raises an organizer action item (§299 b10), and guessing "sponsor"
+                    // from a line nobody has classified is how the coupon customer got in.
+                    if (!cls.Unmatched && cls.Kind is SponsorProductKind.Booth
+                                                  or SponsorProductKind.Session
+                                                  or SponsorProductKind.BrandedFeature
+                                                  or SponsorProductKind.PreDay)
+                    {
+                        companyIsSponsor = true;
+                    }
                     if (cls.Unmatched && !string.IsNullOrWhiteSpace(item.ProductName))
                     {
                         unmatchedLines.Add(
@@ -281,7 +301,10 @@ public sealed class SponsorOrderPullService
             if (!string.IsNullOrWhiteSpace(companyName)
                 && !companyName.Equals($"Company {companyId}", StringComparison.Ordinal))
             {
-                var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+                // 🔒 §1034 — IgnoreQueryFilters: this is the WRITER. `SponsorInfos` is filtered to
+                // sponsors, and a non-sponsor row that the filter hides would be re-Added here on
+                // every pull — a duplicate-key crash, or worse, a second row for one company.
+                var info = await _db.SponsorInfos.IgnoreQueryFilters().FirstOrDefaultAsync(
                     x => x.EventId == activeEvent.Id && x.SponsorCompanyId == companyId, ct);
                 if (info is null)
                 {
@@ -290,6 +313,14 @@ public sealed class SponsorOrderPullService
                         EventId = activeEvent.Id,
                         SponsorCompanyId = companyId,
                         CompanyName = companyName,
+                        // 🔴 §1034 — MUST be stated here, not left to the default. `IsSponsor`
+                        // defaults to TRUE (see SponsorInfo), and this name-capture path runs
+                        // BEFORE the flags upsert below — so a coupon customer whose name happens
+                        // to resolve would be created as a sponsor and then never corrected, because
+                        // the update below is deliberately raise-only. The classification above is
+                        // already known at this point; use it.
+                        IsSponsor = companyIsSponsor,
+                        IsExhibitor = companyTier != BoothTier.None,
                     });
                 }
                 else if (!string.Equals(info.CompanyName, companyName, StringComparison.Ordinal))
@@ -535,9 +566,20 @@ public sealed class SponsorOrderPullService
             // lands. None-tier orders never create a row (nothing to show yet).
             // §299 b9: a speaking-session purchase must reach SponsorInfo.HasSponsorSession
             // even when the company has NO booth tier, so the row is upserted for either.
-            if (companyTier != BoothTier.None || companyHasSession)
+            // 🔴 §1034 — A ROW FOR EVERY BUYING COMPANY, SPONSOR OR NOT.
+            //
+            // This used to be `if (companyTier != None || companyHasSession)` — "only make a row
+            // once there is something to show". ⚠️ That made the ANSWER to "is this a sponsor?" the
+            // ABSENCE of a row, which is silence: it reads identically whether the company bought
+            // only tickets, or the pull has never run, or the pull crashed. The coupon customer
+            // (company 33, measured 2026-08-10) had no row for that reason — and its contacts were
+            // still mirrored in as Role=Sponsor, because nothing consulted the classification.
+            //
+            // 🔑 Now the row is always written and `IsSponsor` carries the answer. A global query
+            // filter (see CommunityHubDbContext) keeps every existing consumer meaning SPONSORS, so
+            // widening this table does not widen the public page, the SoMe planner or the Zoho push.
             {
-                var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+                var info = await _db.SponsorInfos.IgnoreQueryFilters().FirstOrDefaultAsync(
                     s => s.EventId == activeEvent.Id
                          && s.SponsorCompanyId == companyId, ct);
                 // Derive the commercial package from the company's highest booth
@@ -554,6 +596,9 @@ public sealed class SponsorOrderPullService
                         SponsorPackage = companyPackage,
                         BoothLabel = companyBoothNumber,
                         HasSponsorSession = companyHasSession,
+                        // §1034 — the three flags, from the products (his definition).
+                        IsSponsor = companyIsSponsor,
+                        IsExhibitor = companyTier != BoothTier.None,
                     });
                 }
                 else
@@ -580,6 +625,21 @@ public sealed class SponsorOrderPullService
                     if (companyHasSession && !info.HasSponsorSession)
                     {
                         info.HasSponsorSession = true;
+                        changed = true;
+                    }
+
+                    // 🔒 §1034 — RAISE-ONLY, exactly like the tier and the session flag above, and
+                    // for the same reason: an organizer who marks a company a sponsor by hand must
+                    // survive the next pull. A withdrawal is an organizer action, never a silent
+                    // re-classification — the same rule §299 b9 already set for refunds.
+                    if (companyIsSponsor && !info.IsSponsor)
+                    {
+                        info.IsSponsor = true;
+                        changed = true;
+                    }
+                    if (companyTier != BoothTier.None && !info.IsExhibitor)
+                    {
+                        info.IsExhibitor = true;
                         changed = true;
                     }
                     if (changed) info.UpdatedAt = DateTimeOffset.UtcNow;
@@ -712,6 +772,11 @@ public sealed class SponsorOrderPullService
                     companyIdStr);
                 continue;
             }
+            // 🔑 §1034b — the "is this a sponsor?" gate is NOT repeated here. It lives inside
+            // `SponsorContactSyncService.SyncCompanyAsync`, which is what stamps `Role = Sponsor`
+            // and has FOUR callers — three of them organizer pages. A gate at this call site was
+            // the first attempt and it was measured wrong the same hour: the coupon customer he
+            // reported has no completed webshop order at all, so it never comes through here.
             try
             {
                 var result = await _contactSync.SyncCompanyAsync(activeEvent.Id, companyIdInt, ct);

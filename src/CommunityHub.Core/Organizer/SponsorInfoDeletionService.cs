@@ -94,7 +94,9 @@ public sealed class SponsorInfoDeletionService
     public async Task<DeletionResult> DeleteAsync(
         int eventId, int sponsorInfoId, CancellationToken ct = default)
     {
-        var info = await _db.SponsorInfos
+        // 🔒 §1034 — deletion must reach a NON-sponsor row too: a coupon customer's row is exactly
+        // the kind an organizer may want to remove, and the sponsor filter would report it missing.
+        var info = await _db.SponsorInfos.IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.Id == sponsorInfoId && s.EventId == eventId, ct);
         if (info is null)
         {

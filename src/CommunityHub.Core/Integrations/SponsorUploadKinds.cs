@@ -108,11 +108,12 @@ public static class SponsorUploadKinds
     {
         if (kind is "some" or "print")
         {
-            var info = await db.SponsorInfos
+            // 🔒 §1034 — upsert: bypass the sponsor filter or a hidden row becomes a duplicate.
+            var info = await db.SponsorInfos.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
             if (info is null)
             {
-                info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId };
+                info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId, IsSponsor = true };
                 db.SponsorInfos.Add(info);
             }
 

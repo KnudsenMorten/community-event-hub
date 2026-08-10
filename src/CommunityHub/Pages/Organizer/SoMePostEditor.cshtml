@@ -18,6 +18,29 @@
     .btn.primary:hover { background:#16276a; }
     .btn[aria-disabled="true"] { background:#c8ccd4; cursor:default; }
 
+    /* 🔴 §1048 — THE THREE POST ACTIONS, LAID OUT ONCE INSTEAD OF THREE MARGIN HACKS.
+       Operator 2026-08-10: "too cramped". The buttons were three sibling forms each asking
+       for `margin-top:10px`, and the middle one ALSO carried `display:inline` — on which
+       ⚠️ Do NOT write a literal tag in angle brackets in this comment: Razor parses tag helpers
+       inside a style block too, and it fails the BUILD with "malformed 'form' tag helper".
+       margin-top does nothing at all. So Duplicate sat flush against Accept & approve while
+       Delete, a block, kept its gap: the one control between them lost its air, which is
+       exactly what the screenshot shows. A flex column owns the spacing now, so no form has
+       to ask, and the gap cannot depend on a display mode set for an unrelated reason. */
+    .post-actions { display:flex; flex-direction:column; gap:12px; margin-top:14px; }
+    .post-actions > form { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:0; }
+    /* One column width so the three buttons form an edge and the descriptions start together.
+       min() so 360px does not overflow — the description wraps under instead. */
+    .post-actions > form > .btn { min-width:min(196px, 100%); }
+    .post-actions .muted { flex:1 1 260px; min-width:0; }
+
+    /* §1048 — `btn-ghost` was USED on this page and defined only inside SoMeQueue.cshtml's own
+       <style>, so it did nothing here and Duplicate rendered solid blue: visually identical to
+       the destructive Delete beside it. Same class of defect as §865.1 above — a class that
+       exists on one page in this area and not the next. */
+    .btn.btn-ghost { background:#eef2f7; color:#1f2937; }
+    .btn.btn-ghost:hover, .btn.btn-ghost:focus { background:#dde5ef; color:#1f2937; }
+
     /* §865.2(1) — the walk. He asked FOUR times; it is the most-used control on the page. */
     .walk-btn { min-width:170px; min-height:56px; font-size:1.1rem; }
 
@@ -270,8 +293,12 @@
             </p>
         }
 
+        @* §1048 — the three actions share ONE spacing rule (.post-actions), instead of each form
+           carrying its own margin-top and one of them silently losing it to display:inline. *@
+        <div class="post-actions">
+
         @* The accept / hand-back action, beside the state it changes. *@
-        <form method="post" asp-page-handler="SetPlanState" style="margin-top:10px;">
+        <form method="post" asp-page-handler="SetPlanState">
             <input type="hidden" name="id" value="@post.Id" />
             @* 🔴 §887.1 — THE THIRD STATE, and the one he was actually stuck in. The two axes can
                disagree: a post accepted under the OLD code got its slot locked and was never
@@ -316,7 +343,9 @@
            🔒 The copy is HELD, unscheduled-in-spirit and belongs to no subject — the confirmation
            says so, because "duplicate" could reasonably be read as "a second live copy of this
            post" and it is not: its variables are flattened to the words they read today. *@
-        <form method="post" asp-page-handler="Duplicate" style="margin-top:10px;display:inline;"
+        @* §1048 — `display:inline` removed. It silently killed this form's own `margin-top`, which
+           is why THIS button was the cramped one. Spacing belongs to .post-actions now. *@
+        <form method="post" asp-page-handler="Duplicate"
               onsubmit="return confirm('Duplicate this post?\n\nThe copy is yours to edit and is held for approval. Its text is copied as WORDS — the variables are filled in as they read today — because a copy belongs to no session or sponsor.');">
             <input type="hidden" name="id" value="@post.Id" />
             <button type="submit" class="btn btn-ghost">Duplicate this post</button>
@@ -324,7 +353,7 @@
 
         @* §853 — delete. A soft delete: the row survives so the planner will not re-propose the
            subject, since it re-plans its own proposals every run. *@
-        <form method="post" asp-page-handler="Delete" style="margin-top:10px;"
+        <form method="post" asp-page-handler="Delete"
               onsubmit="return confirm('Delete this post? The planner will not propose it again. You can restore it afterwards.');">
             <input type="hidden" name="id" value="@post.Id" />
             <input type="hidden" name="restore" value="false" />
@@ -343,6 +372,8 @@
                 }
             </span>
         </form>
+
+        </div>@* /.post-actions — §1048 *@
 
         @if (post.Status == CommunityHub.Core.Domain.SoMePostStatus.Published)
         {

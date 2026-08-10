@@ -7,11 +7,13 @@ namespace CommunityHub.Core.Integrations;
 
 /// <summary>What one auto-approval pass did — the numbers the Jobs page and the log both show.</summary>
 /// <param name="Approved">Posts turned on.</param>
-/// <param name="TooSoon">Skipped: inside the lead window (or already past). The §889.1 guard.</param>
+/// <param name="NotYetDue">§1030 — skipped: NOT YET DUE, or already overdue (the §889.1 guard).
+/// ⚠️ This was <c>TooSoon</c> until §1030 inverted the rule; the old name described the old
+/// comparison and would have taught it to the next reader.</param>
 /// <param name="Blocked">Skipped: the approval gate refused — a dependency is missing.</param>
 /// <param name="Message">One sentence for a human.</param>
 public sealed record SoMeAutoApproveResult(
-    int Approved, int TooSoon, int Blocked, string Message);
+    int Approved, int NotYetDue, int Blocked, string Message);
 
 /// <summary>
 /// §918 — APPROVE THE TEMPLATE-BUILT POSTS AUTOMATICALLY, under three guards.
@@ -22,11 +24,25 @@ public sealed record SoMeAutoApproveResult(
 /// concerns were about HOW, and each became a guard below.</para>
 ///
 /// <list type="number">
-/// <item>🔴 <b>NOTHING PAST-DATED, AND NOTHING IMMINENT.</b> §889.1 already happened once: he
-/// approved #495, its 09:00 slot had passed, and it published <b>thirty seconds later</b>. Approving
-/// a whole queue would do that to every post whose time has gone by — a burst of publications with
-/// no chance to look. A post must be at least <see cref="SoMeSettings.AutoApproveLeadDays"/> away,
-/// which doubles as the window in which he can still catch one.</item>
+/// <item>🔴 <b>§1030 — APPROVE ONLY AS IT COMES DUE: inside the window, and never past-dated.</b>
+/// Operator 2026-08-10: <i>"they must follow principles about first become eligble (deliver things
+/// like some text) + become auto-approved when it reaches the time"</i>.
+///
+/// <para>⚠️ <b>This INVERTS the original guard, which approved everything MORE than
+/// <see cref="SoMeSettings.AutoApproveLeadDays"/> away and left the near-term posts for him.</b>
+/// Measured 2026-08-10: that had auto-approved <b>29 posts 24–169 days out</b>, all still
+/// <c>PlanState.Proposed</c> — so posts he had never accepted into the plan were approved months
+/// ahead, while the ones about to run waited for a click. He read the page and could not reconcile
+/// it with the rule he thought he had asked for. He was right; the code was the wrong way round.</para>
+///
+/// <para>🔒 <b>The past-dated half of the old guard is KEPT, and it is not optional.</b> §889.1
+/// happened once already: he approved #495 after its 09:00 slot had passed and it published
+/// <b>thirty seconds later</b>. So the rule is a WINDOW — due within the lead time, and not yet
+/// overdue — rather than a single comparison. An overdue post still waits for a human, because
+/// approving one is indistinguishable from publishing it.</para>
+///
+/// <para>🔑 The plan also stays movable for longer, which is what <c>Proposed</c> is for: a post
+/// far out is no longer frozen by an approval nobody asked for.</para></item>
 ///
 /// <item>🔒 <b>THE APPROVAL GATE STILL APPLIES.</b> <see cref="SoMeApprovalGate"/> refuses a sponsor
 /// or tier post whose company has not delivered its social text or logo (§850/§865.4). Auto-approve
@@ -82,11 +98,12 @@ public sealed class SoMeAutoApproveService
             return new SoMeAutoApproveResult(0, 0, 0, "Auto-approval is off — every post waits for you.");
         }
 
-        // 🔒 A zero or negative lead would defeat guard 1 entirely, so it is floored rather than
-        // trusted: a misconfigured field must not become "publish everything now".
+        // 🔒 A zero or negative lead is floored: a misconfigured field must never widen the window
+        // to "everything", in either direction.
         var leadDays = Math.Max(1, settings.AutoApproveLeadDays);
         var now = _clock.GetUtcNow();
-        var earliest = now.AddDays(leadDays);
+        // §1030 — the WINDOW: due within `leadDays`, and not already overdue.
+        var dueBy = now.AddDays(leadDays);
 
         var candidates = await _db.SoMePosts
             .Where(p => p.EventId == eventId
@@ -100,16 +117,28 @@ public sealed class SoMeAutoApproveService
             .ToListAsync(ct);
 
         var approved = 0;
-        var tooSoon = 0;
+        var notYet = 0;
         var blocked = 0;
 
         foreach (var post in candidates)
         {
-            // Guard 1 — far enough out. Covers past-dated posts too: they are not "soon", they are
-            // already overdue, and approving one publishes it on the next dispatch tick.
-            if (post.ScheduledAtUtc < earliest)
+            // Guard 1 (§1030) — the WINDOW.
+            //
+            // 🔴 OVERDUE STAYS WITH A HUMAN. §889.1: approving a post whose slot has passed
+            // publishes it on the next dispatch tick — thirty seconds, in the incident. That is
+            // indistinguishable from pressing publish, so a rule may never do it.
+            if (post.ScheduledAtUtc <= now)
             {
-                tooSoon++;
+                notYet++;
+                continue;
+            }
+
+            // Not due yet — it stays PLANNED and the plan stays movable. This is the half that was
+            // inverted: it used to be the condition for approving, and is now the condition for
+            // waiting.
+            if (post.ScheduledAtUtc > dueBy)
+            {
+                notYet++;
                 continue;
             }
 
@@ -127,15 +156,17 @@ public sealed class SoMeAutoApproveService
 
         if (approved > 0) await _db.SaveChangesAsync(ct);
 
+        // §1030 — the sentence describes the WINDOW, or it teaches the old rule to whoever reads it.
         var message =
-            $"Auto-approved {approved} post(s) scheduled more than {leadDays} day(s) out. "
-            + $"{tooSoon} left for you (too soon or overdue), {blocked} waiting on a missing dependency.";
+            $"Auto-approved {approved} post(s) due within {leadDays} day(s). "
+            + $"{notYet} not yet due (or already overdue — those stay with you), "
+            + $"{blocked} waiting on a missing dependency.";
 
         _log?.LogInformation(
-            "§918 auto-approve: {Approved} approved, {TooSoon} too soon, {Blocked} blocked "
+            "§1030 auto-approve: {Approved} approved, {NotYet} not yet due, {Blocked} blocked "
             + "(lead {LeadDays}d, event {EventId}).",
-            approved, tooSoon, blocked, leadDays, eventId);
+            approved, notYet, blocked, leadDays, eventId);
 
-        return new SoMeAutoApproveResult(approved, tooSoon, blocked, message);
+        return new SoMeAutoApproveResult(approved, notYet, blocked, message);
     }
 }

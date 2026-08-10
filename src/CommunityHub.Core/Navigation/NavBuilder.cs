@@ -587,7 +587,17 @@ public static class NavBuilder
             items.Add(new("/Sponsor/Tasks", "Nav.SponsorTasks"));
             // §837 — the posts CEH will publish about this sponsor: their company, their tier and
             // their sessions, each with the preview and the date it runs on LinkedIn.
-            items.Add(new("/Sponsor/Announcements", "Nav.SponsorAnnouncements"));
+            //
+            // 🔴 §1027 (operator 2026-08-10: *"wrong placement of SoMe announcement - should go into
+            // exhibibitor & booth details"*) — for an EXHIBITOR this moves INTO that fold-out
+            // (added with the other booth leaves below). It is exactly the §489 shape, which did
+            // the same for Attendee Telemetry, INCLUDING the reason it is conditional: a
+            // digital-only sponsor has NO booth fold-out, so for them it must stay top-level or
+            // the page disappears from the menu entirely.
+            if (!isExhibitor)
+            {
+                items.Add(new("/Sponsor/Announcements", "Nav.SponsorAnnouncements"));
+            }
 
             // §135 (operator 2026-06-27): the booth run-of-show (key dates & times) is now a
             // LEAF inside the SHARED "Event logistics" fold-out (Nav.SectionEventLogistics) —
@@ -670,6 +680,11 @@ public static class NavBuilder
             if (role == ParticipantRole.Sponsor && isExhibitor)
             {
                 items.Add(new("/Sponsor/Telemetry", "Nav.AttendeeTelemetry",
+                    SectionKey: "Nav.SectionExhibitorBooth"));
+                // §1027 — and the social announcements, immediately after telemetry. Both are
+                // "what the event is doing FOR you", which is why they belong together and why
+                // neither reads as a top-level action the sponsor has to take.
+                items.Add(new("/Sponsor/Announcements", "Nav.SponsorAnnouncements",
                     SectionKey: "Nav.SectionExhibitorBooth"));
             }
         }

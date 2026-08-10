@@ -22,6 +22,15 @@
         new HubTile("/Organizer/ActionQueue", Localizer["Nav.OrgActionQueue"].Value, Localizer["OrgPeople.ActionQueue"].Value, "onboarding-step-reset"),
         new HubTile("/Organizer/WelcomeLinks", "Welcome sign-in links", "Review and revoke welcome auto-login links the hub has issued.", "magic-link"),
         new HubTile("/Organizer/AccessLinks", "Permanent sign-in links", "Standing one-click sign-in links.", "magic-link"),
+
+        @* §1040 — sits beside the two sign-in-link tiles on purpose: all three ISSUE A LINK that
+           works without a login, and all three need the same three questions answered on one page —
+           who does it cover, when does it expire, and how do I withdraw it.
+           🔑 Placed here rather than left routable-only: §1042 (today) was the operator reporting a
+           control as MISSING when it existed two clicks away behind a card named for something else.
+           A page nobody can find is worth what a page that does not exist is worth. *@
+        new HubTile("/Organizer/AttendeeMonitors", "Volume package monitors",
+            "Share a live list of who has bought a ticket — by e-mail domain or coupon code — with the company that bought the block. A secure link, no login, revocable, with an Excel export."),
         // §501 (operator 2026-07-28: "i cannot find the 2 buttons… move them under People category,
         // as it make sense to have them there"). Both manage PEOPLE — sponsor contacts and their
         // roles — but sat on the Sponsor Admin hub, filed by which COMPANY they belong to rather

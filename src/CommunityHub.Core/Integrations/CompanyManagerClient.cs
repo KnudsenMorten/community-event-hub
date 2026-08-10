@@ -97,10 +97,32 @@ public sealed class CompanyManagerClient
     private readonly HttpClient _http;
     private readonly CompanyManagerOptions _options;
 
-    public CompanyManagerClient(HttpClient http, CompanyManagerOptions options)
+    /// <summary>
+    /// 🔴 §1041 — THE WRITE GUARD, WHICH THIS CLIENT DID NOT HAVE.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-10, on a DEV run reporting 53 billing updates: <i>"this is a service
+    /// that runs in dev that sync from erp to webshop = write permissions. it is not allowed to do
+    /// that"</i>. He was right, and the cause was not a misconfiguration — <b>this client was never
+    /// wired to the guard at all.</b> §340-H covered Zoho, e-conomic, LinkedIn and SharePoint;
+    /// Company Manager (the WordPress webshop) was simply missed, so its three write methods were
+    /// reachable from ANY host that had the credentials.</para>
+    ///
+    /// <para>⚠️ <b>DEV and PROD share ONE Company Manager</b> (<c>CompanyManager__BaseUrl</c> is
+    /// identical on all four app services), so an unguarded write here lands on the live webshop —
+    /// exactly the class of damage §612's ceiling exists to prevent for Zoho.</para>
+    ///
+    /// <para>🔑 Optional, defaulting to allow-all, so the many places that construct this client in
+    /// tests and legacy paths are unchanged — the same shape the other guarded clients use.</para>
+    /// </remarks>
+    private readonly IExternalWriteGuard _writes;
+
+    public CompanyManagerClient(
+        HttpClient http, CompanyManagerOptions options, IExternalWriteGuard? writes = null)
     {
         _http = http;
         _options = options;
+        _writes = writes ?? new AllowAllExternalWrites();
 
         // WordPress application password is HTTP Basic.
         var creds = Convert.ToBase64String(Encoding.ASCII.GetBytes(
@@ -174,6 +196,11 @@ public sealed class CompanyManagerClient
     public async Task<bool> UpdateCompanyAsync(
         int companyId, IReadOnlyDictionary<string, object?> fields, CancellationToken ct = default)
     {
+        // 🔴 §1041 — DEV MUST NOT WRITE TO THE SHARED WEBSHOP. This is the call that reported
+        // "53 BILLING updated" from a DEV run against the live Company Manager.
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(UpdateCompanyAsync), ct))
+            return false;
+
         var url = $"{_options.BaseUrl.TrimEnd('/')}/companies/{companyId}";
         // UTF-8 JSON so Danish æøå survive (WordPress is charset-sensitive).
         var json = JsonSerializer.Serialize(fields);
@@ -225,6 +252,10 @@ public sealed class CompanyManagerClient
     public async Task<int> CreateUserAsync(
         string email, string firstName, string lastName, int? companyId, CancellationToken ct = default)
     {
+        // 🔴 §1041 — creating a real webshop USER from DEV would be worse than a billing edit.
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(CreateUserAsync), ct))
+            return 0;
+
         var local = (email ?? string.Empty).Split('@')[0];
         var body = new Dictionary<string, object?>
         {
@@ -249,6 +280,10 @@ public sealed class CompanyManagerClient
     /// <summary>POST link an existing user to a company (companies/{id}/users {user_id}).</summary>
     public async Task<bool> LinkUserToCompanyAsync(int companyId, int userId, CancellationToken ct = default)
     {
+        // 🔴 §1041 — the third write on this client. All three, or the guard is decorative.
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(LinkUserToCompanyAsync), ct))
+            return false;
+
         var url = $"{_options.BaseUrl.TrimEnd('/')}/companies/{companyId}/users";
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {

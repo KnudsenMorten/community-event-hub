@@ -7,16 +7,28 @@ using Xunit;
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// §918 — AUTO-APPROVAL, AND THE THREE GUARDS IT MUST NOT BREAK.
+/// §918/§1030 — AUTO-APPROVAL, AND THE THREE GUARDS IT MUST NOT BREAK.
 /// </summary>
 /// <remarks>
 /// <para>Operator 2026-08-06: <i>"as they run from the templates, i see no reason why we should not
 /// auto-approve them, concerns?"</i> — with 79 posts held and 1 approved, clicking each was not a
 /// workflow. The concerns were about HOW, and each is a test here.</para>
 ///
-/// <para>🔴 The first guard is the one with history: §889.1 saw him approve #495 whose 09:00 slot
-/// had already passed, and it published <b>thirty seconds later</b>. Without a lead time,
-/// auto-approving a queue does that to every overdue post at once.</para>
+/// <para>🔴 <b>§1030 (2026-08-10) INVERTED guard 1, and these tests were rewritten with it.</b> They
+/// are not stale tests that were deleted — each one described the OLD comparison correctly, so each
+/// was re-pointed at the new window. The rule is now: approve only when
+/// <c>now &lt; ScheduledAtUtc &lt;= now + leadDays</c> — <i>"become auto-approved when it reaches the
+/// time"</i>. The old code approved everything MORE than the lead away, which had auto-approved 29
+/// posts 24–169 days out while the imminent ones waited for a click.</para>
+///
+/// <para>🔒 The past-dated half of the guard survived the inversion and is not optional: §889.1 saw
+/// him approve #495 whose 09:00 slot had already passed, and it published <b>thirty seconds
+/// later</b>. Approving an overdue post is indistinguishable from publishing it.</para>
+///
+/// <para>⚠️ Every fixture below is scheduled <b>inside</b> the window on purpose. Under the old rule
+/// they sat 30 days out; after the inversion that is "not yet due", which would have made the
+/// switched-off / edited / Type-5 / published / blocked tests pass for the wrong reason — green
+/// without ever reaching the guard they name.</para>
 /// </remarks>
 public sealed class SoMeAutoApproveTests
 {
@@ -59,7 +71,7 @@ public sealed class SoMeAutoApproveTests
     {
         using var db = NewDb();
         await SeedAsync(db, enabled: false);
-        db.SoMePosts.Add(Planned(Now.AddDays(30)));
+        db.SoMePosts.Add(Planned(Now.AddDays(3)));   // due — the switch is the only thing stopping it
         await db.SaveChangesAsync();
 
         var result = await NewService(db).RunAsync(EventId);
@@ -68,12 +80,13 @@ public sealed class SoMeAutoApproveTests
         Assert.All(await db.SoMePosts.ToListAsync(), p => Assert.False(p.IsActive));
     }
 
+    /// <summary>🔑 §1030 — the post has reached its time. This is when a rule may approve it.</summary>
     [Fact]
-    public async Task A_post_far_enough_ahead_is_approved()
+    public async Task A_post_due_inside_the_window_is_approved()
     {
         using var db = NewDb();
-        await SeedAsync(db);
-        db.SoMePosts.Add(Planned(Now.AddDays(30)));
+        await SeedAsync(db, leadDays: 7);
+        db.SoMePosts.Add(Planned(Now.AddDays(3)));
         await db.SaveChangesAsync();
 
         var result = await NewService(db).RunAsync(EventId);
@@ -95,22 +108,49 @@ public sealed class SoMeAutoApproveTests
         var result = await NewService(db).RunAsync(EventId);
 
         Assert.Equal(0, result.Approved);
-        Assert.Equal(1, result.TooSoon);
+        Assert.Equal(1, result.NotYetDue);
         Assert.False((await db.SoMePosts.FirstAsync()).IsActive);
     }
 
+    /// <summary>
+    /// 🔴 §1030 — the inversion itself. A post months out stays PLANNED: he has not accepted it into
+    /// the plan yet, and an approval nobody asked for freezes something still meant to move.
+    /// </summary>
     [Fact]
-    public async Task A_post_inside_the_lead_window_is_left_for_him()
+    public async Task A_post_not_yet_due_is_left_planned()
     {
         using var db = NewDb();
         await SeedAsync(db, leadDays: 7);
-        db.SoMePosts.Add(Planned(Now.AddDays(3)));   // sooner than the lead
+        db.SoMePosts.Add(Planned(Now.AddDays(30)));   // further out than the lead
         await db.SaveChangesAsync();
 
         var result = await NewService(db).RunAsync(EventId);
 
         Assert.Equal(0, result.Approved);
-        Assert.Equal(1, result.TooSoon);
+        Assert.Equal(1, result.NotYetDue);
+        Assert.False((await db.SoMePosts.FirstAsync()).IsActive);
+    }
+
+    /// <summary>
+    /// The far edge, pinned: the lead day itself is inside the window, a minute past it is not.
+    /// ⚠️ Written because the old rule's boundary was the same instant with the opposite meaning —
+    /// an off-by-one here is silent and re-approves the whole backlog.
+    /// </summary>
+    [Fact]
+    public async Task The_far_edge_of_the_window_is_inclusive()
+    {
+        using var db = NewDb();
+        await SeedAsync(db, leadDays: 7);
+        db.SoMePosts.Add(Planned(Now.AddDays(7)));                    // exactly due-by
+        db.SoMePosts.Add(Planned(Now.AddDays(7).AddMinutes(1)));      // one minute too early
+        await db.SaveChangesAsync();
+
+        var result = await NewService(db).RunAsync(EventId);
+
+        Assert.Equal(1, result.Approved);
+        Assert.Equal(1, result.NotYetDue);
+        Assert.True((await db.SoMePosts.OrderBy(p => p.ScheduledAtUtc).FirstAsync()).IsActive);
+        Assert.False((await db.SoMePosts.OrderByDescending(p => p.ScheduledAtUtc).FirstAsync()).IsActive);
     }
 
     /// <summary>
@@ -122,7 +162,7 @@ public sealed class SoMeAutoApproveTests
     {
         using var db = NewDb();
         await SeedAsync(db);
-        var post = Planned(Now.AddDays(30));
+        var post = Planned(Now.AddDays(3));   // due — his words are the only thing stopping it
         post.ManualTextOverride = "my own words";
         db.SoMePosts.Add(post);
         await db.SaveChangesAsync();
@@ -139,7 +179,7 @@ public sealed class SoMeAutoApproveTests
     {
         using var db = NewDb();
         await SeedAsync(db);
-        db.SoMePosts.Add(Planned(Now.AddDays(30), SoMeTemplateKind.EventPost));
+        db.SoMePosts.Add(Planned(Now.AddDays(3), SoMeTemplateKind.EventPost));   // due; Type 5 anyway
         await db.SaveChangesAsync();
 
         var result = await NewService(db).RunAsync(EventId);
@@ -162,7 +202,8 @@ public sealed class SoMeAutoApproveTests
             SponsorPackage = SponsorPackage.Gold,
             SocialMediaIntro = null,          // owes their text
         });
-        var post = Planned(Now.AddDays(30), SoMeTemplateKind.Sponsor);
+        // 🔑 Due inside the window, so the GATE is what stops it — not the clock.
+        var post = Planned(Now.AddDays(3), SoMeTemplateKind.Sponsor);
         post.SubjectKey = "sponsor:co-9";
         post.SponsorCompanyId = "co-9";
         db.SoMePosts.Add(post);
@@ -176,21 +217,25 @@ public sealed class SoMeAutoApproveTests
     }
 
     /// <summary>
-    /// ⚠️ A zero lead would mean "approve what is due now" — the very burst guard 1 exists to stop.
-    /// Floored, so a misconfigured field cannot express it.
+    /// ⚠️ A zero or negative lead is floored to one day rather than obeyed — a misconfigured field
+    /// must not decide the window. Post-§1030 the flooring reads the other way round: an obeyed zero
+    /// would collapse the window to nothing and approve <i>none</i> of them, so what this pins is
+    /// that the floor is applied at all, and that the resulting window is exactly one day.
     /// </summary>
     [Fact]
     public async Task A_zero_lead_is_floored_rather_than_obeyed()
     {
         using var db = NewDb();
         await SeedAsync(db, leadDays: 0);
-        db.SoMePosts.Add(Planned(Now.AddHours(2)));   // due today
+        db.SoMePosts.Add(Planned(Now.AddHours(2)));   // inside the floored 1-day window
+        db.SoMePosts.Add(Planned(Now.AddDays(2)));    // outside it — the floor is 1 day, not 2
         await db.SaveChangesAsync();
 
         var result = await NewService(db).RunAsync(EventId);
 
-        Assert.Equal(0, result.Approved);
-        Assert.Equal(1, result.TooSoon);
+        Assert.Equal(1, result.Approved);
+        Assert.Equal(1, result.NotYetDue);
+        Assert.True((await db.SoMePosts.OrderBy(p => p.ScheduledAtUtc).FirstAsync()).IsActive);
     }
 
     [Fact]
@@ -198,7 +243,9 @@ public sealed class SoMeAutoApproveTests
     {
         using var db = NewDb();
         await SeedAsync(db);
-        var post = Planned(Now.AddDays(30));
+        // Due inside the window on purpose, so STATUS is what excludes it rather than the clock;
+        // the slot then moved out (a re-schedule after publication), which is why the two disagree.
+        var post = Planned(Now.AddDays(3));
         post.Status = SoMePostStatus.Published;
         post.PublishedAtUtc = Now.AddDays(-1);
         db.SoMePosts.Add(post);

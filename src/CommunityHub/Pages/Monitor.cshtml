@@ -1,0 +1,94 @@
+@page "/monitor/{token}"
+@model CommunityHub.Pages.MonitorModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = Model.Monitor?.Name ?? "Tickets";
+    Layout = "_Layout";
+}
+
+@* 🔒 §1040 — a link pasted into a public thread must not become a search result. Defence against
+   the accident, not against an attacker — the token is what defends against the attacker. *@
+@section Head {
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+}
+
+<div class="card">
+    <h1>@Model.Monitor?.Name</h1>
+    <p class="muted">
+        Tickets bought for <strong>@Model.EventName</strong>
+        @if (Model.Monitor is { } m)
+        {
+            @: —
+            @(m.Kind == AttendeeMonitorKind.EmailDomain
+                ? $"everyone registered with an @{m.Value} e-mail address"
+                : $"everyone whose ticket used the code {m.Value}")
+        }
+        . Cancelled tickets are not shown. This page updates by itself as more tickets are bought.
+    </p>
+
+    <p style="margin-top:12px;">
+        <a class="btn primary" asp-page-handler="Export" asp-route-token="@Model.Monitor?.Token"
+           style="text-decoration:none;">⬇ Export to Excel</a>
+    </p>
+</div>
+
+<div class="card">
+    <h2>@Model.Rows.Count ticket(s)</h2>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="muted">
+            No tickets yet. They appear here automatically once someone buys one — there is nothing
+            to refresh or set up.
+        </p>
+    }
+    else
+    {
+        @* Mobile-first: the table scrolls inside its own box rather than pushing the page sideways. *@
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:720px;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:8px 6px;">Bought</th>
+                        <th style="padding:8px 6px;">Name</th>
+                        <th style="padding:8px 6px;">Company</th>
+                        <th style="padding:8px 6px;">E-mail</th>
+                        <th style="padding:8px 6px;">Order</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var a in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #f0f0f0;">
+                        <td style="padding:8px 6px;white-space:nowrap;">
+                            @(a.BoughtAt is { } b ? b.ToString("d MMM yyyy") : "—")
+                        </td>
+                        <td style="padding:8px 6px;">@a.FirstName @a.LastName</td>
+                        <td style="padding:8px 6px;">@(string.IsNullOrWhiteSpace(a.Company) ? "—" : a.Company)</td>
+                        <td style="padding:8px 6px;"><a href="mailto:@a.Email">@a.Email</a></td>
+                        <td style="padding:8px 6px;white-space:nowrap;">
+                            <code style="font-size:12px;">@a.OrderId</code>
+                            @if (!string.IsNullOrWhiteSpace(a.BuyerName))
+                            {
+                                <br />
+                                <span class="muted" style="font-size:12px;">by @a.BuyerName</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="card">
+    <p class="muted" style="font-size:13px;margin:0;">
+        This is a private link shared with you by the organizers. Please do not forward it — it shows
+        personal details of the people holding these tickets.
+        @if (Model.Monitor?.ExpiresAt is { } exp)
+        {
+            <text> It stops working on @exp.ToString("d MMMM yyyy").</text>
+        }
+    </p>
+</div>

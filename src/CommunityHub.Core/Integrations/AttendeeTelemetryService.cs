@@ -390,9 +390,26 @@ public sealed class AttendeeTelemetryService
         tables.Add(new("Resident of Attendee", Slices(a => Norm(a.Country ?? a.CountryCode))));
         var roles = Slices(a => Norm(a.JobTitle), dropBlank: true);
         if (roles.Count > 0) tables.Add(new("Job role of attendees", roles));
-        // §69 — "Top companies" reveals which companies' people are registered, so it is
-        // ORGANIZER-ONLY. Defense-in-depth: only assemble it for an organizer caller; for
-        // public/sponsor callers the aggregate is never built (not just hidden at render).
+        // 🛑 §1052 — "Top companies" IS ORGANIZER-ONLY, AND THAT IS SETTLED. DO NOT REMOVE IT.
+        //
+        // Operator 2026-08-10, in one exchange: *"we cannot expose company names due to gdpr - this
+        // is public page (remove)"* → measured → *"i confirm it what you wrote"* → *"organizers is
+        // ok to see it, reverse"* → **"everybody must be able to see the page, but nobody except
+        // organizers can see top companies"**. That final sentence is the requirement, and it is
+        // EXACTLY what §69 already implemented. The table was briefly deleted and restored.
+        //
+        // 🔑 THE REPORT WAS REAL; THE DIAGNOSIS WAS THE PAGE'S OWN BLURB. All three telemetry
+        // surfaces share this panel and the same H1 "Who's coming to Experts Live Denmark", so the
+        // only thing distinguishing them was the organizer page's claim of parity — "Same figures as
+        // the public sponsor telemetry page" — which was FALSE precisely because of this table.
+        // Seeing company names under that sentence is a correct inference from a wrong premise.
+        // ⇒ The fix was the sentence, not the feature. Fixing the data would have destroyed a
+        // capability to correct a caption.
+        //
+        // MEASURED on PROD the same day, and the reason the removal was reversed: an anonymous GET
+        // of /attendee-telemetry returned 200 with no "Top companies" and zero occurrences of
+        // "compan" in the body. Both /attendee-telemetry and /Sponsor/Telemetry hard-code
+        // isOrganizer:false, so the aggregate is never CONSTRUCTED for them — not merely hidden.
         if (isOrganizer)
         {
             var companies = Slices(a => Norm(a.CompanyName), top: 15, dropBlank: true);

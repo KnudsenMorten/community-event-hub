@@ -38,6 +38,35 @@ public static class TravelReimbursementPolicy
             || string.Equals(c, "Danmark", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// §1054 — the task/source-key prefix of the travel claim, so Core can RECOGNISE that task
+    /// without referencing the web project.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>Must stay equal to <c>TravelFormService.SubmitInvoiceTaskKey</c></b>, which lives in the
+    /// web assembly and cannot be referenced from here. A rename on either side unbinds the
+    /// reminder gate SILENTLY — the mail would simply start going out again — so
+    /// <c>TravelTaskKeyPrefixMatchesTests</c> pins the two strings against each other. Same failure
+    /// shape as §1037's system names, and §767's guessed convention.
+    /// </remarks>
+    public const string TaskKeyPrefix = "travel:submit-ticket-invoice";
+
+    /// <summary>
+    /// §1054 — may we MAIL this speaker about their travel claim yet?
+    /// </summary>
+    /// <remarks>
+    /// <para><b>False while the country is unknown.</b> §143 deliberately treats a blank country as
+    /// non-Denmark so the TASK is offered rather than silently withheld — that protection stays.
+    /// This governs only the E-MAIL, because a task can be removed when the speaker answers and a
+    /// sent mail cannot: a Danish speaker received "Submit travel reimbursement" before ever being
+    /// asked where they live (operator 2026-08-10).</para>
+    ///
+    /// <para>🔑 Once a country IS set, Denmark is already filtered upstream by the deadline's
+    /// <c>nonDenmarkOnly</c> flag, so anything that reaches the mail gate with a country is
+    /// legitimately non-Danish. This method therefore asks only "do we know yet?".</para>
+    /// </remarks>
+    public static bool MayEmailClaim(string? country) => !string.IsNullOrWhiteSpace(country);
+
     /// <summary>The explanation shown wherever the claim is withheld — one wording, one place.</summary>
     public const string NotEligibleMessage =
         "Travel reimbursement is for speakers travelling to Copenhagen from outside Denmark, "

@@ -638,8 +638,10 @@ public static class JobsServiceRegistration
         services.AddSingleton(externalWriteOptions);
         services.AddScoped<CommunityHub.Core.Integrations.IExternalWriteGuard,
             CommunityHub.Core.Integrations.ExternalWriteGuard>();
+        // §1037 — pass the whole options object: the banner names EACH system now, because one
+        // word can no longer describe a host that may write to e-conomic but never to Zoho.
         Console.WriteLine(CommunityHub.Core.Integrations.ExternalWriteGuard.StartupBanner(
-            externalWriteOptions.AllowExternalWrites));
+            externalWriteOptions));
 
         // --- Backstage exhibitor sync --------------------------------------
         var backstageSyncOptions = new BackstageSyncOptions();

@@ -86,7 +86,9 @@ public class SponsorsModel : PageModel
         List<Contact> Contacts,
         int Open, int InProgress, int Done, int Overdue, int Total,
         DateOnly? NextDue,
-        bool IsWithdrawn);
+        bool IsWithdrawn,
+        /// <summary>§1035 — marked as a TEST company: never pushed to Zoho, never announced.</summary>
+        bool IsTestData = false);
 
     public record Contact(int ParticipantId, string Name, string Email, bool IsActive);
 
@@ -156,6 +158,56 @@ public class SponsorsModel : PageModel
     /// </summary>
     [CommunityHub.Audit.Audit("Reset sponsor onboarding",
         Category = CommunityHub.Core.Domain.AuditCategory.Admin, TargetType = "SponsorCompany")]
+    /// <summary>
+    /// §1035 — mark a sponsor company as TEST DATA, or unmark it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-10: <i>"i dont have a IsTestSponsor so i had to offboard them as
+    /// sponsor so i didnt get them synced to zoho"</i> · <i>"i didn't have a place to set the flag
+    /// in the ui"</i>. The flag existed (§905/§909) and <b>no page, handler or service in the
+    /// codebase ever wrote it</b> — the one row carrying it had been edited straight in the
+    /// database. This is that missing control.</para>
+    ///
+    /// <para>🔑 Deliberately NOT a typed confirmation like Withdraw: this takes nothing away and is
+    /// reversible in one click. Withdraw deactivates every contact and cancels reservations; this
+    /// only stops the company reaching Zoho and the social campaign.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostSetTestCompanyAsync(
+        string companyId, bool isTest, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var info = await _db.SponsorInfos.IgnoreQueryFilters().FirstOrDefaultAsync(
+            s => s.EventId == me.EventId && s.SponsorCompanyId == companyId, ct);
+
+        if (info is null)
+        {
+            // ⚠️ Say so rather than silently doing nothing: a company with no facts row is a real
+            // state here (the grid is built from contacts and tasks), and "nothing happened" would
+            // read as the flag having been set.
+            Error = $"Company {companyId} has no sponsor record yet, so there is nothing to mark. "
+                  + "It gets one when the webshop pull classifies it or you link it by hand.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        info.IsTestData = isTest;
+        info.UpdatedAt = _clock.GetUtcNow();
+        info.LastUpdatedByEmail = me.Email;
+        await _db.SaveChangesAsync(ct);
+
+        Message = isTest
+            ? $"{companyId} is now marked as TEST data — it will not be created or updated in Zoho "
+              + "Backstage, and it is left out of the social-media campaign. Nothing already in "
+              + "Zoho was changed."
+            : $"{companyId} is no longer marked as test data — it syncs to Zoho and is announced "
+              + "like any other sponsor.";
+
+        return RedirectToPage(new { });
+    }
+
     public async Task<IActionResult> OnPostResetSponsorOnboardingAsync(
         string companyId, bool resetWelcome, bool resetOverview, bool resetBoothMembers,
         bool resetAllTasks,
@@ -352,10 +404,70 @@ public class SponsorsModel : PageModel
                                          && t.DueDate < today);
 
         // Group everything by SponsorCompanyId.
+        // 🔴 §1034 — A COMPANY THAT IS NOT A SPONSOR IS NOT ON THE SPONSORS PAGE.
+        //
+        // This list is assembled from PARTICIPANTS and TASKS, not from SponsorInfos, so the global
+        // sponsor filter cannot reach it — the grid would still show a coupon customer that has a
+        // stray sponsor-role contact. ⚠️ And it includes DEACTIVATED contacts on purpose (the rows
+        // show "+N deactivated"), so switching those contacts off does NOT remove the row: without
+        // this exclusion the company he reported would still be here after the clean-up.
+        //
+        // 🔒 Only companies whose row SAYS `IsSponsor = 0` are dropped. A company with no row at
+        // all is left alone — that is "the pull has not classified it yet", not "not a sponsor",
+        // and hiding it would make a genuinely new sponsor invisible during onboarding.
+        var nonSponsorCompanyIds = new HashSet<string>(
+            await _db.SponsorInfos.IgnoreQueryFilters()
+                .Where(s => s.EventId == eventId && !s.IsSponsor)
+                .Select(s => s.SponsorCompanyId)
+                .ToListAsync(ct),
+            StringComparer.OrdinalIgnoreCase);
+
+        // §1035 — companies marked as TEST data: badged here, and never pushed to Zoho.
+        var testCompanyIds = new HashSet<string>(
+            await _db.SponsorInfos.IgnoreQueryFilters()
+                .Where(s => s.EventId == eventId && s.IsTestData)
+                .Select(s => s.SponsorCompanyId)
+                .ToListAsync(ct),
+            StringComparer.OrdinalIgnoreCase);
+
+        // 🔑 §1034b — every company the hub has ever recorded as a company, sponsor or not.
+        var knownCompanyIds = new HashSet<string>(
+            await _db.SponsorInfos.IgnoreQueryFilters()
+                .Where(s => s.EventId == eventId)
+                .Select(s => s.SponsorCompanyId)
+                .ToListAsync(ct),
+            StringComparer.OrdinalIgnoreCase);
+
+        var companyIdsWithTasks = new HashSet<string>(
+            tasks.Where(t => !string.IsNullOrWhiteSpace(t.SponsorCompanyId)).Select(t => t.SponsorCompanyId!),
+            StringComparer.OrdinalIgnoreCase);
+        var companyIdsWithAnActiveContact = new HashSet<string>(
+            contacts.Where(c => c.IsActive && !string.IsNullOrWhiteSpace(c.SponsorCompanyId))
+                    .Select(c => c.SponsorCompanyId!),
+            StringComparer.OrdinalIgnoreCase);
+
+        // 🔴 §1034b — THE SECOND HALF, and without it the reported row survives the whole fix.
+        //
+        // The coupon customer has **no `SponsorInfo` row at all** (it never bought in the webshop —
+        // it is an e-conomic customer), so the `IsSponsor = 0` test above has nothing to match. And
+        // deactivating its two contacts does not help either, because this list deliberately keeps
+        // DEACTIVATED ones so a row can show "+N deactivated".
+        //
+        // 🔒 So a company also drops out when the hub knows nothing about it as a company AND there
+        // is nothing left to manage: no row, no task, and not one active contact. ⚠️ Each condition
+        // is load-bearing — a company with no row but an ACTIVE contact is a sponsor mid-onboarding
+        // whom the pull has not classified yet, and hiding that one would be a worse bug than the
+        // one being fixed.
+        bool NothingLeftToShow(string companyId) =>
+            !knownCompanyIds.Contains(companyId)
+            && !companyIdsWithTasks.Contains(companyId)
+            && !companyIdsWithAnActiveContact.Contains(companyId);
+
         var allCompanyIds = contacts.Select(c => c.SponsorCompanyId)
             .Concat(tasks.Select(t => t.SponsorCompanyId))
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Select(c => c!)
+            .Where(c => !nonSponsorCompanyIds.Contains(c) && !NothingLeftToShow(c))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -393,7 +505,8 @@ public class SponsorsModel : PageModel
             var name  = names.TryGetValue(cid, out var nm) ? nm : SponsorCompanyName.UnresolvedName(cid);
             return new CompanyRow(
                 cid, name, co, open, ip, done, ovr, t.Count, nxt,
-                withdrawnIds.Contains(cid));
+                withdrawnIds.Contains(cid),
+                testCompanyIds.Contains(cid));
         }).ToList();
 
         // Free-text search over the company name + id + any contact name/email.

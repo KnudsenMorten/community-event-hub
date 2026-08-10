@@ -42,6 +42,24 @@
         new("/Organizer/SoMeQueue", "Calendar for LinkedIn Posts",
             "Every post in one list — search, filter and open any one to edit. Also the day-by-day calendar view."),
 
+        @* 🔴 §1042 — THE POST EDITOR GETS ITS OWN CARD BACK. Operator 2026-08-10: *"i have no post
+           editor"* / *"make also a link on the menu for Post Editor here"*.
+
+           ⚠️ §914 merged "Edit posts" into the card above on the reasoning that all three views were
+           "the same posts". That is true of the DATA and false of the JOB: walking 84 posts to
+           approve them one at a time is a different task from finding one post in a list, and it is
+           the task he does most. Merging it left the walk two clicks deep behind a card named for a
+           CALENDAR, and he reported it as lost — twice.
+
+           🔑 The §914 rule is unchanged: no page is unreachable. This adds a second route to a page
+           that already had one, because a route existing is not the same as a person finding it. *@
+        @* ⚠️ A PLAIN "&", never "&amp;". These strings are C# values rendered as `@t.Title`, which
+           Razor HTML-ENCODES — so an entity here is encoded a second time and the organizer reads
+           the literal text "&amp;" on the card (§1047). The sibling tiles on /Organizer/Logistics
+           ("Speaker & order review") have always had this right. *@
+        new("/Organizer/SoMePostEditor", "Post Editor — walk & approve",
+            "Open posts one at a time with Previous / Next, approve or hold each, edit the wording and picture, and duplicate a post."),
+
         @* Absorbs: SoMe post templates (§833) + Posting frequency (§842.2). All three decide what
            the automatic posts SAY and how often they go. *@
         new("/Organizer/SoMeScheduler", "Post planner",

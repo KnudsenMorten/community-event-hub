@@ -160,11 +160,14 @@ public class SponsorWebshopCompanyModel : PageModel
             if (user is null) return " (coordinator changed; CEH/Zoho update skipped — user not found.)";
 
             var companyKey = companyId.ToString();
-            var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+            // 🔒 §1034 — upsert: bypass the sponsor filter or a hidden row becomes a duplicate.
+            // An ORGANIZER linking a webshop company here is asserting it IS a sponsor, which is
+            // the manual override the raise-only rule in the order pull is designed to preserve.
+            var info = await _db.SponsorInfos.IgnoreQueryFilters().FirstOrDefaultAsync(
                 s => s.EventId == eventId && s.SponsorCompanyId == companyKey, ct);
             if (info is null)
             {
-                info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyKey, CreatedAt = _clock.GetUtcNow() };
+                info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyKey, IsSponsor = true, CreatedAt = _clock.GetUtcNow() };
                 _db.SponsorInfos.Add(info);
             }
             else info.UpdatedAt = _clock.GetUtcNow();

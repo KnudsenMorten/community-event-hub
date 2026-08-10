@@ -152,12 +152,44 @@ public sealed class TaskReminderBuilder
                     .Where(sp => sp.ParticipantId == t.AssignedParticipantId)
                     .Select(sp => sp.ContactEmailOverride)
                     .FirstOrDefault(),
+                // §1054 — needed by the travel gate below. Projected here rather than queried per
+                // task: this loop runs over every open dated task in the edition.
+                t.SourceKey,
+                SpeakerCountry = _db.SpeakerProfiles
+                    .Where(sp => sp.ParticipantId == t.AssignedParticipantId)
+                    .Select(sp => sp.Country)
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
 
         var messages = new List<ReminderMessage>();
         foreach (var t in tasks)
         {
+            // 🔴 §1054 — DO NOT MAIL A TRAVEL CLAIM TO SOMEONE WHOSE COUNTRY WE HAVE NOT ASKED FOR.
+            //
+            // Operator 2026-08-10, on a Danish speaker who received "Submit travel reimbursement":
+            // *"danish speakers get no travel reimbursement"*, and his chosen fix — *"b - withhold
+            // email until country is known"*.
+            //
+            // 🔑 THE RULE WAS NEVER MISSING; THE ORDER OF EVENTS DEFEATED IT. `SpeakerProfile.Country`
+            // starts blank because the SPEAKER sets it, later, in Speaker Details. §143 deliberately
+            // treats unknown as non-Denmark ("withholding a reimbursement task from someone whose
+            // country we have simply not asked for would quietly cost them money"), so the task is
+            // seeded and this builder mails it. When the speaker then answers "Denmark", the seeder
+            // skips the deadline and the orphan prune removes the task — the TASK self-heals, and
+            // the E-MAIL does not.
+            //
+            // 🔒 So the task still appears in the hub (§143's protection intact — nothing is silently
+            // withheld and no money is lost); only the MAIL waits until the answer exists. A blank
+            // country is the ONLY thing suppressed: once it is set, Denmark is filtered upstream by
+            // `nonDenmarkOnly`, so anything reaching here with a country is legitimately non-Danish.
+            if (t.SourceKey is { } sk
+                && sk.StartsWith(Entitlements.TravelReimbursementPolicy.TaskKeyPrefix, StringComparison.Ordinal)
+                && !Entitlements.TravelReimbursementPolicy.MayEmailClaim(t.SpeakerCountry))
+            {
+                continue;
+            }
+
             var daysLeft = t.DueDate.DayNumber - today.DayNumber;
 
             // REQUIREMENTS §81: a deadline reminder fires ONLY on the due day

@@ -91,18 +91,36 @@ public sealed class LiveBackstageExhibitorApi : IBackstageExhibitorApi
     private readonly BackstageExhibitorOptions _options;
     private readonly ILogger<LiveBackstageExhibitorApi> _log;
 
+    /// <summary>
+    /// 🔴 §1041 — THE LAST UNGUARDED PATH TO ZOHO, and the one that made a confident claim wrong.
+    /// </summary>
+    /// <remarks>
+    /// <para>This class POSTs exhibitor requests to Zoho Backstage with its own <see cref="HttpClient"/>,
+    /// so it <b>bypasses <see cref="ZohoClient"/>'s guard entirely</b>. On 2026-08-10 the operator's
+    /// policy was implemented as *"DEV must never write to Zoho"* and verified against
+    /// <c>Integrations:ExternalWrites:Zoho</c> — which this path never consults.</para>
+    ///
+    /// <para>⚠️ DEV was saved only by its READ-ONLY refresh token (§1038): Zoho itself would refuse
+    /// the write. That is the value of enforcing at the credential as well as in code — and NOT a
+    /// reason to leave the code path open, because the next environment to get a writing credential
+    /// would have no such backstop.</para>
+    /// </remarks>
+    private readonly IExternalWriteGuard _writes;
+
     public LiveBackstageExhibitorApi(
         HttpClient http,
         ZohoClient zoho,
         ZohoOptions zohoOptions,
         BackstageExhibitorOptions options,
-        ILogger<LiveBackstageExhibitorApi> log)
+        ILogger<LiveBackstageExhibitorApi> log,
+        IExternalWriteGuard? writes = null)
     {
         _http = http;
         _zoho = zoho;
         _zohoOptions = zohoOptions;
         _options = options;
         _log = log;
+        _writes = writes ?? new AllowAllExternalWrites();
     }
 
     /// <summary>
@@ -136,6 +154,16 @@ public sealed class LiveBackstageExhibitorApi : IBackstageExhibitorApi
                 "Backstage exhibitor creation needs DefaultBoothCategoryId, "
                 + "BackstagePortalId and BackstageEventId to be configured.");
         }
+
+        // 🔴 §1041 — the guard, checked BEFORE the token is even requested. Two reasons for the
+        // order: a blocked host must not spend one of Zoho's 10-per-10-minutes token requests
+        // (§783.12b), and returning quietly here is what makes "DEV never writes to Zoho" true of
+        // this path as well as of ZohoClient.
+        //
+        // ⚠️ Returns rather than throws: the caller's job is to CREATE exhibitors, and a policy
+        // refusal is not an error to alert on — it is the configured behaviour of this environment.
+        // The guard logs the refusal itself, so it is never a silent absence (§335).
+        if (!await _writes.AllowAsync(ExternalSystems.Zoho, nameof(CreateAsync), ct)) return;
 
         var token = await _zoho.GetAccessTokenAsync(ct);
         if (string.IsNullOrWhiteSpace(token))

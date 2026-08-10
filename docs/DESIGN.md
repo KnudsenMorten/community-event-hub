@@ -5480,10 +5480,12 @@ The one-way model that replaced the old two-way sync. **CEH is the owner.**
 - **CEH→Zoho** (`SessionBackstagePushService`): create-only API, so a linked session is diffed and
   reported. Fields: title, description, time, duration, track, hall, **speakers** (§1008),
   **session type** (§1012). Tags are excluded — the agenda read does not return them (§594).
-- **Zoho→CEH** (`SessionChangeDetectionService`): 🛑 **permanently off in code (§1020)** — it returns
-  before reading anything, there is no feature switch, and re-enabling is a deploy. The engine and
-  its `[Function]` are kept (retiring the job would orphan a PROD health marker, §634) but its
-  detailed tests were deleted with the behaviour: **reviving it means rebuilding those first.**
+- **Zoho→CEH** (`SessionChangeDetectionService`): 🛑 **DEAD. Not supported (operator 2026-08-10:
+  *"we will not support zoho to ceh … it is dead for now"*).** It returns before reading anything,
+  there is no feature switch, and there is no plan to bring it back. The engine and its `[Function]`
+  remain only because retiring the job would orphan a PROD health marker (§634) — that is the sole
+  reason the code still exists. ⇒ **Do not propose reviving it, and do not treat its missing test
+  coverage as a gap.**
   🔒 Signage is unaffected — `SignageAgendaSyncService` mirrors the Backstage agenda into
   `AgendaActivities` on its own timer, and Zoho remains 100% the owner there (§754).
 

@@ -116,6 +116,17 @@ Everything listed is live in the product today; nothing here is planned or parti
 | 87 | [Extend a prepaid block without changing the coupon code](#87-extend-a-prepaid-block-without-changing-the-coupon-code--2026-08-09) | 2026-08-09 |
 | 88 | [Speaker photos show up, wherever they came from](#88-speaker-photos-show-up-wherever-they-came-from--2026-08-09) | 2026-08-09 |
 | 89 | [The header counts down to the ticket sale](#89-the-header-counts-down-to-the-ticket-sale--2026-08-09) | 2026-08-09 |
+| 90 | [Told when the public agenda names the wrong speakers](#90-told-when-the-public-agenda-names-the-wrong-speakers--2026-08-09) | 2026-08-09 |
+| 91 | [Mark a session as common to every track](#91-mark-a-session-as-common-to-every-track--2026-08-09) | 2026-08-09 |
+| 92 | [Your keynotes arrive as keynotes](#92-your-keynotes-arrive-as-keynotes--2026-08-09) | 2026-08-09 |
+| 93 | [Prepaid ticket invoices: the right number, the right ticket name](#93-prepaid-ticket-invoices-the-right-number-the-right-ticket-name--2026-08-09) | 2026-08-09 |
+| 94 | [Tell a partner their coupon is ready — in one click](#94-tell-a-partner-their-coupon-is-ready--in-one-click--2026-08-09) | 2026-08-09 |
+| 95 | [Edit any session properly, and see who is on it](#95-edit-any-session-properly-and-see-who-is-on-it--2026-08-09) | 2026-08-09 |
+| 96 | [Webshop coupons appear on the invoice](#96-webshop-coupons-appear-on-the-invoice--2026-08-09) | 2026-08-09 |
+| 97 | [A ticket class is called by its name, everywhere](#97-a-ticket-class-is-called-by-its-name-everywhere--2026-08-09) | 2026-08-09 |
+| 98 | [The hub owns the schedule, and cannot be switched out of it](#98-the-hub-owns-the-schedule-and-cannot-be-switched-out-of-it--2026-08-09) | 2026-08-09 |
+| 99 | [Your announcement preview shows the actual picture](#99-your-announcement-preview-shows-the-actual-picture--2026-08-10) | 2026-08-10 |
+| 100 | [Posts are approved as they come due, not months ahead](#100-posts-are-approved-as-they-come-due-not-months-ahead--2026-08-10) | 2026-08-10 |
 
 ---
 
@@ -3841,3 +3852,127 @@ including breaks, lunch and the party that the session list does not model.*
 
 *What remains in settings is a separate switch that controls only one thing: whether a speaker is
 emailed when an organizer moves their session.*
+
+## 99. Your announcement preview shows the actual picture *(✅ 2026-08-10)*
+
+Sponsors and speakers have a page showing every post the organizers will publish about them, and
+when it runs. It was showing the **file name** of the accompanying image — which tells you nothing
+about what your audience will see.
+
+The picture itself now appears on the card, at a comfortable size on a laptop and full width on a
+phone. Posts that carry a video show a player instead. If an image cannot be loaded the card simply
+has no picture — never a broken-image icon.
+
+**The words are the real words, too.** The preview reads exactly as the post will publish, with your
+company name, your website and the organizers already filled in, rather than the placeholders the
+template is written with.
+
+**And only posts that are genuinely ready are listed.** A post appears once the organizers have
+approved it *and* everything it depends on has arrived — so a sponsor announcement waiting on your
+company text or logo is not shown to you as though it were ready to go. If your page is empty, the
+short answer is that nothing has been approved for you yet.
+
+*Sponsors no longer see the technical note about how people are named in the post text; it is about
+the organizers' own mentions and was never relevant on a sponsor's page. Speakers still see it,
+because there it describes the people the post actually names.*
+
+## 100. Posts are approved as they come due, not months ahead *(✅ 2026-08-10)*
+
+Automatic approval can carry the routine, template-built announcements so an organizer does not
+click through a hundred of them. It was working the wrong way round: it approved everything far in
+the future and left the posts about to run waiting for a human — the opposite of useful, and the
+reason posts for late in the season were already marked as going out.
+
+Approval now happens **as a post comes due**: when it falls inside the lead time you set (a week, by
+default), and not before. Everything further out stays *planned*, which is what planned means — the
+campaign can still be moved, re-worded or dropped without un-doing an approval nobody asked for.
+
+**A post whose time has already passed is never approved automatically.** Approving one is the same
+as publishing it immediately, so that decision stays with a person — the guard that has been in
+place since the first automatic run and is unchanged.
+
+*Two things that never change: a post an organizer has re-written by hand keeps waiting for a human,
+and a post whose sponsor still owes their material can never be approved by a rule.*
+
+*The state shown on a post is now honest about both halves. A post says **scheduled** only when the
+organizers have accepted it into the plan **and** approved it; until then it says **planned**, even
+if approval has already been given.*
+
+## 101. See who has used the tickets your company bought *(✅ 2026-08-10)*
+
+A company that buys a block of tickets has a problem the organizers cannot see: **who has actually
+claimed one?** Until now the answer meant asking an organizer, who exported a list and mailed it back.
+
+Now the organizers can create a **volume package monitor** per buyer — matched on the buyer's e-mail
+domain or their coupon code — and send that buyer **one link**. The recipient opens it with no login
+and sees, for their own company only: who has registered, when, their name, company, e-mail and order
+id, plus an **Excel export** of the same list.
+
+**The count the organizer sees is the count the recipient sees.** The organizer page runs the same
+query as the shared link, so it is a true preview — you can check the list looks right before sending
+it out, rather than discovering afterwards that it was wrong.
+
+*What it deliberately excludes: cancelled tickets, other editions, and look-alike domains — a buyer
+sees the people they paid for, and nobody else.*
+
+*A ticket appears on the list once the hub has pulled the order, which is minutes rather than
+instant. Neither view is live-on-purchase, and both say so.*
+
+## 102. Write a new post without hunting for the button *(✅ 2026-08-10)*
+
+Creating a social post from scratch was on the campaign page all along — collapsed, below a list of
+sixty-three posts. It was reported as **missing**, twice, which is the only verdict that matters: a
+capability folded shut below the fold is indistinguishable from one that does not exist.
+
+**Write a new post** is now the first thing on the page, already open. It creates an empty post and
+opens it in the **post editor** — the same screen used for every other post, so a new post gets the
+live preview, the variables, the picture picker and the schedule without a second, slightly-different
+compose form to learn.
+
+**Every post in the list also has a Duplicate button now**, so an existing post can be used as the
+starting point for a new one without opening it first. The copy is held for approval and its text is
+copied as *words* — the variables are filled in as they read today — because a copy belongs to no
+session or sponsor.
+
+*A post written from scratch is held for approval like any other. Nothing reaches the company page
+until you turn it on.*
+
+## 103. The picture is chosen from a list, not typed from memory *(✅ 2026-08-10)*
+
+Attaching artwork to a post meant typing its file name into a text box — from a library of about
+fifty files whose names follow a strict convention. A single typo published the post with no picture
+and looked exactly like the artwork having failed.
+
+The graphic is now **picked from a dropdown** of what is actually in the library. A plain text box
+remains beside it for a link or a path that is not a library file.
+
+*If the document library is unreachable, the box is still there — a storage outage stops the picture
+being offered, never the post being written.*
+
+## 104. Travel reimbursement is not offered to people who cannot claim it *(✅ 2026-08-10)*
+
+Travel reimbursement is for community speakers travelling to Copenhagen from outside Denmark. That
+rule was applied correctly everywhere it mattered — the claim form and the checklist step both refuse
+anyone else — but the **reminder e-mail** could still go out before a speaker had told us where they
+live, because the country is something the speaker fills in themselves, later.
+
+The reminder now **waits until the country is known**. The task still appears on the speaker's list
+in the meantime, so nobody quietly loses a reimbursement they are entitled to; only the e-mail holds
+back until there is an answer to act on.
+
+*A speaker from Denmark is never mailed about it at all, and never could claim: the form has always
+refused.*
+
+## 105. Who is coming, at a glance and without naming anyone *(✅ 2026-08-10)*
+
+The public "who's coming" page reports the shape of the audience — ticket type, job roles, where
+people travel from, how they heard about the event — as **aggregates only**. No company names and
+nothing that identifies an individual appear on it, and the figures a sponsor sees are the same
+figures anyone sees.
+
+The breakdown is now **easier to read**: each topic is its own framed block with its heading ruled
+off, so it is obvious which numbers belong to which question. Previously a heading in the left column
+could sit closer to the block above it than to its own figures.
+
+*Organizers see one extra breakdown — the companies their attendees come from — on their own page,
+behind a login. It is never built for the public or sponsor pages, not merely hidden on them.*

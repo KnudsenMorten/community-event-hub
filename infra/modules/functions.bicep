@@ -180,6 +180,40 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Integrations__AllowExternalWrites'
           value: string(allowExternalWrites)
         }
+        // 🔴 §1037 — THE PER-SYSTEM CEILING (operator 2026-08-10). The single switch above could
+        // only say "every system" or "no system", so DEV had to be "no system" — while what he
+        // needs is DEV exercising ERP and SharePoint and never touching Zoho:
+        //   "dev must newer WRITE to zoho, but it is allowed to read from zoho. dev is allowed to
+        //    readwrite to erp. ... dev is not allowed to publish on linkedin. dev is allowed to
+        //    write to sharepoint (as it has its own separate path)."
+        // 🔒 A system NOT named here falls back to Integrations__AllowExternalWrites, so prod keeps
+        // writing everywhere and an unconfigured host still writes nothing.
+        // ⚠️ The JOBS host is where the syncs actually run, so this is the copy that matters most.
+        {
+          name: 'Integrations__ExternalWrites__Zoho'
+          value: string(allowExternalWrites)
+        }
+        {
+          name: 'Integrations__ExternalWrites__LinkedIn'
+          value: string(allowExternalWrites)
+        }
+        {
+          name: 'Integrations__ExternalWrites__Erp'
+          value: 'true'
+        }
+        {
+          name: 'Integrations__ExternalWrites__SharePoint'
+          value: 'true'
+        }
+        // 🔴 §1041 — THE WEBSHOP (Company Manager / WordPress on the public site). Added after a
+        // DEV run reported 53 billing updates against the LIVE webshop: CompanyManagerClient had
+        // never been wired to the write guard at all, so any host with the credentials could write.
+        // ⚠️ THIS host is the one that runs the ERP→webshop reconcile, so this is the copy that
+        // would have stopped it. DEV and PROD share ONE Company Manager.
+        {
+          name: 'Integrations__ExternalWrites__Webshop'
+          value: string(allowExternalWrites)
+        }
         // NOTE: no Sql__AdminPassword / Sql__AdminUser is emitted. The Functions
         // app authenticates to Azure SQL passwordlessly via its system-assigned
         // managed identity (the connection string in Program.cs appends

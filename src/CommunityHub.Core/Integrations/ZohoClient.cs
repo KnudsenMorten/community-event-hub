@@ -190,6 +190,26 @@ public sealed class ZohoOptions
     public string ClientSecret { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
 
+    /// <summary>
+    /// §1038 — may THIS host spend Zoho token requests at all? <c>null</c> (unset) keeps the §783.12b
+    /// behaviour exactly: blocked wherever external writes are blocked.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Set this to <c>true</c> ONLY on a host that has its OWN refresh token.</b> Zoho
+    /// throttles <i>10 access-token requests per 10 minutes</i> <b>per refresh token</b>, and allows
+    /// 20 active refresh tokens per user per client — so a host with its own token has its own
+    /// budget and cannot starve another. That is the entire reason §783.12b blocked DEV, and the
+    /// entire reason it can stop.</para>
+    ///
+    /// <para>⚠️ <b>Setting it true on a host that still SHARES a refresh token re-creates the
+    /// outage</b>: PROD starts returning 401s that read exactly like a revoked credential, which is
+    /// how the original incident presented and why it took so long to attribute.</para>
+    ///
+    /// <para>🔒 Nullable on purpose. A plain <c>bool</c> defaulting to false would silently block
+    /// every host that has not been told about this setting — including PROD.</para>
+    /// </remarks>
+    public bool? ReadsAllowed { get; set; }
+
     // 🗑 §754.5 — `AgendaReadEnabled` and `SpeakerReadEnabled` are DELETED (2026-08-01).
     //
     // 🔒 DO NOT REINTRODUCE THEM, AND DO NOT WRITE ANOTHER COMMENT SAYING A BACKSTAGE READ SCOPE IS
@@ -465,7 +485,28 @@ public sealed class ZohoClient
     /// explicit <c>AllowExternalWrites=false</c> blocks — which both DEV hosts already carry from
     /// bicep, so there is no new app setting to deploy and nothing for a config copy to get wrong.</para>
     /// </remarks>
-    public bool HostMayReachZoho => _externalOptions?.AllowExternalWrites != false;
+    /// <remarks>
+    /// <para>🔑 <b>§1038 — THIS IS NOW EXPLICIT, BECAUSE THE REASON FOR IT CAN BE REMOVED.</b> The
+    /// paragraph above rests on ONE fact: DEV and PROD share a single refresh token. Zoho's throttle
+    /// is documented as <i>"a total of 10 access token requests can be made within 10 minutes"</i>
+    /// <b>per refresh token</b>, and up to <b>20 active refresh tokens per user per client</b>
+    /// (zoho.com/accounts/protocol/oauth/token-limits.html). ⇒ A host with its OWN refresh token has
+    /// its OWN budget and cannot starve PROD — so the block should lift for that host, and only for
+    /// that host.</para>
+    ///
+    /// <para>🔒 <c>Zoho:ReadsAllowed</c> is therefore a THREE-STATE setting, not a bool: unset keeps
+    /// the old behaviour exactly (blocked wherever writes are blocked), so no existing host changes
+    /// on deploy. Setting it <c>true</c> is the deliberate act of saying <i>"this host has its own
+    /// Zoho credential"</i>. ⚠️ Setting it true on a host that still shares PROD's token re-creates
+    /// §783.12b — the outage where PROD returns 401s that read exactly like a revoked credential.</para>
+    ///
+    /// <para>⚠️ <b>This governs READS ONLY.</b> Writes stay gated by
+    /// <c>Integrations:ExternalWrites:Zoho</c> (§1037), which is <c>false</c> on DEV — and a DEV
+    /// token minted with READ-only scopes makes that a fact Zoho enforces rather than a rule CEH
+    /// remembers.</para>
+    /// </remarks>
+    public bool HostMayReachZoho =>
+        _options.ReadsAllowed ?? (_externalOptions?.AllowExternalWrites != false);
 
     /// <summary>
     /// §340-H — may this host perform the Zoho WRITE <paramref name="operation"/>?
@@ -1036,14 +1077,35 @@ public sealed class ZohoClient
     /// POST create an EXHIBITOR (the booth record). Zoho REQUIRES <c>exhibitor_category_id</c>
     /// (else HTTP 400 "Booth category ID is required") — the pinned booth-category id for the
     /// company's tier (REQUIREMENTS §41a). Body: exhibitor_category_id, company_name,
-    /// website_url, description, contact{first,last,email}. <c>exhibitor_type</c> is NOT sent
-    /// (Zoho derives it from the category; sending it causes "category not found"). Scope:
-    /// <c>ZohoBackstage.exhibitor.CREATE</c>.
+    /// website_url, description, company_social_pages, contact{first,last,email}.
+    /// <c>exhibitor_type</c> is NOT sent (Zoho derives it from the category; sending it causes
+    /// "category not found"). Scope: <c>ZohoBackstage.exhibitor.CREATE</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>🔴 §1033 — <b>THE SOCIAL PAGES ARE SENT ON CREATE, AND THAT IS NOT A CONTRADICTION OF
+    /// §791.3.</b> Operator 2026-08-10 asked why an exhibitor's LinkedIn still arrives as a
+    /// hand-entry line. Every one of §791.3's measurements — and §801.2's, §803.2's and §803.3's —
+    /// was a <b>PUT</b>. The CREATE path was <b>never measured</b>, because it never sent the field
+    /// at all: the payload above simply had no <c>company_social_pages</c> key. So "no record has
+    /// ever received a value this way" was true of updates and untested for creates.</para>
+    ///
+    /// <para>🔑 Zoho's own create-an-exhibitor documentation lists <c>company_social_pages</c> in the
+    /// request body, with a two-key sample (<c>facebook</c> + <c>linkedin</c>). ⚠️ The UPDATE doc
+    /// listed it too and the endpoint discards it, so the doc is a reason to TRY, never evidence
+    /// that it worked — which is why the caller <b>reads the record back</b> and reports only what
+    /// Zoho actually kept (§791.2: say <i>pushed</i>, never <i>updated</i>, for anything unread).</para>
+    ///
+    /// <para>🔒 Deliberately NOT behind <see cref="ZohoOptions.PushExhibitorSocialPages"/>. That
+    /// switch is off because re-pushing on every update pass mailed a false success for ever; a
+    /// create happens once per company, sends one extra key on a request already being made, and
+    /// cannot loop. Gating it on the update switch would keep the one path that might work switched
+    /// off for the reason the other one failed.</para>
+    /// </remarks>
     public async Task<ZohoCreateResult> CreateExhibitorAsync(
         string accessToken, string companyName, string? websiteUrl, string? description,
         string? exhibitorCategoryId, string? contactFirstName, string? contactLastName, string? contactEmail,
-        string? boothLabel = null, CancellationToken ct = default)
+        string? boothLabel = null, string? linkedInUrl = null, string? twitterUrl = null,
+        CancellationToken ct = default)
     {
         if (!await MayWriteAsync(nameof(CreateExhibitorAsync), ct))
             return new(null, ExternalWritesDisabledError);
@@ -1062,6 +1124,20 @@ public sealed class ZohoClient
         if (!string.IsNullOrWhiteSpace(boothLabel)) payload["booth_label"] = boothLabel;
         if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
         if (!string.IsNullOrWhiteSpace(description)) payload["description"] = description;
+
+        // 🔴 §1033 — the social pages, on CREATE. Zoho's create doc lists the field and CEH has
+        // never sent it here, so §791.3's "not writable" verdict does not cover this path: it was
+        // measured four times, every one a PUT. Same object shape the PUT uses.
+        // ⚠️ A 200 proves nothing — the PUT returns 200 and echoes the field back while storing
+        // nothing. The caller reads the record back and reports only what survived.
+        if (!string.IsNullOrWhiteSpace(linkedInUrl) || !string.IsNullOrWhiteSpace(twitterUrl))
+        {
+            var social = new Dictionary<string, object?>();
+            if (!string.IsNullOrWhiteSpace(linkedInUrl)) social["linkedin"] = linkedInUrl;
+            if (!string.IsNullOrWhiteSpace(twitterUrl)) social["twitter"] = twitterUrl;
+            payload["company_social_pages"] = social;
+        }
+
         if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
             || !string.IsNullOrWhiteSpace(contactEmail))
         {

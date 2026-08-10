@@ -31,6 +31,11 @@ public sealed class ErpWebshopContactSyncService
 
     /// <summary>§502 — OPTIONAL. Present only where orphan pruning is wanted; without it the
     /// service still DETECTS and reports orphans but changes nothing.</summary>
+    /// <summary>
+    /// §1041b — optional; null means "assume writes are allowed", which is the pre-guard behaviour.
+    /// </summary>
+    private readonly IExternalWriteGuard? _writes;
+
     private readonly Data.CommunityHubDbContext? _db;
     private readonly Organizer.ParticipantDeactivationService? _deactivate;
 
@@ -45,8 +50,12 @@ public sealed class ErpWebshopContactSyncService
         IEconomicInvoiceClient? invoice = null,
         // §921 — the consecutive-failure gate, PER COMPANY. Optional so an unconfigured caller
         // still runs; without it the old behaviour (report every blip) applies.
-        Diagnostics.JobFailureTracker? failures = null)
+        Diagnostics.JobFailureTracker? failures = null,
+        // 🔴 §1041b — needed to tell "WordPress refused the value" apart from "this host is not
+        // allowed to write at all". See the billing block for why that distinction is not cosmetic.
+        IExternalWriteGuard? writes = null)
     {
+        _writes = writes;
         _erp = erp;
         _cm = cm;
         _cmOptions = cmOptions;
@@ -133,6 +142,9 @@ public sealed class ErpWebshopContactSyncService
     public async Task<SyncResult> SyncAsync(int? onlyCustomerNumber = null, CancellationToken ct = default)
     {
         var notes = new List<string>();
+        // §1041b — how many companies had a billing write refused because this host may not write
+        // to the webshop. Counted, then reported as ONE line rather than 53 misleading ones.
+        var webshopWritesBlocked = 0;
         if (!CanRun) return new(false, 0, 0, 0, 0, notes);
 
         var customers = await _erp.ListCustomersAsync(null, SponsorGroup, ct);
@@ -289,6 +301,25 @@ public sealed class ErpWebshopContactSyncService
                     // fix for names we recognise, not a licence to guess (§582).
                     var iso = CountryCodeMapper.ToIso2(detail.Country);
                     if (iso is not null) Follow("billing_country", iso, cmCompany.BillingCountry);
+                }
+
+                // 🔴 §1041b — IF THIS HOST MAY NOT WRITE, SAY THAT, AND SAY IT ONCE.
+                //
+                // ⚠️ Without this the §897 read-back logic below produces a message that is both
+                // WRONG and HARMFUL. The guard refuses the write, `UpdateCompanyAsync` returns
+                // false, `after` is null, and every field lands in `refused` — which is reported as
+                // *"Company Manager did NOT store … the call succeeded but the value did not change.
+                // Set it by hand"*. The call did not succeed; it was never made. On DEV that told
+                // the operator to hand-fix 53 companies that were perfectly correct.
+                //
+                // 🔑 §897's read-back is right for what it was built for — WordPress accepting a
+                // field and keeping the old value. It simply cannot distinguish "refused upstream"
+                // from "never sent", because both look like "no read-back". So the caller has to.
+                if (billing.Count > 0 && _writes is not null
+                    && !await _writes.AllowAsync(ExternalSystems.Webshop, "BillingSync", ct))
+                {
+                    webshopWritesBlocked++;
+                    billing.Clear();   // nothing below runs; no per-company hand-entry noise
                 }
 
                 if (billing.Count > 0)
@@ -605,6 +636,28 @@ public sealed class ErpWebshopContactSyncService
                     cu.CustomerNumber, consecutive, CompanyFailureAlertThreshold);
             }
           }
+        }
+
+        // 🔴 §1041b — LOGGED, NOT MAILED. Operator 2026-08-10: *"it was refused because it was the
+        // dev env so it was positive"* … *"but this report is not relevant to see in dev, can we
+        // turn it off"*.
+        //
+        // ⚠️ The mail this replaced said *"Company Manager did NOT store … set it by hand"* for all
+        // 53 companies — describing a failure that had not happened and asking him to fix records
+        // that were already correct. A policy refusal is not a finding.
+        //
+        // 🔑 §335 ("the only symptom is that nothing happens") is still satisfied without a mail:
+        // the guard itself logs every refusal with the system and operation, this line gives the
+        // per-run total, and the startup banner states the host's whole posture. What is removed is
+        // the ALERT, not the evidence — and an alert nobody should act on trains people to ignore
+        // the ones they should.
+        if (webshopWritesBlocked > 0)
+        {
+            _log.LogInformation(
+                "ERP→webshop: billing NOT pushed for {Count} company(ies) — this host may not write "
+                + "to Company Manager (Integrations:ExternalWrites:Webshop). Expected on DEV; no "
+                + "action needed. Not mailed (§1041b).",
+                webshopWritesBlocked);
         }
 
         if (notes.Count > 0)

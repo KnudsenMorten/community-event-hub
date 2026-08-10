@@ -306,7 +306,9 @@ public class CouponInvoicingModel : PageModel
 
         await LoadAsync(me.EventId, ct);
         Invite = await BuildInviteAsync(me.EventId, InviteSettingId, ct);
-        if (Invite?.Blocker is { } why) Error = why;
+        // 🔴 §1026 — do NOT also raise the page-level Error. The blocker is rendered inside the
+        // preview card, beside the button he pressed; setting Error printed the identical sentence
+        // a second time at the top of the page (operator 2026-08-10: *"mentioned 2 times"*).
         return Page();
     }
 
@@ -423,24 +425,48 @@ public class CouponInvoicingModel : PageModel
         // --- who it goes to, and every reason it cannot ----------------------------------
         string? email = null, name = rule.RequesterName;
         string? blocker = null;
-        if (rule.ErpCustomerNumber is { } cust && rule.RequesterContactNumber is { } contact)
+        if (rule.ErpCustomerNumber is { } cust)
         {
-            await LoadContactsAsync(new[] { cust }, ct);
-            ContactsByCustomer.TryGetValue(cust, out var contacts);
-            var match = contacts?.FirstOrDefault(c => c.ContactNumber == contact);
-            email = match?.Email;
-            name = match?.Name ?? name;
-            if (string.IsNullOrWhiteSpace(email))
+            // 🔴 §1026 — "— customer default —" IS A REQUESTER. Operator 2026-08-10: *"it has a
+            // contact - the default one"*.
+            //
+            // 🔑 A null `RequesterContactNumber` does NOT mean "nobody". It means "use whoever
+            // e-conomic has as this customer's attention contact" — which is exactly what the
+            // INVOICE does (`CouponPrepaidInvoiceService` passes the same null and e-conomic fills
+            // it in). Refusing to mail in that case told him he had picked nothing when he had
+            // picked the default, and it is the commonest setting on the page.
+            var contact = rule.RequesterContactNumber;
+            if (contact is null)
             {
-                blocker = contacts is null || contacts.Count == 0
-                    ? "e-conomic could not be reached, so the requester's email address is unknown."
-                    : $"The requester ({name ?? "contact " + contact}) has no email address in e-conomic.";
+                var detail = _invoices is null ? null : await _invoices.GetCustomerAsync(cust, ct);
+                contact = detail?.AttentionContactNumber;
+            }
+
+            if (contact is { } contactNo)
+            {
+                await LoadContactsAsync(new[] { cust }, ct);
+                ContactsByCustomer.TryGetValue(cust, out var contacts);
+                var match = contacts?.FirstOrDefault(c => c.ContactNumber == contactNo);
+                email = match?.Email;
+                name = match?.Name ?? name;
+                if (string.IsNullOrWhiteSpace(email))
+                {
+                    blocker = contacts is null || contacts.Count == 0
+                        ? "e-conomic could not be reached, so the requester's email address is unknown."
+                        : $"The requester ({name ?? "contact " + contactNo}) has no email address in e-conomic.";
+                }
+            }
+            else
+            {
+                blocker = "This customer has no default contact in e-conomic, so there is nobody to "
+                        + "notify. Pick a specific requester above, or set a contact on the customer "
+                        + "in e-conomic.";
             }
         }
         else
         {
-            blocker = "This coupon has no requester contact, so there is nobody to notify. "
-                    + "Pick the customer and the requester above first.";
+            blocker = "This coupon has no e-conomic customer, so there is nobody to notify. "
+                    + "Pick the customer above first.";
         }
 
         // 🔒 A provisional DRAFT number must never be quoted to a partner — they would look for an

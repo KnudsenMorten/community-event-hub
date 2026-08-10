@@ -107,9 +107,17 @@ public class ExternalWriteCeilingTests
     {
         var blocked = ExternalWriteGuard.StartupBanner(envDefault: false);
 
-        Assert.Contains("ENFORCED", blocked);
-        // It used to end "unless an organizer explicitly overrides it on the Settings page" — the
-        // exact promise §612 removed. A banner that describes the old rule is a trap.
+        // §1037 — the banner now names each system, so the single word "ENFORCED" no longer fits.
+        // The PROMISE it must still make is unchanged and is what this asserts: an override can
+        // only ever restrict. ⚠️ It used to end "unless an organizer explicitly overrides it on the
+        // Settings page" — the exact promise §612 removed, and a banner describing the old rule is
+        // a trap.
+        Assert.Contains("only RESTRICT", blocked);
+        Assert.Contains("never widen", blocked);
         Assert.DoesNotContain("unless an organizer", blocked);
+
+        // And every system reads BLOCKED on a host whose default is off and which names none.
+        Assert.Contains("Zoho Backstage=BLOCKED", blocked);
+        Assert.Contains("e-conomic=BLOCKED", blocked);
     }
 }

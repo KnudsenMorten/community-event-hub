@@ -186,6 +186,42 @@ public sealed class SponsorContactSyncService
             return new SponsorContactSyncResult(companyId, 0, 0, 0, 0);
         }
 
+        // 🔴 §1034b — ONLY A KNOWN SPONSOR'S CONTACTS BECOME SPONSOR PARTICIPANTS. THE GATE LIVES
+        // HERE, BECAUSE THIS METHOD IS WHAT STAMPS `Role = Sponsor`.
+        //
+        // ⚠️ §1034 first put this gate at the order-pull call site, and that was measured WRONG the
+        // same hour: the reported company (33, a coupon customer) has **no completed webshop order
+        // at all** — the pull ran on the new code and created nothing for it — so it never went
+        // through that path. It arrived through one of the other THREE callers, all organizer-side:
+        // /Organizer/EconomicContacts (which fires this for whichever CM company matches an
+        // e-conomic customer an organizer opens), the sponsor-admin dashboard, and CompanyDetails.
+        // A gate on one caller was a gate on the one caller that was innocent.
+        //
+        // 🔑 <b>"No row" MEANS "not a sponsor" here, and that is the whole correction.</b> The
+        // sponsor row is written when a sponsorship is actually bought — the order pull creates it
+        // BEFORE it mirrors contacts, and the organizer/sponsor forms create it with
+        // `IsSponsor = true` — so a real sponsor always has one by the time this runs. A company
+        // with no row is one nothing has ever classified as a sponsor, which is exactly what a
+        // coupon customer is: an e-conomic customer who bought a prepaid ticket block.
+        //
+        // 🔒 Logged, not silent. If an organizer expects contacts and gets none, the reason is in
+        // the log rather than in someone's memory of this rule.
+        var companyKey = companyId.ToString();
+        var sponsorRow = await _db.SponsorInfos.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.EventId == eventId && s.SponsorCompanyId == companyKey, ct);
+
+        if (sponsorRow is null || !sponsorRow.IsSponsor)
+        {
+            _log.LogInformation(
+                "SponsorContactSync: company {Co} is not a sponsor ({Reason}) — contacts NOT "
+                + "mirrored as sponsor participants (§1034b). Link it as a sponsor first if it "
+                + "should be one.",
+                companyId,
+                sponsorRow is null ? "no sponsor row" : "IsSponsor = 0");
+            return new SponsorContactSyncResult(companyId, 0, 0, 0, 0);
+        }
+
         var users = await _cm.GetCompanyUsersAsync(companyId, ct);
         if (users.Count == 0)
         {

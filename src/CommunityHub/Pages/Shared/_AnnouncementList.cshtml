@@ -31,9 +31,35 @@ else
 
             <div style="margin-top:6px;white-space:pre-wrap;">@post.PreviewText</div>
 
+            @* 🔴 §1032 — SHOW THE PICTURE, not its file name. Operator 2026-08-10: the card printed
+               `sponsor-12.png` where the image belongs, which tells an external audience nothing
+               about what we are about to publish about them — and a preview is the one thing this
+               page exists to give them.
+               🔒 The bytes come through /some-post-media, which re-checks that this post is on THIS
+               participant's own page: their browser has no SharePoint permission, and the organizer
+               proxy is organizer-only by design.
+               ⚠️ onerror hides the frame rather than leaving a browser's broken-image glyph — an
+               unreachable library must degrade to "no picture", not to visible breakage. *@
             @if (!string.IsNullOrWhiteSpace(post.ImageRef))
             {
-                <div class="muted" style="margin-top:4px;">🖼 @post.ImageRef</div>
+                var mediaUrl = $"/some-post-media/{post.PostId}";
+                <div style="margin-top:8px;">
+                    @if (post.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video)
+                    {
+                        <video src="@mediaUrl" controls preload="metadata"
+                               style="max-width:100%;width:420px;border-radius:8px;border:1px solid #e5e7eb;"
+                               onerror="this.parentElement.style.display='none';">
+                        </video>
+                    }
+                    else
+                    {
+                        @* Mobile-first: full width on a phone, capped on a desktop. *@
+                        <img src="@mediaUrl" alt="Preview of the picture for this post" loading="lazy"
+                             style="max-width:100%;width:420px;height:auto;display:block;
+                                    border-radius:8px;border:1px solid #e5e7eb;"
+                             onerror="this.parentElement.style.display='none';" />
+                    }
+                </div>
             }
 
             @* 🔴 §916 — WHAT IT IS STILL WAITING FOR. Operator 2026-08-06: *"and any missing
@@ -51,8 +77,15 @@ else
             @* 🔒 §824.14c — the honest line about tagging. CEH names people in the TEXT; it cannot
                @-mention an external speaker (no member URN is obtainable) and the sponsor company-id
                lookup is refused even for our own org. A preview implying a real LinkedIn mention
-               would promise a notification that never arrives. *@
-            <div class="muted" style="margin-top:4px;">@post.MentionLine</div>
+               would promise a notification that never arrives.
+               🔴 §1032 — the SPONSOR page suppresses it. Operator 2026-08-10 called
+               "Mentions the organizers by name…" *"not relevant"* there, and he is right: it is
+               LinkedIn mechanics about the ORGANIZERS, on a page about the sponsor. The line stays
+               for speakers, where it is about the people the post actually names. *@
+            @if (ViewData["HideMentionLine"] as bool? != true)
+            {
+                <div class="muted" style="margin-top:4px;">@post.MentionLine</div>
+            }
         </div>
     }
 }

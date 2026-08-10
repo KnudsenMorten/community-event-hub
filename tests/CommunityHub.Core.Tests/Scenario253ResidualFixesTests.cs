@@ -271,6 +271,14 @@ public sealed class Scenario253ResidualFixesTests
         using var db = NewDb();
         await SeedEventAsync(db);
 
+        // 🔒 §1034b — the mirror refuses a company that is not a known sponsor. This test is about
+        // e-mail NORMALIZATION for a real sponsor's contact, so the fixture states that it is one.
+        db.SponsorInfos.Add(new CommunityHub.Core.Domain.SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "42", CompanyName = "Corp ApS", IsSponsor = true,
+        });
+        await db.SaveChangesAsync();
+
         var options = new CompanyManagerOptions
         {
             Enabled = true,

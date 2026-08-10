@@ -91,7 +91,9 @@ public sealed class SponsorOnboardingResetService
             return Failed("No sponsor company selected.");
         }
 
-        var info = await _db.SponsorInfos
+        // 🔒 §1034 — an onboarding RESET is an admin lifecycle action; it must not report "not
+        // found" for a company the sponsor filter is hiding.
+        var info = await _db.SponsorInfos.IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == sponsorCompanyId, ct);
         if (info is null)
         {

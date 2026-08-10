@@ -81,44 +81,6 @@
     <div class="card"><p role="alert" class="error" style="margin:0;">@Model.Error</p></div>
 }
 
-@* 🔴 §1016c — THE PREVIEW. Operator 2026-08-09: *"preview is fine and then a send mail. then it is
-   safe"* — and it has to carry the weight, because this mail is deliberately ring-EXEMPT (his
-   decision: the recipient is an e-conomic contact, not a participant, so the ring gate could only
-   ever have dropped it silently). What protects a paying partner from a mis-click is that the exact
-   text, and the exact address, are on screen before anything is sent. *@
-@if (Model.Invite is { } claimInvite)
-{
-    <div class="card" style="border:2px solid #1565c0;">
-        <h2 style="margin:0 0 4px;font-size:16px;">
-            Claim invite &mdash; @claimInvite.CouponName
-            <span style="font-weight:normal;color:#6b7280;font-size:13px;">
-                (@(claimInvite.IsPrepaid ? "prepaid" : "ad-hoc") wording)
-            </span>
-        </h2>
-        @if (claimInvite.Blocker is { } blocked)
-        {
-            <p role="alert" class="error" style="margin:8px 0;">@blocked</p>
-        }
-        else
-        {
-            <p style="margin:8px 0;font-size:14px;">
-                <strong>To:</strong> @claimInvite.ToName &lt;@claimInvite.ToEmail&gt;<br />
-                <strong>Subject:</strong> @claimInvite.Subject
-            </p>
-            <div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;background:#fff;
-                        max-height:420px;overflow:auto;">
-                @Html.Raw(claimInvite.Html)
-            </div>
-            <form method="post" asp-page-handler="SendInvite" style="margin-top:12px;">
-                <input type="hidden" name="InviteSettingId" value="@claimInvite.SettingId" />
-                <button type="submit" class="btn">Send this email to @claimInvite.ToEmail</button>
-                <span style="font-size:12px;color:#6b7280;margin-left:8px;">
-                    This goes to the partner. There is no undo.
-                </span>
-            </form>
-        }
-    </div>
-}
 
 @* §798.2 — THE ADD FORM IS AT THE TOP. Operator 2026-08-04: *"can the add a single coupn be added
    to top instead of bottom to avoid scrolling"*. With a real list of coupons it sat below every
@@ -719,6 +681,45 @@
                 <span style="font-size:11.5px;color:#6b7280;">Not yet notified.</span>
             }
         </div>
+
+        @* 🔴 §1026 — THE PREVIEW RENDERS HERE, UNDER THE BUTTON THAT PRODUCED IT (operator
+           2026-08-10: *"put the message near the button//action, not at top"*). It used to render at
+           the top of the page: on a page with many coupons that put the answer a screen away from
+           the question, and gave no clue WHICH coupon it belonged to.
+           🔒 Matched on SettingId, so only the row he pressed shows it. *@
+        @if (Model.Invite is { } preview && r.Setting is not null && preview.SettingId == r.Setting.Id)
+        {
+            <div style="border:2px solid #1565c0;border-radius:8px;padding:12px;margin-top:10px;">
+                <strong style="font-size:14px;">
+                    Claim invite &mdash; @preview.CouponName
+                    <span style="font-weight:normal;color:#6b7280;font-size:12.5px;">
+                        (@(preview.IsPrepaid ? "prepaid" : "ad-hoc") wording)
+                    </span>
+                </strong>
+                @if (preview.Blocker is { } blocked)
+                {
+                    <p role="alert" class="error" style="margin:8px 0;">@blocked</p>
+                }
+                else
+                {
+                    <p style="margin:8px 0;font-size:14px;">
+                        <strong>To:</strong> @preview.ToName &lt;@preview.ToEmail&gt;<br />
+                        <strong>Subject:</strong> @preview.Subject
+                    </p>
+                    <div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;background:#fff;
+                                max-height:420px;overflow:auto;">
+                        @Html.Raw(preview.Html)
+                    </div>
+                    <form method="post" asp-page-handler="SendInvite" style="margin-top:12px;">
+                        <input type="hidden" name="InviteSettingId" value="@preview.SettingId" />
+                        <button type="submit" class="btn">Send this email to @preview.ToEmail</button>
+                        <span style="font-size:12px;color:#6b7280;margin-left:8px;">
+                            This goes to the partner. There is no undo.
+                        </span>
+                    </form>
+                }
+            </div>
+        }
 
         @if (r.Setting is not null)
         {

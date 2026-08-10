@@ -146,11 +146,13 @@ public sealed class SponsorCoordinatorFormService : IWizardFormService
 
     private async Task<SponsorInfo> GetOrCreateInfoAsync(int eventId, string companyId, CancellationToken ct)
     {
-        var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+        // 🔒 §1034 — see SponsorCompanyFormService: an upsert must bypass the sponsor filter or it
+        // duplicates the row. Reached only by a signed-in sponsor, so a row created here IS one.
+        var info = await _db.SponsorInfos.IgnoreQueryFilters().FirstOrDefaultAsync(
             s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
         if (info is null)
         {
-            info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId, CreatedAt = _clock.GetUtcNow(), UpdatedAt = _clock.GetUtcNow() };
+            info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId, IsSponsor = true, CreatedAt = _clock.GetUtcNow(), UpdatedAt = _clock.GetUtcNow() };
             _db.SponsorInfos.Add(info);
         }
         else

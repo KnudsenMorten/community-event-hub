@@ -135,7 +135,64 @@ public class SponsorInfo
     /// (Gold and above). Silver is digital-only. Computed from
     /// <see cref="SponsorPackage"/>; not persisted.
     /// </summary>
-    public bool HasBooth => SponsorPackage >= SponsorPackage.Gold;
+    /// <remarks>
+    /// <para>⚠️ §1034 — <b>prefer <see cref="IsExhibitor"/> for new code.</b> This derived the fact
+    /// from the commercial PACKAGE, which is a tier, and a tier is a poor place to hide a yes/no.
+    /// Kept because ~30 call sites read it — the nav, the wizard steps, the booth tasks, the Zoho
+    /// exhibitor push — and rewriting all of them mid-event is risk without a benefit.</para>
+    ///
+    /// <para>🔑 <b>It now reads the FLAG as well, and the OR is deliberate.</b> Every consumer
+    /// picks up <see cref="IsExhibitor"/> for free, and because this only ever WIDENS the answer,
+    /// no existing behaviour can narrow: a company an organizer bumps to Gold by hand keeps its
+    /// booth even if the flag was never set, exactly as before. The backfill set the two to agree
+    /// (<c>IsExhibitor = 1</c> ⇔ <c>SponsorPackage &gt;= Gold</c>), so today they say the same
+    /// thing; the OR is what makes the transition safe rather than a flag day.</para>
+    /// </remarks>
+    public bool HasBooth => IsExhibitor || SponsorPackage >= SponsorPackage.Gold;
+
+    /// <summary>
+    /// 🔴 §1034 — <b>IS THIS COMPANY A SPONSOR AT ALL?</b> True when it bought at least one
+    /// SPONSORSHIP product (booth · session · branded feature · pre-day). False for a company that
+    /// only ever bought logistics add-ons or ticket/coupon packages.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-10, on a coupon customer appearing in the Sponsors grid: <i>"this is a
+    /// coupon customer, and must not be created as sponsor"</i> → <i>"I recommend something like
+    /// IsSponsor=0/1 and isExhibitor=0/1 HasExhibitorSession=0/1. We have the definitions based on
+    /// the webshop products they buy"</i>.</para>
+    ///
+    /// <para>⚠️ <b>What went wrong without it:</b> nothing asked whether the company was a sponsor.
+    /// Every completed webshop order carrying a Company Manager id was treated as sponsorship, so a
+    /// company that bought a prepaid TICKET block had its contacts mirrored into
+    /// <c>Participants</c> as <c>Role = Sponsor</c> and appeared on /Organizer/Sponsors. The
+    /// classification to tell them apart already existed — the <c>addon</c> rule covers "Ticket
+    /// Packages" — it was simply never consulted for this question.</para>
+    ///
+    /// <para>🔑 <b>A row now exists for EVERY buying company</b>, sponsor or not, so the answer is
+    /// recorded rather than inferred from a row's absence. <c>IsSponsor = 0</c> is a real, auditable
+    /// answer; "no row" was silence that read the same whether the pull had run or not.</para>
+    ///
+    /// <para>🔒 <b>Defaults to TRUE, and that is the safe direction.</b> Only ONE producer can say
+    /// "not a sponsor" — the order pull, from the classified webshop lines — and it sets the value
+    /// explicitly. Every other path that creates a row (the sponsor's own company forms, an
+    /// organizer linking a webshop company, a logo upload) is reachable only for a real sponsor, so
+    /// the default is what they all meant. ⚠️ A default of FALSE combined with the query filter
+    /// would mean any path that forgot the flag writes a row that instantly disappears — including
+    /// ~40 existing test fixtures, which is how this was found.</para>
+    /// </remarks>
+    public bool IsSponsor { get; set; } = true;
+
+    /// <summary>
+    /// 🔴 §1034 — true when the company bought a BOOTH, i.e. it is an exhibitor. Set from the
+    /// classified order lines, not derived from the tier.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 A sponsor without a booth (digital-only) is <c>IsSponsor = 1, IsExhibitor = 0</c> —
+    /// operator: <i>"any sponsor buying a product in webshop should be created as sponsor. but only
+    /// the ones that actually have booth are considered a exhibitor"</i>. This is what gates the
+    /// Zoho EXHIBITOR record; the sponsor record is gated by <see cref="IsSponsor"/>.
+    /// </remarks>
+    public bool IsExhibitor { get; set; }
 
     /// <summary>
     /// Optional public website URL shown as the sponsor's link on the public

@@ -50,9 +50,18 @@
     .tl-metric .k { color:#6b7280; font-size:12.5px; margin-top:4px; }
     .tl-graph { display:flex; align-items:flex-end; gap:2px; height:120px; padding:8px 0; border-bottom:1px solid #e6eaf2; overflow-x:auto; }
     .tl-gbar { flex:0 0 8px; background:var(--el-blue,#008BD2); border-radius:2px 2px 0 0; min-height:2px; }
-    .tl-grid { display:grid; gap:16px; grid-template-columns:1fr; margin-top:18px; }
+    /* 🔴 §1052 — EACH TOPIC IS ITS OWN BLOCK. Operator 2026-08-10: "make more space after each
+       topic, as it is hard to separate them apart - or make - like does this belong to text
+       above?". With a flat 16px gap and no boundary, a heading in the left column sat closer to
+       the PRECEDING card's last row than to its own table, so the eye grouped them wrongly — and
+       a page whose whole job is reading numbers off labels cannot afford that ambiguity.
+       ⇒ A framed card plus a bigger ROW gap (row > column, because the columns are already
+       separated by the fold between them). */
+    .tl-grid { display:grid; gap:22px 18px; grid-template-columns:1fr; margin-top:18px; }
     @@media (min-width:760px) { .tl-grid { grid-template-columns:1fr 1fr; } }
-    .tl-card h3 { margin:0 0 10px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
+    .tl-card { border:1px solid #e6eaf2; border-radius:10px; padding:12px 14px; background:#fff; }
+    .tl-card h3 { margin:0 0 10px; font-size:15.5px; color:var(--el-darkblue,#1D3380);
+                  padding-bottom:8px; border-bottom:1px solid #eef1f6; }
     .tl-table { width:100%; border-collapse:collapse; font-size:13.5px; }
     .tl-table td { padding:5px 6px; vertical-align:top; border-bottom:1px solid #f0f2f6; }
     .tl-rank { color:#9aa0aa; width:1%; white-space:nowrap; font-variant-numeric:tabular-nums; }

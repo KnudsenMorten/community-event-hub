@@ -128,6 +128,17 @@ public sealed class AttendeeTelemetryServiceTests
         Assert.Equal(67, t!.Pct2DayInSegment);
     }
 
+    /// <summary>
+    /// §69 / §1052 — <b>everybody may see the PAGE; only an organizer may see "Top companies".</b>
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-10, settling it in his own words: <i>"everybody must be able to see the
+    /// page, but nobody except organizers can see top companies"</i> — after a round trip through
+    /// <i>"we cannot expose company names due to gdpr - this is public page (remove)"</i> and
+    /// <i>"organizers is ok to see it, reverse"</i>. 🛑 The behaviour never needed to change; the
+    /// organizer page's blurb claimed parity with the public page while showing this extra table,
+    /// which made a correctly-gated feature look like a leak. Do not delete this aggregate.
+    /// </remarks>
     [Fact]
     public async Task Top_companies_table_is_built_only_for_organizer_callers()
     {
@@ -135,7 +146,6 @@ public sealed class AttendeeTelemetryServiceTests
         await SeedEventAsync(db);
         await SeedMirrorAsync(db);
 
-        // Organizer surface (isOrganizer: true) — the OrganizerOnly aggregate is assembled.
         var t = await NewService(db).GetAsync("all", isOrganizer: true);
 
         var companies = t!.Tables.SingleOrDefault(x => x.Title == "Top companies");
@@ -150,13 +160,46 @@ public sealed class AttendeeTelemetryServiceTests
         await SeedEventAsync(db);
         await SeedMirrorAsync(db);
 
-        // Public / sponsor surface (isOrganizer: false, the default) — DEFENSE-IN-DEPTH (§69):
-        // the sensitive "Top companies" aggregate is never CONSTRUCTED, not merely hidden at
-        // render. No OrganizerOnly table should exist on the returned data at all.
+        // DEFENSE-IN-DEPTH (§69): never CONSTRUCTED for a public/sponsor caller, not merely hidden
+        // at render — so no template bug, print stylesheet or PDF export can bring it back.
         var t = await NewService(db).GetAsync("all", isOrganizer: false);
 
         Assert.DoesNotContain(t!.Tables, x => x.Title == "Top companies");
         Assert.DoesNotContain(t.Tables, x => x.OrganizerOnly);
+    }
+
+    /// <summary>
+    /// 🔴 §1052 — THE GUARANTEE NOBODY WAS TESTING: the two PUBLIC-FACING pages must pass
+    /// <c>isOrganizer: false</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The service tests above prove the aggregate is withheld <i>when asked as a
+    /// non-organizer</i>. Nothing proved the anonymous and sponsor PAGES actually ask that way — and
+    /// that flag is the entire public guarantee. Flip either literal to <c>true</c>, or to something
+    /// derived from the signed-in user, and company names reach a page anyone can open, with every
+    /// existing test still green.</para>
+    ///
+    /// <para>⚠️ This is the §1041 lesson in a new place: a test of the present cases could not see
+    /// the absent one. The operator's fear — <i>"i was worried that we exposed it out to the
+    /// public"</i> — deserves a test that would actually catch it happening.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData("AttendeeTelemetry.cshtml.cs")]
+    [InlineData(@"Sponsor\Telemetry.cshtml.cs")]
+    public void The_public_facing_telemetry_pages_ask_as_a_non_organizer(string page)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? found = null;
+        while (dir is not null && found is null)
+        {
+            var p = Path.Combine(dir.FullName, "src", "CommunityHub", "Pages", page);
+            if (File.Exists(p)) found = File.ReadAllText(p);
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(found);
+        Assert.Contains("isOrganizer: false", found!, StringComparison.Ordinal);
+        Assert.DoesNotContain("isOrganizer: true", found!, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -89,11 +89,6 @@ public class SoMeQueueModel : PageModel
     public SoMePostPreview? Preview { get; private set; }
     public int? PreviewPostId { get; private set; }
 
-    // Ad-hoc compose fields.
-    [BindProperty] public string? AdHocText { get; set; }
-    [BindProperty] public string? AdHocImageRef { get; set; }
-    [BindProperty] public DateTime? AdHocScheduledAt { get; set; }
-
     // Edit fields.
     [BindProperty] public int PostId { get; set; }
     // §889 — EditText / EditImageRef / RescheduleAt are gone with their handlers: the editor owns
@@ -117,27 +112,55 @@ public class SoMeQueueModel : PageModel
         return Page();
     }
 
-    /// <summary>Create an ad-hoc one-off post directly into the queue.</summary>
-    public async Task<IActionResult> OnPostAdHocAsync(CancellationToken ct)
+    /// <summary>
+    /// 🔴 §1050 — NEW POST = A BLANK POST, OPENED IN THE EDITOR. ONE SOLUTION, NOT TWO.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-10, after asking for a preview and variables on the compose panel:
+    /// <i>"why not make the new post part of the other edit option"</i> · <i>"instead of
+    /// reengineering"</i> · <i>"so we have 1 solution"</i>. He is right, and it is the better design
+    /// by some distance.</para>
+    ///
+    /// <para>The Post Editor ALREADY has everything the compose panel was about to grow: the live
+    /// post preview, the variable colouring (§865.2(5)) that shows which runs are tokens, the
+    /// graphic picker (§844.3), the schedule field, and approve/hold. Building a second preview and
+    /// a second variable UI beside the list would have been two implementations of one idea, drifting
+    /// apart from the day they shipped — which is the exact complaint §1036 makes about test flags.</para>
+    ///
+    /// <para>⚠️ This DOES reverse §834.5's <i>"CEH composes NOTHING here: no template, no variables"</i>
+    /// — the ad-hoc post gains variables by virtue of being edited in the editor like any other. That
+    /// was a deliberate decision then and it is his to change now; recorded rather than silently
+    /// inverted.</para>
+    ///
+    /// <para>🔒 Born HELD and scheduled a day out, per §915.1. A blank post cannot publish: the
+    /// dispatcher needs Active, and this is not.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostNewPostAsync(CancellationToken ct)
     {
         var me = Guard();
         if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
 
-        if (string.IsNullOrWhiteSpace(AdHocText) || AdHocScheduledAt is null)
-        {
-            Message = "An ad-hoc post needs text and a scheduled date/time.";
-        }
-        else
-        {
-            await _queue.CreateAdHocPostAsync(
-                me.EventId, AdHocText!, AdHocImageRef,
-                new DateTimeOffset(AdHocScheduledAt.Value, TimeSpan.Zero),
-                tags: null, byEmail: me.Email, ct);
-            Message = "Ad-hoc post added to the queue.";
-        }
-        await LoadAsync(me.EventId, ct);
-        return Page();
+        // Tomorrow 09:00 UTC — a real slot he can move, not DateTime.MinValue or "now". A default in
+        // the past would be a post that reads as overdue the moment it is created.
+        var when = new DateTimeOffset(
+            DateTime.UtcNow.Date.AddDays(1).AddHours(9), TimeSpan.Zero);
+
+        var post = await _queue.CreateAdHocPostAsync(
+            me.EventId, string.Empty, imageRef: null, when, tags: null, byEmail: me.Email, ct);
+
+        // Straight into the editor, on the post just made — the whole point of the consolidation.
+        return RedirectToPage("/Organizer/SoMePostEditor", new { id = post.Id });
     }
+
+    // 🔒 §1050 — `OnPostAdHocAsync` IS GONE, and so are its four bound properties and this page's
+    // graphics library. It composed a post — text, image and schedule — beside a page whose job is
+    // finding one, and the moment it needed a PREVIEW and VARIABLES it was going to become a second
+    // editor. "so we have 1 solution": creation now makes a blank post and hands it to the real
+    // editor, so nothing here has to know how a post is composed.
+    //
+    // ⚠️ Removed rather than left unreachable. This page has been here before — the note below
+    // records two handlers that outlived their forms, one of which was a live trap. An orphaned
+    // POST handler is reachable by URL and by nothing else, which is the worst of both.
 
     // 🔒 §889 — EDITING AND RESCHEDULING LIVE IN THE EDITOR, and their handlers are gone from here.
     //

@@ -68,7 +68,20 @@ public sealed class SponsorZohoProvisionService
         var notes = new List<string>();
         if (!_options.Enabled) return new(false, 0, 0, 0, 0, 0, 0, notes);
 
-        var infos = await _db.SponsorInfos.Where(s => s.EventId == eventId).ToListAsync(ct);
+        // 🔴 §1035 — TEST AND WITHDRAWN COMPANIES ARE NEVER CREATED OR UPDATED IN ZOHO.
+        // Operator 2026-08-10: *"company 100 was a test company … so i had to offboard them as
+        // sponsor so i didnt get them synced to zoho"*. Neither flag was read on this path, so the
+        // offboarding did not achieve what it was for. Skipped companies are logged, not dropped
+        // silently — an organizer who expects a record in Backstage must be able to find out why
+        // there isn't one.
+        var allInfos = await _db.SponsorInfos.Where(s => s.EventId == eventId).ToListAsync(ct);
+        var infos = allInfos.Where(SponsorZohoScope.MayPushToZoho).ToList();
+        foreach (var outOfScope in allInfos.Where(i => !SponsorZohoScope.MayPushToZoho(i)))
+        {
+            _log.LogInformation(
+                "Provision: {Co} skipped — {Reason} (§1035); nothing created or updated in Zoho.",
+                outOfScope.SponsorCompanyId, SponsorZohoScope.SkipReason(outOfScope));
+        }
         if (infos.Count == 0) return new(true, 0, 0, 0, 0, 0, 0, notes);
 
         string? token;
@@ -263,7 +276,11 @@ public sealed class SponsorZohoProvisionService
                         exResult = await _zoho.CreateExhibitorAsync(
                             token!, name, info.WebsiteUrl, info.CompanyDescription, boothCategoryId,
                             info.EventCoordinatorFirstName, info.EventCoordinatorLastName, info.EventCoordinatorEmail,
-                            boothLabel: info.BoothLabel, ct: ct);
+                            boothLabel: info.BoothLabel,
+                            // 🔴 §1033 — the social pages travel WITH the create. Never sent here
+                            // before, which is why §791.3's PUT measurements say nothing about it.
+                            linkedInUrl: info.LinkedInUrl, twitterUrl: info.TwitterUrl,
+                            ct: ct);
                     }
                     catch (Exception ex)
                     {
@@ -281,6 +298,54 @@ public sealed class SponsorZohoProvisionService
                         exCreated++;
                         notes.Add($"{name}: exhibitor created in Zoho.");
                         zohoWrites.Add($"Created exhibitor '{name}' (Zoho id {exResult.Id})");
+
+                        // 🔴 §1033 — READ THE SOCIAL PAGES BACK. The create now sends them (a path
+                        // §791.3 never measured — all four of its calls were PUTs), but a 200 is
+                        // exactly what the PUT returns while storing nothing, so the only honest
+                        // report is what the record says afterwards. This line is the measurement:
+                        // the first real create settles whether the create endpoint keeps it.
+                        if (!string.IsNullOrWhiteSpace(info.LinkedInUrl)
+                            || !string.IsNullOrWhiteSpace(info.TwitterUrl))
+                        {
+                            try
+                            {
+                                var back = await _zoho.GetExhibitorByIdAsync(token!, exResult.Id!, ct);
+                                var kept = new List<string>();
+                                if (!string.IsNullOrWhiteSpace(back?.LinkedInUrl)) kept.Add("LinkedIn");
+                                if (!string.IsNullOrWhiteSpace(back?.TwitterUrl)) kept.Add("X/Twitter");
+
+                                if (kept.Count > 0)
+                                {
+                                    zohoWrites.Add(
+                                        $"Created exhibitor '{name}' — social pages STORED on create "
+                                        + $"and read back: {string.Join(", ", kept)} (§1033).");
+                                    _log.LogInformation(
+                                        "§1033: exhibitor create KEPT company_social_pages for {Co} "
+                                        + "({Kept}) — the create endpoint writes what the PUT discards.",
+                                        info.SponsorCompanyId, string.Join("+", kept));
+                                }
+                                else
+                                {
+                                    // Not a failure to alert on: it is the §791.3 behaviour extending
+                                    // to create, and the §792 hand-entry mail already carries the
+                                    // value to him. Logged so the answer is on the record either way.
+                                    _log.LogInformation(
+                                        "§1033: exhibitor create did NOT keep company_social_pages for "
+                                        + "{Co} — the create endpoint discards it too, like the PUT "
+                                        + "(§791.3). The hand-entry mail remains the route.",
+                                        info.SponsorCompanyId);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // A read-back that could not be made says nothing either way — and
+                                // §553 forbids collapsing "could not look" into "not there".
+                                _log.LogWarning(ex,
+                                    "§1033: could not read {Co}'s exhibitor back after create — no "
+                                    + "conclusion drawn about company_social_pages.",
+                                    info.SponsorCompanyId);
+                            }
+                        }
                     }
                     else
                     {

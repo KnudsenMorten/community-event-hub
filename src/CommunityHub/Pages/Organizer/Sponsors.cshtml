@@ -221,6 +221,34 @@
                                     </details>
                                 }
 
+                                @* 🔴 §1035 — MARK AS TEST DATA. Operator 2026-08-10: *"i dont have
+                                   a IsTestSponsor so i had to offboard them as sponsor so i didnt
+                                   get them synced to zoho"* / *"i didn't have a place to set the
+                                   flag in the ui"*. The flag existed and nothing could set it.
+                                   Not a typed confirmation like Withdraw: it takes nothing away and
+                                   is reversible in one click. *@
+                                <form method="post" asp-page-handler="SetTestCompany"
+                                      style="display:inline-block;vertical-align:top;margin-left:6px;">
+                                    <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                    <input type="hidden" name="isTest" value="@((!c.IsTestData).ToString().ToLowerInvariant())" />
+                                    @if (c.IsTestData)
+                                    {
+                                        <button type="submit" title="Currently excluded from Zoho and from the social campaign"
+                                                style="cursor:pointer;color:#3730a3;font-size:12px;border:1px solid #c7d2fe;
+                                                       background:#eef2ff;border-radius:6px;padding:4px 9px;">
+                                            🧪 Test data — click to unmark
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button type="submit" title="Stops this company being created or updated in Zoho Backstage, and leaves it out of the social campaign"
+                                                style="cursor:pointer;color:#4b5563;font-size:12px;border:1px solid #d1d5db;
+                                                       background:#fff;border-radius:6px;padding:4px 9px;">
+                                            Mark as test data
+                                        </button>
+                                    }
+                                </form>
+
                                 @* §366 (operator 2026-07-26): the sponsor half of the §355 reset.
                                    Deliberately NOT styled as a danger action like Withdraw above —
                                    it takes nothing away from the company, it just makes the hub ask

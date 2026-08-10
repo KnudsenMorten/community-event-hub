@@ -2,6 +2,14 @@
 @model CommunityHub.Pages.Sponsor.AnnouncementsModel
 @{
     ViewData["Title"] = "Social Media Announcements (managed by ELDK)";
+    // 🔴 §1032 — drop the "Mentions the organizers by name…" line here. Operator 2026-08-10:
+    // *"not relevant"*. It is internal LinkedIn mechanics about the ORGANIZERS, printed on every
+    // row of a page a SPONSOR reads about themselves. The speaker page keeps it (§824.14c), where
+    // the sentence is about the people the post names.
+    // 🔑 Set on ViewData rather than forked into a second partial: two renderers for "how a post is
+    // previewed" is the drift _AnnouncementList exists to prevent, and the copy that drifted would
+    // be the one an external audience reads.
+    ViewData["HideMentionLine"] = true;
 }
 
 <div class="card">

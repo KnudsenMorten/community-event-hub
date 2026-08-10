@@ -96,6 +96,8 @@ public static class BreadcrumbBuilder
             ["/organizer/findperson"]            = "/organizer/people",
             ["/organizer/accesslinks"]           = "/organizer/people",
             ["/organizer/welcomelinks"]          = "/organizer/people",
+            // §1040 — Volume Package monitors, carded on People beside the two sign-in-link pages.
+            ["/organizer/attendeemonitors"]      = "/organizer/people",
             ["/organizer/pendingspeakers"]       = "/organizer/people",
             ["/organizer/economiccontacts"]      = "/organizer/people",
             ["/organizer/sponsorwebshopcompany"] = "/organizer/people",

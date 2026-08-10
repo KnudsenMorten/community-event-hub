@@ -17,13 +17,22 @@
         return;
     }
 
+    @* 🔴 §1052 — THIS SENTENCE SAID "Same figures as the public sponsor telemetry page" WHILE THIS
+       PAGE SHOWED A TABLE THE PUBLIC PAGE DOES NOT HAVE ("Top companies", §69).
+       That is how a correctly-gated organizer table got reported as a public GDPR leak: all three
+       telemetry surfaces share this panel and the same H1, so the ONLY thing distinguishing them
+       was a claim of parity that was false. Reading company names under that sentence is a correct
+       inference from a wrong premise — the defect was the caption, not the data.
+       🔒 So it now names the difference explicitly, and says who can see it. A page that tells you
+       what is public must be right about it, or it is worse than silent. *@
     <p style="color:#4b5563;margin-top:0;">
         Aggregate attendee analytics — pick a segment and drill into the breakdown by
         job role, where attendees are from, ticket type and the registration custom-field
-        topics. Same figures as the public sponsor telemetry page.
+        topics. The public and sponsor telemetry pages show these same aggregates
+        <strong>except “Top companies”</strong>, which is organizer-only and is never built for
+        those pages.
     </p>
 
-    @* §69 — organizer surface: IsOrganizer:true unlocks the organizer-only "Top companies" table. *@
     <partial name="_AttendeeTelemetryPanel"
              model="new CommunityHub.Pages.Shared.AttendeeTelemetryPanelModel(Model.Data, Model.Segments, IsOrganizer: true)" />
 </div>

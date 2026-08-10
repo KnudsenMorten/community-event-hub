@@ -45,6 +45,16 @@ public sealed class AuthorizationFallbackTests
         // the token is the only authorisation, and the brief forbids collecting identity here.
         // A login redirect would make every printed code in the venue useless.
         "CommunityHub.Pages.FeedbackModel",                    // /f/{token}
+        // 🔴 §1040 — /monitor/{token}, the Volume Package list a company follows. Anonymous BY
+        // DESIGN and reviewed as such: the recipient is OUTSIDE the hub and has no account, so a
+        // login redirect would make the feature impossible rather than safer.
+        //
+        // ⚠️ This is the only anonymous page that shows real people's NAMES and E-MAIL ADDRESSES,
+        // so it carries more than the token: the monitor scopes to ONE domain or ONE coupon (a
+        // forwarded link cannot widen), it is revocable, it EXPIRES by itself (15 Feb 2027), it is
+        // strictly read-only, and unknown/revoked/expired all answer 404 alike so a stranger cannot
+        // learn that a token is real.
+        "CommunityHub.Pages.MonitorModel",                     // /monitor/{token}
         "CommunityHub.Pages.Sessions.AskModel",                // /Sessions/Ask (QR question)
         "CommunityHub.Pages.Speakers.IndexModel",              // /Speakers
         "CommunityHub.Pages.Speakers.DetailModel",             // /Speakers/{id}

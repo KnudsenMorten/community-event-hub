@@ -47,6 +47,77 @@ public sealed class ExternalWriteOptions
     /// and self-heals when the setting lands.</para>
     /// </summary>
     public bool AllowExternalWrites { get; set; } = false;
+
+    /// <summary>
+    /// 🔴 §1037 — THE PER-SYSTEM CEILING. <c>Integrations:ExternalWrites:{System}</c>, e.g.
+    /// <c>Integrations:ExternalWrites:Zoho = false</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-10, stating the DEV policy in full: <i>"dev must newer WRITE to zoho,
+    /// but it is allowed to read from zoho. dev is allowed to readwrite to erp. dev is allowed to
+    /// read from webshop. dev is allowed to have test webpages so i can verify signage. dev is not
+    /// allowed to publish on linkedin. dev is allowed to import from sessionize. dev is allowed to
+    /// write to sharepoint (as it has its own separate path). as a general rule, importing into ceh
+    /// is 100% fine - but sending data out from dev is controlled"</i>.</para>
+    ///
+    /// <para>🔑 <b>His general rule was already this class's rule</b> — §340-H put it in as many
+    /// words: <i>"Reads are never gated: pulling data INTO CEH changes nothing outside it"</i>. What
+    /// was missing is that the ceiling was ONE boolean for every system at once, so DEV could not be
+    /// "no Zoho writes, but yes to ERP and SharePoint" — it was all or nothing, and the answer had to
+    /// be nothing.</para>
+    ///
+    /// <para>🔒 <b>A system NOT listed falls back to <see cref="AllowExternalWrites"/>.</b> That
+    /// keeps PROD (which sets it true) writing everywhere without enumerating systems, and keeps an
+    /// unconfigured host at "write nothing" — the only defensible default. ⚠️ It also means a NEW
+    /// integration is governed the moment it calls the guard, rather than silently unlisted.</para>
+    /// </remarks>
+    public Dictionary<string, bool> ExternalWrites { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// §1037 — the system names the guard is called with, and the config key each one binds to.
+/// </summary>
+/// <remarks>
+/// ⚠️ <b>These strings are the ones the CALL SITES really pass</b> — listed from the code, never
+/// guessed (§767 shipped a sweep that matched nothing for four production runs because a convention
+/// was assumed). A rename on either side unbinds the policy silently, so
+/// <c>ExternalWriteSystemNameTests</c> pins the mapping against the live call sites.
+/// </remarks>
+public static class ExternalSystems
+{
+    public const string Zoho = "Zoho Backstage";
+    public const string Erp = "e-conomic";
+    public const string LinkedIn = "LinkedIn";
+    public const string SharePoint = "SharePoint";
+
+    /// <summary>
+    /// 🔴 §1041 — the WEBSHOP (Company Manager / WordPress on the public site).
+    /// </summary>
+    /// <remarks>
+    /// Added after a DEV run reported <b>53 billing updates against the LIVE webshop</b>. The cause
+    /// was not a misconfiguration: <c>CompanyManagerClient</c> had never been wired to the guard at
+    /// all, so its three write methods were reachable from any host holding the credentials — and
+    /// DEV and PROD share one Company Manager. ⚠️ §340-H's list (Zoho, e-conomic, LinkedIn,
+    /// SharePoint) simply did not include the webshop, and nothing failed when it was missed.
+    /// </remarks>
+    public const string Webshop = "Webshop";
+
+    /// <summary>
+    /// The settings key for a system name. 🔑 An ALIAS, not a slug of the display name: nobody
+    /// should have to write <c>Integrations:ExternalWrites:Zoho Backstage</c> (a key with a space)
+    /// or guess that e-conomic's hyphen survives.
+    /// </summary>
+    public static string ConfigKeyFor(string system) => system switch
+    {
+        Zoho => "Zoho",
+        Erp => "Erp",
+        LinkedIn => "LinkedIn",
+        SharePoint => "SharePoint",
+        Webshop => "Webshop",
+        // An unrecognised system keeps its own name as the key, so a new integration is
+        // configurable the day it is added rather than silently falling through for ever.
+        _ => system,
+    };
 }
 
 /// <summary>
@@ -112,7 +183,26 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
     /// <para>Fails CLOSED on a DB error: if the override cannot be read we do not guess,
     /// and "do not write to a third party" is the safe guess anyway.</para>
     /// </summary>
-    public async Task<bool> IsAllowedAsync(CancellationToken ct = default)
+    public async Task<bool> IsAllowedAsync(CancellationToken ct = default) =>
+        _options.AllowExternalWrites && await OrganizerOverrideAllowsAsync(ct);
+
+    /// <summary>
+    /// §1037 — the ORGANIZER half of the decision, on its own: <c>true</c> unless an organizer has
+    /// switched external writes off for this edition.
+    /// </summary>
+    /// <remarks>
+    /// <para>Split out because the ENVIRONMENT half is now per-system (§1037) while this half is
+    /// not: an organizer turning writes off means "stop writing anywhere", never "stop writing to
+    /// ERP but keep writing to SharePoint".</para>
+    ///
+    /// <para>🔒 §612 still holds and is what this split must not break: the override may only ever
+    /// RESTRICT. It is ANDed with the per-system ceiling in <see cref="AllowAsync"/>, so no click on
+    /// a DEV Settings page can widen what that host's config permits.</para>
+    ///
+    /// <para>Fails CLOSED on a DB error: if the override cannot be read we do not guess, and "do not
+    /// write to a third party" is the safe guess anyway.</para>
+    /// </remarks>
+    private async Task<bool> OrganizerOverrideAllowsAsync(CancellationToken ct = default)
     {
         if (_cached is bool c) return c;
 
@@ -141,7 +231,10 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
             // The override may now only ever RESTRICT: on a host whose config blocks writes, no
             // override can widen it. Same shape as the §566 e-mail ceiling —
             // effective = MIN(environment, override) — so the rule is consistent system-wide.
-            effective = _options.AllowExternalWrites && (over ?? true);
+            // §1037 — the ENVIRONMENT half moved to `EnvironmentCeilingFor`, which is per-system.
+            // This returns only the organizer's answer; `AllowAsync` ANDs the two, so §612's
+            // "the environment is a ceiling, not a default" is unchanged.
+            effective = over ?? true;
         }
         catch (Exception ex)
         {
@@ -155,18 +248,43 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
         return effective;
     }
 
+    /// <summary>
+    /// §1037 — the ENVIRONMENT ceiling for ONE system: its explicit
+    /// <c>Integrations:ExternalWrites:{key}</c> setting, else the host-wide default.
+    /// </summary>
+    private bool EnvironmentCeilingFor(string system) =>
+        _options.ExternalWrites.TryGetValue(ExternalSystems.ConfigKeyFor(system), out var perSystem)
+            ? perSystem
+            : _options.AllowExternalWrites;
+
     public async Task<bool> AllowAsync(
         string system, string operation, CancellationToken ct = default)
     {
-        if (await IsAllowedAsync(ct)) return true;
+        // 🔴 §1037 — TWO CEILINGS, AND BOTH MUST SAY YES.
+        //
+        // The per-system setting is what lets DEV be what he actually asked for — no Zoho writes,
+        // but read/write to ERP and writes to SharePoint — instead of the all-or-nothing switch
+        // that forced DEV to "nothing". The organizer override still only ever RESTRICTS (§612):
+        // no click on the Settings page can widen what this host's config permits.
+        if (!EnvironmentCeilingFor(system))
+        {
+            _log?.LogWarning(
+                "External write BLOCKED — {System}.{Operation} was NOT performed. This host's "
+                + "policy for {System} is OFF (Integrations:ExternalWrites:{Key}, or the "
+                + "Integrations:AllowExternalWrites default). Expected in DEV for Zoho and "
+                + "LinkedIn; in PROD it means an app setting is missing.",
+                system, operation, system, ExternalSystems.ConfigKeyFor(system));
+            return false;
+        }
+
+        if (await OrganizerOverrideAllowsAsync(ct)) return true;
 
         // Warning, not Information: in a real environment this firing means either the
         // switch is correctly off (DEV — expected, and you want to SEE it while testing) or
         // prod is missing its app setting (a real problem). Both deserve to be visible.
         _log?.LogWarning(
-            "External write BLOCKED — {System}.{Operation} was NOT performed. "
-            + "Integrations:AllowExternalWrites is false for this host and no organizer "
-            + "override enables it. Expected in DEV; in PROD it means the app setting is missing.",
+            "External write BLOCKED — {System}.{Operation} was NOT performed: an organizer has "
+            + "turned external writes off for this edition on the Settings page.",
             system, operation);
         return false;
     }
@@ -178,15 +296,40 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
     /// override may change it later, which the Settings page shows.
     /// </summary>
     public static string StartupBanner(bool envDefault) =>
-        envDefault
-            ? "External writes: ALLOWED by environment config — this host CAN write to Zoho "
-              + "Backstage, e-conomic, LinkedIn and SharePoint (an organizer override may still turn it off)."
-            // §612 — the wording had to change with the rule. It previously ended "unless an
-            // organizer explicitly overrides it on the Settings page", which was true and is exactly
-            // the hole the operator wanted closed. A blocked host is now blocked FULL STOP.
-            : "External writes: BLOCKED by environment config (Integrations:AllowExternalWrites=false) "
-              + "— no outbound writes to Zoho Backstage, e-conomic, LinkedIn or SharePoint. "
-              + "This is ENFORCED: no organizer override can enable writes on this host.";
+        StartupBanner(new ExternalWriteOptions { AllowExternalWrites = envDefault });
+
+    /// <summary>
+    /// §1037 — the banner now names EACH system, because one word can no longer describe the host.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ The old banner said "no outbound writes to Zoho Backstage, e-conomic, LinkedIn or
+    /// SharePoint" whenever the default was off. With per-system ceilings that sentence would be a
+    /// LIE on DEV — which is allowed to write to e-conomic and SharePoint — and a banner an operator
+    /// cannot trust is worse than none, because its whole job is to answer "can the app in front of
+    /// me write to Zoho" without reading config.
+    /// </remarks>
+    public static string StartupBanner(ExternalWriteOptions options)
+    {
+        string[] systems =
+        [
+            ExternalSystems.Zoho, ExternalSystems.Erp,
+            ExternalSystems.LinkedIn, ExternalSystems.SharePoint,
+            ExternalSystems.Webshop,
+        ];
+
+        var parts = systems.Select(s =>
+        {
+            var key = ExternalSystems.ConfigKeyFor(s);
+            var allowed = options.ExternalWrites.TryGetValue(key, out var v)
+                ? v
+                : options.AllowExternalWrites;
+            return $"{s}={(allowed ? "ALLOWED" : "BLOCKED")}";
+        });
+
+        return "External writes by system — " + string.Join(", ", parts)
+            + ". Reads are never gated (importing into CEH changes nothing outside it). "
+            + "An organizer override can only RESTRICT this further, never widen it (§612).";
+    }
 }
 
 /// <summary>

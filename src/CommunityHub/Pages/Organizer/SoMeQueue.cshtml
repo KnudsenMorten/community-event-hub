@@ -89,10 +89,18 @@
        ways. They are merged into one card pointing here, so the other two views must be reachable
        FROM here — a card removed without a route left in its place is a page nobody can open, which
        is exactly the §889.4 complaint. *@
-    <p class="som-meta">
-        <a asp-page="/Organizer/SoMeCalendar">Day-by-day calendar view</a> ·
-        <a asp-page="/Organizer/SoMePostEditor">Walk posts one at a time</a> ·
-        <a asp-page="/Organizer/SoMeSettings">SoMe settings &amp; connection</a>
+    @* 🔴 §1042 — BUTTONS, NOT A ROW OF SMALL LINKS. Operator 2026-08-10: *"ipossi... impossible to
+       see (make button)"*. §914 left these as `som-meta` text, which is the styling for a footnote —
+       and one of them is the WALK, the control he uses to review a batch of posts one at a time.
+       He reported the walk as MISSING; it was here all along, rendered as a footnote. A control
+       nobody can find has the same value as one that is not there. *@
+    <p style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="btn primary" asp-page="/Organizer/SoMePostEditor"
+           style="text-decoration:none;">📝 Walk posts one at a time</a>
+        <a class="btn" asp-page="/Organizer/SoMeCalendar"
+           style="text-decoration:none;">📅 Day-by-day calendar view</a>
+        <a class="btn" asp-page="/Organizer/SoMeSettings"
+           style="text-decoration:none;">⚙ SoMe settings &amp; connection</a>
     </p>
 </div>
 
@@ -122,6 +130,39 @@
         </div>
     </div>
 }
+
+@* 🔴 §1049 — WRITE A POST FROM SCRATCH, AT THE TOP AND OPEN.
+   Operator 2026-08-10: *"missing ability to create new"* — then, on being shown it: *"move this up
+   to top of page - it is hidden at the bottom. it is collapsed. make dropdown to choose graphics"*.
+
+   ⚠️ §889.4 put it BELOW the list and collapsed, reasoning that the page's job is finding an
+   EXISTING post. That reasoning was sound and still produced a control he could not find: he
+   reported creation as MISSING while it sat on the page, closed, under 63 rows. **A capability
+   folded shut below the fold is indistinguishable from one that does not exist** — the same lesson
+   as §1042, where the approve-walk was "gone" because it was a footnote behind a calendar card.
+   ⇒ Top of page, and `open` — the cost is a tall form above the list, which is the lesser harm.
+
+   🔴 §1050 — AND THEN IT BECAME ONE BUTTON. Operator 2026-08-10, having asked for a preview and
+   for variables on this panel: *"why not make the new post part of the other edit option"* ·
+   *"instead of reengineering"* · *"so we have 1 solution"*.
+
+   ⚠️ He is right. The panel was about to grow a post preview and a variable UI — both of which the
+   Post Editor ALREADY has, along with the graphic picker and the schedule. Two implementations of
+   one idea drift apart from the day they ship. So creating a post now MAKES a blank held post and
+   opens it in the editor, and there is exactly one place to compose a post.
+   🔒 This reverses §834.5's "no variables here" for ad-hoc posts — deliberately, by his decision.
+   Recorded in §1050 rather than silently inverted. *@
+<div class="card" id="write-from-scratch">
+    <h2 style="margin-top:0;">Write a new post</h2>
+    <p class="muted">
+        A blank post — no template and no generated text — opened in the post editor, where you get
+        the live preview, the variables, the graphic picker and the schedule. It is held for your
+        approval, so nothing publishes until you accept it.
+    </p>
+    <form method="post" asp-page-handler="NewPost">
+        <button type="submit" class="btn">✚ Write a new post</button>
+    </form>
+</div>
 
 @* 🔴 §889 — THE LIST IS THE LANDING, and the editor is one click from any row.
    Operator 2026-08-06: *"i need to see everything in list format first and then have edit option -
@@ -234,6 +275,17 @@ else
                             <input type="hidden" name="SetActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
                             <button type="submit" class="btn btn-ghost">@(p.IsActive ? "Deactivate" : "Activate")</button>
                         </form>
+                        @* 🔑 §1050 — Duplicate from the LIST, posting to the EDITOR's own handler.
+                           Not a copy of that logic: duplication FLATTENS the variables to the words
+                           they read today (§913), which needs the composer, and a second
+                           implementation here would drift from it. The handler redirects into the
+                           editor on the new copy, which is where he wants to be anyway. *@
+                        <form method="post" asp-page="/Organizer/SoMePostEditor"
+                              asp-page-handler="Duplicate" style="display:inline;"
+                              onsubmit="return confirm('Duplicate post #@p.Id?\n\nThe copy is held for approval and is yours to edit. Its text is copied as WORDS — variables are filled in as they read today.');">
+                            <input type="hidden" name="id" value="@p.Id" />
+                            <button type="submit" class="btn btn-ghost">Duplicate</button>
+                        </form>
                     </td>
                 </tr>
                 @if (!string.IsNullOrWhiteSpace(p.LastError))
@@ -247,34 +299,5 @@ else
         </table>
     </div>
 }
-
-@* §834.5 (operator 2026-08-05: "empty post is i will write post from scratch") — this IS that
-   feature. It already worked; it was called "ad-hoc" and sat unexplained under the queue, so it did
-   not read as the thing he was asking for.
-   🔒 CEH composes NOTHING here: no template, no generated intro, no variables. What he types is what
-   publishes — the deliberate escape hatch from the five generated types.
-   §889.4 — moved BELOW the list and collapsed. It is a tall form, and above the list it was the
-   first thing on a page whose whole job is helping him find an EXISTING post. *@
-<div class="card" id="write-from-scratch">
-    <details>
-        <summary>Write a post from scratch</summary>
-        <p class="muted">
-            An empty post — no template, no generated text. What you write here is exactly what
-            publishes. Use it for anything the five automatic post types do not cover.
-        </p>
-        <form method="post" asp-page-handler="AdHoc" class="som-grid">
-            <label for="adhoc-text">Post text</label>
-            <textarea id="adhoc-text" name="AdHocText" rows="3" required>@Model.AdHocText</textarea>
-
-            <label for="adhoc-img">Image reference (URL / SharePoint path, optional)</label>
-            <input id="adhoc-img" name="AdHocImageRef" type="text" value="@Model.AdHocImageRef" />
-
-            <label for="adhoc-when">Scheduled date/time (UTC)</label>
-            <input id="adhoc-when" name="AdHocScheduledAt" type="datetime-local" required />
-
-            <div><button type="submit" class="btn">Add to queue</button></div>
-        </form>
-    </details>
-</div>
 
 <p><a asp-page="/Index">Back to hub</a></p>

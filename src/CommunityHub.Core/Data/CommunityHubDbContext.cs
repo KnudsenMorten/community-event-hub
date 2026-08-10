@@ -101,6 +101,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// One order has many tickets/attendees; reconciled strictly one-way Zoho→CEH.</summary>
     public DbSet<Order> Orders => Set<Order>();
 
+    /// <summary>§1040 — shareable, revocable views of who has bought a ticket for one company.</summary>
+    public DbSet<AttendeeMonitor> AttendeeMonitors => Set<AttendeeMonitor>();
+
     /// <summary>Last-successful-sync markers, one per (EventId, Key) — drives the
     /// telemetry "Updated &lt;t&gt;" footer (REQUIREMENTS §125/§127).</summary>
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
@@ -1724,10 +1727,56 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => x.EventId).IsUnique();
         });
 
+        // --- AttendeeMonitor (§1040) ----------------------------------------
+        b.Entity<AttendeeMonitor>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Value).IsRequired().HasMaxLength(320);
+            e.Property(x => x.Token).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CreatedByEmail).HasMaxLength(320);
+            e.Property(x => x.Kind).HasConversion<int>();
+
+            // 🔒 The token is the credential for an UNAUTHENTICATED page, so the lookup that
+            // resolves it must be an index — and UNIQUE, so one link can never resolve to two
+            // monitors and show a company someone else's attendees.
+            e.HasIndex(x => x.Token).IsUnique();
+
+            e.HasIndex(x => new { x.EventId, x.Kind, x.Value });
+
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // --- SponsorInfo ----------------------------------------------------
         b.Entity<SponsorInfo>(e =>
         {
             e.HasKey(x => x.Id);
+
+            // 🔴 §1034 — A NON-SPONSOR ROW IS INVISIBLE UNLESS A CALLER ASKS FOR IT.
+            //
+            // The table now holds a row for EVERY company that bought something in the webshop, so
+            // that "is this a sponsor?" is a recorded answer rather than the absence of a row
+            // (operator 2026-08-10, on a coupon customer in the Sponsors grid: *"this is a coupon
+            // customer, and must not be created as sponsor"*). ⚠️ That change alone would have
+            // silently widened 45 existing consumers — the public sponsors page, the SoMe planner
+            // that writes posts ABOUT a company, the Zoho provisioner that CREATES records there,
+            // the tier graphics — every one of which was written when a row meant a sponsor.
+            //
+            // 🔒 So the meaning is preserved at the source: `_db.SponsorInfos` still means SPONSORS.
+            // A caller that genuinely needs the non-sponsors (the order pull that writes them, the
+            // deletion/reset services, an organizer audit view) says so with
+            // `.IgnoreQueryFilters()` — one visible, greppable word at each of the few places that
+            // want it, instead of a filter that 45 call sites had to remember.
+            //
+            // 🔑 This is the §905 lesson applied in advance: *"all have the test flag but some
+            // service doesn't handle it"*. A flag whose enforcement depends on every consumer
+            // remembering it is a flag that will be forgotten somewhere — and the somewhere is
+            // found in production. ⚠️ Safe here because SponsorInfo has NO navigation properties
+            // pointing at it (companies are joined by the string SponsorCompanyId), so no Include
+            // anywhere can be silently emptied by this.
+            e.HasQueryFilter(x => x.IsSponsor);
+
             e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
             e.Property(x => x.LogoVectorPath).HasMaxLength(400);
             e.Property(x => x.LogoVectorFileName).HasMaxLength(200);

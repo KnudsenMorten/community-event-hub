@@ -1,0 +1,151 @@
+@page
+@model CommunityHub.Pages.Organizer.AttendeeMonitorsModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Volume package monitors";
+}
+
+<div class="card">
+    <h1>Volume package monitors</h1>
+    <p class="muted">
+        A company that buys a block of tickets can follow who redeems them. Create a monitor for their
+        <strong>e-mail domain</strong> or their <strong>coupon code</strong>, then send them the link —
+        it needs no login, shows only their own people, and you can withdraw it at any time.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for organizers.</p>
+    }
+    else
+    {
+        @if (Model.Message is not null) { <p class="success">@Model.Message</p> }
+        @if (Model.Error is not null) { <p class="error">@Model.Error</p> }
+
+        <details style="margin-top:12px;">
+            <summary style="cursor:pointer;font-weight:600;">+ New monitor</summary>
+            <form method="post" asp-page-handler="Create" style="margin-top:12px;max-width:640px;">
+                <label for="mon-name">Name</label>
+                <input id="mon-name" name="name" required placeholder="e.g. Arrow volume package"
+                       style="width:100%;" />
+
+                <label for="mon-kind" style="margin-top:10px;display:block;">What it watches</label>
+                <select id="mon-kind" name="kind" style="width:100%;">
+                    <option value="@((int)AttendeeMonitorKind.EmailDomain)">E-mail domain — every attendee at that domain</option>
+                    <option value="@((int)AttendeeMonitorKind.CouponCode)">Coupon code — every attendee whose ticket used that code</option>
+                </select>
+
+                <label for="mon-value" style="margin-top:10px;display:block;">Domain or coupon code</label>
+                <input id="mon-value" name="value" required placeholder="arrow.com  —  or  —  ELDK27VOLUME"
+                       style="width:100%;" />
+                <p class="muted" style="font-size:12px;margin-top:4px;">
+                    A domain may be typed as <code>arrow.com</code>, <code>@@arrow.com</code> or
+                    <code>*@@arrow.com</code> — they all mean the same thing.
+                </p>
+
+                <label for="mon-expires" style="margin-top:10px;display:block;">Link works until</label>
+                <input id="mon-expires" name="expiresAt" type="date"
+                       value="@AttendeeMonitor.DefaultExpiry.ToString("yyyy-MM-dd")" style="width:100%;" />
+                <p class="muted" style="font-size:12px;margin-top:4px;">
+                    Defaults to just after the event. The link stops working by itself on this date.
+                </p>
+
+                <button type="submit" class="btn primary" style="margin-top:12px;">Create monitor</button>
+            </form>
+        </details>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Monitors</h2>
+        @if (Model.Monitors.Count == 0)
+        {
+            <p class="muted">None yet.</p>
+        }
+        else
+        {
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:8px 6px;">Name</th>
+                        <th style="padding:8px 6px;">Watches</th>
+                        <th style="padding:8px 6px;">Attendees</th>
+                        <th style="padding:8px 6px;">Link</th>
+                        <th style="padding:8px 6px;">Status</th>
+                        <th style="padding:8px 6px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var row in Model.Monitors)
+                {
+                    var m = row.Monitor;
+                    <tr style="border-bottom:1px solid #f0f0f0;">
+                        <td style="padding:8px 6px;"><strong>@m.Name</strong></td>
+                        <td style="padding:8px 6px;">
+                            @(m.Kind == AttendeeMonitorKind.EmailDomain ? "domain" : "coupon")
+                            <code>@m.Value</code>
+                        </td>
+                        <td style="padding:8px 6px;">@row.MatchCount</td>
+                        <td style="padding:8px 6px;">
+                            @if (m.IsActive)
+                            {
+                                @* The link is the credential — offered for copying, never rendered
+                                   as a live anchor an organizer might follow and leave in history. *@
+                                <input type="text" readonly value="@row.ShareUrl"
+                                       onclick="this.select();document.execCommand('copy');"
+                                       title="Click to copy"
+                                       style="width:100%;min-width:260px;font-size:12px;cursor:pointer;" />
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                        </td>
+                        <td style="padding:8px 6px;">
+                            @if (m.RevokedAt is { } r)
+                            {
+                                <span style="color:#b91c1c;">withdrawn @r.ToString("d MMM")</span>
+                            }
+                            else if (m.IsExpired(DateTimeOffset.UtcNow))
+                            {
+                                <span style="color:#b91c1c;">expired</span>
+                            }
+                            else
+                            {
+                                <span style="color:#047857;">active</span>
+                                <span class="muted" style="font-size:12px;">
+                                    until @(m.ExpiresAt?.ToString("d MMM yyyy") ?? "further notice")
+                                </span>
+                            }
+                            <br />
+                            <span class="muted" style="font-size:12px;">
+                                @if (m.ViewCount > 0)
+                                {
+                                    @($"opened {m.ViewCount}×, last {m.LastViewedAt:d MMM HH:mm}")
+                                }
+                                else
+                                {
+                                    @:never opened
+                                }
+                            </span>
+                        </td>
+                        <td style="padding:8px 6px;">
+                            @if (m.RevokedAt is null)
+                            {
+                                <form method="post" asp-page-handler="Revoke"
+                                      onsubmit="return confirm('Withdraw this link?\n\nAnyone holding it stops seeing the list immediately. The monitor is kept so you can see it existed.');">
+                                    <input type="hidden" name="id" value="@m.Id" />
+                                    <button type="submit" class="btn"
+                                            style="color:#b91c1c;border-color:#b91c1c;font-size:12px;">Withdraw</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+}

@@ -86,6 +86,18 @@ public sealed class SponsorZohoSyncService
         if (info is null)
             return new(true, false, false, false, "Nothing to sync yet.");
 
+        // 🔴 §1035 — the per-company gate. This method is the one EVERY caller funnels through
+        // (the bulk re-sync, the order pull, the organizer buttons), so a test or withdrawn company
+        // is refused once here rather than at each of them.
+        if (!SponsorZohoScope.MayPushToZoho(info))
+        {
+            _log.LogInformation(
+                "Zoho sync: {Co} skipped — {Reason} (§1035).",
+                companyId, SponsorZohoScope.SkipReason(info));
+            return new(true, false, false, info.HasBooth,
+                $"Skipped — this company is {SponsorZohoScope.SkipReason(info)}.");
+        }
+
         // Reuse a caller-supplied token (bulk re-sync fetches ONE token for the whole
         // run to avoid the Zoho token-endpoint rate limit); otherwise fetch our own.
         var token = accessToken;

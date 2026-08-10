@@ -97,6 +97,16 @@ public sealed class SponsorContactSyncCmUserIdTests
         };
         db.Events.Add(ev);
         await db.SaveChangesAsync();
+
+        // 🔒 §1034b — the contact mirror now REFUSES a company that is not a known sponsor, so the
+        // fixture must say this one is. These tests are about a real sponsor's contacts; without
+        // the row they would exercise the new gate instead of the id-linking they are named for.
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = ev.Id, SponsorCompanyId = CompanyId.ToString(),
+            CompanyName = "2linkIT ApS", IsSponsor = true,
+        });
+        await db.SaveChangesAsync();
         return ev;
     }
 

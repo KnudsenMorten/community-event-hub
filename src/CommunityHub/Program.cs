@@ -1042,6 +1042,9 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeScheduleService>()
 // Both are read-only projections over data the engine already owns; neither stores anything.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeWizardService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeAnnouncementQuery>();
+// §1040 — Volume Package monitors: the organizer page and the shared /monitor/{token} page both
+// resolve this, so the count an organizer sees is the list the recipient gets.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.AttendeeMonitorQuery>();
 // §841 — the picture library behind the post editor's preview + picker.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeGraphicLibrary>();
 // §842.2 — per-type announcement frequency (and the §842.5 sponsor guard).
@@ -1848,6 +1851,35 @@ app.MapGet("/organizer/some-graphic", async (
     if (f is null) return Results.NotFound();
 
     // The gallery loads dozens of these per page; they are immutable per name.
+    http.Response.Headers["Cache-Control"] = "private, max-age=3600";
+    return Results.File(f.Content, f.ContentType);
+}).RequireAuthorization();
+
+// §1032: the picture for ONE announcement, for the SPONSOR or SPEAKER it is about — so their
+// preview shows the image instead of the file name (`sponsor-12.png`), which is what the page
+// rendered until now. Streamed with the app's creds like every other media proxy here; an external
+// participant's browser has no SharePoint permission.
+// 🔒 Gated on the post being on THIS participant's own announcements page — the same scope the list
+// uses (SoMeAnnouncementQuery.VisibleMediaPostAsync). Merely being signed in is not enough: these
+// are campaign assets, and the organizer proxy above is organizer-only for that reason.
+app.MapGet("/some-post-media/{postId:int}", async (
+        int postId,
+        CommunityHub.Core.Integrations.SoMeAnnouncementQuery announcements,
+        CommunityHub.Core.Integrations.SoMeGraphicLibrary library,
+        CommunityHub.Auth.ICurrentParticipantAccessor participant,
+        HttpContext http,
+        CancellationToken ct) =>
+{
+    var me = participant.Current;
+    if (me is null) return Results.Unauthorized();
+
+    var post = await announcements.VisibleMediaPostAsync(me.EventId, me.ParticipantId, postId, ct);
+    if (post is null || string.IsNullOrWhiteSpace(post.ImageRef)) return Results.NotFound();
+
+    var f = await library.GetAsync(post.ImageRef, post.TemplateKind, post.MediaKind, ct);
+    if (f is null) return Results.NotFound();
+
+    // Immutable per post+name, and a page shows several. Private: it is scoped to this participant.
     http.Response.Headers["Cache-Control"] = "private, max-age=3600";
     return Results.File(f.Content, f.ContentType);
 }).RequireAuthorization();

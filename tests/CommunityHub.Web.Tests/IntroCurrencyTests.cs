@@ -82,6 +82,11 @@ public sealed class IntroCurrencyTests
              + "The mail it sends goes to a PARTNER's billing contact, who is not a hub participant "
              + "and never reads the intro; for everyone the intro IS written for, this changes "
              + "nothing they can see or operate.",
+        [100] = "WHEN a rule may auto-approve a template-built post (inside the lead window, never "
+              + "past-dated). Entirely ORGANIZER machinery on the campaign side: no speaker, "
+              + "sponsor, volunteer or attendee can see or operate it. What an intro reader sees is "
+              + "the STATE on their own announcement — planned until the organizers have accepted "
+              + "and approved it — and §99's row already promises exactly that.",
         [93] = "Prepaid coupon invoicing corrections — the §86/§87 decision again. This is the "
              + "ORGANIZER-only /Organizer/CouponInvoicing page and the accounting draft behind it; "
              + "no speaker, sponsor, volunteer or attendee sees the page, the invoice number or the "

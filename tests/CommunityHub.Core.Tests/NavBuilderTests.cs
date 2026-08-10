@@ -630,18 +630,27 @@ public sealed class NavBuilderTests
         // §483/§488/§489: the fold-out carries FOUR in-hub leaves (Key Dates & Times, Your Booth,
         // Party Preday, Attendee Telemetry) plus the nested "Zoho Event System" group — just Leads
         // + Inquiries after §488 removed the four Zoho setup links ⇒ 6 items.
+        // §1027: Social Media Announcements joins them as a FIFTH leaf ⇒ 7.
         var booth = g.Sections().Single(s => s.HeadingKey == "Nav.SectionExhibitorBooth");
         var boothHrefs = booth.Items.Select(i => i.Href).ToList();
-        Assert.Equal(6, booth.Items.Count);
+        Assert.Equal(7, booth.Items.Count);
         Assert.Contains("/Sponsor/Booth", boothHrefs);          // Your Booth moved here
         Assert.DoesNotContain("/Sponsor/CaptureLead", boothHrefs);
 
         // §483 ORDER — the operator's exact sequence. The layout renders direct leaves before any
         // sub-fold-out, so asserting the leaf order here is what pins what he actually sees.
         var boothLeaves = booth.Items.Where(i => i.SubSectionKey is null).Select(i => i.Href).ToList();
+        // §1027: announcements follow telemetry — both are "what the event is doing FOR you",
+        // which is why they sit together and neither belongs in the top-level action menu.
         Assert.Equal(
-            new[] { "/Sponsor/Logistics", "/Sponsor/Booth", "/Forms/Wizard?step=party", "/Sponsor/Telemetry" },
+            new[] { "/Sponsor/Logistics", "/Sponsor/Booth", "/Forms/Wizard?step=party",
+                    "/Sponsor/Telemetry", "/Sponsor/Announcements" },
             boothLeaves);
+        // §1027: announcements left the sponsor's TOP-LEVEL menu — for an exhibitor it lives only
+        // in the booth fold-out. (A digital-only sponsor has no fold-out, so it stays top-level
+        // for them — asserted in the non-exhibitor test.)
+        Assert.DoesNotContain("/Sponsor/Announcements",
+            g.Sections().Where(s => s.HeadingKey is null).SelectMany(s => s.Items).Select(i => i.Href));
         // §489: telemetry left the sponsor's TOP-LEVEL menu — for an exhibitor it exists only here.
         Assert.DoesNotContain(g.Items, i => i.Href == "/Sponsor/Telemetry" && i.SectionKey is null);
 

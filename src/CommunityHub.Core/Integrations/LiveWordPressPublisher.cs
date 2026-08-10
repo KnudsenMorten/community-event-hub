@@ -24,12 +24,23 @@ public sealed class LiveWordPressPublisher : IWordPressPublisher
     private readonly WordPressOptions _options;
     private readonly ILogger<LiveWordPressPublisher> _log;
 
+    /// <summary>
+    /// §1041 — the write guard. This publisher POSTs to the LIVE WordPress site that DEV and PROD
+    /// share, and it was never wired to the guard. ⚠️ It creates DRAFTS only (§31), so the blast
+    /// radius is smaller than the Company Manager writes that caused the incident — but a stream of
+    /// draft posts appearing on the public site from a DEV test is still DEV reaching outward, which
+    /// the operator's rule forbids: <i>"sending data out from dev is controlled"</i>.
+    /// </summary>
+    private readonly IExternalWriteGuard _writes;
+
     public LiveWordPressPublisher(
-        HttpClient http, WordPressOptions options, ILogger<LiveWordPressPublisher> log)
+        HttpClient http, WordPressOptions options, ILogger<LiveWordPressPublisher> log,
+        IExternalWriteGuard? writes = null)
     {
         _http = http;
         _options = options;
         _log = log;
+        _writes = writes ?? new AllowAllExternalWrites();
 
         if (CanWrite)
         {
@@ -53,6 +64,11 @@ public sealed class LiveWordPressPublisher : IWordPressPublisher
         if (!CanWrite)
             return new WordPressPublishResult(false, null, null,
                 "WordPress connector is not configured — no draft created.");
+
+        // 🔴 §1041 — DEV must not create posts on the shared live site, draft or otherwise.
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, "CreateWordPressDraft", ct))
+            return new WordPressPublishResult(false, null, null,
+                "External writes to the webshop are blocked on this host — no draft created.");
 
         var endpoint = $"{_options.SiteUrl.TrimEnd('/')}/wp-json/wp/v2/posts";
 
