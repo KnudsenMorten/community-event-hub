@@ -63,13 +63,13 @@ Measured on this repository on 2026-09-14.
 
 | | |
 |---|---|
-| Delivered features in the catalog | **222** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
+| Delivered features in the catalog | **223** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
 | Application code (C#, excluding migrations) | **211,770** lines in 1,053 files |
 | Razor views | **43,076** lines in 261 files (203 pages) |
 | Scheduled background jobs | **43** timer-triggered functions, plus an order webhook |
 | Database migrations | **259** EF Core migrations |
 | Branded e-mail templates | **39** |
-| Automated tests | **6,770** xUnit tests (144,778 lines of test code), plus Pester and Playwright suites |
+| Automated tests | **6,773** xUnit tests (145,008 lines of test code), plus Pester and Playwright suites |
 | Infrastructure as code | **7** Bicep files (1,071 lines) |
 
 ---
@@ -218,7 +218,7 @@ A summary of what is delivered today. Each area has much more detail — and the
 - **Every capability has a switch** and is off until you turn it on for your edition; release rings let you open features and e-mail to your own test accounts first, then a few real people, then everyone.
 - Rooms, session lengths and audience levels, webshop product rules and job cadences are **configuration you edit**, not code.
 - Accounts **marked as test data** stay out of every total a supplier invoices you for — rooms, meals, head counts.
-- A public template that **builds from a fresh clone**, with sanitized starter configuration.
+- A public template that **builds from a fresh clone** and ships a **neutral default content set** — every task's instructions, the welcome steps, information pages, surveys and edition settings — so a fresh install is usable from the first start.
 
 ### Sign-in & embedding
 
@@ -426,7 +426,7 @@ Then point the apps at them. On **both** the web app and the Functions app set (
 
 ⚠️ Several `Email` defaults in code still name the upstream community's own mailboxes. Set these before
 the first mail goes out. Every other integration (webshop, Zoho, SharePoint, LinkedIn, Sessionize, …) is
-optional and stays off until you configure its section — see [`config-examples/`](config-examples/README.md)
+optional and stays off until you configure its section — see [`config/README.md`](config/README.md)
 and [`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference).
 
 ### 5. Give the apps access to the database
@@ -448,20 +448,25 @@ ALTER ROLE db_datawriter ADD MEMBER [<functionsAppName>];
 
 `<webAppName>` is the first label of the web app hostname from step 3.
 
-### 6. Per-edition configuration
+### 6. Make the content yours
 
-```bash
-mkdir -p config
-cp config-examples/event.example.json             config/event.eldk27.json
-cp config-examples/sponsor.example.json           config/sponsor.eldk27.json
-cp config-examples/speaker-deadlines.example.json config/speaker-deadlines.eldk27.json
-```
+The repository ships a complete **neutral default set** in `config/` — edition settings, sponsor rules,
+speaker deadlines, the instructions of every built-in task, the welcome step of each role, the
+information pages (introduction, key dates, addresses, good to know, session guidelines, wayfinding, …)
+and the integration field maps — plus the call-for-speakers and post-event survey definitions in
+`src/CommunityHub/App_Data/Surveys/`. A fresh install works with them as they are; edit them for your
+event:
 
-Edit them for your event. The file names above are the paths the code reads by default; to use your own
-names, set `EventConfig__EventConfigPath`, `SponsorConfig__SponsorConfigPath` and
-`SpeakerDeadlines__ConfigPath` on both apps. `config/` is packaged into both apps at publish time, so do
-this **before** step 7. [`config-examples/README.md`](config-examples/README.md) explains every file,
-and which task and welcome texts you write yourself.
+- `config/event.eldk27.json` — your community, dates, venue, rooms and the `placeholders` used in task
+  text and e-mails.
+- `config/speaker-deadlines.eldk27.json` and `config/sponsor.eldk27.json` — your deadlines and sponsor rules.
+- `config/content/eldk27/*.md`, `config/tasks/eldk27/**/*.md`, `config/welcome/eldk27/*.md` — the words
+  people read.
+- Delete `config/signal-groups.eldk27.json` if you do not use Signal groups.
+
+`config/` is packaged into both apps at publish time, so do this **before** step 7.
+[`config/README.md`](config/README.md) explains every file and which app setting points the app at a
+different file name.
 
 ### 7. Publish and deploy the code
 
@@ -523,9 +528,10 @@ az webapp config ssl create  --resource-group rg-<baseName>-dev --name <webAppNa
   `Email__RedirectAllTo` on the dev apps sends every mail to one inbox.
 - **Run it locally.** See [`docs/DESIGN.md` §10](docs/DESIGN.md#10-build--local-dev) (use a SQL login
   locally; integrated authentication is not supported without one).
-- **Tests.** `dotnet test CommunityHub.sln` runs offline. About 200 of the tests check the upstream
-  event's own content files (task texts, welcome copy, edition config), which are not part of this
-  template, and fail in a fresh clone; the rest need nothing external.
+- **Tests.** `dotnet test CommunityHub.sln` runs offline and needs nothing external; the structural
+  checks run against whatever is in `config/`, so they tell you when an edited file no longer parses.
+  While `config/PUBLIC-TEMPLATE.md` exists, the 19 tests that pin the upstream conference's own values
+  or its maintainers' internal documents are skipped, with that reason shown.
 
 ---
 
@@ -537,7 +543,8 @@ Two layers decide which event is served:
   current event" from it. Roll over to a new edition by inserting a new row, marking it active and
   deactivating the previous one.
 - **Per-edition files under `config/`** — event identity, dates, venue, rooms, sponsor rules, speaker
-  deadlines — plus task and welcome texts in Markdown. Start from [`config-examples/`](config-examples/README.md).
+  deadlines — plus task, welcome and information-page texts in Markdown. The repository ships a neutral
+  default set; see [`config/README.md`](config/README.md).
 
 App-wide settings are App Service / Functions **app settings**, with secrets as Key Vault references:
 `Sql:ConnectionStringTemplate` (emitted by the Bicep; the apps authenticate with their managed identity),
@@ -590,7 +597,8 @@ scripts/
   deploy.sh                 Create the resource group and deploy infra/main.bicep
   set-secrets.sh            Write secret values into Key Vault from prompts
   Export-SqlBacpac.ps1      Export the database to a .bacpac
-config-examples/            Sanitized starter config for your edition (copy into config/)
+config/                     Per-edition settings, task/welcome/info-page texts and field maps — ships a neutral default set
+config-examples/            Historical copies of early e-mail templates (reference only)
 templates/emails/           The branded e-mail templates the apps render (layout + one file per mail)
 docs/
   FEATURES.md               Every delivered feature, by date
@@ -598,8 +606,8 @@ docs/
   img/                      Screenshots used by the docs
 ```
 
-This repository is the sanitized public template. Your real `config/`, parameter files, logos and data
-belong in a private copy.
+This repository is the sanitized public template. Once `config/`, the parameter files and your logos hold
+your real event, keep them in a private copy.
 
 ---
 
@@ -609,7 +617,7 @@ belong in a private copy.
 |---|---|
 | **[`docs/FEATURES.md`](docs/FEATURES.md)** | The complete delivered feature catalog — an index of every entry with its ship date, then the detail. |
 | **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, scheduled jobs, e-mail, build, infrastructure, deploy and the operational runbook. |
-| **[`config-examples/README.md`](config-examples/README.md)** | Every per-edition configuration file, where it goes and what reads it. |
+| **[`config/README.md`](config/README.md)** | Every per-edition configuration and content file, what reads it, and how to point the app at your own. |
 | [`docs/ROLE-FLOWS.md`](docs/ROLE-FLOWS.md), [`docs/UX-FLOWS-DETAILED.md`](docs/UX-FLOWS-DETAILED.md), [`docs/SECURITY-NOTES.md`](docs/SECURITY-NOTES.md) | Supporting design notes. |
 
 The public mirror is updated milestone by milestone; every public commit names the private source commit

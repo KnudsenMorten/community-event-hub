@@ -28,7 +28,7 @@ public sealed class EmailInventoryCurrencyTests
     private static readonly Regex Row =
         new(@"^\|\s*\d+\s*\|\s*`(?<key>[^`]+)`\s*\|\s*(?<layer>[^|]+?)\s*\|", RegexOptions.Multiline);
 
-    [Fact]
+    [InternalDocsFact]
     public void The_inventory_lists_every_shipped_template_and_nothing_that_is_gone()
     {
         var repo = FindRepoRoot();
@@ -47,7 +47,7 @@ public sealed class EmailInventoryCurrencyTests
             + string.Join(", ", stale));
     }
 
-    [Fact]
+    [InternalDocsFact]
     public void Each_row_names_the_layer_that_actually_wins()
     {
         // Precedence at send time is: DB override > config/email-templates > templates/emails.
@@ -77,7 +77,7 @@ public sealed class EmailInventoryCurrencyTests
             + string.Join("\n  ", wrong));
     }
 
-    [Fact]
+    [InternalDocsFact]
     public void The_inventory_still_warns_that_a_DB_override_beats_both_files()
     {
         // The single most important caveat in the document: an edition with a saved override on

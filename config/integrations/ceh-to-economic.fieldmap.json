@@ -1,0 +1,119 @@
+{
+  "$comment": "§323 fieldmap SCHEMA v2 for the ERPSystem hop (OUTBOUND: CEH/Company Manager is the source; e-conomic mirrors customers + contacts). The payload contract is the operator's PROVEN legacy automation (tools/legacy-automation webhook-customer / webhook-contact), now implemented live in LiveEconomicErpClient. ORDER→INVOICE is deliberately NOT a CEH write: the legacy Azure Function webhook-syncorders owns it (documented in the Order record below as owned-by-legacy-webhook).",
+  "integration": "ceh-to-economic",
+  "direction": "Outbound",
+  "source": {
+    "system": "CEH",
+    "kind": "internal-sql",
+    "notes": "Customer facts originate in Company Manager (WordPress) and are mirrored by CEH; the resolved PUBLIC company name chain is public → legal → billing → 'Company {id}'."
+  },
+  "target": {
+    "system": "e-conomic",
+    "kind": "rest-api",
+    "baseUrl": "https://restapi.e-conomic.com",
+    "notes": "Auth: X-AppSecretToken + X-AgreementGrantToken headers (Key-Vault-backed app settings). Paged GETs follow pagination.nextPage."
+  },
+  "records": {
+    "Customer": {
+      "source": { "record": "CompanyManagerCompany (+ resolved contact e-mail)" },
+      "target": {
+        "record": "customer",
+        "guiPanel": "e-conomic → Customers",
+        "endpoints": { "list": "/customers?pagesize=1000", "detail": "/customers/{customerNumber}", "create": "/customers", "update": "/customers/{customerNumber}" },
+        "limitations": [
+          "DEDUPE BY NAME (legacy rule): full paged list, trimmed case-insensitive match — never create a same-named customer twice",
+          "hub-side idempotency: ErpCustomerLink (one per event+company); CVR modulus-11 gate blocks the FIRST create only",
+          "PUT replaces the record — read-merge-write (fetch, overlay hub-owned fields, PUT back)"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "PublicName → Name → billing → 'Company {id}'", "type": "String" },
+          "target": { "field": "name", "gui": "Name", "type": "String" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "List",
+          "limitations": "ALWAYS the resolved public name chain — never the legal/billing name as primary"
+        },
+        {
+          "source": { "field": "CorporateIdentificationNumber", "type": "String" },
+          "target": { "field": "corporateIdentificationNumber", "gui": "CVR", "type": "String" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "List",
+          "limitations": "Danish CVR (8-digit modulus-11) validated before the first create (hard block); re-syncs proceed"
+        },
+        {
+          "source": { "field": "Currency", "type": "String (ISO 4217)" },
+          "target": { "field": "currency", "gui": "Currency", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "falls back to the agreement base currency (DKK) when the company carries none"
+        },
+        {
+          "source": { "field": "VatZone", "type": "Integer 1-4" },
+          "target": { "field": "vatZone.vatZoneNumber", "gui": "VAT zone", "type": "Object" },
+          "compare": "Integer", "capability": "CreateOnly", "read": "List",
+          "limitations": "1=Indland 2=EU 3=Outside-EU 4=Domestic-no-VAT; non-parsable falls back to 1"
+        },
+        {
+          "source": { "field": "(agreement default)", "type": "Integer" },
+          "target": { "field": "customerGroup.customerGroupNumber", "gui": "Customer group", "type": "Object" },
+          "compare": "Integer", "capability": "CreateOnly", "read": "List",
+          "limitations": "EconomicErp:CustomerGroupNumber (default 1, the legacy automation's default)"
+        },
+        {
+          "source": { "field": "(agreement default)", "type": "Integer" },
+          "target": { "field": "paymentTerms.paymentTermsNumber", "gui": "Payment terms", "type": "Object" },
+          "compare": "Integer", "capability": "CreateOnly", "read": "List",
+          "limitations": "EconomicErp:PaymentTermsNumber (default 1, the legacy automation's default)"
+        },
+        {
+          "source": { "field": "resolved contact e-mail", "type": "String" },
+          "target": { "field": "email", "gui": "Email", "type": "String" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "List"
+        }
+      ]
+    },
+    "Contact": {
+      "source": { "record": "CompanyManagerUser (+ company default role pointers)" },
+      "target": {
+        "record": "customer contact",
+        "guiPanel": "e-conomic → Customer → Contacts",
+        "endpoints": { "list": "/customers/{customerNumber}/contacts?pagesize=1000", "detail": null, "create": "/customers/{customerNumber}/contacts", "update": null },
+        "limitations": [
+          "DEDUPE BY E-MAIL under the customer (case-insensitive) — an existing contact is left alone (edits stay with the §26g reconcile)",
+          "roles ride the notes field: Role:1 = signer (default_signer_id), Role:2 = event coordinator (event_coordination_default_contact_id)"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "full_name / display_name", "type": "String" },
+          "target": { "field": "name", "gui": "Name", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "user_email", "type": "String" },
+          "target": { "field": "email", "gui": "Email", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "role (company default pointers)", "type": "Enum" },
+          "target": { "field": "notes", "gui": "Notes", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "'Role:1' / 'Role:2' convention — parsed by the §26g role-audience readers"
+        }
+      ]
+    },
+    "Order": {
+      "source": { "record": "WooCommerce order (completed, _cm_company_id-linked)" },
+      "target": {
+        "record": "invoice draft",
+        "guiPanel": "e-conomic → Invoices → Drafts",
+        "endpoints": { "list": "/invoices/drafts?pagesize=1000 (+ /invoices/booked)", "detail": null, "create": "/invoices/drafts", "update": null },
+        "limitations": [
+          "OWNED BY THE LEGACY WEBHOOK (webhook-syncorders, DESIGN §18.2) — CEH must NOT create these (double-invoice risk); LiveEconomicErpClient.CreateOrderAsync deliberately throws",
+          "idempotency: references.other = 'WebshopOrderId-{orderNumber}' checked across drafts + booked",
+          "webshop prices are EUR; converted to the customer currency via the currency API (ceiling)",
+          "line product by VAT zone: 1 → product 1000 (Indland-Tax), 2/3/4 → product 2000 (No-Tax); layout 'English*'; notes.heading '{EventName} - {CommunityName}', textLine1 'Sponsorship'"
+        ]
+      },
+      "fields": []
+    }
+  }
+}

@@ -188,7 +188,7 @@ public class ParticipantTaskDefinitionTests
         { "swag", "Pick your polo size (or 'I wear my own clothes')." },
     };
 
-    [Theory]
+    [PrivateContentTheory] // the migration-history pin is the upstream event's own wording
     [MemberData(nameof(CarriedCopy))]
     public void Body_carries_the_OLD_task_text_verbatim(string step, string originalDescription)
     {

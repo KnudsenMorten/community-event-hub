@@ -161,7 +161,7 @@ public sealed class TicketClassRenameTests
     /// with an empty config silently degrades to name-matching, which is the very thing the id is
     /// there to survive — so pin that the shipped edition config carries it.
     /// </summary>
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public void The_shipped_edition_config_wires_the_two_day_class_id()
     {
         var path = Path.Combine(

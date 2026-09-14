@@ -1,0 +1,135 @@
+{
+  "$comment": "§303c fieldmap SCHEMA v2 for the CallForSpeakersSystem → CEH import (INBOUND: Sessionize is the source of speaker/session submissions; CEH mirrors them and then owns the data as master toward Zoho — see ceh-to-zoho-backstage.fieldmap.json for the second hop). DESIGN-FIRST DOCUMENTATION SLICE: this file records the mapping the SessionizeApiClient importer implements today; wiring the importer to consume it (like the Zoho speaker slice) is a later slice. Same schema as every fieldmap: explicit source{}/target{} blocks; target.gui = the CEH page/field label the value lands on.",
+  "integration": "sessionize-to-ceh",
+  "direction": "Inbound",
+  "source": {
+    "system": "Sessionize",
+    "kind": "rest-api",
+    "baseUrl": "https://sessionize.com/api/v2/{endpointId}/view/All",
+    "timezone": "EVENT-LOCAL wall-clock WITHOUT an offset — '2027-03-01T09:00:00' MEANS 09:00 in the event timezone. The importer attaches the offset valid at that date (via EventTimezone); NEVER read these as UTC."
+  },
+  "target": {
+    "system": "CEH",
+    "kind": "internal-sql",
+    "timezone": "DateTimeOffset carrying the REAL offset of the event timezone for the date.",
+    "notes": "Import-owned fields are refreshed each pull; speaker-EDITED bio fields are never overwritten (SpeakerEditedFields markers)."
+  },
+  "records": {
+    "Session": {
+      "source": { "record": "sessions[] (view/All)" },
+      "target": {
+        "record": "Session (SQL)",
+        "guiPanel": "Organizer → Sessions",
+        "endpoints": { "list": "/view/All", "detail": null, "create": null, "update": null },
+        "limitations": [
+          "READ-ONLY source — CEH never writes back to Sessionize",
+          "the sessions list REQUIRES the categoryItems→categories resolution for Format/Track/Level/Tags",
+          "initial ROOM ALLOCATION is done in Sessionize (operator §303) — rooms flow in via roomId→rooms[]"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "title", "type": "String" },
+          "target": { "field": "Title", "gui": "Session title", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "description", "type": "MultiLine" },
+          "target": { "field": "Abstract", "gui": "Session abstract", "type": "MultiLine" },
+          "compare": "MultiLine",
+          "limitations": "onward hop: becomes the Zoho 'Session Description' (GuiOnly there — ACTION mail)"
+        },
+        {
+          "source": { "field": "room / roomId → rooms[]", "type": "String" },
+          "target": { "field": "Room", "gui": "Room", "type": "String" },
+          "compare": "String",
+          "limitations": "room NAMES must be byte-identical across Sessionize/CEH/Zoho (§299.6 warn-only check)"
+        },
+        {
+          "source": { "field": "categoryItems: group title contains 'track'", "type": "SingleChoice" },
+          "target": { "field": "Track", "gui": "Track", "type": "String" },
+          "compare": "String",
+          "limitations": "matches 'Suggested Event Track' and a plain 'Track' group; onward hop uses the TrackNameMap"
+        },
+        {
+          "source": { "field": "categoryItems: group title contains 'level'", "type": "SingleChoice" },
+          "target": { "field": "Level", "gui": "Level", "type": "String" },
+          "compare": "String",
+          "limitations": "VERBATIM passthrough — 'Advanced (300)', 'Expert (400)', 'Black Belt (500)'; onward hop derives the 'Session Level: …' tag (zoho.sessionTags)"
+        },
+        {
+          "source": { "field": "categoryItems: group title contains 'tag' (the 'Labels/Tags' multiple-choice, 100+ options)", "type": "MultiSelect" },
+          "target": { "field": "Tags", "gui": "Tags (chips on the session detail)", "type": "Array" },
+          "compare": "Array",
+          "limitations": "1:1 UNBOUNDED — EVERY label chosen in the submission is kept (comma-joined), none hardcoded, no cap; onward hop ports them all into the Zoho Tags via zoho.sessionTags"
+        },
+        {
+          "source": { "field": "categoryItems: group title contains 'format'", "type": "SingleChoice", "derivation": "sessionize.lengthMinutes" },
+          "target": { "field": "LengthMinutes", "gui": "Length (minutes)", "type": "Integer" },
+          "compare": "Integer",
+          "limitations": "numeric minutes from the scheduled times when published, else the Format label's '(NN min)' hint"
+        },
+        {
+          "source": { "field": "startsAt / endsAt", "type": "DateTime" },
+          "target": { "field": "StartsAt / EndsAt", "gui": "Schedule", "type": "DateTime" },
+          "compare": "String",
+          "limitations": "skipped when IsDateOverridden (organizer manually placed the session)"
+        },
+        {
+          "source": { "field": "speakers[]", "type": "Array" },
+          "target": { "field": "SessionSpeakers", "gui": "Speakers", "type": "Array" },
+          "compare": "Array"
+        }
+      ]
+    },
+    "Speaker": {
+      "source": { "record": "speakers[] (view/All)" },
+      "target": {
+        "record": "SpeakerProfile (SQL)",
+        "guiPanel": "Speaker → Details (get-started)",
+        "endpoints": { "list": "/view/All", "detail": null, "create": null, "update": null },
+        "limitations": [
+          "READ-ONLY source — CEH never writes back to Sessionize",
+          "speaker-EDITED fields are NEVER overwritten by the delta re-import (SpeakerEditedFields)",
+          "NO company field exists in Sessionize (hub-collected, §302b); NO accreditation field (hub-collected checkboxes)"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "firstName", "type": "String" },
+          "target": { "field": "FirstName", "gui": "First name", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "lastName", "type": "String" },
+          "target": { "field": "LastName", "gui": "Last name", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "tagLine", "type": "String" },
+          "target": { "field": "Tagline", "gui": "Tagline", "type": "String" },
+          "compare": "String",
+          "limitations": "onward hop: Zoho 'Designation'"
+        },
+        {
+          "source": { "field": "bio", "type": "MultiLine" },
+          "target": { "field": "Biography", "gui": "Biography", "type": "MultiLine" },
+          "compare": "MultiLine",
+          "limitations": "onward hop: Zoho 'Description'"
+        },
+        {
+          "source": { "field": "links[] (LinkedIn / Twitter / Blog)", "type": "Array" },
+          "target": { "field": "LinkedIn / Twitter / Blog", "gui": "Bio & links", "type": "Url" },
+          "compare": "Object",
+          "limitations": "Blog has NO Zoho field on the onward hop (never mailed as a Zoho change)"
+        },
+        {
+          "source": { "field": "profilePicture", "type": "Url" },
+          "target": { "field": "PhotoUrl", "gui": "Photo", "type": "Url" },
+          "compare": "Object",
+          "limitations": "NOT pushed to Zoho on the onward hop (Profile Photo is UI-managed there)"
+        }
+      ]
+    }
+  }
+}

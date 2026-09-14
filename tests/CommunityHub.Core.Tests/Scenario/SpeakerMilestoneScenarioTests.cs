@@ -51,7 +51,7 @@ public sealed class SpeakerMilestoneScenarioTests
             new SpeakerDeadlineOptions { ConfigPath = RepoPaths.SpeakerDeadlinesConfig() },
             ScenarioFixture.Clock);
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task Seeds_milestone_tasks_at_the_absolute_documented_dates()
     {
         using var db = ScenarioFixture.NewDb();
@@ -80,7 +80,7 @@ public sealed class SpeakerMilestoneScenarioTests
         Assert.All(mcTasks, t => Assert.Equal(TaskState.Open, t.State));
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task All_speakers_get_the_same_task_set()
     {
         using var db = ScenarioFixture.NewDb();
@@ -103,7 +103,7 @@ public sealed class SpeakerMilestoneScenarioTests
         Assert.Single(s1Tasks, t => t.DueDate == FinalDue);
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task Travel_task_is_non_denmark_only_and_links_to_the_travel_form()
     {
         using var db = ScenarioFixture.NewDb();

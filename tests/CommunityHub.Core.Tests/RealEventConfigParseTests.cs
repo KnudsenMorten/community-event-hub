@@ -3,7 +3,7 @@ using Xunit;
 namespace CommunityHub.Core.Tests;
 public class RealEventConfigParseTests
 {
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public void Real_event_config_parses_volunteer_section()
     {
         var cfg = new EventEditionConfigLoader().Load("config/event.eldk27.json");

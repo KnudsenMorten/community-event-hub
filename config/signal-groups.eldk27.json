@@ -1,0 +1,16 @@
+{
+  "_comment": "DEFAULT Signal group invite links shipped with the public template (operational links, not secrets). Replace the placeholder links with your own groups — or DELETE this file if you do not use Signal, which hides the step. The Broadcast group is shared by everyone in scope; the Chat link differs per role. A role key being present puts that role in scope for the Get-Started 'Join Signal groups' step (it always gets Broadcast); a chatUrl additionally renders a Chat button. Omit the file to hide the step entirely.",
+  "broadcastLabel": "DEMO27 Broadcast",
+  "broadcastUrl": "https://signal.group/#REPLACE_WITH_YOUR_BROADCAST_GROUP_INVITE",
+  "roles": {
+    "Speaker": {
+      "chatLabel": "DEMO27 Speakers - Chat",
+      "chatUrl": "https://signal.group/#REPLACE_WITH_YOUR_SPEAKER_CHAT_INVITE"
+    },
+    "Volunteer": {
+      "chatLabel": "DEMO27 Volunteers - Chat",
+      "chatUrl": "https://signal.group/#REPLACE_WITH_YOUR_VOLUNTEER_CHAT_INVITE"
+    },
+    "Media": {}
+  }
+}

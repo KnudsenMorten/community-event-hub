@@ -1,0 +1,102 @@
+{
+  "slug": "eldk27-post-attendee",
+  "closesMonthsAfterEventEnd": 1,
+  "title": "How was the event?",
+  "subtitle": "Five minutes, anonymous, and it shapes next year",
+  "eventName": "Demo Community Conference",
+  "eventDate": "Event dates",
+  "intro": "Thank you for coming. Tell us what worked and what did not — this form is the main thing we plan next year from.",
+  "introDisclaimer": "Anonymous. We cannot see who answered, so please be blunt.",
+  "introThankYou": "Every answer is read by the organizing team.",
+  "thanksTitle": "Thank you.",
+  "thanksBody": "That is genuinely useful. See you next year.",
+  "questions": [
+    {
+      "id": "overall",
+      "kind": "Rating",
+      "prompt": "Overall, how was the event?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "recommend",
+      "kind": "Rating",
+      "prompt": "How likely are you to recommend it to a colleague?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Not at all",
+      "scaleMaxLabel": "Definitely"
+    },
+    {
+      "id": "content",
+      "kind": "Rating",
+      "prompt": "The sessions and their content",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "venue",
+      "kind": "Rating",
+      "prompt": "The venue — rooms, signage, getting around",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "catering",
+      "kind": "Rating",
+      "prompt": "Food and drink",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "expo",
+      "kind": "Rating",
+      "prompt": "The expo area and the sponsor stands",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "attended",
+      "kind": "MultiChoice",
+      "prompt": "Which parts did you attend?",
+      "choices": [
+        { "id": "masterclass", "label": "Master Class (pre-day)" },
+        { "id": "sessions", "label": "Conference sessions" },
+        { "id": "expo", "label": "Expo area" },
+        { "id": "party", "label": "The party" }
+      ]
+    },
+    {
+      "id": "next-topics",
+      "kind": "FreeText",
+      "prompt": "What should we cover next year?",
+      "placeholder": "Topics, technologies, speakers you would like to see",
+      "maxLength": 1500
+    },
+    {
+      "id": "one-change",
+      "kind": "FreeText",
+      "prompt": "If you could change ONE thing about the event, what would it be?",
+      "help": "The single most useful question on this form.",
+      "maxLength": 1500
+    },
+    {
+      "id": "anything-else",
+      "kind": "FreeText",
+      "prompt": "Anything else?",
+      "maxLength": 2000
+    }
+  ]
+}

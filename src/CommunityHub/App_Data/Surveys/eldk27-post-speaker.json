@@ -1,0 +1,100 @@
+{
+  "slug": "eldk27-post-speaker",
+  "closesMonthsAfterEventEnd": 1,
+  "title": "Speaking at the event",
+  "subtitle": "How was it from your side of the room?",
+  "eventName": "Demo Community Conference",
+  "eventDate": "Event dates",
+  "intro": "Thank you for speaking. You saw the parts of the event nobody else did — the green room, the tech, the schedule as it actually ran.",
+  "introDisclaimer": "Anonymous. It is not tied to your session or your name, so say the awkward part.",
+  "introThankYou": "This is how the speaker experience gets better.",
+  "thanksTitle": "Thank you.",
+  "thanksBody": "Noted, and acted on where we can.",
+  "questions": [
+    {
+      "id": "overall",
+      "kind": "Rating",
+      "prompt": "Overall, how was speaking at the event?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "speak-again",
+      "kind": "Rating",
+      "prompt": "How likely are you to submit again next year?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Not at all",
+      "scaleMaxLabel": "Definitely"
+    },
+    {
+      "id": "comms",
+      "kind": "Rating",
+      "prompt": "Communication before the event — deadlines, what to send, when",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "hub",
+      "kind": "Rating",
+      "prompt": "The speaker hub — uploading your deck, travel, hotel, the tasks",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "room-tech",
+      "kind": "Rating",
+      "prompt": "Your room and its technology on the day",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "hospitality",
+      "kind": "Rating",
+      "prompt": "Speaker hospitality — arrival, hotel, the appreciation dinner",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "session-length",
+      "kind": "SingleChoice",
+      "prompt": "Was your session slot the right length?",
+      "choices": [
+        { "id": "too-short", "label": "Too short" },
+        { "id": "right", "label": "About right" },
+        { "id": "too-long", "label": "Too long" }
+      ]
+    },
+    {
+      "id": "went-wrong",
+      "kind": "FreeText",
+      "prompt": "Did anything go wrong that we could have prevented?",
+      "help": "Technical, logistical, or organisational — we would rather hear it than not.",
+      "maxLength": 2000
+    },
+    {
+      "id": "one-change",
+      "kind": "FreeText",
+      "prompt": "If you could change ONE thing for speakers next year, what would it be?",
+      "maxLength": 1500
+    },
+    {
+      "id": "anything-else",
+      "kind": "FreeText",
+      "prompt": "Anything else?",
+      "maxLength": 2000
+    }
+  ]
+}

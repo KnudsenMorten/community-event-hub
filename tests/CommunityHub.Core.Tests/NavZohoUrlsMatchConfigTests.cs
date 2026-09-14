@@ -53,7 +53,7 @@ public class NavZohoUrlsMatchConfigTests
         return item!.Href;
     }
 
-    [Theory]
+    [PrivateContentTheory] // pins the upstream edition's own config values
     [InlineData("Nav.LeadsZoho", "leadsListUrl")]
     [InlineData("Nav.InquiriesZoho", "inquiriesListUrl")]
     public void The_nav_item_and_the_edition_config_point_at_the_same_place(string navKey, string configKey)
@@ -85,7 +85,7 @@ public class NavZohoUrlsMatchConfigTests
     /// 🔒 The event-slug segment is the whole point of §667 and the easiest thing to lose again:
     /// without it the fragment route is still perfectly well-formed, so nothing looks broken.
     /// </summary>
-    [Theory]
+    [PrivateContentTheory] // pins the upstream edition's own config values
     [InlineData("exhibitorSpaceUrl")]
     [InlineData("exhibitorProfileUrl")]
     [InlineData("boothMembersUrl")]
@@ -105,7 +105,7 @@ public class NavZohoUrlsMatchConfigTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))
+            if (File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln"))
                 && Directory.Exists(Path.Combine(dir.FullName, "config")))
             {
                 return dir.FullName;

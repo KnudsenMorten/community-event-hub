@@ -27,7 +27,7 @@ namespace CommunityHub.Web.Tests;
 /// </summary>
 public sealed class TestsDocCurrencyTests
 {
-    [Fact]
+    [InternalDocsFact]
     public void Every_test_file_named_in_TESTS_md_actually_exists()
     {
         var repoRoot = FindRepoRoot();

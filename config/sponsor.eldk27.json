@@ -1,0 +1,201 @@
+{
+  "_schema": "eldk-hub/sponsor-config@1",
+  "_doc": "DEFAULT sponsor task-automation rules shipped with the public template. Edit for your event. The sponsor task DEFINITIONS (titles, audiences, completion) live in code (CommunityHub.Core/Tasks/Definitions/SponsorTaskDefinitions.cs); their body text lives in config/tasks/<edition>/sponsor/*.md. This file carries what stays per-edition: deadline rules, webshop product classification, contact roles, the swag catalogue, the event-platform sponsor categories and the per-tier booth specs. Community-specific text is written as {{placeholder}} markers resolved from event.<edition>.json -> placeholders. With integrations.woocommerce disabled, sponsor orders come from manual CSV import, but these rules still drive task generation.",
+  "deadlineRules": {
+    "_doc": "Named deadline rules referenced by the sponsor task definitions. basis 'eventMinus' = event start date minus N days; 'eventEndPlus' = the event's last day plus N days; 'contractPlus' = the sponsor's first-order date plus N days, with fallbackNowPlus used when no order date is known.",
+    "logo": { "basis": "contractPlus", "days": 14, "fallbackNowPlus": 14 },
+    "sponsorDescription": { "basis": "contractPlus", "days": 14, "fallbackNowPlus": 14 },
+    "wallDesign": { "basis": "eventMinus", "days": 120 },
+    "wallUpload": { "basis": "eventMinus", "days": 71 },
+    "boothLayout": { "basis": "eventMinus", "days": 71 },
+    "registerBoothMembers": { "basis": "eventMinus", "days": 40 },
+    "exhibitorProfile": { "basis": "eventMinus", "days": 35 },
+    "leadAppBoothMembers": { "basis": "eventMinus", "days": 7 },
+    "appGameSignUp": { "basis": "eventMinus", "days": 55 },
+    "tvRequest": { "basis": "eventMinus", "days": 70 },
+    "attendeeBagSignUp": { "basis": "eventMinus", "days": 70 },
+    "attendeeBagShipment": { "basis": "eventMinus", "days": 30 },
+    "session": { "basis": "eventMinus", "days": 135 },
+    "boothShipment": { "basis": "eventMinus", "days": 7 },
+    "downloadLeads": {
+      "_doc": "A POST-event task: the day after the event's last day.",
+      "basis": "eventEndPlus",
+      "days": 1
+    }
+  },
+  "orderImport": {
+    "_doc": "Column mapping for a webshop order export (manual CSV import; mirrors what the WooCommerce pull produces). Sponsor identity keys on email.",
+    "columns": [
+      "Order_Number",
+      "Order_Date",
+      "Sponsor_Name",
+      "Sponsor_Email",
+      "Product_Number",
+      "Product_Name",
+      "Quantity"
+    ],
+    "sponsorKey": "Sponsor_Email"
+  },
+  "sponsorContacts": {
+    "_doc": "A sponsor is a COMPANY with several contacts and roles. With a company directory integration enabled, companies/contacts/roles come from it and this list maps its role ids to labels; without it, the hub manages contacts itself using these roles. reminderTargeting decides who receives sponsor task reminders.",
+    "roles": [
+      {
+        "key": "coordinator",
+        "label": "Event Coordinator",
+        "companyManagerRoleId": 2,
+        "canManage": true,
+        "_doc": "Receives all sponsor reminders. Can assign tasks."
+      },
+      {
+        "key": "signer",
+        "label": "Signer / Approver",
+        "companyManagerRoleId": 1,
+        "canManage": false,
+        "_doc": "Never receives task reminders. Record/contact only."
+      },
+      {
+        "key": "booth",
+        "label": "Booth Staff",
+        "companyManagerRoleId": null,
+        "canManage": false,
+        "_doc": "Hub-only role. Reminded only for a task assigned to them."
+      }
+    ],
+    "reminderTargeting": {
+      "_doc": "ASSIGNED task: the assignee is primary and all coordinators are copied. UNASSIGNED task: all coordinators are primary. Signers never receive reminders.",
+      "assignedTaskPrimary": "assignee",
+      "assignedTaskCc": "all-coordinators",
+      "unassignedTaskPrimary": "all-coordinators",
+      "neverRemind": [
+        "signer"
+      ]
+    }
+  },
+  "productClassification": {
+    "_doc": "How each ordered webshop product is classified — by its category text and/or its name, never by a static product-id list, so next edition's products need no config change. A product can match several types; each matched type's tasks are added. Matching is substring and case-insensitive. The category names below are an example webshop structure; rename them to match yours.",
+    "rules": [
+      {
+        "type": "booth",
+        "_doc": "Booth packages: any product whose category contains an exhibitor-package-with-booth category, OR whose name contains a booth code like 'Booth E-12'.",
+        "matchCategoryContains": [
+          "Exhibitor Tier Package with Booth",
+          "Tier Packages With Exhibitor Booth"
+        ],
+        "matchNameRegex": "Booth E-\\d+",
+        "_tierDoc": "The booth tier is read from the per-tier categories ('Platinum Exhibitor', 'Diamond Exhibitor', 'Gold Exhibitor', 'Feature Exhibitor'). No tier category -> defaultTier.",
+        "tierFromCategorySuffix": {
+          "Feature Exhibitor": "feature",
+          "Platinum": "platinum",
+          "Diamond": "diamond",
+          "Gold": "gold"
+        },
+        "defaultTier": "gold"
+      },
+      {
+        "type": "session",
+        "_doc": "Sponsor session products — one category per session length.",
+        "matchCategoryContains": [
+          "Exhibitor Session",
+          "Session (",
+          "Session Preday",
+          "Sessions"
+        ]
+      },
+      {
+        "type": "brandedFeature",
+        "_doc": "Branded feature sponsorships without their own booth, and digital-only tiers. They still get the baseline sponsor tasks (logo, descriptions, app game).",
+        "matchCategoryContains": [
+          "Branded Feature Package",
+          "Attendee Experience Sponsor",
+          "Hospitality & Comfort",
+          "Content & Program",
+          "Community & Appreciation",
+          "Sponsor Tier Package (Digital Only)",
+          "Silver Sponsor",
+          "Tier Packages Without Booth"
+        ]
+      },
+      {
+        "type": "preday",
+        "_doc": "Pre-day master-class track sponsors. These may ALSO match 'booth' — both task sets apply.",
+        "matchCategoryContains": [
+          "Pre-day"
+        ]
+      },
+      {
+        "type": "addon",
+        "_doc": "Logistics add-ons — not sponsorships (furniture, package handling, extra staff tickets, TV screen). Recognised so they are not reported as unmatched, but they generate no tasks.",
+        "matchCategoryContains": [
+          "Booth Furniture",
+          "TV Rental",
+          "Attendee Bag Packaging",
+          "Extra Staff Tickets",
+          "Booth Option",
+          "Booth Options",
+          "Package Handling",
+          "Ticket Packages",
+          "Options",
+          "Addons",
+          "Uncategorized"
+        ],
+        "generatesTasks": false
+      }
+    ]
+  },
+  "swagCatalog": {
+    "_doc": "The sponsor swag catalogue IS the webshop: every product in the category named here is shown with its own price, picture and short description. Matching is substring and case-insensitive. bagQuantity is how many pieces one bag order is. currencySymbol is shown beside prices (empty = bare numbers).",
+    "categoryName": "Swags",
+    "bagQuantity": 500,
+    "currencySymbol": "€"
+  },
+  "zohoSponsorCategoryMap": {
+    "_doc": "Optional (Zoho Backstage only). Webshop product CATEGORY -> event-platform sponsor CATEGORY. A company buying in several categories gets one sponsor record per heading. Needles are substring, case-insensitive, against the same category text productClassification uses. Every heading used here needs an id in event.<edition>.json -> zohoSponsorCategoryIds.",
+    "rules": [
+      { "zohoCategory": "Session sponsors", "matchCategoryContains": [ "Exhibitor Session Sponsors", "Exhibitor Session", "Session (", "Session Preday" ] },
+      { "zohoCategory": "Track sponsors", "matchCategoryContains": [ "Track Sponsor" ] },
+      { "zohoCategory": "Founding partner", "matchCategoryContains": [ "Found Partner Sponsor", "Founding Partner Sponsor" ] },
+      { "zohoCategory": "Swag sponsor", "matchCategoryContains": [ "Swag Sponsor" ] },
+      { "zohoCategory": "Community & appreciation sponsors", "matchCategoryContains": [ "Community & Appreciation" ] },
+      { "zohoCategory": "Content & program sponsors", "matchCategoryContains": [ "Content & Program" ] },
+      { "zohoCategory": "Attendee experience sponsors", "matchCategoryContains": [ "Attendee Experience Sponsor" ] },
+      { "zohoCategory": "Hospitality & comfort sponsor", "matchCategoryContains": [ "Hospitality & Comfort" ] },
+      { "zohoCategory": "Platinum sponsors", "matchCategoryContains": [ "Platinum Exhibitor" ] },
+      { "zohoCategory": "Diamond sponsors", "matchCategoryContains": [ "Diamond Exhibitor" ] },
+      { "zohoCategory": "Gold sponsors", "matchCategoryContains": [ "Gold Exhibitor" ] },
+      { "zohoCategory": "Silver sponsors", "matchCategoryContains": [ "Silver Sponsor", "Sponsor Tier Package (Digital Only)", "Tier Packages Without Booth" ] }
+    ]
+  },
+  "boothWallSpecs": {
+    "_doc": "Per booth tier: wall size, the wall-design spec file, the webshop coupon for the furniture included in the package, the number of booth members included, and the furniture guidance. Substituted into booth tasks as {{wallSpecUrl}}, {{couponCode}} and {{furnitureSpec}} for the company's classified tier ({{furnitureSpec}} is substituted first, so a {{couponCode}} inside it resolves too).",
+    "tiers": {
+      "platinum": {
+        "wallSize": "6m x 2.3m",
+        "specUrl": "https://your-event.example/files/wall-spec-platinum.pdf",
+        "coupon": "your-platinum-booth-coupon",
+        "boothMembersIncluded": 6,
+        "furnitureSpec": "Coupon code: **{{couponCode}}**\n\nChoose the furniture included with your booth in the webshop. **Note:** you must place an order to secure the furniture, even when the coupon covers it."
+      },
+      "diamond": {
+        "wallSize": "5m x 2.3m",
+        "specUrl": "https://your-event.example/files/wall-spec-diamond.pdf",
+        "coupon": "your-diamond-booth-coupon",
+        "boothMembersIncluded": 4,
+        "furnitureSpec": "Coupon code: **{{couponCode}}**\n\nChoose the furniture included with your booth in the webshop. **Note:** you must place an order to secure the furniture, even when the coupon covers it."
+      },
+      "gold": {
+        "wallSize": "4m x 2.3m",
+        "specUrl": "https://your-event.example/files/wall-spec-gold.pdf",
+        "coupon": "your-gold-booth-coupon",
+        "boothMembersIncluded": 2,
+        "furnitureSpec": "Coupon code: **{{couponCode}}**\n\nChoose the furniture included with your booth in the webshop. **Note:** you must place an order to secure the furniture, even when the coupon covers it."
+      },
+      "feature": {
+        "wallSize": "3m x 2.3m",
+        "specUrl": "https://your-event.example/files/wall-spec-feature.pdf",
+        "coupon": "your-feature-booth-coupon",
+        "boothMembersIncluded": 2,
+        "furnitureSpec": "Coupon code: **{{couponCode}}**\n\nChoose the furniture included with your booth in the webshop. **Note:** you must place an order to secure the furniture, even when the coupon covers it."
+      }
+    }
+  }
+}

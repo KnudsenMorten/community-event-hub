@@ -152,7 +152,7 @@ public class TaskFieldGuardTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))
+            if (File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln"))
                 && Directory.Exists(Path.Combine(dir.FullName, "config")))
             {
                 return dir.FullName;

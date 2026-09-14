@@ -1,0 +1,112 @@
+{
+  "slug": "eldk27-post-sponsor",
+  "closesMonthsAfterEventEnd": 1,
+  "title": "Sponsoring the event",
+  "subtitle": "Was it worth it, and what would make it worth more?",
+  "eventName": "Demo Community Conference",
+  "eventDate": "Event dates",
+  "intro": "Thank you for sponsoring. We would rather hear the honest version now than lose you quietly next year.",
+  "introDisclaimer": "Anonymous. It is not tied to your company, so please be direct about value for money.",
+  "introThankYou": "This is read before the next sponsor packages are put together.",
+  "thanksTitle": "Thank you.",
+  "thanksBody": "That goes straight into next year's planning.",
+  "questions": [
+    {
+      "id": "overall",
+      "kind": "Rating",
+      "prompt": "Overall, how was sponsoring the event?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "value",
+      "kind": "Rating",
+      "prompt": "Value for money",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "sponsor-again",
+      "kind": "Rating",
+      "prompt": "How likely are you to sponsor again next year?",
+      "required": true,
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Not at all",
+      "scaleMaxLabel": "Definitely"
+    },
+    {
+      "id": "leads",
+      "kind": "Rating",
+      "prompt": "The quantity and quality of conversations at your stand",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "booth-logistics",
+      "kind": "Rating",
+      "prompt": "Booth logistics — shipping, build-up, check-in, furniture, power",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "hub",
+      "kind": "Rating",
+      "prompt": "The sponsor hub — the Get Started steps, uploads, and what was asked of you",
+      "scaleMin": 1,
+      "scaleMax": 5,
+      "scaleMinLabel": "Poor",
+      "scaleMaxLabel": "Excellent"
+    },
+    {
+      "id": "traffic",
+      "kind": "SingleChoice",
+      "prompt": "Traffic to your stand was…",
+      "choices": [
+        { "id": "below", "label": "Below what we expected" },
+        { "id": "as-expected", "label": "About what we expected" },
+        { "id": "above", "label": "Better than we expected" }
+      ]
+    },
+    {
+      "id": "package-interest",
+      "kind": "MultiChoice",
+      "prompt": "What would you want more of next year?",
+      "choices": [
+        { "id": "speaking", "label": "A speaking slot" },
+        { "id": "bigger-booth", "label": "A larger stand" },
+        { "id": "branding", "label": "More branding around the venue" },
+        { "id": "leads", "label": "Better lead capture" },
+        { "id": "networking", "label": "Organised networking with attendees" }
+      ]
+    },
+    {
+      "id": "missing",
+      "kind": "FreeText",
+      "prompt": "What was missing from your sponsorship?",
+      "maxLength": 2000
+    },
+    {
+      "id": "one-change",
+      "kind": "FreeText",
+      "prompt": "If you could change ONE thing for sponsors next year, what would it be?",
+      "maxLength": 1500
+    },
+    {
+      "id": "anything-else",
+      "kind": "FreeText",
+      "prompt": "Anything else?",
+      "maxLength": 2000
+    }
+  ]
+}

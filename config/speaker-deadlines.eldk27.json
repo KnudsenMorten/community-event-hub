@@ -1,0 +1,18 @@
+{
+  "_doc": "DEFAULT speaker deadline table shipped with the public template — set your own dates. The speaker task definitions (title, audience, completion) live in code and their body text in config/tasks/<edition>/speaker/*.md; this file carries only each task's absolute due date (yyyy-MM-dd), looked up by its stable 'key'. 'title' must keep matching the definition's title exactly. The reminder job mails one reminder, on the due day.",
+  "getStartedDeadline": {
+    "_doc": "On reminderDate every active speaker whose Get-Started wizard is not complete gets one reminder; the wizard is due by deadline.",
+    "reminderDate": "2026-11-15",
+    "deadline": "2026-12-01"
+  },
+  "deadlines": [
+    { "key": "hotel", "title": "Hotel", "dueDate": "2026-12-01" },
+    { "key": "dinner", "title": "Appreciation Dinner", "dueDate": "2026-12-01" },
+    { "key": "swag", "title": "Swag / Speaker gift", "dueDate": "2026-12-01" },
+    { "key": "lunch", "title": "Pre-day Lunch", "dueDate": "2027-02-01" },
+    { "key": "travel", "title": "Submit travel reimbursement", "dueDate": "2027-02-01", "nonDenmarkOnly": true },
+    { "key": "promote", "title": "Help to promote your session(s)", "dueDate": "2027-02-05" },
+    { "key": "preview-presentation", "title": "Upload preview presentation", "dueDate": "2027-02-10" },
+    { "key": "final-presentation", "title": "Upload final presentation", "dueDate": "2027-02-24" }
+  ]
+}

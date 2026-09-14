@@ -1,0 +1,215 @@
+{
+  "_schema": "eldk-hub/event-config@1",
+  "_doc": "DEFAULT per-edition event config shipped with the public template — edit it for your event. Everything community- and edition-specific lives here so the application code stays generic. Every value below is a placeholder. Keys starting with an underscore are documentation only. A missing file or a missing block is NOT fatal: the loader returns empty values and the affected feature shows its 'not configured' state.",
+
+  "_zohoSponsorCategoryIdsDoc": "Optional (only if you push sponsors to Zoho Backstage). Sponsor-category NAME -> Backstage sponsorship_type id, one for every heading used in sponsor.<edition>.json -> zohoSponsorCategoryMap. Find each id in the Backstage admin (Manage > Sponsors > Sponsor Category, browser dev-tools Network tab) and replace the placeholders.",
+  "zohoSponsorCategoryIds": {
+    "Founding partner": "REPLACE_WITH_BACKSTAGE_ID",
+    "Competition sponsor": "REPLACE_WITH_BACKSTAGE_ID",
+    "Swag sponsor": "REPLACE_WITH_BACKSTAGE_ID",
+    "Silver sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Hospitality & comfort sponsor": "REPLACE_WITH_BACKSTAGE_ID",
+    "Attendee experience sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Gold sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Content & program sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Session sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Diamond sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Community & appreciation sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Platinum sponsors": "REPLACE_WITH_BACKSTAGE_ID",
+    "Track sponsors": "REPLACE_WITH_BACKSTAGE_ID"
+  },
+
+  "edition": {
+    "code": "DEMO27",
+    "eventName": "Demo Community Conference",
+    "displayName": "DEMO27 Crew Hub",
+    "isActive": true,
+    "expectedAttendees": 500,
+    "_expectedAttendeesNote": "Approximate attendee count, substituted wherever {{expectedAttendees}} appears in task descriptions, e-mails and forecasts.",
+    "_doc": "code is the unique edition key and should match the Code of your active Events row. Exactly one edition should be active."
+  },
+
+  "community": {
+    "name": "Demo Community",
+    "organizerEmail": "organizers@your-event.example",
+    "senderName": "Demo Community",
+    "senderEmail": "noreply@your-event.example",
+    "supportEmail": "support@your-event.example",
+    "brandColor": "#0a3d62",
+    "logoUrl": "",
+    "_doc": "Identity of the community running this edition. A different community changes this block (and the rest of the file), never the code."
+  },
+
+  "dates": {
+    "preDay": "2027-03-01",
+    "day1": "2027-03-02",
+    "day2": "2027-03-03",
+    "timezone": "Europe/Brussels",
+    "lockDate": "2027-02-10",
+    "day1StartTimeLocal": "09:00",
+    "hotelStayFrom": "2027-02-28",
+    "hotelStayUntil": "2027-03-04",
+    "_hotelStayDoc": "The first and last night the hotel picker accepts. Leave both blank to derive them from the event dates.",
+    "_day1StartTimeLocalNote": "Local wall time the event opens on day1; drives the top-bar countdown. Blank defaults to 09:00.",
+    "_doc": "lockDate: the hotel and dinner forms go read-only on/after this date; an edit to an already-submitted booking in the days leading up to it raises an organizer action item. preDay is the master-class / setup day."
+  },
+
+  "ticketSale": {
+    "_doc": "Drives the site-wide top-bar ticket banner. Before opensAtLocal it shows 'Tickets on sale <date>'; at/after it shows 'Tickets are now on sale' (a link when ticketUrl is set) or hides when afterOpen=hide. opensAtLocal is local wall time in dates.timezone. Set enabled=false to turn the banner off.",
+    "enabled": false,
+    "opensAtLocal": "2026-10-01T09:00:00",
+    "ticketUrl": "https://your-event.example/tickets",
+    "afterOpen": "onsale"
+  },
+
+  "masterClassTickets": {
+    "_doc": "Which ticket class grants master-class (pre-day) access. twoDayClassIds is authoritative (ticket-class ids are stable, names can be edited); nameMarkers are the fallback, matched case- and space-insensitively as 'name contains marker'. Leave twoDayClassIds empty to match on names only.",
+    "twoDayClassIds": [],
+    "nameMarkers": [ "2-day", "2 day" ]
+  },
+
+  "venue": {
+    "name": "Riverside Convention Center",
+    "address": "1 Example Street, Example City",
+    "mapUrl": ""
+  },
+
+  "formDeadlines": {
+    "speakerProfile": "2027-02-01",
+    "volunteerProfile": "2027-02-01",
+    "hotel": "2027-02-10",
+    "dinner": "2027-02-10",
+    "_doc": "Per-form 'respond by' dates. Drive the incomplete-form chaser e-mails."
+  },
+
+  "crewDays": [
+    { "key": "setup", "label": "Setup day", "date": "2027-02-28" },
+    { "key": "preday", "label": "Pre-day (master class)", "date": "2027-03-01" },
+    { "key": "mainday", "label": "Main conference day", "date": "2027-03-02" }
+  ],
+
+  "roles": [
+    { "key": "organizer", "label": "Organizer", "isAdmin": true },
+    { "key": "speaker", "label": "Speaker", "isAdmin": false },
+    { "key": "volunteer", "label": "Volunteer", "isAdmin": false },
+    { "key": "sponsor", "label": "Sponsor", "isAdmin": false },
+    { "key": "speaker-sponsor", "label": "Speaker-Sponsor", "isAdmin": false },
+    { "key": "video", "label": "Video", "isAdmin": false },
+    { "key": "photography", "label": "Photography", "isAdmin": false },
+    { "key": "vip", "label": "VIP", "isAdmin": false }
+  ],
+
+  "auth": {
+    "pinLength": 6,
+    "pinTtlMinutes": 15,
+    "pinMaxRequestsPerHour": 5,
+    "_doc": "PIN-by-email sign-in: PIN length, validity window in minutes, and the per-address request rate limit."
+  },
+
+  "sharepoint": {
+    "_doc": "Optional SharePoint Online document library for sponsor uploads, graphics and photos. Authentication is configured separately (app settings / Key Vault), never here. Leave siteUrl empty to disable the integration; task descriptions then fall back to {{uploadPortalUrl}}.",
+    "siteUrl": "",
+    "driveName": "",
+    "_driveNameDoc": "Empty = the default 'Documents' library.",
+    "rootFolderPath": "Events/DEMO27/Sponsors/Uploads",
+    "_sponsorUploadNotifyDoc": "Who is e-mailed when a sponsor uploads a file.",
+    "sponsorUploadNotify": [ "organizers@your-event.example" ],
+    "sponsorWallUploadNotify": []
+  },
+
+  "_sessionLengthsDoc": "Session-length quick picks (label + minutes) offered on the organizer session forms and the public /Sessions filter. Any positive whole number of minutes up to sessionLengthMaxMinutes is accepted.",
+  "sessionLengths": [
+    { "label": "20 min", "minutes": 20 },
+    { "label": "45 min", "minutes": 45 },
+    { "label": "60 min", "minutes": 60 },
+    { "label": "Full day (Master Class)", "minutes": 420 }
+  ],
+  "sessionLengthMaxMinutes": 600,
+
+  "_sessionLevelsDoc": "Audience levels (label + numeric code). Always sorted by the numeric code, never alphabetically.",
+  "sessionLevels": [
+    { "label": "Introductory", "code": 100 },
+    { "label": "Intermediate", "code": 200 },
+    { "label": "Advanced", "code": 300 },
+    { "label": "Expert", "code": 400 }
+  ],
+
+  "_sessionRoomsDoc": "The per-edition room registry. Room names should be identical across your call-for-speakers system, the hub and your event platform. Venue rooms carry floor + capacity (preDay marks the pre-day set; the same physical room may appear per day with a different capacity). Expo locations have capacity null and expo true. Validation against this list is warn-only.",
+  "sessionRooms": [
+    { "name": "Room-Keynote-Floor 0-Max 800", "floor": "0", "capacity": 800, "preDay": false },
+    { "name": "Room-A-Floor 1-Max 120", "floor": "1", "capacity": 120, "preDay": false },
+    { "name": "Room-A-Floor 1-Max 60-MC", "floor": "1", "capacity": 60, "preDay": true },
+    { "name": "Expo-Stage", "capacity": null, "expo": true }
+  ],
+
+  "volunteer": {
+    "_doc": "extraAvailabilityDays = lead-up days outside the public event dates that volunteers can still mark availability for.",
+    "extraAvailabilityDays": [
+      { "date": "2027-02-28", "label": "Setup day" }
+    ]
+  },
+
+  "resources": {
+    "_doc": "Drives the shared, read-only /Resources page. Each link needs a label + url; note and isDownload are optional. An empty block renders a friendly 'nothing here yet' state.",
+    "intro": "Everything you need on the day, in one place.",
+    "sections": [
+      {
+        "title": "At the venue",
+        "description": "Where to go and how to find your way around.",
+        "links": [
+          { "label": "Event site", "url": "https://your-event.example", "note": "Schedule, speakers and general info." }
+        ]
+      },
+      {
+        "title": "Need help?",
+        "description": "Reach the organizers if something is missing or unclear.",
+        "links": [
+          { "label": "Email the organizers", "url": "mailto:organizers@your-event.example" }
+        ]
+      }
+    ]
+  },
+
+  "postEvent": {
+    "_doc": "Post-event thank-you content. picturesUrl blank = the photo paragraph is left out. linkedIn is the list a company is invited to tag; a blank url renders the name as plain text.",
+    "picturesUrl": "",
+    "linkedInFollowers": "",
+    "linkedIn": [
+      { "name": "Demo Community company page", "url": "" }
+    ]
+  },
+
+  "placeholders": {
+    "_doc": "Shared text-substitution map: any key here replaces {{key}} in sponsor task descriptions and e-mail templates. Keys starting with an underscore are never substituted. Leave a key empty when your event has no equivalent and the marker simply disappears from the rendered text.",
+    "uploadPortalUrl": "",
+    "configuratorUrl": "",
+    "eventSiteUrl": "https://your-event.example",
+    "exhibitorSpaceUrl": "",
+    "exhibitorProfileUrl": "",
+    "boothMembersUrl": "",
+    "boothMaterialsUrl": "",
+    "leadsListUrl": "",
+    "inquiriesListUrl": "",
+    "venueFloorPlanUrl": "",
+    "bookingsUrl": "",
+    "exhibitorGuideUrl": "",
+    "supportEmail": "support@your-event.example",
+    "wallContactName": "",
+    "wallContactEmail": "",
+    "leadContactName": "",
+    "leadContactEmail": "",
+    "sponsorContactName": "",
+    "sponsorContactEmail": "",
+    "speakerContactName": "",
+    "speakerContactEmail": "",
+    "volunteerContactName": "",
+    "volunteerContactEmail": "",
+    "shippingAddressBags": "",
+    "shippingAddressDsv": "",
+    "freightContactPhone": "",
+    "freightContactEmail": "",
+    "attendeeBagPriceEur": "",
+    "tvRentalPriceEur": "",
+    "extraBoothStaffPriceEur": ""
+  }
+}

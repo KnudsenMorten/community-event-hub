@@ -384,6 +384,8 @@ public sealed class IntroCurrencyTests
         [221] = "The public edition builds and its setup guide matches what it ships. A fix to the "
               + "open-source template's build and getting-started documentation for communities running "
               + "their own copy; nothing an organizer, speaker, sponsor or attendee of this event sees changes.",
+        [222] = "A fresh install comes with default content. Neutral default texts shipped only in the "
+              + "open-source template for other communities; this event's own content and hub are unchanged.",
         [206] = "Email export on the participant status board. An ORGANIZER-only convenience over "
               + "addresses the organizer already holds; nothing a participant sees, sets or receives "
               + "differently.",
@@ -552,7 +554,7 @@ public sealed class IntroCurrencyTests
     /// </remarks>
     private const int FirstEnforcedChapter = 74;
 
-    [Fact]
+    [PrivateContentFact] // the public default intro is a snapshot; this pins the upstream intro to FEATURES.md
     public void Every_FEATURES_chapter_is_either_in_the_intro_or_explicitly_excused()
     {
         var repoRoot = FindRepoRoot();

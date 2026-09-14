@@ -152,7 +152,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
     /// ledger row</b>. A gate that consumed the occasion would silence the announcement for ever,
     /// which is a worse bug than the one it fixes and an invisible one.</para>
     /// </summary>
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task It_is_HELD_before_the_Help_Promote_deadline_and_leaves_no_ledger_row()
     {
         using var db = ScenarioFixture.NewDb();
@@ -180,7 +180,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
         Assert.Single(onTheDay.Sent);
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task A_released_graphic_mails_its_speaker_the_help_promote_link()
     {
         using var db = ScenarioFixture.NewDb();
@@ -221,7 +221,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
     /// speaker who has already been told must not tell them again — otherwise moving the
     /// trigger off the daily sweep would turn a batch of releases into a batch of mails.
     /// </summary>
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task Re_running_about_the_SAME_graphics_sends_nothing()
     {
         // The idempotency that must survive §664: three triggers (release click, sync run, daily
@@ -244,7 +244,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
         Assert.Single(sender.Sent);
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task A_NEW_graphic_for_an_already_notified_speaker_DOES_mail_again()
     {
         // §664, the operator's own case: he was notified on the 28th, then the Test Master Class
@@ -309,7 +309,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
         Assert.Empty(sender.Sent);
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task The_664_backfill_still_announces_a_graphic_released_AFTER_the_old_mail()
     {
         // The half that actually fixes his report. The backfill must reconstruct what the legacy
@@ -342,7 +342,7 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
         Assert.Equal(ScenarioSeed.SpeakerOneEmail, Assert.Single(sender.Sent).To);
     }
 
-    [Fact]
+    [PrivateContentFact] // pins the upstream edition's own config values
     public async Task Narrowing_to_one_speaker_never_mails_the_others()
     {
         using var db = ScenarioFixture.NewDb();

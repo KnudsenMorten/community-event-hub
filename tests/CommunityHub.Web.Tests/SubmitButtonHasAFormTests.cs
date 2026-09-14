@@ -105,7 +105,7 @@ public sealed class SubmitButtonHasAFormTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))) return dir.FullName;
+            if (File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln"))) return dir.FullName;
             dir = dir.Parent;
         }
         throw new InvalidOperationException("Could not locate the repository root.");

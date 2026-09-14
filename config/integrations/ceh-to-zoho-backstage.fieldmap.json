@@ -1,0 +1,224 @@
+{
+  "$comment": "§303c fieldmap SCHEMA v2 — every property lives under an explicit source{} or target{} block. source = where the value comes from (CEH here — CEH is ALWAYS the master for this integration; stage 3 dropped). target = where it is written and how the operator sees it (target.gui = the label in the TARGET's admin GUI; ops mails speak these names). Rule properties per field: compare (String|MultiLine|Integer|Object|Array — the generic valid-vs-changed rule), capability (CreateOnly|CreateAndUpdate|GuiOnly), read (List|DetailOnly|NotReadable — where the target echoes the value back), direction (Outbound|Inbound, default = file direction), limitations (free-text per-field constraints). Loaded fail-soft at host startup over the ZohoFieldMap code defaults. SPEAKER slice live; Sessions/Sponsors migrate here next.",
+  "integration": "ceh-to-zoho-backstage",
+  "direction": "Outbound",
+  "source": {
+    "system": "CEH",
+    "kind": "internal-sql",
+    "timezone": "DateTimeOffset with the REAL offset of the event timezone for that date (e.g. +01:00 CET / +02:00 CEST).",
+    "notes": "CEH is ALWAYS the master for this integration (operator 2026-07-24; stage 3 read-back dropped)."
+  },
+  "target": {
+    "system": "Zoho Backstage",
+    "kind": "rest-api",
+    "baseUrl": "https://www.zohoapis.eu/backstage/v3/portals/{portal}/events/{event}",
+    "timezone": "Event configured to the event timezone; the API takes/returns UTC ('…Z' start_time) and the GUI renders event-local time. §305: a correctly-offset CEH value converts exactly via ToUniversalTime — never send a wall-clock as if it were UTC."
+  },
+  "records": {
+    "Speaker": {
+      "source": { "record": "SpeakerProfile (+ Participant e-mail)" },
+      "target": {
+        "record": "speaker",
+        "guiPanel": "Edit Speaker",
+        "endpoints": { "list": "/speakers", "detail": "/speakers/{id}", "create": "/speakers", "update": null },
+        "limitations": [
+          "CREATE-ONLY: per-id POST/PUT/PATCH/DELETE all return 404 — later changes go via the ACTION mail",
+          "creating a speaker SENDS THE INVITATION to that e-mail",
+          "attaching an unknown e-mail to a session AUTO-CREATES + INVITES a speaker",
+          "e-mails are stored lowercased; the session attach list matches CASE-SENSITIVELY"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "FirstName", "type": "String" },
+          "target": { "field": "name", "gui": "First Name", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "LastName", "type": "String" },
+          "target": { "field": "last_name", "gui": "Last Name", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "CompanyName", "type": "String" },
+          "target": { "field": "company", "gui": "Company Name", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "optional in Zoho; absent from Sessionize — hub-collected on the Details form"
+        },
+        {
+          "source": { "field": "Country", "type": "String" },
+          "target": { "field": "country", "gui": "Country", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "sent as the upper-cased 2-letter code"
+        },
+        {
+          "source": { "field": "Tagline", "type": "String" },
+          "target": { "field": "designation", "gui": "Designation", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "Biography", "type": "MultiLine" },
+          "target": { "field": "description", "gui": "Description", "type": "RichText" },
+          "compare": "MultiLine", "capability": "CreateOnly", "read": "List",
+          "limitations": "Zoho's rich-text editor reformats the value — compare is existence-only"
+        },
+        {
+          "source": { "fields": [ "Accreditation", "MvpCategories" ], "type": "MultiSelect", "derivation": "zoho.speakerSkills" },
+          "target": { "field": "skills", "gui": "Skills (comma separated)", "type": "Array" },
+          "compare": "Array", "capability": "CreateOnly", "read": "List",
+          "limitations": "FULL labels kept ('Microsoft MCT', not 'MCT'); accreditation first, MVP categories complement; deduped"
+        },
+        {
+          "source": { "field": "LinkedIn", "fields": [ "LinkedIn", "Twitter" ], "type": "Url" },
+          "target": { "field": "linkedin", "gui": "Social Pages/Handles → LinkedIn", "type": "Object" },
+          "compare": "Object", "capability": "CreateOnly", "read": "List",
+          "limitations": "the two CEH URLs merge into ONE target object (company_social_pages) — existence check only"
+        },
+        {
+          "source": { "field": "Twitter", "fields": [ "LinkedIn", "Twitter" ], "type": "Url" },
+          "target": { "field": "twitter", "gui": "Social Pages/Handles → X (Twitter)", "type": "Object" },
+          "compare": "Object", "capability": "CreateOnly", "read": "List",
+          "limitations": "the two CEH URLs merge into ONE target object (company_social_pages) — existence check only"
+        },
+        {
+          "source": { "field": "SelectedForPublish", "type": "Boolean" },
+          "target": { "field": "featured", "gui": "Feature this speaker", "type": "Boolean" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "HARD publish gate — an unselected speaker is created non-featured"
+        }
+      ]
+    },
+    "Session": {
+      "source": { "record": "Session (SQL)" },
+      "target": {
+        "record": "session",
+        "guiPanel": "Edit Session",
+        "endpoints": { "list": "/sessions?day={n}", "detail": null, "create": "/sessions", "update": null },
+        "limitations": [
+          "CREATE-ONLY: the per-id endpoint refuses PUT and PATCH alike (404 'Please provide valid method')",
+          "the list is PER agenda DAY (1-based) — enumerate /agendas first",
+          "description + tags are REFUSED even on create ('Extra param found') — GuiOnly, the ACTION mail is their only channel",
+          "when start_time is in the payload the ?day= query param is rejected (HTTP 400) — day derives from start_time",
+          "speakers attach at create only (e-mail array; unknown e-mail AUTO-CREATES + INVITES a speaker)"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "Title", "type": "String" },
+          "target": { "field": "title", "gui": "Title", "type": "String" },
+          "compare": "String", "capability": "CreateOnly", "read": "List"
+        },
+        {
+          "source": { "field": "StartsAt", "type": "DateTimeOffset" },
+          "target": { "field": "start_time", "gui": "Session Time", "type": "DateTime (UTC 'Z')" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "§305: CEH carries the real event-timezone offset; convert via ToUniversalTime — never send a wall-clock as UTC"
+        },
+        {
+          "source": { "field": "LengthMinutes", "type": "Integer" },
+          "target": { "field": "duration", "gui": "Duration (Hr/Min)", "type": "Integer minutes" },
+          "compare": "Integer", "capability": "CreateOnly", "read": "List",
+          "limitations": "derived from EndsAt−StartsAt when scheduled, else the Length bucket"
+        },
+        {
+          "source": { "field": "Track", "type": "String" },
+          "target": { "field": "track", "gui": "Track", "type": "Id (resolved by name)" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "REQUIRED on create (§299); the track is resolved/created by NAME via /tracks first"
+        },
+        {
+          "source": { "field": "Room", "type": "String" },
+          "target": { "field": "venue", "gui": "Hall", "type": "Id (resolved by name)" },
+          "compare": "String", "capability": "CreateOnly", "read": "List",
+          "limitations": "hall resolved/created by NAME via /halls (capacity REQUIRED on create); room names must be byte-identical across systems"
+        },
+        {
+          "source": { "field": "SessionSpeakers", "type": "Array" },
+          "target": { "field": "speakers", "gui": "Speakers", "type": "Array of e-mails" },
+          "compare": "Array", "capability": "CreateOnly", "read": "List",
+          "limitations": "ring-scoped attach (only approved + ring-eligible speakers); e-mails lowercased — the attach matches CASE-SENSITIVELY"
+        },
+        {
+          "source": { "fields": [ "Level", "Tags", "(mandatory language)" ], "type": "String + CSV", "derivation": "zoho.sessionTags" },
+          "target": { "field": "tags", "gui": "Tags", "type": "Array" },
+          "compare": "Array", "capability": "GuiOnly", "read": "List",
+          "limitations": "REFUSED on create and no /tags endpoint — ACTION mail only. Derived: 'Session Level: {level}' verbatim + mandatory 'Session Language: English' + every Sessionize label 1:1 unbounded"
+        },
+        {
+          "source": { "field": "Abstract", "type": "MultiLine" },
+          "target": { "field": "description", "gui": "Session Description", "type": "RichText" },
+          "compare": "MultiLine", "capability": "GuiOnly", "read": "List",
+          "limitations": "REFUSED on create ('Extra param found') and no update method — the ACTION mail carries the FULL text to paste (§322l)"
+        }
+      ]
+    },
+    "Sponsor": {
+      "source": { "record": "SponsorInfo + CompanyManager company" },
+      "target": {
+        "record": "sponsor",
+        "guiPanel": "Sponsors",
+        "endpoints": { "list": "/sponsors", "detail": "/sponsors/{id}", "create": "/sponsors", "update": "/sponsors/{id}" },
+        "limitations": [
+          "PUT supported (change-only §302 — every write mails the organizer inbox)",
+          "the per-id DETAIL returns MORE than the list (description/website/socials) — fetch detail before comparing DetailOnly fields"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "CompanyDescription", "type": "MultiLine" },
+          "target": { "field": "description", "gui": "Description", "type": "RichText" },
+          "compare": "MultiLine", "capability": "CreateAndUpdate", "read": "DetailOnly"
+        },
+        {
+          "source": { "field": "WebsiteUrl", "type": "Url" },
+          "target": { "field": "website_url", "gui": "Website", "type": "Url" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "List"
+        }
+      ]
+    },
+    "Exhibitor": {
+      "source": { "record": "SponsorInfo + CompanyManager company (booth sponsors only)" },
+      "target": {
+        "record": "exhibitor",
+        "guiPanel": "Exhibitors",
+        "endpoints": { "list": "/exhibitors", "detail": "/exhibitors/{id}", "create": "/exhibitors", "update": "/exhibitors/{id}" },
+        "limitations": [
+          "PUT supported BUT company_overview + company_social_pages are ACCEPTED and NEVER echoed by any GET (NotReadable) — §302d CEH-side ZohoSocialPushedHash stamp decides re-pushes",
+          "booth_id/website_url/company_name/contact DO round-trip via the list",
+          "booth label ('E-26') lives on the /booths object — resolve label→id before assigning"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "CompanyDescription", "type": "MultiLine" },
+          "target": { "field": "company_overview", "gui": "Company Overview", "type": "RichText" },
+          "compare": "MultiLine", "capability": "CreateAndUpdate", "read": "NotReadable",
+          "limitations": "accepted-but-never-echoed — re-push only when the CEH value changes (§302d hash stamp)"
+        },
+        {
+          "source": { "field": "LinkedInUrl", "fields": [ "LinkedInUrl", "TwitterUrl" ], "type": "Url" },
+          "target": { "field": "company_social_pages.linkedin", "gui": "Social Pages (LinkedIn)", "type": "Object" },
+          "compare": "Object", "capability": "CreateAndUpdate", "read": "NotReadable",
+          "limitations": "merged into ONE company_social_pages object; accepted-but-never-echoed (§302d hash stamp)"
+        },
+        {
+          "source": { "field": "TwitterUrl", "fields": [ "LinkedInUrl", "TwitterUrl" ], "type": "Url" },
+          "target": { "field": "company_social_pages.twitter", "gui": "Social Pages (X/Twitter)", "type": "Object" },
+          "compare": "Object", "capability": "CreateAndUpdate", "read": "NotReadable",
+          "limitations": "merged into ONE company_social_pages object; accepted-but-never-echoed (§302d hash stamp)"
+        },
+        {
+          "source": { "field": "EventCoordinatorEmail", "type": "String" },
+          "target": { "field": "contact.email_id", "gui": "Contact Email", "type": "String" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "NotReadable",
+          "limitations": "§41a: Zoho caps contact e-mail changes at 3 — CEH stamps the last pushed value (ZohoContactEmail) and pushes only real changes"
+        },
+        {
+          "source": { "field": "BoothLabel", "type": "String" },
+          "target": { "field": "booth_id", "gui": "Booth", "type": "Id (resolved by label)" },
+          "compare": "String", "capability": "CreateAndUpdate", "read": "List"
+        }
+      ]
+    }
+  }
+}

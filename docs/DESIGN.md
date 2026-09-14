@@ -1268,8 +1268,8 @@ than relying on the model default; ring-gate `SpeakerBioBackstageSyncService` �
   - **The endpoint id is ordinary operator config — NOT a secret.** It is bound to
     `Sessionize:EndpointId` from non-secret config: `integrations.<edition>.json → sessionize.endpointId`
     and/or, for local DEV, the gitignored `config/sessionize.<edition>.custom.json`. The real per-edition
-    id stays OUT of the public mirror (private `config/` is denylisted from publish; public docs /
-    config-examples keep the `REPLACE_WITH_YOUR_SESSIONIZE_API_ID` placeholder), but it is plain config,
+    id stays OUT of the public mirror (private `config/` is denylisted from publish; public docs and
+    the template's `config/sessionize.<edition>.custom.sample.json` keep the `REPLACE_WITH_YOUR_SESSIONIZE_API_ID` placeholder), but it is plain config,
     **not** a Key Vault secret.
   - **Emails require an advanced field.** Sessionize omits emails from the default JSON; the organizer
     must enable the "speaker emails" advanced field on the API view, or every speaker is skipped
@@ -4634,8 +4634,8 @@ Use a SQL Server (or SQL Server container) with a **SQL login** locally: when `S
 empty the app appends `Authentication=Active Directory Managed Identity;` to the template — the Azure
 path — so integrated/LocalDB authentication does not work without a password. The template must end
 with `;`. `Email:RedirectAllTo` sends every local mail to one inbox. The Jobs project takes the same
-settings via `local.settings.json` (also git-ignored). Per-edition files go in `config/` — start from
-[`../config-examples/`](../config-examples/README.md).
+settings via `local.settings.json` (also git-ignored). Per-edition files live in `config/`; the public
+template ships a neutral default set there (see §13 and §17).
 
 **Schema:**
 ```bash
@@ -4808,8 +4808,30 @@ breaks a build: every `*.sln` in the plan is rewritten for the mirror by `Get-Pu
 is untouched), and a published `.csproj` whose `ProjectReference` points at a stripped project
 **blocks** the publish. `-WhatIf` lists the solution entries it would remove. Documentation and
 getting-started text that name private files are kept honest by hand (README *Getting started* uses
-only published files; `config-examples/` and `infra/*.parameters.example.json` stand in for the
-private `config/` and parameter files, and `ConfigExamplesParseTests` holds them to the code).
+only published files; `infra/*.parameters.example.json` stand in for the private parameter files).
+
+**The public default content set (2026-09-14).** The private repository keeps a neutral copy of its
+per-edition content under `public-template/`, mirrored path for path: `public-template/config/**`
+(edition settings, sponsor rules, speaker deadlines, Signal groups, field maps, every task body,
+welcome step and info page, plus `PUBLIC-TEMPLATE.md`) and
+`public-template/src/CommunityHub/App_Data/Surveys/eldk27-*.json`. `public-template/*` itself is
+denylisted; the publish script adds each file to the plan at its path **without** the prefix, so the
+mirror's `config/` and survey folder hold the defaults at exactly the paths the loaders already read.
+No runtime code changed and the private repository (and every deployment built from it) loads its own
+`config/` exactly as before. A template may only replace a file the mirror does not otherwise ship —
+the publish stops if a template target collides with a published private file. Derived event-specific
+images (organizer portraits, venue floor plans, A/V photos, the feedback poster and a social-post
+screenshot under `wwwroot/content/<edition>/`) are denylisted; the synthetic product screenshots in
+`content/<edition>/img/` still publish.
+
+Two mechanisms keep the copy honest. `PublicTemplateConfigTests` (private repo and mirror) runs the
+defaults through the real loaders, requires a default body for every shipped task definition and a
+counterpart for every private content file (a file added for the event fails the build until the
+template has one), and fails on upstream names, domains or non-`.example` addresses. And
+`config/PUBLIC-TEMPLATE.md` is a switch for the test suite: while it exists, the tests that pin the
+upstream edition's own values (`[PrivateContentFact]` / `[PrivateContentTheory]`) or its internal docs
+(`[InternalDocsFact]`) are skipped with a stated reason — the switch is a file that exists in the
+template, never a private file that is merely missing, so a lost private file still fails loudly.
 
 **Publish workflow** (`.github/workflows/publish-public.yml`) fires on tags `public-vX.Y.Z`,
 `eldk-vX.Y.Z` (team-generic), or `eldkNN-vX.Y.Z` (event-specific — works for eldk27/eldk28/… with no
@@ -5008,9 +5030,10 @@ work at ~360px, shipped in the same commit as the desktop CSS.
 ## 17. Configuration & Key Vault reference
 
 **Per-edition config** (`config/*.<edition>.json`). The real files are private to each instance; the
-public template ships sanitized starters in [`config-examples/`](../config-examples/README.md)
-(`event`, `sponsor`, `speaker-deadlines`, `signal-groups`, plus Sessionize and AI-guidance settings
-samples), which `ConfigExamplesParseTests` runs through the real loaders. The loaders' default paths
+public template ships a neutral default set in `config/` (`event`, `sponsor`, `speaker-deadlines`,
+`signal-groups`, the field maps, all task/welcome/info-page Markdown, plus Sessionize and AI-guidance
+settings samples — described in the template's `config/README.md`), which `PublicTemplateConfigTests`
+runs through the real loaders (§13). The loaders' default paths
 still name the upstream edition (`config/event.eldk27.json`, …); point them at your own files with
 the app settings `EventConfig__EventConfigPath`, `SponsorConfig__SponsorConfigPath`,
 `SpeakerDeadlines__ConfigPath` and `SignalGroups__ConfigPath` on **both** hosts. Of the files below,

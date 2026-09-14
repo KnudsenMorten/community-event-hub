@@ -7,8 +7,8 @@
 #  so nothing secret is ever written to a file or to shell history.
 #
 #  The secret-name inventory matches docs/DESIGN.md section 17 (Key Vault
-#  secret inventory) and the secret NAMES that config-examples/
-#  integrations.example.json references.
+#  secret inventory); reference each one from an app setting as
+#  @Microsoft.KeyVault(VaultName=<vault>;SecretName=<name>).
 #
 #  Usage:   ./scripts/set-secrets.sh <dev|prod>
 #

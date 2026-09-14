@@ -1,0 +1,88 @@
+{
+  "$comment": "§323 fieldmap SCHEMA v2 for the WebshopSystem hop (INBOUND: WooCommerce + Company Manager on the community website are the source; CEH mirrors sponsor orders → tasks/tier and contacts → sponsor logins). Documents the mapping SponsorOrderPullService + SponsorContactSyncService implement. READ-ONLY toward the webshop: the WooCommerce REST key is Read-only; CEH never writes orders.",
+  "integration": "webshop-to-ceh",
+  "direction": "Inbound",
+  "source": {
+    "system": "WooCommerce + Company Manager (WordPress)",
+    "kind": "rest-api",
+    "baseUrl": "https://your-webshop.example/wp-json/wc/v3 (orders/products) + /wp-json/company-manager/v1 (companies/users)",
+    "notes": "Orders filtered to status=completed within the configured OrdersAfter/OrdersBefore window; category names arrive HTML-encoded and are decoded."
+  },
+  "target": {
+    "system": "CEH",
+    "kind": "internal-sql",
+    "notes": "Idempotent per company (SourceKey sponsor:{companyId}:{title-slug}); tier/package RAISE-ONLY; refunded/cancelled orders raise organizer action items but never roll back."
+  },
+  "records": {
+    "SponsorOrder": {
+      "source": { "record": "orders[] (+ products[] category enrichment)" },
+      "target": {
+        "record": "ParticipantTask (sponsor-scoped) + SponsorInfo",
+        "guiPanel": "Sponsor → Tasks / Organizer → Sponsors",
+        "endpoints": { "list": "/orders?status=completed&after={from}&before={to}&per_page=100", "detail": "/products?include={ids}", "create": null, "update": null },
+        "limitations": [
+          "orders WITHOUT the _cm_company_id meta are legacy user-meta orders — skipped (cannot attribute)",
+          "task titles/descriptions render from sponsor.<edition>.json (placeholders incl. SharePoint folder links)",
+          "product classification (SponsorProductClassifier) derives kind + BoothTier + booth number from name + categories"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "meta_data[_cm_company_id]", "type": "Integer" },
+          "target": { "field": "SponsorCompanyId", "gui": "Company", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "line_items[].name + product categories", "type": "String", "derivation": "webshop.productClassification" },
+          "target": { "field": "SponsorInfo.Tier / BoothLabel / SponsorPackage / HasSponsorSession", "gui": "Sponsor tier & booth", "type": "Enum + String" },
+          "compare": "String", "limitations": "RAISE-ONLY: a pull never lowers an already-granted tier/package"
+        },
+        {
+          "source": { "field": "line_items[] (classified)", "type": "Array", "derivation": "webshop.sponsorTasks" },
+          "target": { "field": "ParticipantTask rows", "gui": "Sponsor Tasks", "type": "Array" },
+          "compare": "Array", "limitations": "SourceKey sponsor:{companyId}:{title-slug}; orphans pruned; delivered tasks auto-closed"
+        },
+        {
+          "source": { "field": "date_created_gmt", "type": "DateTime (UTC)" },
+          "target": { "field": "task DueDate (config offset)", "gui": "Due date", "type": "Date" },
+          "compare": "String"
+        }
+      ]
+    },
+    "SponsorContact": {
+      "source": { "record": "companies/{id}/users (+ company default role pointers)" },
+      "target": {
+        "record": "Participant (Role=Sponsor)",
+        "guiPanel": "Organizer → Participants",
+        "endpoints": { "list": "/companies/{id}/users", "detail": "/users/{id}", "create": null, "update": null },
+        "limitations": [
+          "SET-ONLY flags: IsSigner/IsEventCoordinator set from default_signer_id / event_coordination_default_contact_id, never cleared by sync",
+          "an organizer-deactivated contact is never silently re-activated",
+          "e-mails normalized lowercase; CmUserId is the stable link key"
+        ]
+      },
+      "fields": [
+        {
+          "source": { "field": "user_email", "type": "String" },
+          "target": { "field": "Email", "gui": "Email", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "full_name / display_name", "type": "String" },
+          "target": { "field": "FullName", "gui": "Name", "type": "String" },
+          "compare": "String"
+        },
+        {
+          "source": { "field": "user_id", "type": "Integer" },
+          "target": { "field": "CmUserId", "gui": "(link key)", "type": "Integer" },
+          "compare": "Integer"
+        },
+        {
+          "source": { "field": "default_signer_id / event_coordination_default_contact_id", "type": "Integer" },
+          "target": { "field": "IsSigner / IsEventCoordinator", "gui": "Roles", "type": "Boolean" },
+          "compare": "String", "limitations": "Role 1 = signer, Role 2 = event coordinator; Company Manager has NO per-user roles"
+        }
+      ]
+    }
+  }
+}

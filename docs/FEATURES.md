@@ -21,7 +21,7 @@ Hosting & Reliability.
 
 ## Feature index
 
-The complete delivered set — **222 entries** (chapters 1–12 summarise an area; every later entry is
+The complete delivered set — **223 entries** (chapters 1–12 summarise an area; every later entry is
 one dated delivery), in the order they shipped. Nothing here is planned or partial; the few
 capabilities retired since they shipped are marked *(retired)*, here and where they appear.
 
@@ -249,6 +249,7 @@ capabilities retired since they shipped are marked *(retired)*, here and where t
 | 219 | [No "add by hand" mail for event-platform fields the hub can write](#219-no-add-by-hand-mail-for-event-platform-fields-the-hub-can-write--2026-09-14) | 2026-09-14 |
 | 220 | [Sponsor contacts with a shared mailbox name are added to the webshop](#220-sponsor-contacts-with-a-shared-mailbox-name-are-added-to-the-webshop--2026-09-14) | 2026-09-14 |
 | 221 | [The public edition builds, and its setup guide matches what it ships](#221-the-public-edition-builds-and-its-setup-guide-matches-what-it-ships--2026-09-14) | 2026-09-14 |
+| 222 | [A fresh install comes with default content](#222-a-fresh-install-comes-with-default-content--2026-09-14) | 2026-09-14 |
 
 ---
 
@@ -5707,7 +5708,29 @@ copy, and the getting-started guide told readers to run setup scripts that are n
 - **A getting-started guide that only uses what is in the repository.** Infrastructure, secrets, app
   deployment, database access, the first organizer account and the custom domain are each a documented
   step using the included scripts or the standard Azure and .NET command-line tools.
-- **Starter files to copy.** Example infrastructure parameter files and sanitized example configuration
-  (event, sponsor rules, speaker deadlines, Signal groups, Sessionize and AI-guidance settings), each
-  explaining where it goes and which setting points the app at it — and checked by tests against the
-  code that reads them, so they stay current.
+- **Starter files.** Example infrastructure parameter files to copy and fill in, checked by tests against
+  the infrastructure template so they stay current. *(The example configuration first shipped alongside
+  them became the default content set in §222.)*
+
+## 222. A fresh install comes with default content *(✅ 2026-09-14)*
+
+A community installing the open-source edition used to get working pages with nothing in them: the
+built-in tasks had no instructions, the Get-Started wizards had no welcome step, the information pages
+did not exist and the surveys were missing — all of that lived only in the original event's private
+configuration.
+
+- **Everything a new event needs to read, in neutral words.** The instructions of every built-in task
+  (speaker, sponsor and crew), the welcome step for each role, the information pages — introduction, key
+  dates, venue addresses, good to know, session guidelines, session feedback, A/V, wayfinding, organizer
+  contacts — the call-for-speakers topic survey and the three post-event surveys, the edition settings,
+  sponsor rules, speaker deadlines and the integration field maps.
+- **Nothing of another event in it.** No event, venue, sponsor or person names, no addresses, prices or
+  dates from the conference it came from — placeholders and the hub's own `{{tokens}}` instead, so you edit
+  words rather than hunt for someone else's details.
+- **Ready where the app looks.** The defaults sit exactly where the hub reads its content, so there is
+  nothing to copy or rename before the first start; a short guide in the configuration folder says what
+  each file does.
+- **Kept current automatically.** Tests check that every task the hub knows about has instructions in the
+  default set, that the settings parse, and that nothing specific to another event slips in; the test
+  suite passes on a fresh clone, skipping — with a stated reason — only the few checks that belong to the
+  original event's own content.

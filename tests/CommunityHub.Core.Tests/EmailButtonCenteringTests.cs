@@ -115,7 +115,7 @@ public sealed class EmailButtonCenteringTests
         while (dir is not null)
         {
             if (Directory.Exists(Path.Combine(dir.FullName, "templates", "emails"))
-                && File.Exists(Path.Combine(dir.FullName, "CLAUDE.md")))
+                && File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln")))
             {
                 return dir.FullName;
             }
