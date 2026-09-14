@@ -413,14 +413,119 @@
            BASE rule, not a desktop media query — breakpoints kept failing on scaled
            Windows screens, and width:100% already caps fields at the container on
            phones, so a small base max-width never served any purpose. */
+        /* 🔴 §1129 — search / datetime-local / time WERE MISSING FROM THIS LIST, and that is the
+           whole reason the organizer filter rows looked broken (operator 2026-08-25: *"why does the
+           layout look so wrng here all over the place"* · *"buttons and fields are all over the
+           place. looks bad"*).
+
+           🔑 The tell was the MARGIN, not the border. Every styled control carries
+           `margin: 6px 0 14px`, so in a `align-items:end` filter row their margin-boxes end 14px
+           BELOW the visible control — i.e. the selects sit 14px higher than a search box that had no
+           margin at all. That 14px is exactly the offset in his screenshot, and it is why the Search
+           field looked dropped while Status/Persona/Flag looked fine.
+
+           ⚠️ It also explains "make the field wider": without `width:100%` the search box fell back
+           to the browser's ~20-character default, so it was the narrowest control on the row.
+
+           🔒 An OMISSION, not a decision — nothing anywhere opted these types out. A type-by-type
+           allowlist silently drops every input type nobody remembered, which is why the three that
+           happened to be added later (search, datetime-local, time) all render unstyled. */
         input[type=email], input[type=text], input[type=number],
         input[type=date], input[type=tel], input[type=url],
+        input[type=search], input[type=datetime-local], input[type=time],
         select, textarea {
             display: block; width: 100%; max-width: 640px;
             padding: 8px; margin: 6px 0 14px;
             border: 1px solid #c4c8d4; border-radius: 6px;
             font-size: 15px; box-sizing: border-box;
         }
+
+        /* ------------------------------------------------------------------
+           §1129 — THE INLINE FILTER BAR used by the organizer grids.
+
+           🔑 The stacked-form margin above (`6px 0 14px`) is right for a normal
+           top-to-bottom form and WRONG for a horizontal row: it is a per-control
+           bottom margin fighting `align-items:end`, so controls, labels and the
+           submit button each land at a different height. The button has no such
+           margin at all, which is why Apply sat lowest of the lot.
+
+           ⇒ Inside a filter bar the vertical rhythm comes from ONE place — the
+           row's own `gap` — and every control's margin is zeroed. Then
+           `align-items:end` genuinely aligns the bottoms, because every item's
+           margin-box bottom IS its visible bottom.
+
+           Mobile-first: it wraps at any width and each field may shrink to its
+           min-width, so it degrades to a stack at ~360px with no media query.
+           ------------------------------------------------------------------ */
+        .ceh-filterbar {
+            display: flex; flex-wrap: wrap;
+            gap: 12px 16px; align-items: end;
+            margin-bottom: 16px;
+        }
+        .ceh-filterbar__field { display: flex; flex-direction: column; min-width: 170px; }
+        /* Search earns more room than a dropdown: it holds an id, a name OR an e-mail.
+           🔒 `flex-basis` sets the WANTED width while `min-width` stays small, so the field shrinks
+           inside a narrow card instead of forcing the row wider than its container. A hard
+           `min-width: 320px` here is the classic mobile-overflow bug: it cannot shrink, so at ~360px
+           minus the card padding it pushes the page into a horizontal scroll. */
+        .ceh-filterbar__field--wide { flex: 1 1 320px; min-width: 200px; max-width: 460px; }
+        .ceh-filterbar label { display: block; margin: 0 0 4px; }
+        .ceh-filterbar input,
+        .ceh-filterbar select { margin: 0; width: 100%; max-width: 100%; }
+        /* Sits on the row's baseline with the controls, not 14px below them. */
+        .ceh-filterbar button { margin: 0; }
+        /* 🔑 §1130 — ESCAPE THE 1100px READING-WIDTH CAP. `main .card form:not(:has(table))` below
+           caps plain forms for readability, and a filter bar is not prose: at 1100px the last filter
+           and the Apply button were pushed onto a second line on a 1700px card for no reason.
+           Measured: the row ended at exactly 1100px and Ring + Apply wrapped beneath it.
+
+           ⚠️ The selector must OUT-SPECIFY that rule, not merely follow it. A bare `.ceh-filterbar`
+           (0,1,0) loses to `main .card form:not(:has(table))` (0,1,4) however late it appears —
+           `:not()` and `:has()` contribute their argument's specificity. Two classes wins. */
+        main .card form.ceh-filterbar { max-width: none; }
+
+        /* ------------------------------------------------------------------
+           §1130 — THE BULK-ACTION BAR, same disease as the filter row.
+
+           Inside its flex row the global control rule stretched each <select>
+           to its 640px max-width and gave it a 14px bottom margin, so the two
+           dropdowns sprawled across the bar and their "Apply" buttons fell onto
+           a second line — the "Change persona to … Change ring to" spread the
+           operator's screenshot shows.
+
+           ⇒ Same remedy: the row owns the spacing, the controls carry none, and
+           a dropdown sizes to its content instead of grabbing 640px.
+           ------------------------------------------------------------------ */
+        .bulk-bar label { display: inline; margin: 0; white-space: nowrap; }
+        .bulk-bar select {
+            display: inline-block; width: auto; min-width: 150px;
+            max-width: 100%; margin: 0;
+        }
+        .bulk-bar button { margin: 0; }
+
+        /* ------------------------------------------------------------------
+           §1131 — A LINK THAT IS REALLY AN ACTION, styled as a button.
+
+           Operator 2026-08-25 on the participants export: *"i also need this as
+           a button"*. It was a 13px text link inside grey explanatory prose, so
+           the most useful ACTION on the page looked like a footnote about it.
+
+           🔑 An <a> rather than a <button>: these are GET download handlers, so
+           a link is the correct element (right-click, open in a new tab, and no
+           form to submit). Only the appearance was wrong, so only the
+           appearance changes — the semantics stay a link.
+           ------------------------------------------------------------------ */
+        .ceh-actionrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        a.ceh-btn {
+            display: inline-block;
+            background: var(--el-blue); color: #fff !important;
+            padding: 9px 16px; border-radius: 7px;
+            font-size: 15px; font-weight: 600; line-height: 1.2;
+            text-decoration: none; white-space: nowrap;
+        }
+        a.ceh-btn:hover { background: var(--el-darkblue); color: #fff !important; }
+        a.ceh-btn--secondary { background: #c4c8d4; color: var(--el-darkblue) !important; }
+        a.ceh-btn--secondary:hover { background: #aab0c0; color: var(--el-darkblue) !important; }
         textarea { max-width: 960px; }
         /* Plain FIELD forms stay readable; forms hosting a TABLE (admin grids) keep
            the full fluid width. */
@@ -854,6 +959,28 @@
            portal never looks frozen. Pure progressive enhancement — with JS off
            the page just navigates as before. Mobile-first: the overlay tracks the
            grid wrapper at any width and the shimmer bars are fluid. */
+        /* ------------------------------------------------------------------
+           §1130 — PROSE IN AN ADMIN GRID GETS A READABLE MEASURE.
+
+           🔑 §309 made `main` FLUID on desktop (94vw up to 1700px) so the wide
+           admin TABLES finally use a big monitor. The explanatory paragraphs
+           above those tables inherited that width silently — measured at 1920px
+           and 2560px, the Participants intro renders **1660px wide**, roughly
+           200 characters per line. Nothing is clipped and the page does not
+           scroll sideways (verified: scrollWidth == clientWidth at 1489/1920/
+           2560), but a 200-character line is unreadable and reads as broken
+           layout, which is exactly how the operator described it.
+
+           ⇒ The TABLE keeps the full fluid width — that is what §309 bought.
+           Only the prose is capped, at the classic readable measure.
+
+           🔒 Scoped to `.ceh-grid > p`, i.e. the five organizer grid pages, and
+           to DIRECT children so a paragraph nested inside a toolbar or a cell is
+           untouched. Checked before shipping: none of those pages uses a `<p>`
+           as a flex/width layout row, so nothing gets squashed.
+           ------------------------------------------------------------------ */
+        .ceh-grid > p { max-width: 80ch; }
+
         .ceh-grid { position: relative; }
         .ceh-grid[data-ceh-grid-busy] > * { opacity: .45; transition: opacity .15s ease; }
         .ceh-grid__skeleton {

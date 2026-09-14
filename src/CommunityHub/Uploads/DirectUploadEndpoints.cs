@@ -279,6 +279,8 @@ public static class DirectUploadEndpoints
                 CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
                 TimeProvider clock,
                 CommunityHub.Core.Email.IEmailSender email,
+                // §1072 — so the notice is sent as ops mail; without it the ring gate drops it.
+                CommunityHub.Core.Email.IEmailContextAccessor emailCtx,
                 ILoggerFactory logs,
                 CancellationToken ct) =>
         {
@@ -319,7 +321,7 @@ public static class DirectUploadEndpoints
             var sponsorName = await ResolveSponsorNameAsync(db, me.EventId, companyId!, ct);
             await SponsorUploadKinds.NotifyAsync(
                 email, spec, sponsorName, item.Name, item.WebUrl, me.Email,
-                logs.CreateLogger("DirectUpload"), ct);
+                logs.CreateLogger("DirectUpload"), ct, emailCtx);
 
             return Results.Ok(new { ok = true, name = item.Name });
         }).RequireAuthorization();

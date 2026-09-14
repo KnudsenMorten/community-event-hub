@@ -1,6 +1,6 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-27. Accuracy pass 2026-07-07 (§224/§234 review): claims that
+*Delivered feature set, as of 2026-09-14. Accuracy pass 2026-07-07 (§224/§234 review): claims that
 described since-retired behavior are annotated inline as "(retired/corrected 2026-07-07: …)" — the
 original text is kept as history, the note states what the hub does today.*
 
@@ -21,8 +21,9 @@ Hosting & Reliability.
 
 ## Feature index
 
-The complete delivered set — **82 features**, in the order they shipped.
-Everything listed is live in the product today; nothing here is planned or partial.
+The complete delivered set — **222 entries** (chapters 1–12 summarise an area; every later entry is
+one dated delivery), in the order they shipped. Nothing here is planned or partial; the few
+capabilities retired since they shipped are marked *(retired)*, here and where they appear.
 
 | # | Feature | Shipped |
 | --- | --- | --- |
@@ -39,7 +40,7 @@ Everything listed is live in the product today; nothing here is planned or parti
 | 11 | [Organizer hub — run the whole event from one place](#11-organizer-hub--run-the-whole-event-from-one-place) |  |
 | 12 | [Hosting & reliability — production-grade by design](#12-hosting--reliability--production-grade-by-design) |  |
 | 13 | [Accessibility — usable by keyboard and screen reader](#13-accessibility--usable-by-keyboard-and-screen-reader--2026-06-15) | 2026-06-15 |
-| 14 | [Bilingual UI — English and Danish *(✅ 2026-06-15)*](#14-bilingual-ui--english-and-danish--2026-06-15-retired-2026-07-07) | 2026-06-15 |
+| 14 | [Bilingual UI — English and Danish *(retired 2026-07-07)*](#14-bilingual-ui--english-and-danish--2026-06-15-retired-2026-07-07) | 2026-06-15 |
 | 15a | [Social-media post editor: one field, live variables, first publish](#15a-social-media-post-editor-one-field-live-variables-first-publish--2026-08-05) | 2026-08-05 |
 | 15 | [Social-media graphics & shared file store](#15-social-media-graphics--shared-file-store--2026-06-15) | 2026-06-15 |
 | 16 | [Feature settings — turn capabilities on when you're ready](#16-feature-settings--turn-capabilities-on-when-youre-ready--2026-06-17) | 2026-06-17 |
@@ -127,6 +128,127 @@ Everything listed is live in the product today; nothing here is planned or parti
 | 98 | [The hub owns the schedule, and cannot be switched out of it](#98-the-hub-owns-the-schedule-and-cannot-be-switched-out-of-it--2026-08-09) | 2026-08-09 |
 | 99 | [Your announcement preview shows the actual picture](#99-your-announcement-preview-shows-the-actual-picture--2026-08-10) | 2026-08-10 |
 | 100 | [Posts are approved as they come due, not months ahead](#100-posts-are-approved-as-they-come-due-not-months-ahead--2026-08-10) | 2026-08-10 |
+| 101 | [See who has used the tickets your company bought](#101-see-who-has-used-the-tickets-your-company-bought--2026-08-10) | 2026-08-10 |
+| 102 | [Write a new post without hunting for the button](#102-write-a-new-post-without-hunting-for-the-button--2026-08-10) | 2026-08-10 |
+| 103 | [The picture is chosen from a list, not typed from memory](#103-the-picture-is-chosen-from-a-list-not-typed-from-memory--2026-08-10) | 2026-08-10 |
+| 104 | [Travel reimbursement is not offered to people who cannot claim it](#104-travel-reimbursement-is-not-offered-to-people-who-cannot-claim-it--2026-08-10) | 2026-08-10 |
+| 105 | [Who is coming, at a glance and without naming anyone](#105-who-is-coming-at-a-glance-and-without-naming-anyone--2026-08-10) | 2026-08-10 |
+| 106 | [A ticket is called "1-day" or "2-day", not "Other"](#106-a-ticket-is-called-1-day-or-2-day-not-other--2026-08-11) | 2026-08-11 |
+| 107 | [Volume package: see which companies have reached ten attendees](#107-volume-package-see-which-companies-have-reached-ten-attendees--2026-08-11) | 2026-08-11 |
+| 108 | [Volume package: the hub asks who approves, and you decide](#108-volume-package-the-hub-asks-who-approves-and-you-decide--2026-08-11) | 2026-08-11 |
+| 110 | [Volume package: the company sets up its own benefits](#110-volume-package-the-company-sets-up-its-own-benefits--2026-08-11) | 2026-08-11 |
+| 111 | [Volume package: the group photo, and a reminder that knows when to stop](#111-volume-package-the-group-photo-and-a-reminder-that-knows-when-to-stop--2026-08-11) | 2026-08-11 |
+| 112 | [Group photos: plan the day, publish the times, hand the partner a list](#112-group-photos-plan-the-day-publish-the-times-hand-the-partner-a-list--2026-08-11) | 2026-08-11 |
+| 109 | [Media Management: the picture and video libraries, in the hub](#109-media-management-the-picture-and-video-libraries-in-the-hub--2026-08-11) | 2026-08-11 |
+| 113 | [Get Started tells the whole team what is already done](#113-get-started-tells-the-whole-team-what-is-already-done--2026-08-13) | 2026-08-13 |
+| 114 | [Company details asks for everything the event actually needs](#114-company-details-asks-for-everything-the-event-actually-needs--2026-08-13) | 2026-08-13 |
+| 115 | [Your website address is managed in the webshop](#115-your-website-address-is-managed-in-the-webshop--2026-08-13) | 2026-08-13 |
+| 116 | [Sponsor reminders reach the whole coordinator team, every time](#116-sponsor-reminders-reach-the-whole-coordinator-team-every-time--2026-08-13) | 2026-08-13 |
+| 117 | [One status board for every role, with filters](#117-one-status-board-for-every-role-with-filters--2026-08-13) | 2026-08-13 |
+| 118 | [Catering numbers you can order against](#118-catering-numbers-you-can-order-against--2026-08-14) | 2026-08-14 |
+| 119 | [A lunch list for both days, and diets asked once](#119-a-lunch-list-for-both-days-and-diets-asked-once--2026-08-14) | 2026-08-14 |
+| 120 | [Coupon invoicing is one click from anywhere](#120-coupon-invoicing-is-one-click-from-anywhere--2026-08-21) | 2026-08-21 |
+| 121 | [The agreed price, and the share you actually invoice](#121-the-agreed-price-and-the-share-you-actually-invoice--2026-08-21) | 2026-08-21 |
+| 122 | [Your customers can see their own usage, and export it](#122-your-customers-can-see-their-own-usage-and-export-it--2026-08-21) | 2026-08-21 |
+| 123 | ["Increase max" applies itself — and invoices the difference](#123-increase-max-applies-itself--and-invoices-the-difference--2026-08-21) | 2026-08-21 |
+| 124 | [One warning when a customer nears what was agreed](#124-one-warning-when-a-customer-nears-what-was-agreed--2026-08-21) | 2026-08-21 |
+| 125 | [The customer is told their code is live, without you remembering to](#125-the-customer-is-told-their-code-is-live-without-you-remembering-to--2026-08-21) | 2026-08-21 |
+| 126 | [You decide who hears from us, per coupon](#126-you-decide-who-hears-from-us-per-coupon--2026-08-21) | 2026-08-21 |
+| 127 | [The mails read like a letter, and state the agreement they open](#127-the-mails-read-like-a-letter-and-state-the-agreement-they-open--2026-08-21) | 2026-08-21 |
+| 128 | [Your team is copied on every mail a customer receives](#128-your-team-is-copied-on-every-mail-a-customer-receives--2026-08-21) | 2026-08-21 |
+| 129 | [The speaker page says which speakers must be marked as guests](#129-the-speaker-page-says-which-speakers-must-be-marked-as-guests--2026-08-21) | 2026-08-21 |
+| 130 | [Your company's social links reach the public exhibitor page](#130-your-companys-social-links-reach-the-public-exhibitor-page--2026-08-21) | 2026-08-21 |
+| 131 | [Skipped on purpose is not a failure](#131-skipped-on-purpose-is-not-a-failure--2026-08-21) | 2026-08-21 |
+| 132 | [The badge says whether anybody is actually invoiced](#132-the-badge-says-whether-anybody-is-actually-invoiced--2026-08-21) | 2026-08-21 |
+| 133 | [Two panels, two buttons — nothing is lost when you save](#133-two-panels-two-buttons--nothing-is-lost-when-you-save--2026-08-21) | 2026-08-21 |
+| 134 | [The coupon page in plain words](#134-the-coupon-page-in-plain-words--2026-08-21) | 2026-08-21 |
+| 135 | [Names where a person reads, numbers where a machine matches](#135-names-where-a-person-reads-numbers-where-a-machine-matches--2026-08-21) | 2026-08-21 |
+| 136 | [The claim link is a real address](#136-the-claim-link-is-a-real-address--2026-08-21) | 2026-08-21 |
+| 137 | [A customer that stops being a sponsor is withdrawn](#137-a-customer-that-stops-being-a-sponsor-is-withdrawn--2026-08-21) | 2026-08-21 |
+| 138 | [A dropped connection is a retry, not a permanent error naming an order](#138-a-dropped-connection-is-a-retry-not-a-permanent-error-naming-an-order--2026-08-21) | 2026-08-21 |
+| 139 | [The reconcile really does what its mail says](#139-the-reconcile-really-does-what-its-mail-says--2026-08-21) | 2026-08-21 |
+| 140 | [The reconcile mail repeats only when the list changes](#140-the-reconcile-mail-repeats-only-when-the-list-changes--2026-08-21) | 2026-08-21 |
+| 141 | [Speaker and session to-dos reach the right organizers](#141-speaker-and-session-to-dos-reach-the-right-organizers--2026-08-25) | 2026-08-25 |
+| 142 | [The social-media approval notice shows the post](#142-the-social-media-approval-notice-shows-the-post--2026-08-25) | 2026-08-25 |
+| 143 | [A "do this by hand" mail no longer blames the wrong system](#143-a-do-this-by-hand-mail-no-longer-blames-the-wrong-system--2026-08-25) | 2026-08-25 |
+| 144 | [Every speaker and session to-do reaches the same organizers](#144-every-speaker-and-session-to-do-reaches-the-same-organizers--2026-08-25) | 2026-08-25 |
+| 145 | [A speaker alert that was never arriving now arrives](#145-a-speaker-alert-that-was-never-arriving-now-arrives--2026-08-25) | 2026-08-25 |
+| 146 | [A website corrected in the webshop now reaches the hub](#146-a-website-corrected-in-the-webshop-now-reaches-the-hub--2026-08-25) | 2026-08-25 |
+| 147 | [LinkedIn and X/Twitter now follow the webshop too](#147-linkedin-and-xtwitter-now-follow-the-webshop-too--2026-08-25) | 2026-08-25 |
+| 148 | [A reminder when your webshop links are missing](#148-a-reminder-when-your-webshop-links-are-missing--2026-08-25) | 2026-08-25 |
+| 149 | [No more "update this contact by hand" when it is already correct](#149-no-more-update-this-contact-by-hand-when-it-is-already-correct--2026-08-25) | 2026-08-25 |
+| 150 | [The organizer filter rows line up](#150-the-organizer-filter-rows-line-up--2026-08-25) | 2026-08-25 |
+| 151 | [Readable text and a tidier toolbar on the organizer lists](#151-readable-text-and-a-tidier-toolbar-on-the-organizer-lists--2026-08-25) | 2026-08-25 |
+| 152 | [The participants export is a button](#152-the-participants-export-is-a-button--2026-08-25) | 2026-08-25 |
+| 153 | [Speaker and volunteer photos are also saved under the person's name](#153-speaker-and-volunteer-photos-are-also-saved-under-the-persons-name--2026-08-25) | 2026-08-25 |
+| 154 | [Volunteer availability shows when each day actually starts](#154-volunteer-availability-shows-when-each-day-actually-starts--2026-08-25) | 2026-08-25 |
+| 155 | [The hotel form accepts every real arrival night](#155-the-hotel-form-accepts-every-real-arrival-night--2026-08-25) | 2026-08-25 |
+| 156 | [Audit times in local time](#156-audit-times-in-local-time--2026-08-25) | 2026-08-25 |
+| 157 | [Audit exports include local time](#157-audit-exports-include-local-time--2026-08-25) | 2026-08-25 |
+| 158 | [Clearer main-day option for volunteers who attend the conference](#158-clearer-main-day-option-for-volunteers-who-attend-the-conference--2026-08-26) | 2026-08-26 |
+| 159 | [Company billing details follow the finance system again](#159-company-billing-details-follow-the-finance-system-again--2026-08-26) | 2026-08-26 |
+| 160 | [VAT zone changes made in the finance system now reach the webshop](#160-vat-zone-changes-made-in-the-finance-system-now-reach-the-webshop--2026-08-26) | 2026-08-26 |
+| 161 | [Fewer false alarms from the signage screens](#161-fewer-false-alarms-from-the-signage-screens--2026-08-27) | 2026-08-27 |
+| 162 | [A steadier connection to the event platform](#162-a-steadier-connection-to-the-event-platform--2026-08-27) | 2026-08-27 |
+| 163 | [Sponsor artwork that stays in step with the files](#163-sponsor-artwork-that-stays-in-step-with-the-files--2026-08-28) | 2026-08-28 |
+| 164 | [Clearer logo guidance for sponsors](#164-clearer-logo-guidance-for-sponsors--2026-08-28) | 2026-08-28 |
+| 165 | [Announcements that slipped are re-scheduled](#165-announcements-that-slipped-are-re-scheduled--2026-08-28) | 2026-08-28 |
+| 166 | [Volunteer photos filed under both name and id](#166-volunteer-photos-filed-under-both-name-and-id--2026-08-28) | 2026-08-28 |
+| 167 | [Volunteer availability at a glance](#167-volunteer-availability-at-a-glance--2026-08-28) | 2026-08-28 |
+| 168 | [More of the sign-up visible where you choose people](#168-more-of-the-sign-up-visible-where-you-choose-people--2026-08-28) | 2026-08-28 |
+| 169 | [Undo a pre-selection without losing the sign-up](#169-undo-a-pre-selection-without-losing-the-sign-up--2026-08-28) | 2026-08-28 |
+| 170 | [A page for volunteer availability](#170-a-page-for-volunteer-availability--2026-08-28) | 2026-08-28 |
+| 171 | [Deactivate says what it does — and asks you to type it](#171-deactivate-says-what-it-does--and-asks-you-to-type-it--2026-08-28) | 2026-08-28 |
+| 172 | [Free-ticket attendees now show a country](#172-free-ticket-attendees-now-show-a-country--2026-08-28) | 2026-08-28 |
+| 173 | [A photo is required if you ask to be featured](#173-a-photo-is-required-if-you-ask-to-be-featured--2026-08-28) | 2026-08-28 |
+| 174 | [LinkedIn profiles on the pre-selection queue](#174-linkedin-profiles-on-the-pre-selection-queue--2026-08-28) | 2026-08-28 |
+| 175 | [Being featured needs a photo *and* a LinkedIn link](#175-being-featured-needs-a-photo-and-a-linkedin-link--2026-08-28) | 2026-08-28 |
+| 176 | [Web addresses work without typing "https://"](#176-web-addresses-work-without-typing-https--2026-08-28) | 2026-08-28 |
+| 177 | [Company names on the public event site stay correct](#177-company-names-on-the-public-event-site-stay-correct--2026-08-29) | 2026-08-29 |
+| 178 | [Fewer "add by hand" e-mails that aren't yours to fix](#178-fewer-add-by-hand-e-mails-that-arent-yours-to-fix--2026-08-31) | 2026-08-31 |
+| 179 | [Sponsor contacts and company defaults on the sponsor hub too](#179-sponsor-contacts-and-company-defaults-on-the-sponsor-hub-too--2026-08-31) | 2026-08-31 |
+| 180 | [Availability grouped by where each volunteer stands](#180-availability-grouped-by-where-each-volunteer-stands--2026-08-31) | 2026-08-31 |
+| 181 | [The same "we updated the event platform" e-mail, only once](#181-the-same-we-updated-the-event-platform-e-mail-only-once--2026-09-03) | 2026-09-03 |
+| 182 | [Sponsor promotion graphics actually reach the sponsor's post](#182-sponsor-promotion-graphics-actually-reach-the-sponsors-post--2026-09-12) | 2026-09-12 |
+| 183 | [One answer to "will this post have a picture?"](#183-one-answer-to-will-this-post-have-a-picture--2026-09-12) | 2026-09-12 |
+| 184 | [Test and non-announced sessions stay out of the campaign — and out of the graphics](#184-test-and-non-announced-sessions-stay-out-of-the-campaign--and-out-of-the-graphics--2026-09-12) | 2026-09-12 |
+| 185 | [Nothing that must not be announced can sit in the post planner](#185-nothing-that-must-not-be-announced-can-sit-in-the-post-planner--2026-09-12) | 2026-09-12 |
+| 186 | [Nothing is posted over Christmas and New Year](#186-nothing-is-posted-over-christmas-and-new-year--2026-09-12) | 2026-09-12 |
+| 187 | [A start date for sponsor announcements](#187-a-start-date-for-sponsor-announcements--2026-09-12) | 2026-09-12 |
+| 188 | [The post editor survives a duplicated post](#188-the-post-editor-survives-a-duplicated-post--2026-09-12) | 2026-09-12 |
+| 189 | [Announcement dates, arranged by post type](#189-announcement-dates-arranged-by-post-type--2026-09-12) | 2026-09-12 |
+| 190 | [Sponsor tier posts run as two named rounds](#190-sponsor-tier-posts-run-as-two-named-rounds--2026-09-12) | 2026-09-12 |
+| 191 | [Changing a date moves the posts that are already there](#191-changing-a-date-moves-the-posts-that-are-already-there--2026-09-12) | 2026-09-12 |
+| 192 | [See what else is on a day before you reschedule](#192-see-what-else-is-on-a-day-before-you-reschedule--2026-09-12) | 2026-09-12 |
+| 193 | [Every round of every post type has its own start date](#193-every-round-of-every-post-type-has-its-own-start-date--2026-09-12) | 2026-09-12 |
+| 194 | [Master classes and other sessions start on their own dates](#194-master-classes-and-other-sessions-start-on-their-own-dates--2026-09-12) | 2026-09-12 |
+| 195 | [Announcement rules you can change, per category](#195-announcement-rules-you-can-change-per-category--2026-09-12) | 2026-09-12 |
+| 196 | [Posting capacity — will the campaign actually fit?](#196-posting-capacity--will-the-campaign-actually-fit--2026-09-12) | 2026-09-12 |
+| 197 | [Event posts stop churning](#197-event-posts-stop-churning--2026-09-12) | 2026-09-12 |
+| 198 | [One announcement per subject per round](#198-one-announcement-per-subject-per-round--2026-09-12) | 2026-09-12 |
+| 199 | [What the held-back announcements are waiting for](#199-what-the-held-back-announcements-are-waiting-for--2026-09-12) | 2026-09-12 |
+| 200 | [Held-back announcements stay in the plan, and keep moving](#200-held-back-announcements-stay-in-the-plan-and-keep-moving--2026-09-12) | 2026-09-12 |
+| 201 | ["Not ready" says what is missing, on the plan itself](#201-not-ready-says-what-is-missing-on-the-plan-itself--2026-09-12) | 2026-09-12 |
+| 202 | [A round you have dated is a round that gets planned](#202-a-round-you-have-dated-is-a-round-that-gets-planned--2026-09-12) | 2026-09-12 |
+| 203 | [The post list names the exact category](#203-the-post-list-names-the-exact-category--2026-09-12) | 2026-09-12 |
+| 204 | [A hidden flag could keep a session out of the campaign](#204-a-hidden-flag-could-keep-a-session-out-of-the-campaign--2026-09-12) | 2026-09-12 |
+| 205 | [Who has not finished Get started](#205-who-has-not-finished-get-started--2026-09-12) | 2026-09-12 |
+| 206 | [Email export on the participant status board](#206-email-export-on-the-participant-status-board--2026-09-12) | 2026-09-12 |
+| 207 | [Filters that mean what they say, and test users out of the way](#207-filters-that-mean-what-they-say-and-test-users-out-of-the-way--2026-09-12) | 2026-09-12 |
+| 208 | [Track artwork retires with its track](#208-track-artwork-retires-with-its-track--2026-09-12) | 2026-09-12 |
+| 209 | [Your own artwork is never overwritten — but you are told when it ages](#209-your-own-artwork-is-never-overwritten--but-you-are-told-when-it-ages--2026-09-12) | 2026-09-12 |
+| 210 | [Every published LinkedIn post is in the audit log](#210-every-published-linkedin-post-is-in-the-audit-log--2026-09-12) | 2026-09-12 |
+| 211 | [Attendee telemetry: the three question cards carry the right headings](#211-attendee-telemetry-the-three-question-cards-carry-the-right-headings--2026-09-12) | 2026-09-12 |
+| 212 | [A master class with one speaker can be announced](#212-a-master-class-with-one-speaker-can-be-announced--2026-09-13) | 2026-09-13 |
+| 213 | [Automatic public-name fixes no longer ask for your attention](#213-automatic-public-name-fixes-no-longer-ask-for-your-attention--2026-09-14) | 2026-09-14 |
+| 214 | [No more repeated "Website pushed" mails for sponsors that are already correct](#214-no-more-repeated-website-pushed-mails-for-sponsors-that-are-already-correct--2026-09-14) | 2026-09-14 |
+| 215 | [Deleted event-platform sponsor entries are cleaned up safely](#215-deleted-event-platform-sponsor-entries-are-cleaned-up-safely--2026-09-14) | 2026-09-14 |
+| 216 | [Every welcomed sponsor now gets the Get Started reminder](#216-every-welcomed-sponsor-now-gets-the-get-started-reminder--2026-09-14) | 2026-09-14 |
+| 217 | [The sponsor welcome overview names each company](#217-the-sponsor-welcome-overview-names-each-company--2026-09-14) | 2026-09-14 |
+| 218 | [Session announcements tag the speakers](#218-session-announcements-tag-the-speakers--2026-09-14) | 2026-09-14 |
+| 219 | [No "add by hand" mail for event-platform fields the hub can write](#219-no-add-by-hand-mail-for-event-platform-fields-the-hub-can-write--2026-09-14) | 2026-09-14 |
+| 220 | [Sponsor contacts with a shared mailbox name are added to the webshop](#220-sponsor-contacts-with-a-shared-mailbox-name-are-added-to-the-webshop--2026-09-14) | 2026-09-14 |
+| 221 | [The public edition builds, and its setup guide matches what it ships](#221-the-public-edition-builds-and-its-setup-guide-matches-what-it-ships--2026-09-14) | 2026-09-14 |
 
 ---
 
@@ -1228,6 +1350,22 @@ follow-up automatically.
   minutes** so saves on either side don't drift. It is behind the `erp-webshop-reconcile`
   feature flag (off by default) and **skips a contact that already exists** rather than
   duplicating it.
+- **The accounting system really is the master for the billing identity fields.** *(✅ 2026-08-26)*
+  Where your webshop marks a field **"data owner: accounting system"** — company registration /
+  VAT number, phone, currency and VAT zone — the hub now keeps it that way: a value corrected in
+  the accounting system flows to the webshop on the next reconcile, and the webshop is never the
+  place those four are edited. Previously the webshop page made that promise while only the
+  billing address block was actually kept in step, so a registration number typed into the
+  accounts could sit unnoticed for as long as you liked. The website, LinkedIn and Twitter fields
+  are deliberately **not** in this set — those stay owned by the webshop, so no two systems ever
+  compete for one field.
+- **"Set it by hand" now means it really wasn't saved.** *(✅ 2026-08-26)* When the hub writes to
+  your webshop it reads the value straight back and reports only what actually changed, so a field
+  the webshop quietly discards is named once instead of being reported as a success for ever. That
+  check now also understands the fields above — including a VAT zone that the webshop returns as a
+  plain number — so it no longer flags correctly-saved values as rejected. A field the hub cannot
+  yet verify is recorded in the technical log for us rather than sent to you as manual work: you
+  are asked to fix something by hand only when the webshop genuinely refused it.
 - **Tax-ID checked before a sponsor is created.** *(🟡 2026-06-15)* A new sponsor's
   company tax-id is validated automatically, catching typos and invalid numbers up
   front rather than at invoicing time.
@@ -2106,7 +2244,7 @@ drawn by hand for each speaker as it was for ELDK26. The look is now fixed in co
 across the line-up is identical in treatment:
 
 - **One canvas, one layout.** 1200 × 627 (the LinkedIn/X link-card size) — the event photograph
-  toned down behind a thin white frame, the **Experts Live Denmark mark** top-left, the speaker's
+  toned down behind a thin white frame, the **community's logo mark** top-left, the speaker's
   name and session title lower-left, and a **circular speaker badge** on the right: the photo cropped
   to a circle inside a blue ring reading *"Where the Microsoft community meets"*, with a **SPEAKER**
   plate across the bottom.
@@ -2270,6 +2408,16 @@ record is never lost and a contact's address is never accidentally locked out.
   someone already set**. It pulls a missing value in from the webshop, then pushes it up to the
   booth platform if that side is blank — so a sponsor's links and description quietly become complete
   everywhere.
+- **A sponsor's social links now reach the booth platform on their own *(✅ 2026-08-17)*.** For a
+  period the booth platform's API accepted a company's LinkedIn and X/Twitter links and quietly threw
+  them away, so the hub stopped sending them and instead e-mailed the organizer a copy-and-paste list
+  to type in by hand. The platform has since fixed it, the hub verified the fix against a live record,
+  and those links are **pushed automatically again** — along with the company website, overview and
+  short description. **The "please add these by hand" e-mail no longer lists them.**
+  - What still arrives by e-mail does so for a reason that cannot be automated away: **booth videos
+    and collateral**, which the booth platform offers no way to set, and **contact-detail changes**,
+    which the hub deliberately never writes to protect the sponsor from the lock-out described below.
+    When there is nothing outstanding — the normal case — no e-mail is sent at all.
 - **The contact email is protected from a known lock-out.** The booth platform blocks a record after
   a few updates to its contact email, so the hub sends the contact email **only when it has genuinely
   changed** — a no-op re-send of the same address is never sent. A real change still goes through; a
@@ -2280,6 +2428,48 @@ record is never lost and a contact's address is never accidentally locked out.
   these engine/ops alerts are delivered **regardless of release-ring gating** so they always reach the
   organizer. *(External booth-platform credentials and the one pinned booth-category id are operator
   config; until they're set the sync runs in a safe no-write mode and reports what it would do.)*
+- **Sponsors are listed under what they actually bought — in every category at once.**
+  *(✅ 2026-08-31)* A sponsor is now shown under the **sponsorship heading their purchase earns**,
+  taken from the product itself rather than from their booth tier. Previously a sponsor who bought
+  no booth was filed under the entry-level tier whatever they had paid for, so a swag, hospitality,
+  content or session sponsorship all appeared in the wrong place publicly.
+  - **Buy three kinds of sponsorship, appear in all three.** A company that buys products in three
+    categories now exists **once under each heading** in the event platform, which is how a sponsor
+    who supports several parts of the event is meant to be shown.
+  - **One update reaches every listing.** Company name, description and website belong to the
+    company, not to one listing, so a change is pushed to **all** of that company's records — they
+    can never read differently under two headings. Each one is compared against what is actually
+    there first, so nothing is rewritten needlessly.
+  - **What already exists is adopted, never duplicated.** A listing an organizer created by hand is
+    picked up and kept in step instead of a second one being created beside it. And if the platform
+    cannot tell the hub which heading an existing listing sits under, the hub **reports it rather
+    than creating one blindly** — a missing listing is a minute's work to add by hand, while
+    duplicate sponsor entries are not.
+  - **A heading is never taken away automatically.** If a sponsorship lapses, the existing listing
+    stays and the organizer is told about it — removing a sponsor from public view is always a
+    human decision.
+  - **App-game sponsors are recognised.** Signing up for the attendee app game files the company
+    under the competition heading, even though there is no webshop product behind it.
+  - **The mapping is configuration**, so a webshop category rename is a config edit, not a code
+    change — and a product that maps to no heading keeps its previous single listing rather than
+    being guessed into the wrong one.
+- **Sponsor names read like brands in public, and like companies on the invoice.** *(✅ 2026-08-31)*
+  A company has two names, and they now behave differently on purpose: the **billing name keeps its
+  legal form** (A/S, ApS, GmbH, LLC, K/S, AG …) because an invoice needs it, while the **public name
+  — the one on the sponsor wall, in the event platform and on social — never carries it**.
+  - **You are told, not overruled.** If a sponsor's public name carries a legal form, it appears in
+    the organizer's reconcile email with the suggested wording. It is **not changed automatically**:
+    a public name someone typed is theirs to edit, and a job that quietly rewrote it every few
+    minutes would be an argument they could not win.
+  - **An empty public name is filled in for you.** When a company has never set one, everything
+    falls back to the legal name — so the legal form gets published anyway. That case *is* filled
+    automatically (nothing is overwritten), and reported, and never touched again once it has a
+    value.
+  - **A one-time cleanup, with a preview.** Organizers can sweep every sponsor's public name in one
+    go from the sponsor admin page. **Preview lists exactly which names would change and writes
+    nothing**; a second, confirmed press applies them. The billing name is never touched.
+  - **The event platform follows automatically.** Correcting the source corrects both the sponsor
+    and the exhibitor record on the next sync — no second cleanup to remember.
 
 ## 18. Get-started wizards for every role *(✅ 2026-06-25)*
 
@@ -3790,10 +3980,16 @@ page records when each partner was last notified so nobody sends it twice.
 **It refuses to send something wrong.** If the invoice is still a draft in your accounting system,
 the button stops and says so — a draft is renumbered when you book it, so quoting that number would
 send your partner looking for an invoice that does not exist. Same if the requester has no email
-address on file, or has not been chosen yet.
+address on file, or has not been chosen yet — **and same if your edition has no public ticket
+address configured**, because the claim link is the whole point of the letter and one without a site
+on it leads nowhere *(✅ 2026-08-21)*.
 
 *The billing frequency in the letter is read from that coupon's own billing period, so the promise
 and the system cannot drift apart.*
+
+**Sending it is one decision, not two** *(✅ 2026-08-21)*. The button is the consent — there is no
+separate switch to arm first. The per-coupon switches that remain cover only what a customer receives
+**without you**: their secure usage link, and the recurring status mail.
 
 ## 95. Edit any session properly, and see who is on it *(✅ 2026-08-09)*
 
@@ -3976,3 +4172,1542 @@ could sit closer to the block above it than to its own figures.
 
 *Organizers see one extra breakdown — the companies their attendees come from — on their own page,
 behind a login. It is never built for the public or sponsor pages, not merely hidden on them.*
+
+## 106. A ticket is called "1-day" or "2-day", not "Other" *(✅ 2026-08-11)*
+
+The organizer attendee list counted 1-day tickets correctly, but wrote them in the system's own
+spelling: the summary tile said **1-day tickets** while the row underneath said **Other**, and the
+ticket filter offered `TwoDay` / `Other` / `None`. The same words reached the spreadsheet an
+organizer downloads and the printable on-site list.
+
+Everywhere a ticket type is now written the way it is spoken — **2-day**, **1-day**, or **No
+ticket** — on screen, in the filter, in the CSV/Excel export and on the printable list.
+
+*Saved links still work: filtering by ticket keeps its existing address, so a bookmarked "show me
+the 1-day holders" link is unaffected.*
+
+## 107. Volume package: see which companies have reached ten attendees *(✅ 2026-08-11)*
+
+A company that brings **ten or more attendees** earns the volume-package benefits (a keynote
+mention, a social-media announcement and a group photo). Working out who qualifies used to mean
+reading order lists by hand, and the same company can arrive three different ways: someone buys a
+block of tickets, people claim the company's coupon, or ten colleagues each register with their own
+company e-mail address.
+
+Organizers now have a **Volume Package** page that answers it directly. Each company is one row —
+its display name plus the e-mail domains, coupons and individually-linked addresses that belong to
+it — and the page shows how many attendees it has today, which of the three routes found them, and
+whether it qualifies.
+
+- **Nobody is counted twice.** A company that buys twenty tickets on its own coupon is found by
+  more than one route; the answer is still twenty people, not forty. The per-route figures on the
+  page therefore do **not** add up to the total, and the page says so where it is read, rather than
+  leaving an organizer to spot the discrepancy and report it as a fault.
+- **Companies that trade under several names, or across several countries**, are one row: put both
+  domains on it and give it the name you want shown.
+- **It is re-checked every day.** A company that qualified and then dropped below ten — a
+  cancellation — gets a state of its own on the page, so it is visible rather than quietly
+  reverting to looking like a company that never qualified. An approval already given is **not**
+  withdrawn automatically; the organizer decides.
+- **The page suggests who to ask** — the purchaser who brought the most attendees — for the
+  organizer to confirm or overrule.
+
+*This first stage shows the picture and sends nothing: no attendee, purchaser or coordinator is
+contacted by it. Inviting the qualifying companies to take up their benefits comes next.*
+
+## 108. Volume package: the hub asks who approves, and you decide *(✅ 2026-08-11)*
+
+Knowing that a company qualifies leaves a question: **who at that company do we deal with?** When a
+company first reaches ten attendees the hub now e-mails the organizer mailbox and asks — naming the
+purchaser who brought the most people, because that is usually the right person.
+
+- **It is a suggestion, not a decision.** On the Volume Package page you approve that person or type
+  somebody else entirely. Where nobody bought tickets — ten freelancers who each paid for themselves
+  — it says so plainly instead of nominating a stranger.
+- **Each company is asked about once**, not every morning until someone gets round to it. You can
+  deliberately ask again from the page.
+- **Approving records who we deal with. It contacts nobody** — not the purchaser, not the attendees.
+  Approvals can be withdrawn, and the contact is kept when you do.
+- **You can switch the asking off.** Companies are still counted every day and the page still shows
+  who qualifies; nobody is asked to approve anything. The page tells you which way the switch is set
+  rather than leaving you to find out from the absence of e-mail.
+
+*It ships switched off. Turn on "Volume package: ask who approves" under Settings → Features when you
+want the hub to start asking.*
+
+## 110. Volume package: the company sets up its own benefits *(✅ 2026-08-11)*
+
+Once organizers have confirmed who to deal with at a qualifying company, that person gets a **link to
+their own page** — no account, no password, and it works for a marketing colleague who is not coming
+to the event at all. Four short steps:
+
+1. **What they want** — keynote mention, social-media announcement, group photo. Any combination.
+2. **Who coordinates the photo** for them, so we brief one person and they tell their own colleagues.
+   *We never write to their attendees about the photo — some people would rather not be photographed.*
+3. **Their logo**, for screen and for print.
+4. **Their LinkedIn page**, so the announcement tags the company rather than naming it in text.
+
+- **"We do not want to participate" is a real answer**, on the first step, and it stops the asking.
+  A company that changes its mind can simply tick something later.
+- **They can come back to the link** and change any of it; the last step shows what has been
+  recorded, so nobody has to ask whether it went through.
+- **The link is theirs alone.** Organizers can withdraw it at any time, issue a fresh one — which
+  immediately retires the old one — and it stops working by itself after the event. A withdrawn link
+  cannot be used even by someone who still has the page open.
+- **Organizers can send the invitation from the hub, or copy the link** and write their own message.
+
+*The invitation e-mail is switched off until you turn it on: it is the only message in this feature
+that reaches the company rather than the organizers.*
+
+## 111. Volume package: the group photo, and a reminder that knows when to stop *(✅ 2026-08-11)*
+
+A company that asks for the **group photo** now flows straight into the group-photo list organizers
+already use — same page, same scheduling, same calendar invite. No second list to keep in step, and
+the number of tickets is filled in automatically instead of typed.
+
+- **Their own page shows the slot** once it is scheduled, with a calendar file the coordinator
+  **forwards to colleagues themselves**. We never write to a company's attendees about the photo —
+  nobody should be told to turn up for a photograph they did not agree to.
+- **A moved slot updates the invitation** people already have, rather than adding a second entry to
+  everyone's calendar.
+- **The day is suggested from the tickets they bought** — colleagues holding a 1-day ticket are not
+  there on the pre-day, so the page says which day would actually reach them. Choosing the slot stays
+  with the organizers.
+- **A weekly reminder** chases a company that was invited and has not answered — and **stops the
+  moment they finish or say they would rather not**. A company that was never invited is never
+  reminded.
+
+*One rule now decides the group photo: ten attendees or more, the same as the rest of the volume
+package. It previously required more than ten, so a company with exactly ten earned the package and
+was refused the photo.*
+
+## 112. Group photos: plan the day, publish the times, hand the partner a list *(✅ 2026-08-11)*
+
+**You enter the timeslots you actually have** — paste them one per line, around the keynote, the
+breaks and lunch. The hub does not invent times; it chooses from yours. *(A one-click starter set of
+25 is there for trying it out, and refuses to run once real slots exist.)*
+
+**The planner fits the companies in.** Companies whose colleagues all hold **1-day tickets can only
+be photographed on the main day** — they are not at the venue on the pre-day — so the planner puts
+the flexible companies on the pre-day first and keeps the main day for those who have nowhere else to
+go. **Nobody is quietly left out**: any company that does not fit is listed, with the reason.
+
+**Proposing and publishing are separate.** A proposal can be re-run and thrown away as often as you
+like without a single company being told anything. **Publishing** is the moment each company sees its
+time on its own page — and from then on **that time is never moved by the planner**, because their
+colleagues already have it in their calendars.
+
+**For the partner who runs the photos on the day**, two downloads:
+- **An Excel running order** — time, day, company, headcount, contact name, e-mail and mobile,
+  location, and whether it is published yet. Companies still without a time are on the list too,
+  marked as such, so it never looks finished when it isn't.
+- **One calendar file with every photo**, imported once. A moved slot updates the entry rather than
+  leaving two, and each entry carries the coordinator's phone number — on the day, that is what gets
+  a late company found.
+
+## 109. Media Management: the picture and video libraries, in the hub *(✅ 2026-08-11)*
+
+The press, photo and video crew now have their own **Media Management** section in the menu, with a
+page for **pictures** and a page for **video**. Each lists what is already there — newest first, with
+size and date — and lets the crew **add**, **download** and **delete** files.
+
+🔑 **The crew never needs a SharePoint account.** The hub does the work on their behalf, so a
+photographer signs in to the hub with the same PIN as everyone else and nothing asks them to
+authenticate anywhere else. The same is true of downloads: the file comes from the hub, not from a
+document-library link that would only work for people with access to it.
+
+- **Large video is expected.** Files are uploaded in chunks, so a multi-gigabyte recording does not
+  have to arrive in one piece.
+- **Unusual camera formats are welcome.** RAW files and sidecars are accepted; only files a computer
+  would *run* (programs and scripts) are refused.
+- **A file with the same name replaces the previous one**, so a corrected export does not leave two
+  versions behind.
+- ⚠️ **Deleting is permanent from the hub's side** — it asks first.
+
+Each page **names the folder it is working in**, so it is always clear which library you are looking
+at — and if that folder does not exist yet, the page says so rather than showing an empty list that
+could be mistaken for "nobody has uploaded anything".
+
+*Only the media crew and organizers see this section.*
+
+## 113. Get Started tells the whole team what is already done *(✅ 2026-08-13)*
+
+Sponsor onboarding is a **shared checklist**, not a personal one — every event coordinator at a
+company sees the same progress, and whoever finishes a step finishes it for everybody. The reminder
+now says so.
+
+Previously the biweekly nudge listed only what was still open, under the heading *"a few Get Started
+steps are still waiting for you"*. If a colleague had already uploaded the logos, the mail never
+mentioned it — so it read as though the hub had not noticed, and the person receiving it had no way
+to tell whether their team was nearly finished or had not started.
+
+**What the reminder shows now:**
+
+- **Still open** — the steps that genuinely remain, and for company details, **exactly which fields
+  are blank** rather than just the step name. "Company details — company description, short
+  description, social-media branding text" is something you can act on; "Company details" is not.
+- **Already done** — the steps the company has completed, **who completed them and when**, wherever
+  the hub recorded it. *"Logos & artwork — alex@example.com on 11 Aug 2026."*
+- A line making the shared nature explicit: anyone on the team can finish an open step, and it closes
+  for everyone.
+
+Attribution is only ever shown where it was actually recorded — a step completed by a route that did
+not capture a name simply appears as done, without one.
+
+## 114. Company details asks for everything the event actually needs *(✅ 2026-08-13)*
+
+The **Company details** step is complete when the information other parts of the event depend on is
+genuinely on file:
+
+- your **company description**
+- your **social-media branding text**
+- your **short description** — *exhibitors only*, since that is the one-liner used beside a booth
+
+Previously the step counted as finished if **either** a website **or** a description was present.
+Because almost every sponsor has a website, that masked the rest: a company could sit at 100% while
+its social-media text was missing — and that text is what a sponsor announcement post is built from,
+so the post could not be published while nothing was asking anyone for it. The two are now connected:
+if a post is waiting on your text, Get Started is asking you for it.
+
+🔑 **Each field only has to contain text** — there is no minimum length, and a step is never blocked
+on formatting.
+
+⚠️ **You can still move through the wizard without completing a step.** *Next* always works and you
+can come back later; the reminder keeps the outstanding items visible until they are done.
+
+## 115. Your website address is managed in the webshop *(✅ 2026-08-13)*
+
+The **website URL** on Company details is now shown as **read-only**, with a **Change on the
+webshop** button beside it.
+
+The webshop is the authoritative source for that address, and it flows into the hub automatically —
+so a value typed into the hub could quietly disagree with it. Rather than letting two places claim
+the same field, the hub shows what the webshop holds and hands you straight over when you want to
+change it.
+
+The button explains where it is sending you **before** it opens anything: the webshop is a separate
+system with its own sign-in, so you may meet a login screen and can use "Lost your password?" there.
+The notice can be dismissed permanently once you have seen it.
+
+*Your LinkedIn and Twitter/X addresses are unchanged and still editable in the hub.*
+
+## 116. Sponsor reminders reach the whole coordinator team, every time *(✅ 2026-08-13)*
+
+Everything the hub sends a sponsor company now uses **one rule** for who receives it: every event
+coordinator on that company's record, drawn from the customer system, with anyone an organizer has
+marked as a coordinator included on top. Contract signers who are not coordinators are not chased
+about event logistics, and nobody is contacted in place of a coordinator.
+
+Previously two of those reminders answered the question slightly differently, so a coordinator could
+receive one kind of reminder and quietly never receive the other. They now agree.
+
+**Dated sponsor to-dos are reminded per company, not per person.** A sponsor to-do belongs to the
+company — whoever gets to it first completes it for everybody — and the reminders now match that:
+
+- Every coordinator is reminded on the due day, and again on the agreed interval until it is done.
+- Each person gets their **own** sign-in link, never a shared one.
+- Each is paced independently, so one colleague reading a reminder does not stop another's.
+- The moment **any** coordinator completes it, the reminders stop for the whole company.
+- If a company has no event coordinator on file, **nobody is written to** — we would rather fix the
+  record than chase the wrong person.
+- Someone who has left the company stops receiving reminders immediately, while the work they already
+  completed stays completed.
+
+## 117. One status board for every role, with filters *(✅ 2026-08-13)*
+
+**"Who still owes me something?"** now has one page that answers it for everybody — speakers,
+sponsors, attendees, volunteers, organizers, media and event partners — instead of a separate board
+per role, or per audience, each counting things its own way.
+
+Every role already has a **Get Started** checklist with a completion percentage, and that is exactly
+what the board shows. The number on the board is **the same number the person sees on their own
+page**: it is read from their checklist, never recalculated. Two boards that each did their own
+arithmetic could disagree with each other and with the participant — this one cannot.
+
+**What each row shows**
+
+- Name and role — with **sponsors grouped by company**, because a sponsor's checklist and to-dos
+  belong to the company, not to one contact. The row says how many contacts it covers.
+- **Completion** — the percentage and the steps done out of the steps that apply.
+- **What is still open**, named step by step. For a sponsor's company details it goes further and
+  names **the individual fields that are still blank** — the same words the sponsor's own reminder
+  uses, so organizer and sponsor are reading one fact rather than two.
+- **Overdue to-dos**, with the date the oldest one was due.
+
+**Filters and order**
+
+- Filter by **role**, and by **status**: complete, in progress, not started, or has overdue to-dos.
+- **At-risk first** by default — whoever is overdue is at the top, then whoever is least far along.
+- A filtered view is a shareable link, and long lists are paged.
+
+**Honest by construction**
+
+- People who cannot sign in — deactivated contacts, withdrawn or cancelled tickets — are not listed.
+  A board about outstanding work should not show last year's sponsor.
+- To-dos the system closed on someone's behalf are **not** counted as completed work. Nobody is
+  credited with something they never did.
+- A sponsor contact who is not linked to a company shows as **having no checklist** rather than as
+  0% — there is nothing for them to do, and saying "0%" would blame them for it.
+- The board says **when its figures were built**, with a Refresh link, so a number is never quietly
+  older than it looks.
+
+The **sponsor deliverables** board stays as the stage-by-stage drill-down behind a sponsor row, and
+the old per-sponsor status table has been retired — the page it lived on is now purely the sponsor
+maintenance actions.
+
+## 118. Catering numbers you can order against *(✅ 2026-08-14)*
+
+**One calculation, wherever you read it.** The lunch head-count on the organizer dashboard, on the
+Lunch headcount page and in the spreadsheet the venue receives are now produced by the same engine —
+so they cannot disagree, and the number you order against is the number every screen shows.
+
+**The pre-day now counts everybody who is actually in the building:**
+
+- **Attendees holding a 2-day ticket.** The pre-day is the Master Class day and only a 2-day ticket
+  admits you to it — so every one of those people eats, and they were missing entirely. They are
+  counted from the ticket itself; nobody has to sign up for something they already paid for.
+- **The always-on-site crew** — organizers, media and event partners. They are never shown a pre-day
+  lunch question, so their blank answer was being read as "not eating".
+- **Sponsors' booth members**, from the booth check-in, counted once — a sponsor contact who also
+  ticked the lunch box is no longer counted twice.
+- **Not** test accounts, withdrawn people, cancelled tickets, or 1-day holders (who are not there on
+  the pre-day).
+
+**The main day is everyone on site** — all crew plus every live ticket, 1-day and 2-day alike,
+because main-day lunch is ordered for everybody rather than signed up for. That number now appears on
+the dashboard too, not just on the detail page.
+
+**Cancelled tickets no longer inflate any total.** When a ticket is cancelled or passed to someone
+else the record is deliberately kept, so the history is intact — but three places were counting those
+records as people who are coming. Attendee totals on the dashboard, the command centre and the
+reporting export now count live tickets only, and the "needs attention" tiles no longer show
+reconciliation work on tickets that no longer exist.
+
+The spreadsheet states where each part of the total came from, so a catering figure can always be
+traced back to the people and the tickets behind it.
+
+## 119. A lunch list for both days, and diets asked once *(✅ 2026-08-14)*
+
+**The main day now has its own lunch spreadsheet**, listing the crew, speakers, volunteers and
+sponsor contacts by name, alongside a count of every attendee holding a ticket. There is no sign-up
+behind it and there should not be — main-day lunch is ordered for everyone on site, so the list is
+simply who is coming.
+
+**Lunch spreadsheets no longer carry dietary columns.** Lunch options are agreed with the venue as
+part of the ordering process, so the hub does not ask about them — and the sheets now say that
+plainly rather than showing an empty column, which reads as "nobody here has a dietary need".
+
+**The Appreciation Dinner remains the one place dietary requirements are captured**, on its own form,
+where it is a required field. Its default is **No special diet** — both the option shown on a fresh
+form and the one recorded if it is never changed.
+
+## 120. Coupon invoicing is one click from anywhere *(✅ 2026-08-21)*
+
+Partner coupons are **worked**, not configured: somebody buys a block, somebody extends one, somebody
+asks for a higher limit, somebody wants to know which invoice a claim ended up on. That page now has
+its own entry in the organizer menu instead of sitting two clicks in under *Setup*.
+
+Nothing moved — the page is where it always was, so existing links and anything that says
+*"Organizer → Setup → Coupon invoicing"* still takes you there.
+
+## 121. The agreed price, and the share you actually invoice *(✅ 2026-08-21)*
+
+Ad-hoc coupons used to bill whatever the ticket happened to sell for. A coupon can now carry the
+**price you agreed** with that customer, and the **percentage of it you invoice them** — for the
+arrangements where the customer covers part of a ticket and the attendee covers the rest.
+
+- Leave the price blank and nothing changes: the ticket's own price is used, exactly as before.
+- Leave the percentage blank and it means 100% — no existing coupon behaves differently.
+- The invoice line says which it used, e.g. *"Invoiced: 50% of 3,000.00 DKK (agreed price)"*, and
+  stays silent when there is nothing unusual to explain.
+
+The field is labelled with what it means for the money — *"Linked company is invoiced ___%"* — because
+at 50/50 a share and a discount look identical, and they stop looking identical the first time
+somebody types 30.
+
+## 122. Your customers can see their own usage, and export it *(✅ 2026-08-21)*
+
+Every customer with a coupon agreement gets a private link to a page of their own. It shows:
+
+- **Each agreement on its own line** — a prepaid block and a capped ad-hoc code appear separately,
+  because they are separate agreements with separate limits.
+- **Where they stand**: claimed, remaining, the agreed maximum, and what has been billed so far.
+- **Who has signed up**, with name, email, company, ticket class, ticket number and the date *and
+  time* of purchase — on screen and as an **Excel export**.
+
+Ticket and order numbers export as text, so a spreadsheet cannot turn them into `1.488E+16`. If a
+customer loses the link, *"Notify again"* on the coupon row re-sends it.
+
+🔒 The page never shows them anything that is not theirs: no note of which of their purchases you
+have not yet invoiced, and no internal thresholds.
+
+## 123. "Increase max" applies itself — and invoices the difference *(✅ 2026-08-21)*
+
+When a customer needs more tickets, they press **Increase max** on their own line and say how many.
+
+| Their agreement | What happens |
+|---|---|
+| **Ad-hoc with a cap** | the cap is raised immediately. Nothing to invoice — those tickets bill as they are claimed |
+| **Prepaid** | a purchase is added for the **difference**, at the price already agreed with them, and the draft invoice is raised |
+
+Either way you get one mail with **one thing left to do**: raise the matching limit on the ticket
+platform, which is the only place a claim can actually be stopped.
+
+- The mail **leads with the increase** — `+10`, then `30 → 40` — not with a total you have to subtract.
+- The page is reachable by link, so it asks **who is requesting**, and the mail reports that name and
+  address as *self-reported* alongside the contact you already have on file.
+- 🔒 An increase of more than 100 tickets is **reported but not applied automatically**. It is a
+  typo guard, not a credit limit: a mistyped 4,000 on a 3,000 DKK ticket would be a twelve-million-krone
+  invoice. A customer who genuinely needs 200 asks twice, or you do it on the page.
+- Only **capped** lines offer the button — an open agreement has no maximum to raise.
+
+## 124. One warning when a customer nears what was agreed *(✅ 2026-08-21)*
+
+Prepaid blocks and capped ad-hoc codes now feed **the same alert**, with the same wording and the same
+quiet period: *"3 of 50"*, *"3 of 20"* — always what is left, next to what was agreed.
+
+The reason they share one alert is that they share one failure: the hub cannot stop a claim, so
+passing the agreed number means somebody has taken a ticket outside the agreement either way.
+Over-the-limit is reported as over, never rounded up to zero, and an open-ended agreement is never a
+candidate — there is no number to be near.
+
+## 125. The customer is told their code is live, without you remembering to *(✅ 2026-08-21)*
+
+The claim invitation goes out **once the code actually exists** on the ticket platform — because the
+mail says *"you can now start claiming"*, and that is only true from that moment. You confirm the code
+is live; the hub does the writing, and the mail carries their private usage link with it.
+
+## 126. You decide who hears from us, per coupon *(✅ 2026-08-21)*
+
+Some customers buy once, by invoice, and never come back. They do not want a status mail every
+fortnight and they do not need a link.
+
+Two ticks on each coupon — **give them a usage link** and **send them the status mail** — both **off
+until you turn them on**. An untouched coupon is silent. A coupon with no usage link is left out of
+that customer's page entirely rather than the link being withheld, so a customer who also holds a
+normal agreement keeps everything that belongs to it.
+
+Invoicing cadence is per coupon too, so a one-off sale can invoice weekly while everything else runs
+fortnightly — no new kind of coupon required.
+
+## 127. The mails read like a letter, and state the agreement they open *(✅ 2026-08-21)*
+
+The claim invitation now opens a paying relationship by **saying what was agreed**, in one table a
+finance person can check a line at a time: the kind of agreement, tickets bought, the price, the
+customer's own limit, and how often they will be invoiced.
+
+- **Every row is dropped when the value is unknown.** A price quoted wrongly in the first mail of a
+  paying relationship costs more than a price not quoted at all.
+- **Free means free** — a free allocation is no longer told it will be invoiced every two weeks.
+- **"Bi-weekly" is gone**, because in English it means both *twice a week* and *every two weeks* — in
+  a sentence about how often somebody is billed. Now: *every week*, *every 2 weeks*, *every month*.
+- Amount, ticket class, event name, invoice number and cadence are **bold**; paragraphs have room to
+  breathe.
+- Every mail the platform sends now renders in the house font with buttons that fit their label — a
+  single styled button used to quietly opt an entire mail out of the font, and buttons sized for a
+  font the reader might not have could clip the word that said what they do.
+
+## 128. Your team is copied on every mail a customer receives *(✅ 2026-08-21)*
+
+Coupon mails are the one place the hub writes **directly to a paying customer**. The organizer mailbox
+is now **CC'd** on the claim invitation and on the status mail, so when a customer replies *"your mail
+said 30"*, somebody can read the mail.
+
+CC rather than BCC: the customer can see the organizer team is on the thread, which is true and is the
+point. Mails already addressed to that mailbox get no CC — copying it on its own mail is how a mailbox
+stops being read.
+
+## 129. The speaker page says which speakers must be marked as guests *(✅ 2026-08-21)*
+
+The speaker category decides **who the event covers hotel and travel for** — and that consequence used
+to live only in the organizer's head. The rule is now written on the approval page *and* in the
+approval mail, **above** the one-click buttons rather than below them, because those buttons approve
+the whole queue at once and the most tempting one is the wrong one for a speaker with a travel
+agreement. The note also says what to do instead: approve that group individually on the page.
+
+The pending-speaker ring now also defaults to the released ring, so a one-click approval no longer
+leaves a speaker held at the last step while the page above says they should be through it.
+
+## 130. Your company's social links reach the public exhibitor page *(✅ 2026-08-21)*
+
+Sponsor social-media links were being sent to the public event platform correctly and silently
+discarded at the other end — a platform defect, not a hub one, confirmed by measurement in early
+August and fixed at source. We re-measured on the same record with the same method and the links now
+stick, so the push is switched on: what a company enters on **Company details** is what appears
+publicly.
+
+Nothing needs re-entering, and nothing about how the hub sends them changed — it was right all along.
+
+## 131. Skipped on purpose is not a failure *(✅ 2026-08-21)*
+
+A company deliberately excluded from a sync — test data, or a company that has been withdrawn — used
+to be counted as a **failure**: `failed 1`, every single pass, for ever.
+
+Skipped and failed are now separate outcomes everywhere they are reported: the job summary
+(`skipped 1, failed 0`), the Sponsors button (*"1 skipped on purpose"*, never *"needs attention"*),
+company details, and the log — where a routine skip is no longer raised as a warning.
+
+🔑 **Why it was worth fixing rather than explaining.** A permanently-wrong `1` becomes the new zero.
+It sets the floor a real failure has to climb above before anybody notices, and a second, genuine
+failure would have shown as `2` — indistinguishable at a glance from the `1` everyone had learned to
+ignore.
+
+## 132. The badge says whether anybody is actually invoiced *(✅ 2026-08-21)*
+
+A prepaid coupon used to be tagged *"never invoiced"* — directly above the invoice number that had
+been raised for it. The two statements were about different things, and the short one had lost its
+subject.
+
+Now: **`free — nobody is billed`** and **`prepaid — paid up front; claims are not invoiced`**. The
+longer descriptions were already right; a chip has room for a conclusion but not for what it is a
+conclusion *about*, and that is exactly what had been dropped.
+
+## 133. Two panels, two buttons — nothing is lost when you save *(✅ 2026-08-21)*
+
+Filling in a ticket class and quantity and then pressing **Save** used to appear to lose them. They
+were never saved in the first place: the card carried two separate forms with no visible boundary,
+and Save belonged to the other one.
+
+The card now has two titled panels, each ending in its own button:
+
+- **"Buy tickets into a new pool — this raises an invoice"** → *Create Invoice*, and it says in words
+  that Save will not record what you type there.
+- **"Coupon settings"** → *Save coupon settings*.
+
+The *Increase* form sits at the **bottom** of the pool card now, instead of between the purchase line
+and the buttons — status first, then the things that change it. And the invoice list says what it is:
+one invoice per purchase, so the second one is the top-up.
+
+## 134. The coupon page in plain words *(✅ 2026-08-21)*
+
+- **"Partner" is gone — it says customer**, on the page and in every mail.
+- **"Fortnightly" is gone** — it says *every 2 weeks*.
+- **The button that sends says so.** *"✉ Send the claim link now"* is the only primary button, with
+  its consequence written underneath; the preview is a plain secondary reading *"Show me the mail
+  first…"*. The old primary was labelled with its precondition, which is the one thing you do not
+  need a button to tell you.
+- **Prepaid coupons no longer show ad-hoc fields.** Invoice interval, agreed price, invoiced share and
+  cap are all about billing a *claim* — and a prepaid claim is never invoiced. Those rows now carry a
+  sentence saying where the numbers actually live, instead of four boxes that cannot apply.
+- **The coupon-name field fits a coupon name.** It is the field typed most often and the one that must
+  match the ticket platform exactly — the worst possible one to be unable to read back.
+- **One consent per act.** The claim invitation lost its tick: the tick's only effect was to make the
+  button labelled *"Send the claim link now"* refuse. Pressing the button is the decision. The two
+  remaining ticks gate the things that happen *without* anybody pressing anything, which is what the
+  heading now says.
+
+## 135. Names where a person reads, numbers where a machine matches *(✅ 2026-08-21)*
+
+A real invoice went out reading `Ticket Class:` followed by a 17-digit number. The id arrived
+honestly — the label
+falls back through the live name, then the stored name, then the id, which is right for a screen and
+wrong for an invoice — so the guard now sits at the **renderers**, not at each caller.
+
+| Where | What you see |
+|---|---|
+| Invoice lines | the ticket-class line is **dropped rather than faked** — the coupon name already identifies the agreement |
+| Customer mails | *"pre-paid claims for tickets"*, not for a 17-digit number |
+| Ops instructions | the id is kept, because it is what you match on — but labelled as an id, never offered as a name |
+| Anywhere a customer is named | **name and number together** — the number is what you search on; it is not the identity |
+
+The affected invoice was corrected in place: it was still a draft, so it was checked field by field
+afterwards — date, currency, amounts, recipient and attention contact all unchanged, only the
+description line different.
+
+## 136. The claim link is a real address *(✅ 2026-08-21)*
+
+An invitation went out carrying only the tail of a web address, with no site in front of it. In a mail
+client that resolves against nothing, and whoever clicks it goes wherever they already were.
+
+Fixed — and **a blank address is now a blocker, not a send**: the link is the entire point of this
+mail, so a wrong one costs more than a send you have to repeat. The address also honours a ticket URL
+edited in Settings, not just the shipped default.
+
+## 137. A customer that stops being a sponsor is withdrawn *(✅ 2026-08-21)*
+
+A company moved out of the sponsor customer group in the finance system used to simply **stop
+appearing** in the reconcile — no note, no change — and the hub went on treating an attendee company
+as a sponsor indefinitely. Leaving a list is not an event unless something makes it one.
+
+Now it is: the company drops off the public sponsors page and the counts, its contacts are
+deactivated and party seats released — audited, reversible from *Organizer → Sponsors*, and the
+finance system itself is never written to.
+
+🔒 **Absence is never the evidence.** The withdrawal happens only when the company is *positively*
+still in the finance system and positively no longer a sponsor. A failed or short read does nothing at
+all — not even a note — because a blip must not be allowed to describe a departure. And an
+**established** sponsor, one with a booth or a platform record, is **reported for your decision rather
+than withdrawn**: the likeliest cause of the group changing on such a company is a mis-click, and
+withdrawal is too much to do on the strength of one field.
+
+## 138. A dropped connection is a retry, not a permanent error naming an order *(✅ 2026-08-21)*
+
+An invoice report blamed a specific customer order for what was actually a dropped network connection,
+in wording nobody could act on. The check that watches for hidden sign-in failures was reading the
+response as it arrived; when that read died half-way it destroyed the response the caller was about to
+use, and the resulting error did not look like something worth retrying.
+
+Now the transport fault is reported as itself — and retried, which is what should have happened the
+first time.
+
+## 139. The reconcile really does what its mail says *(✅ 2026-08-21)*
+
+The ERP reconcile's mail has been saying *"Already done automatically: the matching hub participant
+was deactivated"*. In the scheduled run it was not — the deactivation step had never been wired into
+that host, so it quietly did nothing while the mail asserted it had.
+
+Both halves work now: cleaning up participants whose webshop contact is gone, and the withdrawal in
+#137. **A mail asserting an action that never happened is worse than the missing action**, because it
+stops anybody looking.
+
+⚠️ Neither a green test run nor a healthy deploy could see this. It took watching the job run against
+real data and asking *"what actually changed?"* — so there is now a check that a dependency the job
+cannot work without is genuinely **present**, rather than merely allowed to be absent.
+
+## 140. The reconcile mail repeats only when the list changes *(✅ 2026-08-21)*
+
+Most notes this job produces are momentary — a rename, a billing update — so *"mail whenever there is
+a note"* never repeated for long. The de-sponsored note in #137 is the first **permanent** one: it
+stands until somebody clears a field in the webshop, which the hub cannot do. It would have mailed the
+same line every ten minutes, indefinitely.
+
+The mail now goes only when the **list changes**. A repeat that arrives every ten minutes stops being
+read, and the next real item is then indistinguishable from the noise.
+
+- A clean run **clears** the memory, so a problem that comes back is news rather than a suppressed
+  repeat.
+- If the memory cannot be read, the mail is **sent anyway** — a missed alert is worse than a duplicate.
+- ⚠️ The mail says so, because silence has changed meaning: it now means *"unchanged"*, not *"fixed"*.
+
+## 141. Speaker and session to-dos reach the right organizers *(✅ 2026-08-25)*
+
+The organizer mails that say *"a speaker is held"* or *"apply this session change in Backstage by
+hand"* now reach the shared organizer inbox **and** the organizers who actually own that work — all
+on one message's **To:** line.
+
+- **One mail, several recipients — never a copy each.** These mails start conversations: somebody
+  replies *"done"*. Separate copies would create separate threads in which neither reader can see
+  that the other already did the job, which is exactly what the shared inbox exists to prevent.
+- **Speakers and sessions only.** The same machinery also carries exhibitor, sponsor, billing and
+  webshop notices, plus a weekly volunteer list. Those are deliberately unchanged — a recipient who
+  starts receiving four kinds of mail they never asked for soon filters away the one that mattered.
+- The extra addresses are **configuration**: adding, removing or clearing them needs no code change,
+  and clearing them returns the mails to the shared inbox alone.
+
+## 142. The social-media approval notice shows the post *(✅ 2026-08-25)*
+
+When a social-media post is approved automatically, the notice exists so the date can be overruled
+before it publishes. It now contains what you need to make that call:
+
+- **The full post text**, so you can judge it without opening anything.
+- **What the post is about, in words** — the session or speaker name, in the subject line as well as
+  the body. It previously showed an internal reference such as `session:15`, which told you nothing.
+- **A complete, clickable link** to the post editor. It was previously a bare path that no mail
+  program could open, so the address had to be retyped by hand.
+
+## 143. A "do this by hand" mail no longer blames the wrong system *(✅ 2026-08-25)*
+
+The mail that lists values to enter into the event platform by hand used to explain itself with a
+sentence about the **speaker** interface — including on mails about **sponsors and exhibitors**,
+where it was not merely off-topic but wrong: it stated that no update route exists, while exhibitor
+websites, descriptions and social links are updated automatically on every sync.
+
+The explanation is now given only where it is true. Everywhere else the mail states the certain part
+— these values did not reach the platform, please enter them by hand — and does not invent a cause.
+A wrong explanation is worse than none: it teaches you the system cannot do something it does
+routinely.
+
+## 144. Every speaker and session to-do reaches the same organizers *(✅ 2026-08-25)*
+
+Seven different mails tell an organizer that speaker or session work is waiting: a speaker held in
+the queue, a change to apply by hand, a schedule that disagrees with the talk-submission system, a
+speaker needing a manual update, a queue of changes awaiting approval, and two social-media notices
+with a deadline. They now all go to **the same people** — the shared organizer inbox plus the
+organizers who own that work — on one message's To: line.
+
+- **One list, seven mails.** The audience is defined in a single place, so the next mail of this kind
+  is addressed correctly without anyone having to remember. Previously these seven had drifted to
+  five different answers for who should be told.
+- **The approvals queue reached one person; now it reaches the team.** The mail saying *"N changes
+  need your approval"* had been going to a single developer mailbox. Nothing looked broken — it sent
+  perfectly well, just to the wrong audience.
+- **Changing the recipients is configuration**, not a code change. Clearing the extra names returns
+  all seven to the shared inbox alone.
+- Unchanged on purpose: exhibitor, sponsor, billing, webshop and volunteer-review mails, which are a
+  different audience.
+
+## 145. A speaker alert that was never arriving now arrives *(✅ 2026-08-25)*
+
+The mail *"Speaker needs a manual Backstage update"* was being **silently discarded** before it left
+the building. Mail to the organizer inbox has to identify itself as internal operations mail,
+otherwise the recipient-safety check — which deliberately refuses anything it cannot recognise as a
+known person — rejects it. This one never did, so it failed every time, quietly: the logs looked
+healthy and the inbox simply stayed empty.
+
+It is now correctly identified and delivers. The same fault had been measured once before on a
+different notice, which is how it was recognised here.
+
+## 146. A website corrected in the webshop now reaches the hub *(✅ 2026-08-25)*
+
+The webshop is the authoritative source for a sponsor's website address, and the hub says so on the
+company-details page: *"Change it there and it syncs back here automatically."* That was only half
+true. The hub took the address **once**, when its own field was still empty, and then ignored every
+later correction — so a sponsor who fixed their own URL (for example from `http://` to `https://`)
+saw nothing happen, and could not fix it in the hub either, because the field is deliberately
+read-only there.
+
+The website now always follows the webshop, on every change rather than only the first. The
+correction also reaches the public event site on the same sync, not one pass later.
+
+- **An empty webshop field does not erase your website in the hub.** "Always follow the webshop"
+  applies to what the webshop actually says; a blank is not an instruction to remove a working link.
+- LinkedIn and X/Twitter keep their existing behaviour on purpose — the hub will fill them in if
+  they are empty, but will not overwrite what you have entered there.
+
+## 147. LinkedIn and X/Twitter now follow the webshop too *(✅ 2026-08-25)*
+
+Your website address already came from the webshop. Your **LinkedIn** and **X/Twitter** addresses now
+work the same way: the webshop is the single place you maintain them, and a change there reaches the
+hub — and the public event site — automatically.
+
+- Each of the three now shows a **"Change on the webshop ↗"** button, so the place to edit is one
+  click away rather than something to remember.
+- The fields are read-only in the hub on purpose. Leaving them editable while the webshop is the
+  source would mean typing a change, being told it saved, and having it quietly replaced later — with
+  nothing on screen to explain why.
+- **An empty webshop field never erases what you already have.** If a link exists only in the hub, it
+  is kept and copied up to the webshop instead.
+
+## 148. A reminder when your webshop links are missing *(✅ 2026-08-25)*
+
+Your website and LinkedIn addresses are maintained in the webshop and shown read-only in the hub. If
+either is empty, there is now a weekly reminder — to your company's event-coordinator contacts, with
+a button straight to the webshop — instead of a blank quietly sitting on the public event site.
+
+- **X/Twitter is optional and is never chased.**
+- **It stops on its own** as soon as both are filled. There is nothing to dismiss or turn off.
+- The organizers get one weekly list of the companies still missing something, rather than a copy of
+  every individual reminder.
+
+## 149. No more "update this contact by hand" when it is already correct *(✅ 2026-08-25)*
+
+The report that lists values to enter into the event platform by hand used to include a sponsor's
+contact even when the platform already had it — most visibly when the two differed only in
+capitalisation, such as `Laura@` versus `laura@`.
+
+The contact is now compared against what the event platform **actually holds**, the same way every
+other field in that report already was: ignoring capitalisation and surrounding spaces. A contact
+that genuinely changed is still reported.
+
+- The capitalisation was the symptom, not the cause: the contact line was the one entry that never
+  looked at the other system at all — it only asked whether our own value had changed since the last
+  report.
+- Contact details are still never written automatically. The platform limits how many times a
+  contact address may be updated, so the hub reads it to decide whether to mention it, and leaves the
+  change to a person.
+
+## 150. The organizer filter rows line up *(✅ 2026-08-25)*
+
+On the Participants and Speakers lists, the search box and the **Apply** button sat noticeably lower
+than the dropdowns beside them, and the search box was the narrowest control on the row despite
+holding the longest values.
+
+Both are fixed: every control and the button now share one baseline, and **search is the widest
+field**, since it accepts an id, a name or an email address. The row still collapses to a clean
+stack on a phone.
+
+## 151. Readable text and a tidier toolbar on the organizer lists *(✅ 2026-08-25)*
+
+On a wide monitor the explanatory text above the organizer lists stretched the full width of the
+screen — around 200 characters per line, which is hard to read and looks like a layout fault. The
+text now wraps at a comfortable reading width while the **table keeps the full width**, which is the
+point of the wide layout.
+
+Two related things were fixed at the same time: the filter row no longer breaks onto a second line on
+a wide screen, and the bulk-action bar (deactivate, change persona, change ring) is a single tidy row
+instead of spreading its dropdowns across the width.
+
+## 152. The participants export is a button *(✅ 2026-08-25)*
+
+Exporting the participant list was a small text link inside a grey note, so the most useful action on
+the page looked like a footnote. It is now a proper **Export all participants (Excel)** button with a
+**CSV** button beside it. The reminder that the export always covers *every* participant rather than
+the current filter stays visible next to the buttons, because that is the part worth reading before
+clicking.
+
+## 153. Speaker and volunteer photos are also saved under the person's name *(✅ 2026-08-25)*
+
+Photos are stored under a stable id — `speaker-photo-73.jpg` — which is reliable but impossible to
+search when you know the person and not the number. Each photo is now saved **a second time in the
+same folder** under the person's name as well, for example `speaker-photo-Jane-Doe-73.jpg`.
+
+- **Nothing that used the existing file changes.** The id-named file stays exactly as it was and
+  remains the one the hub and the event site use.
+- The name copy keeps the id on the end, so two people with the same name never overwrite each
+  other's photo.
+- Existing photos are backfilled automatically — each speaker is refreshed once, then things settle
+  back to normal.
+- Applies to **volunteer** photos too, and both copies are removed together if someone is deactivated.
+
+## 154. Volunteer availability shows when each day actually starts *(✅ 2026-08-25)*
+
+The availability form now states the real start time for each day, so you know what you are signing up
+for before you choose:
+
+- **Setup day** — from **09:00**
+- **Pre-day (master class)** — check-in from **07:00**
+- **Main conference day** — check-in from **06:40**
+
+"Full day" says which time it starts from, and the morning window opens at that hour rather than a
+fixed 9 o'clock. Afternoon windows are unchanged. Availability you have already saved is kept — the
+form re-selects your existing choice.
+
+## 155. The hotel form accepts every real arrival night *(✅ 2026-08-25)*
+
+Crew arrive across several days, and the earliest night (5 February) sat just outside the hotel date
+picker — so it could not be selected at all. The bookable range is now stated directly rather than
+guessed from the event dates: **check in 5–9 February, check out 10–12 February.**
+
+**Bookings already made are untouched.** The dates you chose are what the form shows; the range only
+controls which dates the picker offers, and it has been widened rather than narrowed, so nothing
+previously selected has become invalid.
+
+## 156. Audit times in local time *(✅ 2026-08-25)*
+
+The Audit page now shows **local time** by default, so timestamps match the clock on the
+wall instead of needing mental arithmetic. A **Show UTC** button switches back whenever you need the
+raw value, and whichever you choose is remembered next time you open the page.
+
+Summer and winter time are handled correctly, and the underlying record is unchanged — this only
+affects how the time is displayed.
+
+## 157. Audit exports include local time *(✅ 2026-08-25)*
+
+The Audit page’s CSV and Excel exports now carry **two** timestamp columns: `OccurredLocal`
+first, then the original `OccurredUtc`.
+
+Keeping both means an export still lines up with ones taken earlier, while the local column is the
+one you read. Summer and winter time are handled correctly, and the exported time always matches what
+the page shows for the same row.
+
+## 158. Clearer main-day option for volunteers who attend the conference *(✅ 2026-08-26)*
+
+On the volunteer sign-up, the main-day option for people attending the conference now says
+**"Attending conference — I can help pack down after event from 17:00"**, instead of the
+vaguer "can help in the evening". It states what the help actually is and when it starts, so the
+choice is obvious before you make it.
+
+Anyone who already chose this option keeps their answer — only the wording changed.
+
+## 159. Company billing details follow the finance system again *(✅ 2026-08-26)*
+
+The company page's **ERP-owned** block — CVR/VAT number, phone, currency and VAT zone — now updates
+from the finance system automatically, as the "Data owner: ERP" label has always promised. Previously
+only the address and billing email followed; the other four had to be typed in by hand, and a VAT
+number entered in the finance system never appeared.
+
+- VAT/CVR numbers are stored exactly as entered, so **foreign VAT ids** work as well as Danish ones.
+- An unrecognised VAT zone is left alone rather than guessed, because the zone decides whether an
+  invoice carries Danish VAT.
+- The **Website, public name and social links stay owned by the webshop** — those are yours to edit
+  and the finance system never overwrites them.
+
+## 160. VAT zone changes made in the finance system now reach the webshop *(✅ 2026-08-26)*
+
+The **VAT zone** is the field that decides whether an invoice carries Danish VAT. It is part of the
+company page's ERP-owned block, and while the hub was reading it correctly, the value it sent back
+was formatted in a way the webshop stored as a different kind of data — so a zone changed in the
+finance system could quietly fail to arrive.
+
+It is now sent in the webshop's own format, and the hub's own check that a value really landed
+understands that format too. Nothing about the rules changed:
+
+- An **unrecognised zone is still left alone** rather than guessed.
+- A zone that already matches the finance system is **not rewritten**.
+- If the webshop genuinely refuses a value, you are still told once — and if the hub cannot verify a
+  field, that now stays in the log instead of arriving as work for you.
+
+## 161. Fewer false alarms from the signage screens *(✅ 2026-08-27)*
+
+The agenda that feeds the on-site signage screens is pulled from the event platform on a schedule.
+Occasionally a single pull was refused, and that alone produced a "signage agenda sync failed"
+notice — even though the very next pull minutes later worked perfectly.
+
+The hub now **re-establishes its connection and tries again, up to three times**, before telling
+anyone anything. A notice therefore means a real outage rather than one unlucky moment, and it says
+how many attempts were made.
+
+- The **screens were never at risk** and still are not: they keep showing the last agenda that
+  loaded successfully, so nothing goes blank while the hub retries.
+- A genuine outage is still reported — just once it is genuinely a problem.
+
+## 162. A steadier connection to the event platform *(✅ 2026-08-27)*
+
+The hub talks to the event platform constantly — agenda, sessions, speakers, sponsors, exhibitors,
+attendees and orders all flow through one connection. That connection is authorised by a short-lived
+key that the platform issues in limited numbers.
+
+The hub now **shares one key across everything that needs it**, instead of each background worker
+obtaining its own. Because the platform only keeps a handful of keys valid at a time, workers were
+previously able to invalidate one another's — which surfaced as occasional sync failures on a
+connection that was actually healthy.
+
+- **Only one worker ever renews the key**, and the rest use what it obtained.
+- If the platform asks the hub to slow down, **every worker respects it**, not just the one that was
+  told.
+- If any part of this is unavailable, the hub falls back to the previous behaviour rather than
+  stopping — the integrations keep working.
+
+## 163. Sponsor artwork that stays in step with the files *(✅ 2026-08-28)*
+
+If a sponsor's promotion graphic is **deleted from the shared library**, the hub now notices on its
+next sweep, **rebuilds it**, and — until it is back — stops scheduling posts that would have used it.
+Previously the hub kept a record saying the artwork existed, so a deleted file was never rebuilt and
+posts were still planned for a picture that had gone.
+
+Sponsors whose artwork is missing are still **named**, never silently dropped, so nobody falls out of
+the plan unnoticed.
+
+## 164. Clearer logo guidance for sponsors *(✅ 2026-08-28)*
+
+Both places a sponsor can upload their web logo now state that we need the **positive** version — the
+one made for light backgrounds. The logo is placed on a white panel in the promotion graphics, so a
+white or "knockout" logo would simply disappear. A transparent background is still fine and
+preferred; it is the colour of the logo itself that matters.
+
+## 165. Announcements that slipped are re-scheduled *(✅ 2026-08-28)*
+
+An announcement waiting on something (usually artwork) could sit with a date that had already passed,
+then publish out of order once it was unblocked. The planner now moves such a post to the **next free
+slot**, respecting the usual number of posts per day.
+
+- Only the delayed post moves — everything else keeps its date.
+- **An announcement you have already approved is never moved.** It keeps its date and simply goes out
+  late, because that date is yours to change, not ours.
+
+## 166. Volunteer photos filed under both name and id *(✅ 2026-08-28)*
+
+Volunteer photos are stored twice — once by id, once under the person's name — so they can be found
+either way. Volunteers who uploaded **before** that was introduced only had the id copy. A background
+task now fills in the missing name copies automatically, and keeps doing so.
+
+The original file is never renamed, moved or deleted — the second copy is added alongside it.
+
+## 167. Volunteer availability at a glance *(✅ 2026-08-28)*
+
+The pre-selection queue and the Volunteers hub now show an **availability overview**: one row per
+volunteer, with a **green / red** cell for each half of every event day, so you can pick people for a
+shift by looking rather than by opening each sign-up.
+
+- Someone who chose **full day** is green in **both** halves of that day.
+- Under every column is **how many volunteers are available** for that shift.
+- "Attending, can help in the evening" is shown in its own colour and **counted separately** — they
+  are not available for the afternoon shift, so they never inflate that number.
+- A day nobody answered is grey, not red: not answered is not the same as declined.
+
+## 168. More of the sign-up visible where you choose people *(✅ 2026-08-28)*
+
+The pre-selection queue now shows each volunteer's **id, phone, public-profile consent** and a **view
+picture** button, alongside the e-mail it already had — and their **release ring** can be set inline,
+without leaving the page. The queue is also reachable directly from the Volunteers hub.
+
+## 169. Undo a pre-selection without losing the sign-up *(✅ 2026-08-28)*
+
+A shortlisted volunteer can be **reset** back to not-yet-reviewed. Their sign-up, availability, photo
+and consent are all **kept** — this is an undo, not a delete.
+
+Someone who has already been onboarded cannot be reset this way: they can sign in and have had their
+welcome, so removing them is a separate, deliberate action.
+
+## 170. A page for volunteer availability *(✅ 2026-08-28)*
+
+The availability overview now has its **own page**, reachable from the Volunteers area, instead of
+being printed underneath the list of links. The pre-selection queue still shows the same grid for the
+people waiting in it.
+
+## 171. Deactivate says what it does — and asks you to type it *(✅ 2026-08-28)*
+
+Removing a sign-up from the pre-selection queue has always **kept the record**: nothing is deleted
+from the database, and the person's answers, photo and consent are all retained. Only the button
+still said "Delete". It now says **Deactivate**, and explains that the sign-up is **hidden** and that
+the action can be reversed.
+
+Because it sits beside the other row buttons and is easy to press by habit, it now also asks you to
+**type the word DEACTIVATE** before it will go ahead.
+
+The queue itself is tidier too: the column that repeated the same value on every row is gone, and the
+id is smaller and set apart from the name.
+
+## 172. Free-ticket attendees now show a country *(✅ 2026-08-28)*
+
+When a ticket is bought with a **100% coupon**, the ticketing platform collects no billing address —
+there is nothing to invoice — so those attendees had no country and appeared as a blank slice on the
+attendee dashboard.
+
+The dashboard now takes the country from the **coupon's customer** instead, so a company that buys a
+block of tickets for its people is represented properly in the country breakdown.
+
+- A country the attendee gave us themselves is **always** used first.
+- Where neither is available the slice reads **"Not given"** rather than guessing.
+- This affects **only the dashboard**. Exports and on-site lists still show the attendee's own
+  country, blank if we genuinely do not have it — a derived value is never presented as one they gave.
+
+## 173. A photo is required if you ask to be featured *(✅ 2026-08-28)*
+
+On the volunteer sign-up, ticking **"feature me on the public volunteer page"** now requires a photo —
+that box is the one that promises a picture, so accepting it without one left a promise the page
+could not keep.
+
+Volunteers who do **not** ask to be featured are unaffected: the photo stays optional, and nobody is
+turned away for not having a headshot to hand. The form explains the requirement rather than just
+disabling the button.
+
+## 174. LinkedIn profiles on the pre-selection queue *(✅ 2026-08-28)*
+
+Each row in the volunteer pre-selection queue now shows a **LinkedIn** link when the applicant gave
+one, opening in a new tab, so you can look someone up without opening their record.
+
+## 175. Being featured needs a photo *and* a LinkedIn link *(✅ 2026-08-28)*
+
+Ticking **"feature me on the public volunteer page"** now requires both a **photo** and a **LinkedIn
+URL** — the two things that listing shows. Both fields are marked as required the moment you opt in,
+and if either is missing the form says which one.
+
+The LinkedIn address is checked to be a real `https://` link, so a typo is caught while you can still
+correct it.
+
+Volunteers who don't opt in are unaffected — both fields stay optional.
+
+## 176. Web addresses work without typing "https://" *(✅ 2026-08-28)*
+
+A volunteer who writes their LinkedIn as **`www.linkedin.com/in/you`** — without the `https://` —
+now has it accepted and stored as a proper link, instead of being turned away or ending up as
+unclickable text for organizers.
+
+Addresses that are not real web links are still refused, and nothing that could run code is ever
+made clickable.
+
+## 177. Company names on the public event site stay correct *(✅ 2026-08-29)*
+
+A sponsor's **public company name** — the one from the webshop — is now checked and corrected on the
+event platform **every sync**, on both the sponsor and the exhibitor record.
+
+Previously only the sponsor record was kept in step, and even then only when something else about it
+changed. An exhibitor created under a different name (an invoicing name, for example) kept it
+indefinitely, so the same company could appear under two different names on the public site.
+
+The billing name is never used for this — it belongs to the finance system, not to how a company is
+presented publicly.
+
+## 178. Fewer "add by hand" e-mails that aren't yours to fix *(✅ 2026-08-31)*
+
+When the event platform is briefly unavailable, the hub no longer asks you to copy values into it by
+hand. Those values are ones the hub writes itself, and it simply retries on the next run — so a
+passing outage stays a log entry instead of becoming a to-do list.
+
+You are still told when the platform genuinely **refuses** a value, because that one will not fix
+itself. The e-mail now says which of the two happened, instead of describing every line as a field
+the platform has no way to accept.
+
+## 179. Sponsor contacts and company defaults on the sponsor hub too *(✅ 2026-08-31)*
+
+**Sponsor contacts (finance system)** and **Sponsor webshop company & defaults** now appear on the
+Sponsor administration hub as well as under People. They are the same pages either way — a sponsor
+contact is both a person and part of running that sponsor, so both places lead to it.
+
+## 180. Availability grouped by where each volunteer stands *(✅ 2026-08-31)*
+
+The availability overview now groups people: **preselected first**, then anyone already onboarded,
+then those not yet preselected — each block with **its own count per shift**.
+
+That answers the question the page exists for: *do the people I have already shortlisted cover this
+morning?* The overall total for every volunteer is still shown underneath, so you can see at a glance
+how much more the remaining pool would add.
+
+Empty groups are left out entirely rather than shown as an empty heading.
+
+## 181. The same "we updated the event platform" e-mail, only once *(✅ 2026-09-03)*
+
+When the hub sends a sponsor's description, website, company name or social links to the event
+platform, it tells you so. If the platform takes the value, that is the end of it.
+
+Occasionally the platform accepts a value and then does not show it back — usually because the change
+is sitting in the platform as an unpublished draft. The hub could not tell that apart from a value
+that had never been sent, so it announced the same update on every run, and the same few sponsors
+appeared in the e-mail all day.
+
+Now the hub remembers what it has already sent. After the third identical attempt it replaces the
+routine line with **one** notice naming the two things worth checking — whether the change needs
+publishing on the platform, or whether the platform is dropping that field — and then stops
+mentioning it.
+
+**It keeps sending the value.** Nothing is given up on: the moment the platform starts showing the
+value, or the sponsor edits it, the hub goes back to reporting normally.
+
+## 182. Sponsor promotion graphics actually reach the sponsor's post *(✅ 2026-09-12)*
+
+When a sponsor uploads their logo, the hub builds their promotion graphic within minutes. Until now
+that finished graphic could not reach the sponsor's own LinkedIn post: the campaign asked for artwork
+that had passed a review step which sponsor graphics never go through, so it found nothing.
+
+The effect was confusing rather than dramatic, and it was visible in exactly the way you would expect
+to be confusing: the post planner treated the sponsor as ready to announce, while the post itself
+reported "no graphic", the approval step said it was waiting for artwork that was sitting in the
+folder, and the post would have gone out as text only.
+
+Sponsor promotion graphics are now available to the campaign as soon as they are built. Speaker and
+session artwork is unchanged — it still waits for release before it can appear anywhere public.
+
+## 183. One answer to "will this post have a picture?" *(✅ 2026-09-12)*
+
+The post queue, the post calendar and the preview a sponsor or speaker sees on their own page used to
+answer that question in different ways. The queue looked at the artwork as it stands today; the other
+two looked at whatever had been attached when the post was first planned. So a graphic finished after
+planning showed up in one place and not in another, and a graphic that had since been rebuilt could be
+reported under its old name.
+
+All three now report the picture that will actually be published, resolved the same way the publisher
+resolves it. A preview and a post can no longer disagree.
+
+## 184. Test and non-announced sessions stay out of the campaign — and out of the graphics *(✅ 2026-09-12)*
+
+Marking a session as a **test session** now also keeps it out of the social-media campaign: it is
+never announced, and none of its speakers are drawn into the track or session promotion graphics. That
+last part was the visible problem — a test master class carrying four real people put those people
+into a published track graphic, because the graphics builder and the post planner did not agree about
+which sessions count.
+
+There is also a new, separate control: **Exclude from social media**. It is for a *real* session that
+simply has nothing to announce — a Welcome or Closing session. Such a session stays fully public,
+stays on the agenda, and is only left out of the campaign and its graphics.
+
+Both controls live on the session's own row on the Sessions page, and the message tells you exactly
+what each one does.
+
+## 185. Nothing that must not be announced can sit in the post planner *(✅ 2026-09-12)*
+
+Excluding a session or a sponsor used to stop *new* posts being proposed, and stop existing ones being
+approved — but a post created before you set the flag stayed in the queue, switched off, waiting.
+
+Now the planner removes it. On every run, any planned post whose subject must not be announced — a
+test session, a test sponsor company, or a session you have excluded — is taken out of the queue, and
+the planner tells you which ones and why.
+
+**Nothing is lost and nothing published is touched.** Posts that have already gone out are left
+exactly as they are, and a removed post can be brought back: clear the flag and press Restore in the
+post editor, and it returns with its wording intact.
+
+## 186. Nothing is posted over Christmas and New Year *(✅ 2026-09-12)*
+
+The campaign is spread evenly across the whole run-up to the event so that every month carries posts
+rather than everything piling into the opening weeks. The one thing that spread did not know about was
+holidays — it skipped weekends and nothing else, so posts were scheduled for 30 December and 1 January.
+
+**23 December to 3 January is now closed.** Nothing is scheduled across the break, and anything already
+sitting on those dates is moved to the first free slots after it. Posts you have accepted yourself are
+left where you put them and listed instead, so the choice stays yours.
+
+The rule travels with the product rather than with this event, so a future edition is protected
+without anyone remembering to set it.
+
+## 187. A start date for sponsor announcements *(✅ 2026-09-12)*
+
+Sponsor announcements — both the per-company posts and the tier posts — can now be held until a date
+you choose, alongside the existing dates for speaker tracks and master classes.
+
+It holds them back and nothing more: after that date they spread across the run-up like the rest of
+the campaign rather than going out in one block. And it can only ever delay a sponsor, never hurry
+one — a sponsor is still announced no earlier than the day their logo and promotion graphic exist.
+
+## 188. The post editor survives a duplicated post *(✅ 2026-09-12)*
+
+Duplicating a post, or creating one from scratch, produced a post belonging to no session or sponsor —
+which is exactly what a hand-written post should be. Opening the editor afterwards returned a server
+error, and not only for that post: **every** post's editor page failed until it was removed.
+
+Fixed. Duplicates and hand-written posts open normally, and the type filter counts them the way it
+always described.
+
+## 189. Announcement dates, arranged by post type *(✅ 2026-09-12)*
+
+The dates that decide when each part of the campaign starts are now grouped and labelled **by post
+type**, with a table at the top saying which setting governs which type and what happens if you leave
+one empty. Two dates that only existed in the code are now yours to set: the **second round of track
+posts**, and the **last day an event post may run**.
+
+**No date is fixed in the code any more.** Every value on the page overrides the engine's own default,
+and where you leave one blank the fallback is stated beside the field rather than hidden.
+
+## 190. Sponsor tier posts run as two named rounds *(✅ 2026-09-12)*
+
+The tier posts — one per Diamond, Platinum, Gold and Silver — can be given a date for each round.
+Unlike the other dates these are **run dates rather than "not before" dates**: the tier posts go out
+together from the day you name instead of being spread across the months.
+
+## 191. Changing a date moves the posts that are already there *(✅ 2026-09-12)*
+
+Previously a new start date only steered posts that had not been created yet. Anything already
+approved kept the date it was born with, so setting "sponsors from 15 October" left every approved
+sponsor post sitting in September — the queue quietly disagreeing with the rule you had just set.
+
+Now the planner moves them. Planned and approved posts that sit before their type's date are moved
+forward into it, and the run tells you how many. **Only the date changes** — the wording, the picture
+and the approval all survive.
+
+**Posts you accepted yourself are never moved.** Those are listed by number instead, so you can decide
+each one; published posts are untouched.
+
+## 192. See what else is on a day before you reschedule *(✅ 2026-09-12)*
+
+When you change a post's date, the editor now shows what is already scheduled for that day — each
+post's time, number, type and whether it is held, approved or already published — and warns you when
+the day is already at your posts-per-day limit.
+
+It does not stop you: the limit is the everyday rhythm, not a rule, and busy days are sometimes the
+right answer. It just means you no longer have to remember.
+
+## 193. Every round of every post type has its own start date *(✅ 2026-09-12)*
+
+Each post type is announced more than once, and until now some rounds shared a single date — so the
+reminder could land in the same week as the announcement with no way to say otherwise.
+
+Now every round that exists has its own field, grouped under its post type:
+
+- **Speaker tracks — three rounds.** The announcement, a reminder, and a final round in the run-up.
+- **Sponsors — two rounds**, and **sponsor tiers — two rounds**, each with its own start date.
+- **Sessions run once**, except a sponsor's own speaker session, which runs twice.
+
+Leave any of them empty and the fallback is stated beside the field. The page also warns you when a
+round has a date but the posting frequency is set too low for that round to exist at all — a date that
+governs nothing now says so instead of looking like it works.
+
+## 194. Master classes and other sessions start on their own dates *(✅ 2026-09-12)*
+
+Type 2 was being treated as one thing and it is two. Master classes had a start date; keynotes,
+technical sessions and panels had none at all, so there was no way to say "the master classes go first
+and the rest follow a fortnight later".
+
+Both now have their own start date. Ask-the-Experts sessions are never announced, so neither reaches
+them.
+
+## 195. Announcement rules you can change, per category *(✅ 2026-09-12)*
+
+The dates that decide when each part of the campaign runs are now one set of rules, one per category,
+in reading order: **speaker tracks · master classes · technical sessions · sponsor speaker sessions ·
+sponsor tiers · sponsors · event posts.**
+
+Each rule carries **how many rounds**, **a date per round**, and **a date the last round must not pass**.
+Leave a round's date empty and it spreads; leave the end empty and it means the event. There is an
+**Add a round** button, and a round you add is planned on the next run — nothing else to change.
+
+Two things this fixes that were invisible before:
+
+- **"No later than" is now real.** The only end-date rule in the engine was a hardcoded three weeks for
+  sponsor speaker sessions, with a note claiming their last round landed a fortnight before the event.
+  Nothing enforced it — the planner's only ceiling was the event itself. Categories now have a true
+  end date, and the last round respects it.
+- **Sponsor speaker sessions are a category of their own.** They are announced twice where an ordinary
+  session runs once, which used to be a number buried in the scheduler.
+
+Every rule only ever *delays* a post. A sponsor still waits for their logo and graphic, a session for
+its abstract and artwork, a track for its line-up to settle.
+
+## 196. Posting capacity — will the campaign actually fit? *(✅ 2026-09-12)*
+
+A seat is one weekday at one of your posting times. Weekends aren't seats, the Christmas break isn't,
+and a seat already holding a post — published or not — can't hold another. Until now the planner would
+tell you it had run out ("no room, 2 posts") and name what it couldn't place, but never how far short
+it was, where in the year, or what would fix it.
+
+**Posting capacity** shows the arithmetic: how many seats exist between today and the event, how many
+are taken, how many posts each category still wants, and a month-by-month view of where it's tight.
+If it doesn't fit, it tells you the posts-per-day that *would* — and says plainly when no setting can,
+because the day only has so many posting times.
+
+You can also **model counts you don't have yet** — 42 sponsors, 66 sessions — to see whether the shape
+of the campaign works before those numbers are final. Nothing is saved; the real counts always win.
+
+Reached from its own card on the **Marketing / SoMe** hub, and from the post planner next to the run
+that reports the shortfall.
+
+## 197. Event posts stop churning *(✅ 2026-09-12)*
+
+Your own event posts (the dated runs from your campaign deck) were being thrown away and rebuilt every
+ten minutes. The dates never changed — they come from your deck and are used as written — so nothing
+was gained, but each rebuild gave the post a **new id**, which quietly broke every link already sent:
+the "Open it →" in a 24-hour alert, or a URL you had pasted somewhere, pointed at a post that no longer
+existed.
+
+Event posts now keep their identity. The planner still recalculates the *spread* for the types that
+have one to recalculate — an event post has a date of its own, so there is nothing to recompute.
+
+## 198. One announcement per subject per round *(✅ 2026-09-12)*
+
+If the same subject somehow ended up with two announcements for the **same round**, the planner now
+keeps one and retires the other — it is recoverable, not destroyed.
+
+- **The same subject on several dates is not a duplicate.** Those are different rounds — for event
+  posts, the separate runs you wrote in your deck — and they are left exactly as they are.
+- The copy that survives is chosen, not arbitrary: one that has already **published** always wins,
+  then one whose date you **accepted**, then the oldest.
+- **Two posts that both published are never touched.** They both went out; the record has to say so.
+
+## 199. What the held-back announcements are waiting for *(✅ 2026-09-12)*
+
+The planner used to report that *"19 are waiting on a missing dependency"* — a count of a problem
+rather than the problem. SoMe settings now **lists what they are waiting on**, grouped with counts, so
+twelve posts stuck behind one sponsor's logo read as **one** thing to chase rather than twelve.
+
+## 200. Held-back announcements stay in the plan, and keep moving *(✅ 2026-09-12)*
+
+An announcement that is waiting for something — a logo, a sponsor's social text, artwork — is **still a
+planned post with a date**, so you can see it in the queue and it counts against posting capacity.
+
+If its slot arrives and it still is not ready, the planner **moves it to the next free slot**, and keeps
+doing so until the missing piece lands. No announcement sits stranded on a date that has already gone,
+and no seat is quietly held in a month that is over.
+
+Three things it will not do:
+
+- **It never approves anything.** Moving the date is not a way past the checks — a post still waits for
+  whatever it is missing.
+- **It never moves a date you accepted**, or an event post's date from your deck. Those are named in the
+  run report, with the reason, so you can move them yourself.
+- **It never invents room.** If every remaining weekday is already at its posts-per-day limit, the run
+  says so and names the posts — that is the capacity wall, not a silent drop.
+
+## 201. "Not ready" says what is missing, on the plan itself *(✅ 2026-09-12)*
+
+A held-back announcement has always been **in** the plan — a real post, with a date, holding its place
+in the calendar and counting against posting capacity. What it did not do was say why it was stuck.
+
+The queue showed a single `no graphic` chip, which covered one blocker out of a dozen: a post waiting
+on a sponsor's social text, a session's description or an unlinked co-speaker looked perfectly healthy
+until you pressed Activate and nothing appeared to happen. The calendar said *"held — not approved"*
+for two quite different situations — one waiting for **you** to click, one that **cannot** be approved
+by anyone yet.
+
+Now, everywhere the plan is shown:
+
+- Each held-back row carries an amber **⏳ not ready** chip naming the missing thing — *graphic
+  missing*, *logo missing*, *sponsor text missing*, *description missing*, *speaker missing* — with
+  the full explanation on hover.
+- The queue says **how many** are not ready, and that they keep their place: if a date passes before
+  the missing piece arrives, the planner moves that post to the next free slot.
+- The calendar prints **Waiting on: …** under each one, naming who owes what.
+- The settings page keeps the **grouped** view — twelve posts behind one sponsor's logo as one job.
+
+All four read from the same rule, so no two screens can disagree about whether a post is ready.
+
+## 202. A round you have dated is a round that gets planned *(✅ 2026-09-12)*
+
+If you gave a round a date, that round is planned. Previously two different pages each held a "how
+many rounds" number — the old **posting frequency** page and the per-category rules in SoMe settings —
+and when they disagreed, the older one quietly won. That is how speaker tracks could show three dated
+rounds (late September, early December, mid-January) while the planner only ever produced two: the
+third round's date was entered, saved and displayed, and nothing ever used it.
+
+Now there is one number. A category runs as many rounds as you have set **or** as many as you have
+dated, whichever is more — so dating a round is enough, and adding one still works the way it did.
+Lowering the count removes the extra dates with it, so nothing gets stuck.
+
+Posting frequency has moved in with the rest of each category's rules, and the old page now says so
+and points at them.
+
+Also fixed at the same time: **sponsor speaker sessions** were switched on and off by the *ordinary
+session* frequency, so turning Type 2 off silently cancelled them — and their own on/off switch did
+nothing. They now follow their own rule, like every other category.
+
+## 203. The post list names the exact category *(✅ 2026-09-12)*
+
+The Type column in the post queue said **Type 2 — Session announcement** for master classes, technical
+sessions and sponsor speaker sessions alike. Those are three different schedules with three different
+sets of dates, and SoMe settings has always called them **2a**, **2b** and **2c**.
+
+The queue now uses the same names, so a row can be read against the rule that governs it.
+
+## 204. A hidden flag could keep a session out of the campaign *(✅ 2026-09-12)*
+
+An older *test data* flag on a session (separate from the **Mark as TEST session** button) quietly
+excluded that session from the whole social-media campaign — no track post, no session post, and its
+speakers left out of the graphics. Nothing in the hub could set it, nothing showed it, and there was
+no way to switch it off.
+
+Sessions that carry it now say so, with a **Clear legacy test flag** button. Clearing it puts the
+session back in the campaign on the next planning run. There is deliberately no way to switch it *on*:
+**Mark as TEST session** is how a session is marked for testing, and **Exclude from social media** is
+how a real session is kept off LinkedIn.
+
+## 205. Who has not finished Get started *(✅ 2026-09-12)*
+
+A list of every sponsor company that has **not** finished the Get started wizard, with the **event
+coordinator's name and email** beside it — a chase list, not a dashboard. Reached from the Sponsors
+page.
+
+Each row also shows how far along they are and exactly which steps are still open, so a sponsor owing
+one logo is not chased in the same breath as one that has not started. All the coordinator addresses
+are gathered at the bottom, de-duplicated and semicolon-separated, ready to paste into a BCC field.
+
+Two things it deliberately does:
+
+- **Companies with no event coordinator are listed first**, marked *no coordinator*. That is the worst
+  case rather than an omission: the automatic reminders have no recipient either, so nothing at all is
+  chasing them until someone is named.
+- **Test and withdrawn companies are left out**, and "finished" means exactly what the sponsor sees on
+  their own Get started page — the same measure, so nobody is chased for something they have done.
+
+## 206. Email export on the participant status board *(✅ 2026-09-12)*
+
+The status board now hands you the addresses behind the rows you are looking at. Under the summary
+line: how many addresses, a box holding them semicolon-separated and de-duplicated, a **Copy all**
+button and an **Open in mail client** link that drops them straight into BCC.
+
+- **It follows the filters** — set Role = Sponsor and Status = In progress, and the list is exactly
+  those companies. Change a filter and the list follows.
+- **It covers every matching row, not just the page on screen**, so a second page can never quietly
+  drop people from a chase.
+- **Sponsors are represented by their event coordinators**, since that is who answers for a company;
+  every other role is a person, so it is their own address.
+- If a company in the filter has **no event coordinator**, it is named under the list in red. It is
+  not in the addresses — and nothing else is chasing it either, because the automatic reminders have
+  no recipient.
+
+The same thing is on the sponsor Get-started list, for when that is the question.
+
+## 207. Filters that mean what they say, and test users out of the way *(✅ 2026-09-12)*
+
+Two fixes to the participant status board, both about trusting what is on screen.
+
+**The Role dropdown could say one thing while the board showed another.** On a reload, browsers
+restore the last value a dropdown had, overriding the page's own choice — so it could read "Sponsor"
+while the board had in fact been built for every role, and every number, including the email export,
+answered a different question. The controls and the page are now always the same fact. Two further
+changes so a disagreement can never hide again: an **Apply** button that is always available rather
+than only when scripting is off, and a line under the filters stating exactly what is applied —
+*"Showing Sponsor, status In progress, test users hidden."*
+
+**Test users are now hidden by default**, with a **Test users: Hidden / Included** switch beside the
+other filters. It covers both a test person and a test sponsor company — sponsors are listed per
+company, so hiding only the people would have left the test company on the board with its contacts
+removed.
+
+## 208. Track artwork retires with its track *(✅ 2026-09-12)*
+
+If a track loses its last session — deleted, moved to another track, or excluded from announcements —
+its speaker GIF used to stay in circulation, so a post for that track could still go out showing
+people who are no longer in it. That artwork is now **taken out of use automatically** on the next
+graphics run.
+
+The file itself is kept, not deleted: if the track comes back, the same picture returns with it.
+
+## 209. Your own artwork is never overwritten — but you are told when it ages *(✅ 2026-09-12)*
+
+When you replace a generated graphic with your own, the engine leaves it alone for good. That is
+still true, and always will be.
+
+What was missing is that nothing told you when the line-up behind it changed. A graphic you made by
+hand in September could quietly be naming the wrong speakers in December. The graphics run now
+**reports the ones whose line-up has moved on**, so you can decide whether to re-upload or hand the
+track back to the generator. It never rebuilds them for you — overwriting your work would be worse
+than a stale picture.
+
+## 210. Every published LinkedIn post is in the audit log *(✅ 2026-09-12)*
+
+When a post goes out on the company page, the audit log now records **that post** — its number, its
+type, its opening words, when it was scheduled and its LinkedIn id. A post that fails to publish gets
+its own row too, with the error. Until now the log only said how many posts a run published, not which
+ones. Filter the audit log on *some.post-published* to see everything that has gone out.
+
+## 211. Attendee telemetry: the three question cards carry the right headings *(✅ 2026-09-12)*
+
+Three cards on attendee telemetry had their headings shuffled: the attendee's interest (Security,
+Intune, Azure …) was labelled *Job role*, the job role (Modern Workplace Specialist, Management …) was
+labelled *Type of attendee*, and the type (internal IT department, Microsoft partner, vendor) was
+labelled *Attendee interest*. The numbers were always right; each heading now sits over its own
+question.
+
+## 212. A master class with one speaker can be announced *(✅ 2026-09-13)*
+
+A master class or panel discussion is normally presented by two or more people, so a post about one
+with only a single linked speaker is held back — usually it means the other speakers have not been
+linked yet, and announcing it would name the wrong people. When a session genuinely has **one**
+speaker, the post editor now offers **"Override: this master class has only one speaker"** right under
+the reason the post is held. One click lifts that hold for the session (every post about it), and the
+post can then be approved as usual; every other check — description, graphic, and so on — still
+applies. The override can be undone from the same place, and it never applies to a session with no
+speaker at all.
+
+## 213. Automatic public-name fixes no longer ask for your attention *(✅ 2026-09-14)*
+
+When a sponsor's public company name is empty in the webshop, the hub fills it from the legal name
+with the legal form (A/S, ApS, Ltd …) taken off. The daily reconcile mail used to list that as
+something that "needs your attention", even though it was already done. It is now listed as
+**"PUBLIC NAME set automatically — Nothing to do"**, and it no longer counts towards the attention
+number in the subject.
+
+## 214. No more repeated "Website pushed" mails for sponsors that are already correct *(✅ 2026-09-14)*
+
+When the event platform briefly refused to answer a request for a sponsor record, the hub treated
+the sponsor's fields as empty, sent the website again, and mailed that it had done so — even though
+the website was already correct. Now, if a record cannot be read, the hub leaves it alone for that
+run and simply checks again on the next one, so the change mail only lists real changes.
+
+## 215. Deleted event-platform sponsor entries are cleaned up safely *(✅ 2026-09-14)*
+
+A sponsor listed under more than one category on the event platform has one entry per category. If
+one of those entries was deleted on the platform, the hub kept trying to update it indefinitely. It
+now notices, but waits for proof: the entry must be reported missing five times, at least twelve
+hours apart (so two days at the earliest), before the hub lets go of it. It then creates a fresh
+entry under that category, so the sponsor keeps appearing everywhere it is entitled to. A brief
+platform hiccup can never cause an entry to be dropped.
+
+## 216. Every welcomed sponsor now gets the Get Started reminder *(✅ 2026-09-14)*
+
+The regular "Get Started still unfinished" reminder is meant to reach everyone who has been welcomed
+and has not finished their Get Started steps. Sponsor contacts (and some speakers, volunteers and
+partners) who were welcomed automatically were never picked up by it, so they received no reminders
+at all. They are now included, and their reminders follow the same schedule as everyone else's,
+counted from the day their welcome was sent.
+
+## 217. The sponsor welcome overview names each company *(✅ 2026-09-14)*
+
+The sponsor welcome overview now shows each company's name (with its number underneath) instead of
+only a number, and is sorted by name. It also no longer shows an outdated "Blocked — waiting for
+upload folder" status for companies that have in fact been welcomed.
+
+## 218. Session announcements tag the speakers *(✅ 2026-09-14)*
+
+Every social-media announcement for a session — master classes, panels and technical sessions — now
+includes a "🎤 With …" line that tags each speaker on LinkedIn where their profile is connected, and
+names them otherwise. This applies to the standard post wording, all the alternative wordings, and the
+announcements already planned. A session announcement is never published without its speakers.
+
+## 219. No "add by hand" mail for event-platform fields the hub can write *(✅ 2026-09-14)*
+
+When the event platform briefly rejected an update — a website, description or social-media link the hub
+normally writes itself — the hub used to ask you by e-mail to type it in by hand, even though the next
+automatic run would deliver it. It now simply tries again on the next run. The "add by hand" mail is kept
+only for things the platform offers no way to update automatically, such as booth videos and brochures.
+
+## 220. Sponsor contacts with a shared mailbox name are added to the webshop *(✅ 2026-09-14)*
+
+A sponsor contact whose address started the same way as another company's — for example an "info@"
+address — could not be added to the webshop, and the reconcile mail reported it as needing your action.
+New webshop contacts are now created using their full e-mail address, so this can no longer collide.
+
+## 221. The public edition builds, and its setup guide matches what it ships *(✅ 2026-09-14)*
+
+Communities starting their own event from the open-source edition could not get past the first build:
+the solution still listed two maintainer-only console tools that are deliberately left out of the public
+copy, and the getting-started guide told readers to run setup scripts that are not in it either.
+
+- **It builds from a fresh clone.** The published solution now lists only projects the public copy
+  actually contains, and a publish is refused if a published project would reference one that is left
+  out — so this cannot quietly return.
+- **A getting-started guide that only uses what is in the repository.** Infrastructure, secrets, app
+  deployment, database access, the first organizer account and the custom domain are each a documented
+  step using the included scripts or the standard Azure and .NET command-line tools.
+- **Starter files to copy.** Example infrastructure parameter files and sanitized example configuration
+  (event, sponsor rules, speaker deadlines, Signal groups, Sessionize and AI-guidance settings), each
+  explaining where it goes and which setting points the app at it — and checked by tests against the
+  code that reads them, so they stay current.

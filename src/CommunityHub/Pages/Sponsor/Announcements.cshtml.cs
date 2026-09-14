@@ -40,6 +40,13 @@ public class AnnouncementsModel : PageModel
     public bool NoCompanyLink { get; private set; }
     public SponsorAnnouncements? Announcements { get; private set; }
 
+    /// <summary>
+    /// §1060(f) — the raw mention-resolution status. Passed through unreduced: only the shared
+    /// follow-card partial decides what each of the five values may claim, and flattening it here to
+    /// a bool would lose the difference between "confirmed non-follower" and "we could not look".
+    /// </summary>
+    public string? LinkedInStatus { get; private set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -48,12 +55,16 @@ public class AnnouncementsModel : PageModel
 
         // The company lives on the Participant row, not on the auth accessor — the same way every
         // other sponsor page resolves it.
-        var companyId = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+        // §1060(f) — the follow card's status comes off the SAME row, so it costs no extra query.
+        var row = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
             .FirstOrDefaultAsync(
                 _db.Participants
                     .Where(p => p.Id == me.ParticipantId)
-                    .Select(p => p.SponsorCompanyId),
+                    .Select(p => new { p.SponsorCompanyId, p.LinkedInPersonUrnStatus }),
                 ct);
+
+        var companyId = row?.SponsorCompanyId;
+        LinkedInStatus = row?.LinkedInPersonUrnStatus;
 
         if (string.IsNullOrWhiteSpace(companyId))
         {

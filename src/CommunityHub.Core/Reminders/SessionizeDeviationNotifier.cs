@@ -33,11 +33,17 @@ public sealed class SessionizeDeviationNotifier
     private readonly EngineAlertSender _alerts;
     private readonly ILogger<SessionizeDeviationNotifier>? _log;
 
+    // §1124 — the shared speaker/session audience. Optional so existing test constructions keep
+    // compiling; null falls back to the shared inbox alone, i.e. the pre-§1124 behaviour.
+    private readonly EmailOptions? _emailOptions;
+
     public SessionizeDeviationNotifier(
-        EngineAlertSender alerts, ILogger<SessionizeDeviationNotifier>? log = null)
+        EngineAlertSender alerts, ILogger<SessionizeDeviationNotifier>? log = null,
+        Microsoft.Extensions.Options.IOptions<EmailOptions>? emailOptions = null)
     {
         _alerts = alerts;
         _log = log;
+        _emailOptions = emailOptions?.Value;
     }
 
     /// <summary>Announce this import pass's deviations. Silent when there are none (§302).</summary>
@@ -81,10 +87,13 @@ public sealed class SessionizeDeviationNotifier
             + "taken from Sessionize automatically and are not listed here. If the hub's value is "
             + "the one that is wrong, change it in the hub — Sessionize will not overwrite it.</p>";
 
-        await _alerts.AlertAsync(
+        // §1124 — a per-session decision for an organizer, so it goes to the shared speaker/session
+        // audience rather than the shared inbox alone.
+        await _alerts.AlertToAsync(
+            _emailOptions?.SpeakerSessionRecipients()
+                ?? new[] { ZohoChangeNotifier.ActionableRecipient },
             $"Sessionize differs from the hub on {sessions.Count} session(s)",
-            body, ct, throttleKey: null,
-            recipient: ZohoChangeNotifier.ActionableRecipient);
+            body, ct, throttleKey: null);
 
         _log?.LogInformation(
             "§999: reported {Count} Sessionize deviation(s) across {Sessions} session(s).",

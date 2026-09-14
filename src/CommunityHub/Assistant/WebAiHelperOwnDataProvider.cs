@@ -1,6 +1,7 @@
 using CommunityHub.Core.Assistant;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Tasks;
 using CommunityHub.Core.Sponsors;
 using Microsoft.EntityFrameworkCore;
 
@@ -46,11 +47,15 @@ public sealed class WebAiHelperOwnDataProvider : IAiHelperOwnDataProvider
             .FirstOrDefaultAsync(ct);
 
         // --- Their tasks (own rows only) ---------------------------------------
+        // §1081 — the shared "which tasks are this person's" predicate (assigned OR their company's).
+        // §1082 — system-CLOSED rows (retired from the catalog, abandoned on deactivation) are not
+        // work this person did, and this section literally counts "X open, Y completed". Telling the
+        // assistant somebody completed a task that was retired underneath them is how it ends up
+        // saying so to their face.
         var tasks = await _db.Tasks
-            .Where(t => t.EventId == eventId
-                        && (t.AssignedParticipantId == participantId
-                            || (sponsorCompanyId != null
-                                && t.SponsorCompanyId == sponsorCompanyId)))
+            .Where(t => t.EventId == eventId)
+            .VisibleTo(participantId, sponsorCompanyId)
+            .Where(TaskClosure.NotSystemClosed)
             .Select(t => new { t.Title, t.DueDate, t.State, t.IsMandatory })
             .ToListAsync(ct);
 

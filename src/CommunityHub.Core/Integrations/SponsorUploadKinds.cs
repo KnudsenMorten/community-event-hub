@@ -82,8 +82,15 @@ public static class SponsorUploadKinds
             // The exhibitor wall takes ANY format (work order §111) and up to 1 GB. This is THE case
             // direct-to-storage exists for — a gigabyte was never sane to push through a request
             // thread.
+            // §1072 — the WALL has its own audience: the organizer mailbox PLUS whoever produces the
+            // wall. 🔒 Falls back to the shared list when the edition has not set it, so this is
+            // additive and an unconfigured edition behaves exactly as before.
             "wall" => (DocLibraryPaths.SponsorExhibitorWall, Array.Empty<string>(),
-                       1024 * Mb, sp.SponsorUploadNotify, true),
+                       1024 * Mb,
+                       sp.SponsorWallUploadNotify is { Count: > 0 }
+                           ? sp.SponsorWallUploadNotify
+                           : sp.SponsorUploadNotify,
+                       true),
             _ => (null!, null!, 0L, null!, false),
         };
 
@@ -150,7 +157,9 @@ public static class SponsorUploadKinds
     /// </summary>
     public static async Task NotifyAsync(
         Core.Email.IEmailSender email, SponsorUploadSpec spec, string sponsorName,
-        string fileName, string? webUrl, string byEmail, ILogger? log, CancellationToken ct)
+        string fileName, string? webUrl, string byEmail, ILogger? log, CancellationToken ct,
+        // 🔴 §1072 — REQUIRED IN PRACTICE, optional only so no existing caller breaks. See below.
+        Core.Email.IEmailContextAccessor? ctx = null)
     {
         if (spec.Notify is null || spec.Notify.Count == 0) return;
 
@@ -167,6 +176,24 @@ public static class SponsorUploadKinds
             + $"<li><b>Uploaded by:</b> {Enc(byEmail)}</li></ul>"
             + button;
         var subject = $"Sponsor upload — {sponsorName} — {fileName} [ELDK27]";
+
+        // 🔴 §1072 — RING-EXEMPT, OR THIS MAIL IS SILENTLY EATEN.
+        //
+        // ⚠️ THE ACTUAL CAUSE of *"nerdio have upload logo … but no mail"*. Everything upstream
+        // worked: the file reached SharePoint, the audit row was written, this method ran and
+        // composed the mail. Then `BrevoEmailSender` dropped every recipient as an **unknown
+        // recipient**, because `mok@expertslive.dk` and `sb@homeworkers.dk` are ORGANIZER MAILBOXES,
+        // not participant rows, and the per-recipient ring gate fails closed on an address it
+        // cannot resolve to a ring. Correctly — that is what stops a typo'd address being mailed.
+        //
+        // 🔴 THE SAME DEFECT, A THIRD TIME IN ONE DAY: §1060(i)'s auto-approve notice to info@, and
+        // §1061's audit/health reporting of the same drops. ⇒ The rule, written where the next
+        // person will hit it: **a mail to a FIXED operator mailbox must declare itself ops mail.**
+        // An address that is not a participant has no ring, and "no ring" means "dropped".
+        //
+        // 🔑 It is invisible from here: this method's own try/catch sees SUCCESS — the send did not
+        // throw, it was refused two layers down. Nothing in this file could have reported it.
+        using var _ = ctx?.Set(new Core.Email.EmailContext("sponsor-upload-notify", RingExempt: true));
 
         foreach (var to in spec.Notify)
         {

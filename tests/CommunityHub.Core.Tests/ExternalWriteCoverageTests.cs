@@ -74,6 +74,12 @@ public sealed class ExternalWriteCoverageTests
         ["AiHelperAssistant.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
         ["LlmTaskGuidanceGenerator.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
         ["SoMeIntroGenerator.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
+        ["SoMeTextEligibilityJudge.cs"] =
+            "Azure OpenAI inference (§1060(l)) — sends a session title + abstract and reads back a "
+            + "0/1 verdict. Mutates nothing outside CEH, exactly as SoMeIntroGenerator above; the "
+            + "guard governs WRITES, and its own doc states reads are never gated. 🛑 FINAL. "
+            + "⚠️ Note what it sends is session copy the event intends to PUBLISH, not personal data "
+            + "— if that ever changes, this exemption is void and the call needs its own decision.",
 
         ["JobTriggerService.cs"] =
             "Calls the hub's OWN job endpoints (an organizer pressing 'run now'). The work each job "

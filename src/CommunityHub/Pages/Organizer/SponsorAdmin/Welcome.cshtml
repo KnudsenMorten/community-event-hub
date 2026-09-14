@@ -87,7 +87,7 @@
             <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;min-width:560px;">
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>Company id</th>
+                    <th>Company</th>
                     <th style="text-align:right;">Coordinators</th>
                     <th style="text-align:right;">Signer-only</th>
                     <th style="text-align:right;">Welcome sent</th>
@@ -97,7 +97,7 @@
                 @foreach (var r in Model.Rows)
                 {
                     <tr style="border-bottom:1px solid #eee;">
-                        <td>@r.CompanyId</td>
+                        <td><strong>@r.CompanyName</strong><br /><span style="color:#888;font-size:12px;">#@r.CompanyId</span></td>
                         <td style="text-align:right;">@r.Coordinators</td>
                         <td style="text-align:right;color:#888;">@r.SignerOnly</td>
                         <td style="text-align:right;">@r.WelcomeSent / @r.Coordinators</td>

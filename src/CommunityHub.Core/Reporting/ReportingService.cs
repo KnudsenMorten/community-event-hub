@@ -1,3 +1,4 @@
+using CommunityHub.Core.Attendees;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Participants;
@@ -162,11 +163,12 @@ public sealed class ReportingService
         report.SponsorTaskDone = sponsorTasks.Count(t => t.State == TaskState.Done);
 
         // --- Attendees ------------------------------------------------------
-        report.AttendeeTotal = await _db.Attendees
-            .CountAsync(a => a.EventId == eventId, ct);
-        report.AttendeeMismatches = await _db.Attendees
-            .CountAsync(a => a.EventId == eventId
-                             && a.HasReconciliationMismatch, ct);
+        // §1086 — live tickets only. A cancelled ticket is not an attendee to report, and a
+        // cancelled ticket with a reconciliation mismatch is not a job for anybody: the row is kept
+        // as history (§326as), so counting it produced a chase list nobody could ever clear.
+        report.AttendeeTotal = await _db.Attendees.LiveIn(eventId).CountAsync(ct);
+        report.AttendeeMismatches = await _db.Attendees.LiveIn(eventId)
+            .CountAsync(a => a.HasReconciliationMismatch, ct);
 
         // --- Volunteer shift coverage --------------------------------------
         var coverage = new Dictionary<string, int>();

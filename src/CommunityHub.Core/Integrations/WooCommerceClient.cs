@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -113,10 +114,19 @@ public sealed class WooCommerceClient
     private readonly HttpClient _http;
     private readonly WooCommerceOptions _options;
 
-    public WooCommerceClient(HttpClient http, WooCommerceOptions options)
+    private readonly IExternalWriteGuard _writes;
+
+    public WooCommerceClient(
+        HttpClient http, WooCommerceOptions options, IExternalWriteGuard? writes = null)
     {
         _http = http;
         _options = options;
+        // 🔴 §1041 — the environment policy that stops DEV writing to the LIVE webshop. This client
+        // was read-only until §1165k added coupon creation, and `ExternalWriteCoverageTests` caught
+        // it on the first run: an ungated write here is exactly how a DEV run once created 53
+        // records in the live shop. Defaulting to allow-all matches the sibling clients; the real
+        // guard is injected in both hosts.
+        _writes = writes ?? new AllowAllExternalWrites();
 
         // WooCommerce REST: HTTP Basic with consumer key/secret.
         var creds = Convert.ToBase64String(Encoding.ASCII.GetBytes(
@@ -235,6 +245,262 @@ public sealed class WooCommerceClient
     /// returns a map keyed by product id; ids the shop doesn't return are
     /// simply absent.
     /// </summary>
+    /// <summary>
+    /// §1165 — one product as the swag catalogue needs it: what a sponsor sees, plus whether it can
+    /// still be bought.
+    /// </summary>
+    /// <param name="TeaserHtml">
+    /// The product's SHORT description. ⚠️ Raw HTML from WordPress — a renderer must treat it as
+    /// untrusted markup, not paste it into a page.
+    /// </param>
+    /// <param name="InStock">
+    /// 🔑 This is what makes "ordered ⇒ unavailable" free: the webshop already carries real stock,
+    /// and the live session slots use exactly this to stop being sellable once bought.
+    /// </param>
+    /// <param name="StockQuantity">
+    /// How many remain, when the shop tracks a count. Null when the product is stocked as a plain
+    /// in/out flag — which is NOT the same as zero, and a caller must not render it as "0 left".
+    /// </param>
+    public sealed record WooCatalogProduct(
+        long Id,
+        string Name,
+        string? Status,
+        string? TeaserHtml,
+        string? PriceText,
+        string? ImageUrl,
+        string? PermalinkUrl,
+        bool InStock,
+        int? StockQuantity,
+        IReadOnlyList<string> Categories);
+
+    /// <summary>
+    /// §1165 — every product in the shop, with the fields the sponsor swag catalogue renders.
+    /// </summary>
+    /// <remarks>
+    /// <para>Reads the SAME products endpoint the classifier already uses, so there is one place
+    /// that knows how a product is shaped. Category names are HTML-decoded here for the same reason
+    /// they are in <see cref="GetProductCategoriesAsync"/>: WooCommerce returns
+    /// <c>Community &amp;amp; Appreciation</c>, and a caller matching on <c>&amp;</c> would miss it.</para>
+    ///
+    /// <para>⚠️ Returns EVERY product; the caller filters by category. Filtering server-side would
+    /// need the category's numeric id, which is one more thing to pin and to get wrong after a
+    /// rename — and the shop is a few hundred products, read on demand.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<WooCatalogProduct>> GetAllProductsAsync(CancellationToken ct = default)
+    {
+        var all = new List<WooCatalogProduct>();
+        for (var page = 1; page <= 20; page++)
+        {
+            var url = $"{_options.BaseUrl.TrimEnd('/')}/wp-json/wc/v3/products"
+                + $"?per_page={ProductsBatchSize}&page={page}";
+
+            using var resp = await _http.GetAsync(url, ct);
+            resp.EnsureSuccessStatusCode();
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) break;
+
+            var count = 0;
+            foreach (var p in doc.RootElement.EnumerateArray())
+            {
+                count++;
+                var id = GetLong(p, "id");
+                if (id <= 0) continue;
+
+                var cats = new List<string>();
+                if (p.TryGetProperty("categories", out var catArr) && catArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var c in catArr.EnumerateArray())
+                    {
+                        var n = GetString(c, "name");
+                        if (!string.IsNullOrWhiteSpace(n)) cats.Add(WebUtility.HtmlDecode(n));
+                    }
+                }
+
+                string? image = null;
+                if (p.TryGetProperty("images", out var imgs) && imgs.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var i in imgs.EnumerateArray())
+                    {
+                        var src = GetString(i, "src");
+                        if (!string.IsNullOrWhiteSpace(src)) { image = src; break; }
+                    }
+                }
+
+                // "instock" / "outofstock" / "onbackorder". ⚠️ Anything we do not recognise is
+                // treated as NOT available: offering an item we cannot confirm is sellable is the
+                // expensive direction of the two.
+                var stockStatus = GetString(p, "stock_status");
+                var inStock = string.Equals(stockStatus, "instock", StringComparison.OrdinalIgnoreCase);
+
+                int? stockQty = null;
+                if (p.TryGetProperty("stock_quantity", out var sq) && sq.ValueKind == JsonValueKind.Number
+                    && sq.TryGetInt32(out var q))
+                {
+                    stockQty = q;
+                }
+
+                all.Add(new WooCatalogProduct(
+                    Id: id,
+                    Name: WebUtility.HtmlDecode(GetString(p, "name")) ?? string.Empty,
+                    // 🔴 §1165n — WHAT STATE IS THIS PRODUCT IN? Measured on the live shop
+                    // 2026-09-02: the products endpoint returns 44 DRAFT and 2 PRIVATE products
+                    // alongside 54 published ones, because its default status filter is "any".
+                    // Without this the catalogue would show sponsors half-finished products.
+                    Status: NullIfBlank(GetString(p, "status")),
+                    TeaserHtml: NullIfBlank(GetString(p, "short_description")),
+                    PriceText: NullIfBlank(GetString(p, "price")),
+                    ImageUrl: image,
+                    PermalinkUrl: NullIfBlank(GetString(p, "permalink")),
+                    InStock: inStock,
+                    StockQuantity: stockQty,
+                    Categories: cats));
+            }
+
+            if (count < ProductsBatchSize) break;
+        }
+        return all;
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+    /// <summary>The result of creating a coupon: its Woo id, or why it could not be created.</summary>
+    public sealed record WooCouponResult(long? Id, string? Error)
+    {
+        public bool Ok => Id is not null;
+    }
+
+    /// <summary>
+    /// §1165k — resolve a product-category NAME to its Woo id.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Needed because a coupon is restricted by category ID, while everything else in this
+    /// codebase names categories by their TEXT — deliberately, because a name survives a category
+    /// being recreated and an id does not. Resolving late keeps the config human-editable.
+    /// <para>Returns null when the name matches nothing, which the caller must treat as "do not
+    /// create the coupon" rather than as "no restriction needed" — an unrestricted credit is
+    /// spendable on anything in the shop.</para>
+    /// </remarks>
+    public async Task<long?> FindProductCategoryIdAsync(string categoryName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName)) return null;
+
+        for (var page = 1; page <= 10; page++)
+        {
+            var url = $"{_options.BaseUrl.TrimEnd('/')}/wp-json/wc/v3/products/categories"
+                + $"?per_page=100&page={page}";
+            using var resp = await _http.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+
+            var count = 0;
+            foreach (var c in doc.RootElement.EnumerateArray())
+            {
+                count++;
+                var name = WebUtility.HtmlDecode(GetString(c, "name"));
+                if (string.Equals(name?.Trim(), categoryName.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    var id = GetLong(c, "id");
+                    return id > 0 ? id : null;
+                }
+            }
+            if (count < 100) break;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// §1165k — create a fixed-value coupon a sponsor can spend on catalogue items.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-01: <i>"add option to provide a coupon/discount code i provide them
+    /// with a euro value"</i> — and, asked who should create it, <b>CEH through the API</b>.</para>
+    ///
+    /// <para>🔑 <b>That choice is only worth making because of the RESTRICTIONS.</b> A coupon typed
+    /// by hand is one forgotten checkbox away from being spendable twice, on anything, for ever, by
+    /// whoever it was forwarded to. Setting them in code makes them right every time:</para>
+    /// <list type="bullet">
+    ///   <item><c>fixed_cart</c> + amount — a euro value, not a percentage.</item>
+    ///   <item><c>usage_limit = 1</c> — spent once; without it a code is re-usable indefinitely.</item>
+    ///   <item><c>product_categories</c> — spendable only on catalogue items, so a swag credit
+    ///   cannot quietly pay for a booth.</item>
+    ///   <item><c>date_expires</c> — a credit with no end is a liability with no end.</item>
+    ///   <item><c>email_restrictions</c> — usable only by that sponsor's own contacts, so forwarding
+    ///   the code does not spend our money.</item>
+    ///   <item><c>individual_use</c> — not combinable with another discount, because two stacked
+    ///   discounts on one order is not something anybody intended.</item>
+    /// </list>
+    ///
+    /// <para>🔒 The SHOP still decides whether a discount applies at checkout. CEH can misreport a
+    /// credit; it can never give money away.</para>
+    /// </remarks>
+    public async Task<WooCouponResult> CreateCouponAsync(
+        string code,
+        decimal amount,
+        long? restrictToCategoryId,
+        DateOnly? expiresOn,
+        IReadOnlyCollection<string>? emailRestrictions,
+        string? description,
+        CancellationToken ct = default)
+    {
+        // 🔴 §1041 — ASK THE GUARD BEFORE WRITING. A coupon created from DEV would be a real,
+        // spendable discount in the live shop.
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(CreateCouponAsync), ct))
+            return new(null, "External writes to the webshop are disabled in this environment.");
+
+        if (string.IsNullOrWhiteSpace(code)) return new(null, "No coupon code was given.");
+        if (amount <= 0) return new(null, "A coupon must be worth more than zero.");
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["code"] = code.Trim(),
+            ["discount_type"] = "fixed_cart",
+            ["amount"] = amount.ToString("0.00", CultureInfo.InvariantCulture),
+            ["individual_use"] = true,
+            ["usage_limit"] = 1,
+            ["usage_limit_per_user"] = 1,
+        };
+
+        if (!string.IsNullOrWhiteSpace(description)) payload["description"] = description;
+        if (restrictToCategoryId is long catId) payload["product_categories"] = new[] { catId };
+        if (expiresOn is DateOnly d) payload["date_expires"] = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (emailRestrictions is { Count: > 0 })
+            payload["email_restrictions"] = emailRestrictions.Where(e => !string.IsNullOrWhiteSpace(e)).ToArray();
+
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/wp-json/wc/v3/coupons";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+
+        using var resp = await _http.SendAsync(req, ct);
+        string body;
+        try { body = await resp.Content.ReadAsStringAsync(ct); } catch { body = "(unreadable)"; }
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            if (body.Length > 400) body = body[..400];
+            return new(null, $"HTTP {(int)resp.StatusCode} — {body}");
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var id = GetLong(doc.RootElement, "id");
+            // ⚠️ A success status with no id is NOT a success. Recording a credit whose coupon may
+            // not exist would promise a sponsor money the shop refuses at checkout.
+            return id > 0 ? new(id, null) : new(null, "The webshop accepted the coupon but returned no id.");
+        }
+        catch (JsonException)
+        {
+            return new(null, "The webshop's response to the coupon create could not be read.");
+        }
+    }
+
+
     public async Task<IReadOnlyDictionary<long, string>> GetProductCategoriesAsync(
         IEnumerable<long> productIds,
         CancellationToken ct = default)

@@ -73,6 +73,12 @@ public sealed class GetStartedDigestBuilder
     private readonly SponsorWizardService _sponsorWizard;
     private readonly EmailReminderCadenceService? _cadence;
 
+    /// <summary>
+    /// §1081 stage 3 — the SHARED sponsor audience rule. Optional so existing constructions keep
+    /// compiling; null ⇒ the flag-only fallback this builder used to apply inline.
+    /// </summary>
+    private readonly SponsorRecipientResolver? _sponsorRecipients;
+
     /// <summary>The reminder TYPE — the ledger key this mail's history is stored under.</summary>
     public const string ReminderTypeName = "getstarted-digest";
 
@@ -85,8 +91,11 @@ public sealed class GetStartedDigestBuilder
         AttendeeWizardService attendeeWizard,
         SponsorWizardService sponsorWizard,
         // §707.11 — optional so existing constructions keep compiling; null ⇒ the shipped default.
-        EmailReminderCadenceService? cadence = null)
+        EmailReminderCadenceService? cadence = null,
+        // §1081 stage 3 — optional + last, same pattern; null ⇒ the flag-only fallback.
+        SponsorRecipientResolver? sponsorRecipients = null)
     {
+        _sponsorRecipients = sponsorRecipients;
         _db = db;
         _templates = templates;
         _clock = clock;
@@ -136,14 +145,50 @@ public sealed class GetStartedDigestBuilder
             .ToListAsync(ct);
 
         var messages = new List<ReminderMessage>();
+
+        // §1081 stage A — sponsor facts are COMPANY state, and a company normally has several
+        // coordinators due the same digest on the same day. Read once, reused for all of them.
+        var companyFacts = new Dictionary<string, SponsorCompanyDigestFacts>(StringComparer.Ordinal);
+
+        // §1081 stage 3 — resolved coordinator ids per company, same reasoning: one answer, reused
+        // by every coordinator of that company in this pass.
+        var coordinatorIds = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+
         foreach (var p in people)
         {
             if (string.IsNullOrWhiteSpace(p.Email)) continue;
 
-            // §7c sponsor audience rule: sponsor mail goes to event-coordinator
-            // contacts only (the company-scoped wizard is the coordinator's to finish;
-            // signer-only / booth-member contacts are never nagged about it).
-            if (p.Role == ParticipantRole.Sponsor && !p.IsEventCoordinator) continue;
+            // §7c sponsor audience rule: sponsor mail goes to event-coordinator contacts only (the
+            // company-scoped wizard is the coordinator's to finish; signer-only / booth-member
+            // contacts are never nagged about it).
+            //
+            // 🔴 §1081 stage 3 — ASKED THROUGH THE SHARED RESOLVER, not re-implemented here. This
+            // line used to be `!p.IsEventCoordinator`, which is only the FALLBACK half of the rule:
+            // SponsorRecipientResolver treats the e-conomic Role-2 set as PRIMARY and the hub flag
+            // as an additive override. ⇒ A coordinator who holds Role 2 in ERP but whose hub flag
+            // was never set received sponsor TASK reminders (which route through the resolver) and
+            // silently did NOT receive the Get Started digest. One question, two answers — §366.
+            //
+            // 🔑 Resolved ONCE PER COMPANY and cached: a company normally has several coordinators
+            // in this same loop, and the resolver may call e-conomic.
+            if (p.Role == ParticipantRole.Sponsor)
+            {
+                if (_sponsorRecipients is null)
+                {
+                    if (!p.IsEventCoordinator) continue;      // fallback: exactly the old behaviour
+                }
+                else
+                {
+                    var companyId = p.SponsorCompanyId ?? string.Empty;
+                    if (!coordinatorIds.TryGetValue(companyId, out var ids))
+                    {
+                        ids = (await _sponsorRecipients.ResolveAsync(eventId, companyId, ct))
+                            .Select(r => r.ParticipantId).ToHashSet();
+                        coordinatorIds[companyId] = ids;
+                    }
+                    if (!ids.Contains(p.Id)) continue;
+                }
+            }
 
             // 🔒 §738 — NEVER WELCOMED ⇒ NEVER CHASED. This used to fall back to CreatedAt, so a
             // MISSING welcome stamp read as "welcomed in June" and the person was maximally OVERDUE
@@ -174,9 +219,9 @@ public sealed class GetStartedDigestBuilder
             if (!EmailReminderCadenceService.IsDue(today, anchor, lastSent, intervalDays)) continue;
 
             // Enumerate the role's wizard via the WIZARD SERVICE itself (never tasks).
-            var wizard = await OpenStepsAsync(eventId, p.Id, p.Role, ct);
+            var wizard = await StepsForDigestAsync(eventId, p.Id, p.Role, companyFacts, ct);
             if (wizard is null) continue;                       // role has no wizard / no company
-            var (openKeys, titlePrefix, route) = wizard.Value;
+            var (openKeys, doneKeys, titlePrefix, route, missingFieldKeys, credits) = wizard;
             if (openKeys.Count == 0) continue;                  // 100% complete — digest stops
 
             // 🔴 §968 — NO STEP IS EXEMPT. There used to be a skip here for people whose only open
@@ -194,8 +239,57 @@ public sealed class GetStartedDigestBuilder
             tokens["eventDisplayName"] = ev.DisplayName ?? string.Empty;
             tokens["openStepCount"] = openKeys.Count.ToString();
             tokens["getStartedPath"] = route;
+
+            // 🔴 §1081 stage A — NAME THE FIELDS, NOT JUST THE STEP. A sponsor chased for "Company
+            // details" cannot tell which of three fields is blank, and §854 already settled that
+            // shape: what somebody has to act on must be named, because "some sponsors" is not
+            // chaseable. The missing-field list is attached to the step it belongs to.
             tokens["openStepsHtml"] = string.Concat(openKeys.Select(k =>
-                $"<li style=\"margin:0 0 6px;\">{WebUtility.HtmlEncode(TitleFor(titlePrefix, k))}</li>"));
+            {
+                var title = WebUtility.HtmlEncode(TitleFor(titlePrefix, k));
+                var detail = k == "company" && missingFieldKeys.Count > 0
+                    ? " — <span style=\"color:#6b7280;\">"
+                      + WebUtility.HtmlEncode(string.Join(", ", missingFieldKeys.Select(FieldTitleFor)))
+                      + "</span>"
+                    : string.Empty;
+                return $"<li style=\"margin:0 0 6px;\">{title}{detail}</li>";
+            }));
+
+            // 🔑 §1081 stage A — THE REASON THIS WHOLE CHANGE EXISTS. A coordinator was chased while
+            // a colleague had already done several steps, and the mail never said so — so it read as
+            // the hub not knowing, and the operator as not being listened to. Both were right: the
+            // steps named below WERE done, and the ones above genuinely were not. Saying both is what
+            // turns an accusation into a shared checklist.
+            tokens["doneStepCount"] = doneKeys.Count.ToString();
+
+            // 🔒 The whole block is ONE token, so nothing is emitted when nothing is done yet — a
+            // heading reading "Already done (0):" above an empty box would be worse than silence, and
+            // that is the state a brand-new sponsor is in.
+            var doneItems = string.Concat(doneKeys.Select(k =>
+            {
+                var title = WebUtility.HtmlEncode(TitleFor(titlePrefix, k));
+                if (!credits.TryGetValue(k, out var credit)) return $"<li style=\"margin:0 0 6px;\">{title}</li>";
+                // Attribution ONLY where the hub actually recorded it — never inferred.
+                var by = WebUtility.HtmlEncode(credit.Email);
+                // 🔒 InvariantCulture, deliberately: this date sits inside an English template body,
+                // and a server whose thread culture happens to be da-DK would otherwise render a
+                // Danish month into an English sentence. The rest of the mail's copy is resx-driven;
+                // this fragment is composed here, so it has to pick its own culture rather than
+                // inherit whatever the job host was started with.
+                var when = credit.When is { } w
+                    ? " on " + w.UtcDateTime.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)
+                    : string.Empty;
+                return $"<li style=\"margin:0 0 6px;\">{title} — <span style=\"color:#6b7280;\">"
+                     + $"{by}{when}</span></li>";
+            }));
+            tokens["doneBlockHtml"] = doneKeys.Count == 0
+                ? string.Empty
+                : $"<p style=\"margin:0 0 8px;font-weight:600;\">Already done ({doneKeys.Count}):</p>"
+                  + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 16px;\">"
+                  + "<tr><td style=\"background-color:#f4faf5;border-left:3px solid #4caf50;padding:14px 18px;border-radius:4px;\">"
+                  + $"<ul style=\"margin:0;padding:0 0 0 18px;line-height:1.6;\">{doneItems}</ul>"
+                  + "</td></tr></table>";
+
             var rendered = _templates.Render(TemplateName, tokens);
 
             messages.Add(new ReminderMessage(
@@ -217,45 +311,142 @@ public sealed class GetStartedDigestBuilder
     }
 
     /// <summary>
-    /// The OPEN step keys for this participant's wizard, with the resx title prefix and
-    /// the wizard route the digest's magic-link button deep-links to — or null when the
-    /// role has no wizard for this person (e.g. a sponsor contact without a company).
-    /// Sponsor steps with an UNDETERMINABLE state (Done == null, e.g. e-conomic briefly
-    /// unavailable) are not counted as open — mirroring the wizard page, which never
-    /// makes them the "Continue" target.
+    /// §1081 stage A — what the digest needs to describe the checklist HONESTLY: what is still open,
+    /// what is already DONE (and, for a sponsor, who did it and when), and — for the sponsor company
+    /// step — WHICH FIELDS are missing.
     /// </summary>
-    private async Task<(IReadOnlyList<string> OpenKeys, string TitlePrefix, string Route)?>
-        OpenStepsAsync(int eventId, int participantId, ParticipantRole role, CancellationToken ct)
+    /// <param name="Credits">Step key → "completed by X on date", where we actually know. Empty for
+    /// the roles whose steps are personal: attribution only means something for a COMPANY checklist,
+    /// where the reader may not be the person who did the work.</param>
+    private sealed record DigestSteps(
+        IReadOnlyList<string> OpenKeys,
+        IReadOnlyList<string> DoneKeys,
+        string TitlePrefix,
+        string Route,
+        IReadOnlyList<string> MissingFieldKeys,
+        IReadOnlyDictionary<string, (string Email, DateTimeOffset? When)> Credits);
+
+    /// <summary>
+    /// The step keys for this participant's wizard, with the resx title prefix and the wizard route
+    /// the digest's magic-link button deep-links to — or null when the role has no wizard for this
+    /// person (e.g. a sponsor contact without a company).
+    /// <para>Sponsor steps with an UNDETERMINABLE state (<c>Done == null</c>) are counted as NEITHER
+    /// open nor done — mirroring the wizard page, which never makes them the "Continue" target, and
+    /// §1081's rule that a step we cannot evaluate must not be presented as an obligation.</para>
+    /// </summary>
+    private async Task<DigestSteps?> StepsForDigestAsync(
+        int eventId, int participantId, ParticipantRole role,
+        Dictionary<string, SponsorCompanyDigestFacts> companyFacts, CancellationToken ct)
     {
+        // The three wizards return three unrelated step records (SpeakerWizardStep / RoleWizardStep /
+        // SponsorWizardStep) with no shared interface, so each call site projects to (key, done)
+        // before this runs. 🔑 No attribution: these steps are PERSONAL, and "completed by you" is
+        // noise. Attribution earns its place only on a COMPANY checklist, where the reader may not be
+        // the person who did the work.
+        static DigestSteps Personal(IEnumerable<(string Key, bool Done)> steps, string prefix) =>
+            new(steps.Where(s => !s.Done).Select(s => s.Key).ToList(),
+                steps.Where(s => s.Done).Select(s => s.Key).ToList(),
+                prefix, "/Forms/Wizard",
+                Array.Empty<string>(),
+                new Dictionary<string, (string, DateTimeOffset?)>());
+
         switch (role)
         {
             case ParticipantRole.Speaker:
-            {
-                var v = await _speakerWizard.BuildAsync(eventId, participantId, ct);
-                return (v.Steps.Where(s => !s.Done).Select(s => s.Key).ToList(),
-                    "SpeakerWiz.Step.", "/Forms/Wizard");
-            }
+                return Personal(
+                    (await _speakerWizard.BuildAsync(eventId, participantId, ct))
+                        .Steps.Select(s => (s.Key, s.Done)),
+                    "SpeakerWiz.Step.");
+
             case ParticipantRole.Sponsor:
             {
                 var v = await _sponsorWizard.BuildAsync(eventId, participantId, ct);
                 if (v is null) return null; // no company link ⇒ no wizard
-                return (v.Steps.Where(s => s.Done == false).Select(s => s.Key).ToList(),
-                    "SponsorWiz.Step.", "/Forms/Wizard");   // §557: all roles go to the new Get Started
+
+                // 🔑 The sponsor checklist is COMPANY state, so the facts behind it are read ONCE per
+                // company and shared by every coordinator due a digest — the same row, the same
+                // answer, and one query set instead of one per person.
+                var companyId = await _db.Participants.AsNoTracking()
+                    .Where(p => p.Id == participantId)
+                    .Select(p => p.SponsorCompanyId)
+                    .FirstOrDefaultAsync(ct) ?? string.Empty;
+
+                if (!companyFacts.TryGetValue(companyId, out var facts))
+                {
+                    facts = await LoadSponsorFactsAsync(eventId, companyId, ct);
+                    companyFacts[companyId] = facts;
+                }
+
+                return new DigestSteps(
+                    v.Steps.Where(s => s.Done == false).Select(s => s.Key).ToList(),
+                    v.Steps.Where(s => s.Done == true).Select(s => s.Key).ToList(),
+                    "SponsorWiz.Step.", "/Forms/Wizard",   // §557: all roles go to the new Get Started
+                    facts.MissingFieldKeys,
+                    facts.Credits);
             }
+
             case ParticipantRole.Attendee:
-            {
-                var v = await _attendeeWizard.BuildAsync(eventId, participantId, ct);
-                return (v.Steps.Where(s => !s.Done).Select(s => s.Key).ToList(),
-                    "RoleWiz.Step.", "/Forms/Wizard");
-            }
+                return Personal(
+                    (await _attendeeWizard.BuildAsync(eventId, participantId, ct))
+                        .Steps.Select(s => (s.Key, s.Done)),
+                    "RoleWiz.Step.");
+
             default:
             {
                 if (!RoleWizardService.Handles(role)) return null;
-                var v = await _roleWizard.BuildAsync(eventId, participantId, ct);
-                return (v.Steps.Where(s => !s.Done).Select(s => s.Key).ToList(),
-                    "RoleWiz.Step.", "/Forms/Wizard");
+                return Personal(
+                    (await _roleWizard.BuildAsync(eventId, participantId, ct))
+                        .Steps.Select(s => (s.Key, s.Done)),
+                    "RoleWiz.Step.");
             }
         }
+    }
+
+    /// <summary>
+    /// §1081 stage A — the per-COMPANY facts the sponsor digest needs beyond the step list:
+    /// which content fields are still blank, and who completed the steps that ARE done.
+    /// </summary>
+    private sealed record SponsorCompanyDigestFacts(
+        IReadOnlyList<string> MissingFieldKeys,
+        IReadOnlyDictionary<string, (string Email, DateTimeOffset? When)> Credits);
+
+    /// <summary>
+    /// Reads the attribution the hub genuinely holds — never invents it. Where a step was completed
+    /// by a route that recorded no actor, it simply appears as done with no name, which is honest and
+    /// still answers the question the reported incident turned on (*"a colleague already did this"*).
+    /// </summary>
+    private async Task<SponsorCompanyDigestFacts> LoadSponsorFactsAsync(
+        int eventId, string companyId, CancellationToken ct)
+    {
+        var credits = new Dictionary<string, (string Email, DateTimeOffset? When)>(StringComparer.Ordinal);
+
+        var info = await _db.SponsorInfos.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
+
+        var content = Core.Sponsors.SponsorCompanyContent.StatusOf(info);
+
+        if (info is not null)
+        {
+            if (content.AllDelivered && !string.IsNullOrWhiteSpace(info.LastUpdatedByEmail))
+                credits["company"] = (info.LastUpdatedByEmail!, info.UpdatedAt);
+
+            if (!string.IsNullOrWhiteSpace(info.BoothCheckInSlot)
+                && !string.IsNullOrWhiteSpace(info.BoothCheckInSetByEmail))
+                credits["booth-checkin"] = (info.BoothCheckInSetByEmail!, info.BoothCheckInSetAt);
+        }
+
+        // The logo step — the one that produced the reported complaint. The audit records who
+        // uploaded each kind and when; the LATEST of the two is the honest "completed on".
+        var lastLogo = await _db.SponsorUploadAudits.AsNoTracking()
+            .Where(a => a.EventId == eventId && a.SponsorCompanyId == companyId
+                        && (a.Kind == "some" || a.Kind == "print"))
+            .OrderByDescending(a => a.UploadedAt)
+            .Select(a => new { a.UploadedByEmail, a.UploadedAt })
+            .FirstOrDefaultAsync(ct);
+        if (lastLogo is not null && !string.IsNullOrWhiteSpace(lastLogo.UploadedByEmail))
+            credits["logos"] = (lastLogo.UploadedByEmail, lastLogo.UploadedAt);
+
+        return new SponsorCompanyDigestFacts(content.MissingFieldKeys, credits);
     }
 
     /// <summary>The step's GUI title from SharedResource.resx (fallback: the key itself).</summary>
@@ -263,5 +454,19 @@ public sealed class GetStartedDigestBuilder
     {
         try { return StepTitles.Value.GetString(prefix + key) ?? key; }
         catch { return key; }
+    }
+
+    /// <summary>
+    /// §1081 — a missing CONTENT FIELD's label, from the same resx the form labels come from, so the
+    /// mail names the field the sponsor will actually see on the page.
+    /// </summary>
+    private static string FieldTitleFor(string fieldKey)
+    {
+        try
+        {
+            return StepTitles.Value.GetString(
+                Core.Sponsors.SponsorCompanyContent.ResourcePrefix + fieldKey) ?? fieldKey;
+        }
+        catch { return fieldKey; }
     }
 }

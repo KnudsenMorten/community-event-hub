@@ -60,12 +60,25 @@ public sealed record SponsorDeliverableStage(
 /// <param name="CompanyName">Display name (organizer board); falls back to the id.</param>
 /// <param name="IsExhibitor">True when the company has a physical booth (booth stages apply).</param>
 /// <param name="Stages">Every APPLICABLE stage, in the calculator's input (lifecycle) order.</param>
+/// <param name="MissingContentFields">
+/// §1085 — the CEH-owned content fields this company has not filled in, as
+/// <see cref="SponsorCompanyContent"/> keys (empty when the onboarding stage is done).
+/// <para>🔑 <b>Why the board carries this and not just a red chip.</b> §854's rule — what somebody
+/// has to act on must be NAMED — is why the sponsor's own reminder stops saying "Company details"
+/// and starts saying which of the three fields is blank. An organizer chasing that sponsor needs the
+/// same sentence, or the two of them are looking at different information about one fact.</para>
+/// </param>
 public sealed record SponsorDeliverables(
     string CompanyId,
     string CompanyName,
     bool IsExhibitor,
-    IReadOnlyList<SponsorDeliverableStage> Stages)
+    IReadOnlyList<SponsorDeliverableStage> Stages,
+    IReadOnlyList<string>? MissingContentFields = null)
 {
+    /// <summary>The blank CEH-owned content fields, never null. See the ctor param.</summary>
+    public IReadOnlyList<string> MissingContent =>
+        MissingContentFields ?? Array.Empty<string>();
+
     /// <summary>Number of applicable stages (the score denominator).</summary>
     public int ApplicableCount => Stages.Count;
 
@@ -132,7 +145,10 @@ public static class SponsorDeliverablesCalculator
         string companyName,
         bool isExhibitor,
         DateOnly today,
-        IEnumerable<SponsorDeliverableSignal> signals)
+        IEnumerable<SponsorDeliverableSignal> signals,
+        // §1085 — the blank CEH-owned content fields, so the organizer board can NAME what is
+        // outstanding instead of showing a red chip. Optional + last so existing callers compile.
+        IReadOnlyList<string>? missingContentFields = null)
     {
         ArgumentNullException.ThrowIfNull(signals);
 
@@ -147,6 +163,7 @@ public static class SponsorDeliverablesCalculator
                 s.FixLink))
             .ToList();
 
-        return new SponsorDeliverables(companyId, companyName, isExhibitor, stages);
+        return new SponsorDeliverables(
+            companyId, companyName, isExhibitor, stages, missingContentFields);
     }
 }

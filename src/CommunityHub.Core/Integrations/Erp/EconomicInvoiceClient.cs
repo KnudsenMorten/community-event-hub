@@ -26,7 +26,26 @@ public sealed record EconomicCustomerDetail(
     string? Ean,
     int? AttentionContactNumber,
     int? LayoutNumber = null,
-    string? LayoutSelf = null);
+    string? LayoutSelf = null,
+
+    /// <summary>
+    /// §1140 — the customer's CVR / VAT number, e-conomic's <c>corporateIdentificationNumber</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠️ <b>The write side has always sent this field; only the READ was missing.</b>
+    /// <c>EconomicErpClient</c> puts <c>corporateIdentificationNumber</c> into both its create and
+    /// update payloads, so the value round-trips into the ERP perfectly — it simply never came back,
+    /// which is why the webshop's "DATA OWNER: ERP" block could never show it.</para>
+    ///
+    /// <para>🔒 <b>Kept VERBATIM — no digits-only normalisation.</b> This is not necessarily a Danish
+    /// CVR: the case that surfaced it was a DUTCH VAT number, <c>855963876B01</c>, which contains
+    /// letters. Anything that stripped non-digits, or ran it through <c>CvrValidator</c> as a gate,
+    /// would drop or reject a perfectly valid foreign VAT id.</para>
+    /// </remarks>
+    string? CorporateIdentificationNumber = null,
+
+    /// <summary>§1140 — e-conomic's <c>telephoneAndFaxNumber</c>, the webshop's ERP-owned Phone.</summary>
+    string? Phone = null);
 
 /// <summary>One line on a draft invoice, in the shape e-conomic stores.</summary>
 public sealed record EconomicInvoiceLine(
@@ -261,7 +280,12 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
             // §811(d) — the customer's own layout decides the invoice LANGUAGE. Null for a customer
             // that has none, which is when the configured fallback applies.
             LayoutNumber: Nested(c, "layout", "layoutNumber"),
-            LayoutSelf: NestedStr(c, "layout", "self"));
+            LayoutSelf: NestedStr(c, "layout", "self"),
+            // §1140 — the ERP-owned identity fields the webshop's "DATA OWNER: ERP" block shows.
+            // 🔒 Read VERBATIM: a CVR/VAT id may be foreign and alphanumeric (the Dutch
+            // `855963876B01` that surfaced this), so nothing here strips or validates it.
+            CorporateIdentificationNumber: Str(c, "corporateIdentificationNumber"),
+            Phone: Str(c, "telephoneAndFaxNumber"));
     }
 
     public async Task<(int LayoutNumber, string? Self)?> FindLayoutAsync(
@@ -286,6 +310,35 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
 
     public async Task<int> CreateDraftInvoiceAsync(EconomicDraftInvoice invoice, CancellationToken ct = default)
     {
+        // 🔴 §1119 — INVOICES ARE CREATED IN PRODUCTION ONLY, AND THIS IS THE ONLY METHOD THAT
+        // CREATES ONE.
+        //
+        // Operator 2026-08-21, having said it eight times: *"no erp create of invoice from dev. this
+        // can only happend on prod"*.
+        //
+        // 🔑 Put HERE rather than at each caller because "here" is provably every caller: the coupon
+        // sweep, the coupon prepaid button and the webshop sweep all reach e-conomic through this one
+        // method, and so will the next one. A gate per caller is a gate somebody forgets.
+        //
+        // ⚠️ The DEV hole this closes was real and one app setting wide. The JOBS host swaps in
+        // TestModeEconomicInvoiceClient when TestMode is on, so DEV's sweeps never reached e-conomic —
+        // but the WEB host registers the LIVE client unconditionally (Program.cs §786), with real
+        // tokens against the real agreement, so /Organizer/CouponInvoicing's "Create Invoice" button
+        // was held back by nothing except `Invoicing:DryRun` defaulting to true on a host that never
+        // sets it. A default is not a policy.
+        //
+        // 🔒 Reads stay live on DEV, deliberately — §1037: *"as a general rule, importing into ceh is
+        // 100% fine - but sending data out from dev is controlled"*. Looking up a customer or listing
+        // what is already invoiced changes nothing in e-conomic; creating a draft does.
+        if (!await _writes.AllowAsync(
+                ExternalSystems.ErpInvoiceCreate, nameof(CreateDraftInvoiceAsync), ct))
+        {
+            throw new InvalidOperationException(
+                "e-conomic draft invoice refused: this host may not CREATE invoices "
+                + "(Integrations:ExternalWrites:ErpInvoiceCreate, or the "
+                + "Integrations:AllowExternalWrites default — §1119). Invoicing happens on PROD only.");
+        }
+
         // §340-H — the same guard the other ERP writes use, and it THROWS for the same reason:
         // there is no meaningful "did nothing" return value for a create, and swallowing it would
         // let the caller believe an invoice exists.

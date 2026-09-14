@@ -29,7 +29,29 @@ public sealed class LogisticsRecipients
     public const string SectionName = "LogisticsMail";
 
     /// <summary>Where everything goes until the reports are approved.</summary>
-    public string ReviewMailbox { get; set; } = "mok@expertslive.dk";
+    /// <remarks>
+    /// <para>§1076 — <b>the organizer mailbox, not the operator's personal one.</b> Operator
+    /// 2026-08-11: <i>"change the logistics mail to go to info@expertslive.dk"</i>, applying his
+    /// general rule: <b>ops alerts → the operator; event-related action mail → info@</b>. Logistics
+    /// reports (venue, hotel, catering, furniture) are event actions someone must act on, so they
+    /// belong where the team can see them rather than in one person's inbox.</para>
+    ///
+    /// <para>⚠️ This is not a small blast radius: <see cref="ApprovedForRealRecipients"/> is FALSE,
+    /// so <b>every</b> logistics notification is routed here — none reach a venue or supplier yet.
+    /// Changing this address therefore moves the whole logistics stream at once.</para>
+    ///
+    /// <para>🔒 Verified 2026-08-11 that NEITHER PROD host sets a <c>LogisticsMail__*</c> app
+    /// setting, so this default is what actually runs — the change has effect rather than being
+    /// silently overridden.</para>
+    /// </remarks>
+    public string ReviewMailbox { get; set; } = DefaultReviewMailbox;
+
+    /// <summary>
+    /// The shipped review mailbox. 🔑 A named constant so the TESTS assert the RULE ("everything goes
+    /// to the review mailbox until approved") rather than a literal address — three tests had the old
+    /// address typed into them and failed on a recipient change that broke no behaviour at all.
+    /// </summary>
+    public const string DefaultReviewMailbox = "info@expertslive.dk";
 
     /// <summary>
     /// 🔴 FALSE until the operator has approved the generated spreadsheets. While false, EVERY

@@ -46,6 +46,12 @@ public static class AuditActions
     /// <summary>A task was ticked off / re-opened from the task list.</summary>
     public const string TaskComplete = "task.complete";
     public const string TaskReopen = "task.reopen";
+
+    /// <summary>§1216 — one LinkedIn company-page post went out (per post, not per run).</summary>
+    public const string SoMePostPublished = "some.post-published";
+
+    /// <summary>§1216 — one LinkedIn company-page post failed to publish.</summary>
+    public const string SoMePostFailed = "some.post-failed";
 }
 
 /// <summary>

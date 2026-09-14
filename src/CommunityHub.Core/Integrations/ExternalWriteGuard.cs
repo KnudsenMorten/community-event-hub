@@ -103,6 +103,27 @@ public static class ExternalSystems
     public const string Webshop = "Webshop";
 
     /// <summary>
+    /// 🔴 §1119 — CREATING AN INVOICE, AS ITS OWN CEILING, SEPARATE FROM THE REST OF <see cref="Erp"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-21, for the eighth time: <i>"no erp create of invoice from dev. this
+    /// can only happend on prod"</i>. ⚠️ DEV could not honour that through <see cref="Erp"/>, because
+    /// §1037 granted DEV e-conomic writes deliberately — <i>"dev is allowed to readwrite to erp"</i> —
+    /// and that grant is still correct for customers, contacts and orders. Only INVOICES are
+    /// production-only, so only invoices need a narrower ceiling.</para>
+    ///
+    /// <para>🔑 <b>It needs no app setting anywhere.</b> An unlisted system falls back to
+    /// <c>Integrations:AllowExternalWrites</c> — <c>false</c> on both DEV hosts, <c>true</c> on both
+    /// PROD hosts (verified 2026-08-21) — so the correct answer is already configured in each
+    /// environment and nothing has to be remembered at deploy time.</para>
+    ///
+    /// <para>🔒 Why not TestMode: the web host does not bind <c>TestModeOptions</c> at all, so a gate
+    /// built on it would be <c>null</c> — and silently open — in exactly the host that owns the
+    /// "Create Invoice" button. This ceiling is read from config both hosts already emit.</para>
+    /// </remarks>
+    public const string ErpInvoiceCreate = "e-conomic invoice creation";
+
+    /// <summary>
     /// The settings key for a system name. 🔑 An ALIAS, not a slug of the display name: nobody
     /// should have to write <c>Integrations:ExternalWrites:Zoho Backstage</c> (a key with a space)
     /// or guess that e-conomic's hyphen survives.
@@ -111,6 +132,7 @@ public static class ExternalSystems
     {
         Zoho => "Zoho",
         Erp => "Erp",
+        ErpInvoiceCreate => "ErpInvoiceCreate",
         LinkedIn => "LinkedIn",
         SharePoint => "SharePoint",
         Webshop => "Webshop",
@@ -136,6 +158,27 @@ public interface IExternalWriteGuard
 
     /// <summary>The effective posture, for the Settings page and the startup banner.</summary>
     Task<bool> IsAllowedAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// §1059 — may THIS HOST write to <paramref name="system"/> at all? Config only: no DB read,
+    /// no per-edition override, no <c>await</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why this is separate from <see cref="AllowAsync"/>.</b> <c>AllowAsync</c> answers
+    /// "may I perform this ONE write", which is the right question inside a loop. It is the wrong
+    /// question for a JOB that exists solely to write: a job whose every effect is a webshop write
+    /// should not start, walk every sponsor, refuse each write and then e-mail about it — it should
+    /// not run. That needs to be decidable BEFORE the first call, which is what this is.</para>
+    ///
+    /// <para>🔒 <b>Deliberately the ENVIRONMENT ceiling only, not the organizer override.</b> The
+    /// ceiling is the DEV/PROD boundary; the override is a per-edition runtime choice an organizer
+    /// makes on the Settings page. Folding the override in here would let one click stop a whole
+    /// job in PROD, which is a much bigger act than the one that click describes.</para>
+    ///
+    /// <para>Defaults to <c>true</c> so an existing implementation keeps the pre-§1059 behaviour —
+    /// the same "null guard means assume allowed" convention the call sites already use.</para>
+    /// </remarks>
+    bool IsPermittedInThisEnvironment(string system) => true;
 }
 
 /// <inheritdoc cref="IExternalWriteGuard"/>
@@ -257,6 +300,9 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
             ? perSystem
             : _options.AllowExternalWrites;
 
+    /// <inheritdoc />
+    public bool IsPermittedInThisEnvironment(string system) => EnvironmentCeilingFor(system);
+
     public async Task<bool> AllowAsync(
         string system, string operation, CancellationToken ct = default)
     {
@@ -315,6 +361,10 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
             ExternalSystems.Zoho, ExternalSystems.Erp,
             ExternalSystems.LinkedIn, ExternalSystems.SharePoint,
             ExternalSystems.Webshop,
+            // §1119 — named separately because on DEV it is the one that differs from e-conomic:
+            // "e-conomic=ALLOWED, e-conomic invoice creation=BLOCKED" is the whole policy in a line,
+            // and it is the line that answers "can the app in front of me invoice a customer".
+            ExternalSystems.ErpInvoiceCreate,
         ];
 
         var parts = systems.Select(s =>

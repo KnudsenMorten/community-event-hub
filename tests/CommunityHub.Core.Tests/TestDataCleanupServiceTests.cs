@@ -96,8 +96,21 @@ public sealed class TestDataCleanupServiceTests
         Assert.Equal(0, preview.WouldHardDelete);
     }
 
+    /// <summary>
+    /// 🛑 §1082 — THE CLEANUP IS DISABLED, AND THIS PINS IT OFF.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-13: <i>"we dont use that testdataclean-up service, turn it off in
+    /// code"</i>. It was the LAST path in the product that could hard-delete a participant, after the
+    /// organizer grid, the pre-selection queue and the dashboard decline all moved to deactivate-only.
+    /// With it off, <i>"we only make things inactive by filter"</i> is true without exception.</para>
+    ///
+    /// <para>⚠️ These two tests previously asserted the OPPOSITE — that a clean test row was
+    /// physically removed. They are inverted deliberately, not deleted, so the disabled state is a
+    /// stated contract rather than the silent absence of coverage.</para>
+    /// </remarks>
     [Fact]
-    public async Task Cleanup_hard_deletes_clean_rows_and_deactivates_engaged_rows()
+    public async Task Cleanup_is_disabled_and_deletes_nothing()
     {
         using var db = TestDb.New();
         var evt = NewEvent(active: true);
@@ -109,77 +122,42 @@ public sealed class TestDataCleanupServiceTests
         var real = Person(evt.Id, "Real Person", isTest: false);
         db.Participants.AddRange(clean, engaged, real);
         await db.SaveChangesAsync();
-
-        db.SpeakerProfiles.Add(new SpeakerProfile
-        {
-            EventId = evt.Id, ParticipantId = engaged.Id,
-        });
+        db.SpeakerProfiles.Add(new SpeakerProfile { EventId = evt.Id, ParticipantId = engaged.Id });
         await db.SaveChangesAsync();
 
         var result = await NewService(db).CleanupAsync(evt.Id);
 
-        Assert.Equal(1, result.HardDeleted);
-        Assert.Equal(1, result.Deactivated);
-        Assert.Equal(2, result.Total);
-
-        // Clean tester is gone; engaged tester remains but deactivated; real
-        // participant is fully untouched.
-        Assert.Null(await db.Participants.FindAsync(clean.Id));
-
-        var engagedAfter = await db.Participants.FindAsync(engaged.Id);
-        Assert.NotNull(engagedAfter);
-        Assert.False(engagedAfter!.IsActive);
-
-        var realAfter = await db.Participants.FindAsync(real.Id);
-        Assert.NotNull(realAfter);
-        Assert.True(realAfter!.IsActive);
-    }
-
-    [Fact]
-    public async Task Cleanup_is_idempotent()
-    {
-        using var db = TestDb.New();
-        var evt = NewEvent(active: true);
-        db.Events.Add(evt);
-        await db.SaveChangesAsync();
-
-        var clean = Person(evt.Id, "Clean Tester", isTest: true);
-        var engaged = Person(evt.Id, "Engaged Tester", isTest: true, role: ParticipantRole.Speaker);
-        db.Participants.AddRange(clean, engaged);
-        await db.SaveChangesAsync();
-        db.SpeakerProfiles.Add(new SpeakerProfile
-        {
-            EventId = evt.Id, ParticipantId = engaged.Id,
-        });
-        await db.SaveChangesAsync();
-
-        var svc = NewService(db);
-        await svc.CleanupAsync(evt.Id);
-
-        // Second run: the clean row is already gone; the engaged row is still a
-        // test user (now inactive) and re-applies the safe deactivate outcome.
-        var second = await svc.CleanupAsync(evt.Id);
-        Assert.Equal(0, second.HardDeleted);
-        Assert.Equal(1, second.Deactivated);
-    }
-
-    [Fact]
-    public async Task No_test_users_is_an_empty_preview_and_a_no_op_cleanup()
-    {
-        using var db = TestDb.New();
-        var evt = NewEvent(active: true);
-        db.Events.Add(evt);
-        await db.SaveChangesAsync();
-        db.Participants.Add(Person(evt.Id, "Real Only", isTest: false));
-        await db.SaveChangesAsync();
-
-        var svc = NewService(db);
-
-        var preview = await svc.PreviewAsync(evt.Id);
-        Assert.False(preview.Any);
-        Assert.Empty(preview.Rows);
-
-        var result = await svc.CleanupAsync(evt.Id);
         Assert.Equal(0, result.Total);
+        Assert.Equal(0, result.HardDeleted);
+        Assert.Equal(0, result.Deactivated);
+
+        // 🔑 Every row survives — including the "clean" test row the old behaviour removed.
+        Assert.NotNull(await db.Participants.FindAsync(clean.Id));
+        Assert.NotNull(await db.Participants.FindAsync(engaged.Id));
+        Assert.NotNull(await db.Participants.FindAsync(real.Id));
+        // …and nobody was even deactivated as a side effect.
+        Assert.True((await db.Participants.FindAsync(clean.Id))!.IsActive);
+        Assert.True((await db.Participants.FindAsync(real.Id))!.IsActive);
+    }
+
+    /// <summary>
+    /// 🔒 The READ-ONLY preview still works: an organizer can still SEE which rows are test data.
+    /// Only the destructive half refuses, which is what "disabled, not deleted" means here.
+    /// </summary>
+    [Fact]
+    public async Task Preview_still_reports_test_rows_while_cleanup_is_disabled()
+    {
+        using var db = TestDb.New();
+        var evt = NewEvent(active: true);
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+
+        db.Participants.Add(Person(evt.Id, "Clean Tester", isTest: true));
+        await db.SaveChangesAsync();
+
+        var preview = await NewService(db).PreviewAsync(evt.Id);
+
+        Assert.True(preview.Any);
+        Assert.Equal(1, preview.Total);
     }
 }

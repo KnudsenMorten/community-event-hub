@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Entitlements;
+using CommunityHub.Core.Integrations.Erp;
 using CommunityHub.Core.Resources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -449,6 +450,23 @@ public sealed class TravelFormService : IWizardFormService
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// §1166 — the finance mail's subject, with the VAT zone as a POSTFIX.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-02: <i>"I need the subject to include [MOMSZONE=UDLAND] or
+    /// [MOMSZONE=EU] dependent of the country of the speaker … as postfix in the subject"</i>.</para>
+    ///
+    /// <para>🔑 Extracted so the format is TESTABLE. It is the operator-visible contract — finance
+    /// filters and files on it — and a subject line built inline in a method that needs a database,
+    /// an e-mail sender and a participant is a contract nothing can assert.</para>
+    ///
+    /// <para>⚠️ Postfix, not prefix: the existing subject is what finance already recognises, and
+    /// moving the recognisable part off the front would break every rule they have.</para>
+    /// </remarks>
+    public static string ClaimSubject(string fullName, string momsZoneToken) =>
+        $"Travel Rebursement - {fullName} - ELDK27 [MOMSZONE={momsZoneToken}]";
+
     // ----- ERP-inbox email (REQUIREMENTS §48) -----------------------------
     private async Task SendErpCopyAsync(
         int eventId, int participantId, string fullName, string email, TravelReimbursement row, CancellationToken ct)
@@ -463,11 +481,41 @@ public sealed class TravelFormService : IWizardFormService
             .Select(r => new EmailAttachment(r.FileName, r.Content, r.ContentType))
             .ToList();
 
-        var subject = $"Travel Rebursement - {fullName} - ELDK27";
+        // 🔴 §1166 — THE VAT ZONE TRAVELS WITH THE CLAIM.
+        //
+        // Operator 2026-09-02: *"I need the subject to include [MOMSZONE=UDLAND] or [MOMSZONE=EU]
+        // dependent of the country of the speaker … as postfix in the subject"* and the first three
+        // lines of the body to be name, e-mail and the zone.
+        //
+        // 🔑 It is in the SUBJECT because that is the part finance sees in a list without opening
+        // anything, and the zone decides how the expense is booked. The same mapper serves the ERP
+        // customer/invoice path, so a speaker and their sponsor cannot be zoned differently by two
+        // copies of the rule.
+        //
+        // ⚠️ An unknown country produces MOMSZONE=UNKNOWN rather than a guess. A guessed zone is a
+        // tax error that looks like data, and the two wrong answers are not symmetric: charging
+        // Danish VAT wrongly is a refund, omitting it wrongly is money the organiser owes.
+        var speakerCountry = await _db.SpeakerProfiles
+            .Where(s => s.EventId == eventId && s.ParticipantId == participantId)
+            .Select(s => s.Country)
+            .FirstOrDefaultAsync(ct);
+
+        var zoneToken = VatZoneMapper.TokenFor(speakerCountry);
+
+        var subject = ClaimSubject(fullName, zoneToken);
 
         var amount = row.ClaimAmountEur?.ToString("0.##") ?? "(not specified)";
         var enc = (string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
         var body = new StringBuilder();
+        // §1166 — the three lines he asked for, FIRST, before any prose. Finance reads the top of
+        // the mail and files it; putting the identifying facts under an explanatory paragraph is how
+        // they end up being looked for instead of read.
+        body.Append($"<p style=\"font-size:14px;margin:0 0 10px;\">"
+            + $"{enc(fullName)}<br />"
+            + $"{enc(email)}<br />"
+            + $"MOMSZONE={enc(zoneToken)}"
+            + "</p>");
+
         body.Append("<p>A travel reimbursement request has been submitted via the Experts Live DK Event Hub.</p>");
         body.Append("<table style=\"border-collapse:collapse;font-size:14px;\">");
         body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Name</strong></td><td>{enc(fullName)}</td></tr>");

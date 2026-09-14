@@ -32,14 +32,23 @@
 
     @* ---- Filters ---- *@
     <form method="get" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:14px;">
-        <label style="font-size:12.5px;color:#4a5160;">Category
-            <select name="Category" style="display:block;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;">
-                <option value="">All</option>
+        @* §1061 — MULTI-SELECT. Operator 2026-08-11: *"in the filter, i want to have a multi-select
+           of categories, so I can filter on specific"*. Ctrl/⌘-click, or drag, picks several;
+           selecting nothing still means "all", so the control's empty state reads the same as before.
+           🔒 The old single `Category` value is still honoured server-side, so existing links and
+           saved export URLs keep working. *@
+        <label style="font-size:12.5px;color:#4a5160;">Category <span style="color:#8a90a0;">(multi)</span>
+            <select name="Cats" multiple size="4"
+                    style="display:block;min-width:190px;padding:5px 7px;border:1px solid #c4c8d4;border-radius:6px;">
                 @foreach (var c in Model.Categories)
                 {
-                    <option value="@c" selected="@(string.Equals(Model.Category, c, StringComparison.OrdinalIgnoreCase))">@c</option>
+                    var on = (Model.Cats is not null && Model.Cats.Contains(c, StringComparer.OrdinalIgnoreCase))
+                             || (Model.Cats is null or { Length: 0 }
+                                 && string.Equals(Model.Category, c, StringComparison.OrdinalIgnoreCase));
+                    <option value="@c" selected="@on">@c</option>
                 }
             </select>
+            <span style="display:block;font-size:11px;color:#8a90a0;margin-top:2px;">none = all</span>
         </label>
         <label style="font-size:12.5px;color:#4a5160;">Window
             <select name="Days" style="display:block;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;">
@@ -61,15 +70,50 @@
                    style="width:16px;height:16px;" />
             Show Engine related actions
         </label>
+        @* 🔴 §1061 — ring-held mail is hidden by DEFAULT. Operator 2026-08-11, mid ticket-sale:
+           *"this is just noise now and makes it hard to view and follow"* — one run held 18 mails
+           and sent 2, so the holds WERE the page.
+           🔒 Hidden from the VIEW, never from the record: this is the evidence that answers "why did
+           this speaker not get the mail?", which is asked exactly when the rows are in the way. *@
+        <label style="font-size:12.5px;color:#4a5160;display:flex;align-items:center;gap:6px;padding-bottom:8px;white-space:nowrap;">
+            <input type="checkbox" name="ShowDropped" value="true" checked="@Model.ShowDropped"
+                   style="width:16px;height:16px;" />
+            Show Dropped mails (ring-gated)
+        </label>
         <button type="submit" style="padding:8px 14px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">Filter</button>
-        <a asp-page-handler="Export" asp-route-format="csv" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine"
+        <a asp-page-handler="Export" asp-route-format="csv" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine" asp-route-ShowDropped="@Model.ShowDropped"
            style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export CSV</a>
-        <a asp-page-handler="Export" asp-route-format="xlsx" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine"
+        <a asp-page-handler="Export" asp-route-format="xlsx" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine" asp-route-ShowDropped="@Model.ShowDropped"
            style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export XLSX</a>
     </form>
 
-    <p style="font-size:12.5px;color:#6e7681;">
-        @Model.TotalCount event(s) match@(Model.Capped ? $" — showing the {300} most recent" : "").
+    @* §1136 (operator 2026-08-25: "show time in audit in local time (copenhagen) with a button
+       'Show local time' - instead of utc", then: "show in local time by default, with option to
+       choose utc").
+
+       🔑 COPENHAGEN IS THE DEFAULT and the server renders it that way — not UTC-then-swapped-by-JS.
+       That matters for two reasons: there is no flash of the wrong timezone before the script runs,
+       and with JavaScript unavailable the page still shows the timezone he asked for rather than the
+       one he asked to stop seeing.
+
+       🔒 A DISPLAY toggle, not a re-query. Both values are rendered into each row up front, so the
+       button swaps text that is already on the page — no round-trip, and the current filter cannot
+       be lost by toggling. Storage stays UTC (the same rule §844.5 states for SoMe times); this
+       never touches what is recorded.
+
+       🔑 The choice is remembered, because an organizer reading an audit trail sets it once and then
+       filters repeatedly — and every filter is a full page reload that would otherwise snap the
+       column back to UTC. *@
+    <p style="font-size:12.5px;color:#6e7681;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">
+        <span>@Model.TotalCount event(s) match@(Model.Capped ? $" — showing the {300} most recent" : "").</span>
+        @if (Model.Rows.Count > 0)
+        {
+            <button type="button" id="tzToggle" data-mode="local"
+                    style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;
+                           color:#1D3380;font-weight:600;font-size:12.5px;cursor:pointer;">
+                Show UTC
+            </button>
+        }
     </p>
 
     @if (Model.Rows.Count == 0)
@@ -82,7 +126,7 @@
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead>
                     <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
-                        <th style="padding:6px 8px;">When (UTC)</th>
+                        <th style="padding:6px 8px;white-space:nowrap;">When (<span id="tzLabel">Local</span>)</th>
                         <th style="padding:6px 8px;">Category</th>
                         <th style="padding:6px 8px;">Actor</th>
                         <th style="padding:6px 8px;">Action</th>
@@ -93,7 +137,19 @@
                     @foreach (var r in Model.Rows)
                     {
                         <tr style="border-bottom:1px solid #f0f1f4;">
-                            <td style="padding:6px 8px;white-space:nowrap;">@r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            @* §1136 — both readings are rendered SERVER-SIDE. The Copenhagen value
+                               comes from SoMeDisplayTime.ToDanish, the one authority for Danish local
+                               time in this codebase (§844.5), so it is DST-correct and can never
+                               disagree with the SoMe surfaces. ⚠️ Deliberately NOT the browser's own
+                               timezone: an organizer travelling, or a colleague abroad, must read the
+                               same wall clock the event runs on. *@
+                            @{
+                                var utcText = r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                                var localText = CommunityHub.Core.Integrations.SoMeDisplayTime
+                                    .ToDanish(r.OccurredUtc).ToString("yyyy-MM-dd HH:mm:ss");
+                            }
+                            <td style="padding:6px 8px;white-space:nowrap;"
+                                data-utc="@utcText" data-local="@localText">@localText</td>
                             <td style="padding:6px 8px;">@r.Category</td>
                             <td style="padding:6px 8px;">
                                 @r.ActorEmail
@@ -122,6 +178,10 @@
                                     {
                                         CommunityHub.Core.Domain.AuditOutcome.Failure => ("#fee2e2", "#991b1b"),
                                         CommunityHub.Core.Domain.AuditOutcome.Denied => ("#fef9c3", "#854d0e"),
+                                        // §1061 — GREY, not red. A ring hold is a policy decision that
+                                        // worked, so it must not wear the colour of a fault; red is
+                                        // what made 18 correct holds read as an outage.
+                                        CommunityHub.Core.Domain.AuditOutcome.Dropped => ("#eef1f5", "#4a5160"),
                                         _ => ("#dcfce7", "#166534"),
                                     };
                                 }
@@ -134,3 +194,37 @@
         </div>
     }
 </div>
+
+@* §1136 — the UTC ⟷ Copenhagen toggle. Pure display: it swaps text already in the DOM. *@
+<script>
+    (function () {
+        var btn = document.getElementById('tzToggle');
+        if (!btn) return;                                  // no rows ⇒ no button rendered
+        var label = document.getElementById('tzLabel');
+        var KEY = 'ceh.audit.tz';
+
+        function apply(mode) {
+            var local = mode === 'local';
+            document.querySelectorAll('td[data-utc]').forEach(function (td) {
+                var v = local ? td.getAttribute('data-local') : td.getAttribute('data-utc');
+                if (v) td.textContent = v;
+            });
+            if (label) label.textContent = local ? 'Local' : 'UTC';
+            btn.textContent = local ? 'Show UTC' : 'Show local time';
+            btn.setAttribute('data-mode', mode);
+        }
+
+        // 🔒 Every read and write is guarded: a private window, cleared site data or a browser set
+        // to block storage throws on access, and a crashed toggle would leave the column frozen.
+        function saved() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+        function save(v) { try { localStorage.setItem(KEY, v); } catch (e) { /* ignore */ } }
+
+        apply(saved() === 'utc' ? 'utc' : 'local');
+
+        btn.addEventListener('click', function () {
+            var next = btn.getAttribute('data-mode') === 'local' ? 'utc' : 'local';
+            apply(next);
+            save(next);
+        });
+    })();
+</script>

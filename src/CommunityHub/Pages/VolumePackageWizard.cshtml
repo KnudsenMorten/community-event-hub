@@ -1,0 +1,230 @@
+@page "/volume-package/{token}"
+@model CommunityHub.Pages.VolumePackageWizardModel
+@{
+    ViewData["Title"] = "Volume package";
+    Layout = "_Layout";
+    var token = (string?)RouteData.Values["token"] ?? string.Empty;
+    var c = Model.Company;
+}
+
+@* 🔒 §1077 — a link pasted into a public thread must not become a search result. Defence against
+   the accident; the token is what defends against an attacker. *@
+@section Head {
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+}
+
+<div class="card">
+    <h1>@c?.CustomName</h1>
+    <p class="muted">
+        Ten or more of your colleagues are coming, which earns the <strong>volume package</strong>:
+        a mention in the keynote, an announcement on social media, and a group photo on the day.
+        Four short questions and it is set up.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Model.Message)) { <p class="ok">@Model.Message</p> }
+    @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+    @if (c?.DeclinedAt is not null)
+    {
+        <p class="muted">
+            You have told us you would rather not take part. Nothing further will be arranged, and we
+            will not keep asking. If you change your mind, tick what you would like below.
+        </p>
+    }
+
+    @* §1077 stage 4 — the group-photo slot, once an organizer has scheduled one. It appears on the
+       company's OWN page rather than being mailed to their people: CEH must never write to a
+       company's attendees about the photo, so the coordinator takes the calendar file and passes it
+       on internally. *@
+    @if (Model.Photo?.ScheduledAtUtc is { } slot)
+    {
+        <div style="margin-top:14px;padding:12px;background:#eef7ff;border:1px solid #cfe6fb;border-radius:8px;">
+            <strong>📸 Your group photo</strong>
+            <div style="margin-top:4px;font-size:14px;">
+                @slot.UtcDateTime.ToString("dddd d MMMM yyyy, HH:mm") UTC
+                @if (!string.IsNullOrWhiteSpace(Model.Photo.Location))
+                {
+                    <text> · @Model.Photo.Location</text>
+                }
+                <text> · @Model.Photo.DurationMinutes minutes</text>
+            </div>
+            <p style="margin:8px 0 0;font-size:13px;">
+                <a asp-page-handler="Calendar" asp-route-token="@token" download>Download the calendar invite</a>
+                — please forward it to your colleagues yourself. We do not write to them about the
+                photo, and nobody has to take part.
+            </p>
+        </div>
+    }
+
+    @* Mobile-first: the four steps are a wrapping row of small pills, not a wide stepper bar. *@
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 0;">
+        @foreach (var (n, label) in new[]
+                  {
+                      (1, "Participation"), (2, "Coordinator"), (3, "Logo"), (4, "LinkedIn"),
+                  })
+        {
+            var here = Model.Step == n;
+            <a asp-route-token="@token" asp-route-step="@n"
+               style="text-decoration:none;border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600;@(here ? "background:#008BD2;color:#fff;" : "background:#f1f3f8;color:#4a5160;")">
+                @n. @label
+            </a>
+        }
+    </div>
+</div>
+
+@if (Model.Step == 1)
+{
+    <div class="card">
+        <h2>1. What would you like?</h2>
+        <form method="post" asp-page-handler="Participation" asp-route-token="@token">
+            <label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;">
+                <input type="checkbox" asp-for="Keynote" style="width:auto;margin-top:3px;" />
+                <span><strong>Keynote mention</strong><br />
+                <span class="muted" style="font-size:13px;">Your company is named from the stage.</span></span>
+            </label>
+            <label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;">
+                <input type="checkbox" asp-for="Social" style="width:auto;margin-top:3px;" />
+                <span><strong>Social-media announcement</strong><br />
+                <span class="muted" style="font-size:13px;">A post before the event, tagging your company page.</span></span>
+            </label>
+            <label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0 16px;">
+                <input type="checkbox" asp-for="GroupPhoto" style="width:auto;margin-top:3px;" />
+                <span><strong>Group photo</strong><br />
+                <span class="muted" style="font-size:13px;">A photo of your colleagues on the day, at a time we assign.</span></span>
+            </label>
+
+            <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Continue
+            </button>
+        </form>
+    </div>
+
+    <div class="card">
+        @* 🔒 The explicit opt-out the requirement names. It is a separate, plainly-worded form
+           rather than a fourth checkbox: "we do not want any of this" is a different answer from
+           "none ticked yet", and it is what stops the reminders. *@
+        <h2>Or not at all</h2>
+        <p class="muted">
+            If your company would rather not take part in any of it, say so here and we will stop
+            asking.
+        </p>
+        <form method="post" asp-page-handler="Decline" asp-route-token="@token"
+              onsubmit="return confirm('Tell the organizers that @c?.CustomName does not want to take part?');">
+            <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:7px 12px;cursor:pointer;">
+                We do not want to participate
+            </button>
+        </form>
+    </div>
+}
+else if (Model.Step == 2)
+{
+    <div class="card">
+        <h2>2. Who coordinates it for you?</h2>
+        @* 🔒 CEH must never mail the attendees about the photo — some will not want to be
+           photographed. This person tells their own colleagues, which is why we ask for them. *@
+        <p class="muted">
+            We will send the group-photo details to this person, and they pass them on internally —
+            we do not write to your colleagues directly.
+        </p>
+        <form method="post" asp-page-handler="Coordinator" asp-route-token="@token">
+            <label style="display:block;margin-bottom:10px;">
+                <strong>Name</strong>
+                <input asp-for="CoordinatorName" style="display:block;width:100%;max-width:420px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+            </label>
+            <label style="display:block;margin-bottom:10px;">
+                <strong>E-mail</strong>
+                <input asp-for="CoordinatorEmail" type="email" style="display:block;width:100%;max-width:420px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+            </label>
+            <label style="display:block;margin-bottom:14px;">
+                <strong>Mobile</strong>
+                <input asp-for="CoordinatorMobile" style="display:block;width:100%;max-width:420px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+            </label>
+            <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Continue
+            </button>
+        </form>
+    </div>
+}
+else if (Model.Step == 3)
+{
+    <div class="card">
+        <h2>3. Your logo</h2>
+        <p class="muted">
+            One for screen and one for print. PNG, JPG, SVG, EPS, AI or PDF, up to 25 MB each.
+            Sending only one is fine.
+        </p>
+
+        @if (!Model.CanUploadLogo)
+        {
+            <p class="error">
+                Uploads are not available just now — please send your logo to the organizers by
+                e-mail and continue.
+            </p>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="Logo" asp-route-token="@token" enctype="multipart/form-data">
+                <label style="display:block;margin-bottom:12px;">
+                    <strong>Logo for screen</strong>
+                    @if (!string.IsNullOrWhiteSpace(c?.LogoWebPath))
+                    {
+                        <span class="ok" style="font-size:12.5px;"> — received</span>
+                    }
+                    <input asp-for="LogoWeb" type="file" style="display:block;margin-top:4px;max-width:100%;" />
+                </label>
+                <label style="display:block;margin-bottom:14px;">
+                    <strong>Logo for print</strong>
+                    @if (!string.IsNullOrWhiteSpace(c?.LogoPrintPath))
+                    {
+                        <span class="ok" style="font-size:12.5px;"> — received</span>
+                    }
+                    <input asp-for="LogoPrint" type="file" style="display:block;margin-top:4px;max-width:100%;" />
+                </label>
+                <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                    Upload and continue
+                </button>
+            </form>
+        }
+
+        <p style="margin-top:12px;">
+            <a asp-route-token="@token" asp-route-step="4">Skip for now</a>
+        </p>
+    </div>
+}
+else
+{
+    <div class="card">
+        <h2>4. Your LinkedIn page</h2>
+        <p class="muted">So the announcement tags your company rather than naming it in plain text.</p>
+        <form method="post" asp-page-handler="Finish" asp-route-token="@token">
+            <label style="display:block;margin-bottom:14px;">
+                <strong>LinkedIn URL</strong>
+                <input asp-for="LinkedInUrl" placeholder="https://www.linkedin.com/company/..."
+                       style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+            </label>
+            <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Done
+            </button>
+        </form>
+
+        @if (Model.Finished && c is not null)
+        {
+            @* What we recorded, in the company's own terms — so the last screen answers "did that
+               work?" without anyone having to ask an organizer. *@
+            <div style="margin-top:16px;padding:12px;background:#f6f8fc;border:1px solid #e6eaf2;border-radius:8px;font-size:13.5px;">
+                <strong>What we have:</strong>
+                <ul style="margin:8px 0 0;padding-left:20px;">
+                    <li>Keynote mention: @(c.ApprovedKeynoteMention ? "yes" : "no")</li>
+                    <li>Social-media announcement: @(c.ApprovedSocialMediaAnnouncement ? "yes" : "no")</li>
+                    <li>Group photo: @(c.ApprovedGroupPhoto ? "yes" : "no")</li>
+                    <li>Coordinator: @(string.IsNullOrWhiteSpace(c.GroupPhotoContactName) ? "not given yet" : c.GroupPhotoContactName)</li>
+                    <li>Logo: @(string.IsNullOrWhiteSpace(c.LogoWebPath) && string.IsNullOrWhiteSpace(c.LogoPrintPath) ? "not received yet" : "received")</li>
+                    <li>LinkedIn: @(string.IsNullOrWhiteSpace(c.LinkedInUrl) ? "not given yet" : c.LinkedInUrl)</li>
+                </ul>
+                <p class="muted" style="margin:10px 0 0;font-size:12.5px;">
+                    You can come back to this link and change any of it.
+                </p>
+            </div>
+        }
+    </div>
+}

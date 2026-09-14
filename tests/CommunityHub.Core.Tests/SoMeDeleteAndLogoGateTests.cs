@@ -58,7 +58,7 @@ public sealed class SoMeDeleteAndLogoGateTests
             db.GraphicAssets.Add(new GraphicAsset
             {
                 EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = id,
-                StableKey = $"sponsor-{id}",
+                StableKey = $"sponsor-{id}", FileName = $"sponsor-{id}.png",
                 CreatedAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
             });
         }

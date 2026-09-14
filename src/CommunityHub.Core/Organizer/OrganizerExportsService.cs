@@ -14,10 +14,15 @@ namespace CommunityHub.Core.Organizer;
 
 /// <summary>One attendee on the on-site attendee list (REQUIREMENTS §20 Organizer
 /// "Exports &amp; printable run-sheets"). Read-only projection of <see cref="Attendee"/>.</summary>
+/// <remarks>§1077: the ticket component carries the organizer-facing LABEL
+/// (<see cref="TicketStatusDisplay.Label"/> — "2-day" / "1-day"), not the enum name, and is
+/// named for it. Both consumers of this row are human-facing (the printable list and the CSV
+/// an organizer opens in Excel); neither branches on the value — <c>TwoDay</c> is the flag
+/// anything conditional uses.</remarks>
 public sealed record AttendeeListRow(
     string Name,
     string Email,
-    string TicketStatus,
+    string TicketStatusLabel,
     string? TicketClass,
     string MasterClass,
     bool TwoDay);
@@ -159,7 +164,7 @@ public sealed class OrganizerExportsService
             .Select(a => new AttendeeListRow(
                 FullName(a.FirstName, a.LastName),
                 a.Email,
-                a.TicketStatus.ToString(),
+                a.TicketStatus.Label(),
                 a.TicketClassName,
                 a.MasterClassName ?? string.Empty,
                 a.TicketStatus == TicketStatus.TwoDay))
@@ -173,7 +178,7 @@ public sealed class OrganizerExportsService
             new[] { "Name", "Email", "TicketStatus", "TicketClass", "MasterClass", "TwoDay" },
             rows.Select(r => (IReadOnlyList<string>)new[]
             {
-                r.Name, r.Email, r.TicketStatus, r.TicketClass ?? string.Empty,
+                r.Name, r.Email, r.TicketStatusLabel, r.TicketClass ?? string.Empty,
                 r.MasterClass, r.TwoDay ? "yes" : "",
             }));
     }

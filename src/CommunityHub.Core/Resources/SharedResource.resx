@@ -210,6 +210,9 @@
   <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
   <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event Info</value></data>
   <data name="Nav.SectionRegister" xml:space="preserve"><value>Register/Update</value></data>
+  <data name="Nav.SectionMedia" xml:space="preserve"><value>Media Management</value></data>
+  <data name="Nav.MediaPictures" xml:space="preserve"><value>Picture upload management</value></data>
+  <data name="Nav.MediaVideos" xml:space="preserve"><value>Video upload management</value></data>
   <data name="Nav.SectionSpeakerInfo" xml:space="preserve"><value>Speaker Info</value></data>
   <!-- §317: Speaker Info nested sub-fold-outs + the speaker-specific telemetry label. -->
   <data name="Nav.SubPrepareSession" xml:space="preserve"><value>Preparing My Session for ELDK27</value></data>
@@ -569,7 +572,9 @@
   <data name="Nav.OrgAuditTrail" xml:space="preserve"><value>Audit</value></data>
   <!-- §646: the two "is anything broken?" pages, promoted into the main organizer menu. -->
   <data name="Nav.OrgPlatformHealth" xml:space="preserve"><value>Platform Health</value></data>
+  <data name="Nav.OrgParticipantStatus" xml:space="preserve"><value>Participant Status</value></data>
   <data name="Nav.OrgJobs" xml:space="preserve"><value>Background Jobs</value></data>
+  <data name="Nav.OrgCouponInvoicing" xml:space="preserve"><value>Coupon Invoicing</value></data>
   <data name="Nav.OrgDataFreshness" xml:space="preserve"><value>Data Freshness</value></data>
 
   <!-- Organizer: data-freshness panel (REQUIREMENTS §21 "last synced at") -->
@@ -790,7 +795,15 @@
   <data name="SponsorWiz.Step.welcome" xml:space="preserve"><value>Welcome</value></data>
   <data name="SponsorWiz.Step.welcome.Desc" xml:space="preserve"><value>Start here — a quick hello, and what you will find in the Event Hub.</value></data>
   <data name="SponsorWiz.Step.company" xml:space="preserve"><value>Company details</value></data>
-  <data name="SponsorWiz.Step.company.Desc" xml:space="preserve"><value>Your website, social links and company description.</value></data>
+  <data name="SponsorWiz.Step.company.Desc" xml:space="preserve"><value>Your company description, listing one-liner and social-media branding text. Your website comes from the webshop.</value></data>
+  <!-- §1081 — the CEH-owned company content fields, named individually so a reminder can say WHICH
+       one is blank (§854: what somebody has to act on must be named). Keys come from
+       CommunityHub.Core.Sponsors.SponsorCompanyContent. -->
+  <data name="SponsorContent.Field.company-description" xml:space="preserve"><value>company description</value></data>
+  <data name="SponsorContent.Field.short-description" xml:space="preserve"><value>short description</value></data>
+  <data name="SponsorContent.Field.social-media-intro" xml:space="preserve"><value>social-media branding text</value></data>
+  <data name="Sponsor.ChangeWebsiteOnWebshop" xml:space="preserve"><value>Change on the webshop</value></data>
+  <data name="Sponsor.WebsiteFromWebshop" xml:space="preserve"><value>Your website address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</value></data>
   <data name="SponsorWiz.Step.session" xml:space="preserve"><value>Your speaking session</value></data>
   <data name="SponsorWiz.Step.session.Desc" xml:space="preserve"><value>Register your session title, abstract and speaker(s).</value></data>
   <data name="SponsorWiz.Step.coordinator" xml:space="preserve"><value>Event coordinator</value></data>
@@ -1071,6 +1084,7 @@
   <data name="Survey.BackBtn" xml:space="preserve"><value>← Back</value></data>
   <data name="Survey.NextBtn" xml:space="preserve"><value>Next →</value></data>
   <data name="Survey.SubmitBtn" xml:space="preserve"><value>Send my input</value></data>
+  <data name="Survey.Submit" xml:space="preserve"><value>Submit answers</value></data>
   <data name="Survey.HoneypotLabel" xml:space="preserve"><value>Website (do not fill)</value></data>
   <data name="Survey.NoScriptNotice" xml:space="preserve"><value>This survey works best with JavaScript enabled, which guides you step by step. JavaScript appears to be turned off, so the whole survey is shown below as a single form — please fill in every section (track, your three topics with their levels) and use “Send my input” at the bottom. To get the guided experience instead, enable JavaScript in your browser settings and reload this page.</value></data>
   <data name="Survey.JsPickMore" xml:space="preserve"><value>Pick {0} more to continue.</value></data>
@@ -1549,6 +1563,8 @@
   <data name="Settings.Feat.DigestEmails.Desc" xml:space="preserve"><value>The mails that tell someone work is waiting: speakers held from the Zoho flow (within 10 minutes), volunteers awaiting review (weekly), a speaker's open audience questions, and re-opened wizard steps.</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Name" xml:space="preserve"><value>Sponsor order pull</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Desc" xml:space="preserve"><value>Pull completed sponsor and exhibitor orders from the webshop and expand their onboarding tasks.</value></data>
+  <data name="Settings.Feat.SponsorSwagCatalog.Name" xml:space="preserve"><value>Sponsor swag catalogue</value></data>
+  <data name="Settings.Feat.SponsorSwagCatalog.Desc" xml:space="preserve"><value>Show sponsors the catalogue of brandable items for the attendee bags, with price, picture and availability read from the webshop. While this is off the page has no menu entry and sponsors are told it is not available; organizers can still open it to review.</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Name" xml:space="preserve"><value>Sponsor Zoho provisioning</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Desc" xml:space="preserve"><value>After the order pull, create or link each sponsor and exhibitor in Zoho Backstage from webshop data (replaces the legacy sync script). Existing companies are never overwritten.</value></data>
   <data name="Settings.Feat.ErpWebshopReconcile.Name" xml:space="preserve"><value>ERP → webshop reconcile</value></data>
@@ -1559,6 +1575,16 @@
   <data name="Settings.Feat.CouponErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn claimed coupon tickets into DRAFT invoices in e-conomic — one per coupon, so the partner sees the agreement they recognise. It stops at the draft: nothing is booked and nothing reaches the partner until you book it yourself. A coupon is invoiced once, and it bills the ticket's full price rather than the discounted total — a coupon that covers a ticket entirely leaves the total at zero, and billing that would send the partner an invoice for 0.00. A coupon nobody has mapped to an e-conomic customer is never guessed at: the tickets are left uninvoiced and you get an e-mail linking to the page where you set who pays. Set your coupon mappings under Setup → Coupon invoicing before switching this on.</value></data>
   <data name="Settings.Feat.SponsorLeads.Name" xml:space="preserve"><value>Sponsor leads pipeline</value></data>
   <data name="Settings.Feat.SponsorLeads.Desc" xml:space="preserve"><value>Pull captured leads from the CRM and send each sponsor a round-up of the leads they have not seen yet.</value></data>
+  <data name="Settings.Feat.VolumePackageApprovalMail.Name" xml:space="preserve"><value>Volume package: ask who approves</value></data>
+  <data name="Settings.Feat.VolumePackageApprovalMail.Desc" xml:space="preserve"><value>When a company reaches ten attendees, e-mail the organizer mailbox asking who at that company we should deal with — naming the purchaser who brought the most people, for you to confirm or overrule on the Volume Package page. Nobody at the company is contacted: this asks the organizers. Each company is asked about once; you can ask again from the page. Switching this off stops the asking only — companies are still counted daily and the page still shows who qualifies.</value></data>
+  <data name="Settings.Feat.VolumePackageInviteMail.Name" xml:space="preserve"><value>Volume package: invite the company</value></data>
+  <data name="Settings.Feat.VolumePackageInviteMail.Desc" xml:space="preserve"><value>Let organizers e-mail a qualifying company's approver a personal link to their volume-package page, where they choose which benefits they want, name a group-photo coordinator, upload their logo and give their LinkedIn page. This is the only mail in this feature that reaches the company itself — everything else stays between the organizers. It is never sent automatically: an organizer sends it from the Volume Package page, one company at a time.</value></data>
+  <data name="Settings.Feat.MailCampaigns.Name" xml:space="preserve"><value>Mass mail (campaigns)</value></data>
+  <data name="Settings.Feat.MailCampaigns.Desc" xml:space="preserve"><value>Send a mail template to a whole audience — all attendees, 1-day or 2-day holders, sponsors, exhibitors, volunteers, speakers, media, event partners, or previous years' attendees who are not coming this time. Sending is deliberately hard to do by accident: a campaign cannot send until an organizer has previewed the exact recipient count and a sample of the addresses and confirmed, it goes out in small batches so the sending address is not blocked, and every recipient is checked against the unsubscribe and bounce list at the moment of sending. Switching this off stops all campaign sending immediately.</value></data>
+  <data name="Settings.Feat.VolumePackagePostEvent.Name" xml:space="preserve"><value>Volume package: post-event thank-you</value></data>
+  <data name="Settings.Feat.VolumePackagePostEvent.Desc" xml:space="preserve"><value>After the event, let organizers send each qualifying company a thank-you with a link to the event photographs and an invitation to tag the organizers on LinkedIn. It is never sent automatically — an organizer sends it once the picture gallery is actually live — and it is sent only once per company. A company that declined the volume package is never sent it.</value></data>
+  <data name="Settings.Feat.VolumePackageReminders.Name" xml:space="preserve"><value>Volume package: weekly reminders</value></data>
+  <data name="Settings.Feat.VolumePackageReminders.Desc" xml:space="preserve"><value>Once a week, remind a qualifying company that was invited and has not yet said what it wants. It stops by itself the moment they finish the page or choose "we do not want to participate", and it only ever writes to the one person the organizers approved — never to their attendees. A company that was never invited is never reminded.</value></data>
   <data name="Settings.Feat.SponsorUploadWatch.Name" xml:space="preserve"><value>Sponsor upload watcher</value></data>
   <data name="Settings.Feat.SponsorUploadWatch.Desc" xml:space="preserve"><value>Watch each sponsor's upload folder and notify the team when a file is added or replaced.</value></data>
   <data name="Settings.Feat.AttendeeReconcile.Name" xml:space="preserve"><value>Attendee reconciliation</value></data>
@@ -1629,8 +1655,9 @@
   <data name="Sessions.BulkDeleteHint" xml:space="preserve"><value>Only sessions with no attendee data can be selected. Sessions with questions, evaluations or master-class signups are protected.</value></data>
   <data name="Sessions.BulkDeleteConfirmTitle" xml:space="preserve"><value>Delete the selected sessions?</value></data>
   <data name="Sessions.BulkDeleteConfirmBody" xml:space="preserve"><value>This permanently removes {0} selected session(s) and their speaker links. Imported sessions return on the next Sessionize import. This cannot be undone.</value></data>
-  <data name="Queue.Delete" xml:space="preserve"><value>Delete</value></data>
-  <data name="Queue.DeleteConfirmTitle" xml:space="preserve"><value>Remove this queue row?</value></data>
+  <!-- §1146g (operator 2026-08-28: "delete can also be deactive … maybe better to make it consistent … so we dont have to delete rows in sql … so a sign-up becomes hidden"). §1082 made this button DEACTIVATE and keep the row; only the label still said Delete, which is the one word a hurried organizer actually reads. -->
+  <data name="Queue.Deactivate" xml:space="preserve"><value>Deactivate</value></data>
+  <data name="Queue.DeactivateConfirmTitle" xml:space="preserve"><value>Hide this sign-up?</value></data>
   <!-- Attendee My-event: personal schedule / my sessions / quick links / ask + evaluate (§20 Attendee) -->
   <data name="MyEvent.MySessions" xml:space="preserve"><value>My sessions</value></data>
   <data name="MyEvent.NoMySessions" xml:space="preserve"><value>You're not registered for any sessions yet. Reserve your Master Class above, then it'll show up here.</value></data>

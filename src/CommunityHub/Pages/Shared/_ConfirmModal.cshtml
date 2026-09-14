@@ -55,6 +55,25 @@
             }@if (after is not null){<text>@after</text>}
             <span data-ceh-modal-summary class="sr-only"></span>
         </div>
+        @* §1146f — the typed gate. Only rendered when the caller asks for one, so every existing
+           modal is byte-for-byte unchanged. *@
+        @if (!string.IsNullOrWhiteSpace(Model.RequireTypedWord))
+        {
+            var typeId = Model.Id + "-typed";
+            <div class="ceh-modal__typed" style="margin-top:12px;">
+                <label for="@typeId" style="display:block;font-size:13px;margin-bottom:4px;">
+                    Type <strong>@Model.RequireTypedWord</strong> to confirm
+                </label>
+                <input type="text" id="@typeId" autocomplete="off" spellcheck="false"
+                       data-ceh-modal-typed
+                       data-ceh-modal-word="@Model.RequireTypedWord"
+                       aria-describedby="@(Model.Id)-typed-help"
+                       style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:14px;" />
+                <span id="@(Model.Id)-typed-help" class="sr-only">
+                    The confirm button stays disabled until you type @Model.RequireTypedWord exactly.
+                </span>
+            </div>
+        }
         <div class="ceh-modal__actions">
             <button type="button" class="secondary" data-ceh-modal-cancel>@Model.CancelLabel</button>
             <button type="button" class="ceh-modal__confirm" data-ceh-modal-confirm>@Model.ConfirmLabel</button>

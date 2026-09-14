@@ -55,6 +55,31 @@ public sealed class AuthorizationFallbackTests
         // strictly read-only, and unknown/revoked/expired all answer 404 alike so a stranger cannot
         // learn that a token is real.
         "CommunityHub.Pages.MonitorModel",                     // /monitor/{token}
+        // 🔴 §1077 stage 3 — /volume-package/{token}, the qualifying company's own four-step page.
+        // Anonymous BY DESIGN and reviewed as such: the recipient may be a marketing coordinator
+        // who is not an attendee at all, and a qualifying attendee may hold a 1-DAY ticket, which
+        // OneDayAccessGate blocks at every sign-in entry point. A login redirect would either make
+        // the feature impossible or require four holes in a deliberate gate.
+        //
+        // 🔴 UNLIKE EVERY OTHER ENTRY ON THIS LIST, THIS ONE WRITES. The §1040 page above rests
+        // partly on being read-only; that leg is absent here, so it is carried elsewhere: every
+        // handler re-resolves the token (a revoked link cannot be used by someone holding the page
+        // open), every write lands on the ONE company the token resolves to — no handler takes a
+        // company id a caller could substitute — and the page DISCLOSES nothing: the company's own
+        // name and what they typed themselves, no attendees, no colleagues, no addresses.
+        // Revocable, expiring (15 Feb 2027), and unknown/revoked/expired all answer 404 alike.
+        "CommunityHub.Pages.VolumePackageWizardModel",          // /volume-package/{token}
+        // 🔴 §1080 — /unsubscribe, the way out of event mails. Anonymous BY NECESSITY: the people it
+        // serves include previous years' attendees who have no hub account at all, and an
+        // unsubscribe behind a login is an unsubscribe that does not work. The legal basis for
+        // mailing that list (the existing-customer relationship) REQUIRES this page to function.
+        //
+        // 🔒 What stands in for a login: the link is SIGNED (HMAC over edition + address), so a
+        // changed address in the URL is refused and nobody can unsubscribe somebody else. It
+        // DISCLOSES nothing — an invalid link gets one message that never confirms whether an
+        // address exists. And the GET does not act: mail scanners fetch every URL in a message, so
+        // the button POSTs, or we would silently unsubscribe people who never clicked.
+        "CommunityHub.Pages.UnsubscribeModel",                  // /unsubscribe
         "CommunityHub.Pages.Sessions.AskModel",                // /Sessions/Ask (QR question)
         "CommunityHub.Pages.Speakers.IndexModel",              // /Speakers
         "CommunityHub.Pages.Speakers.DetailModel",             // /Speakers/{id}

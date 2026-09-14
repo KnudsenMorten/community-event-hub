@@ -215,8 +215,24 @@
                             }
                             @if (r.UsedForTesting)
                             {
-                                <span title="Test session — hidden from public pages and never synced to the public agenda; hub-visible to ring 0/1 only"
+                                <span title="Test session — hidden from public pages and never synced to the public agenda; hub-visible to ring 0/1 only. Also never announced on social media, and its speakers are left out of the track and session graphics."
                                       style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">TEST</span>
+                            }
+                            @* 🔴 §1189 — operator 2026-09-12: *"as i dont see the exclude in sessins"*.
+                               The control shipped this morning INSIDE the collapsed "Edit session"
+                               drawer, so the only way to find it was to already know it was there —
+                               and the same is true of the STATE it sets. A flag you cannot see on the
+                               row is the §1178 defect in its milder form: not unwritable, just
+                               invisible. The badge states it, and clicking it opens the drawer at the
+                               control that changes it. *@
+                            @if (r.ExcludeFromSoMeAnnouncements)
+                            {
+                                <button type="button"
+                                        title="Never announced on social media, and its speakers are left out of the track and session graphics. It stays fully public everywhere else. Click to change."
+                                        onclick="var d=document.getElementById('edit-@r.Id'); d.open=true; d.scrollIntoView({block:'center'});"
+                                        style="font-size:11px;background:#f6ebf4;color:#7b3f6d;border:0;border-radius:4px;padding:1px 5px;margin-left:4px;cursor:pointer;">
+                                    no social media
+                                </button>
                             }
                         </td>
                         <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Type)</td>
@@ -253,16 +269,69 @@
                                control that opens it. *@
                             <details id="edit-@r.Id">
                                 <summary style="cursor:pointer;font-size:13px;">Edit session</summary>
-                                <div style="padding:8px 0 0;">
+                                @* 🔴 §1178 — the TWO exclusions, side by side, because they are
+                                   different decisions. TEST means "this is not a real session";
+                                   the SoMe one means "a real session we do not announce" (§1060(h) —
+                                   the Welcome and Closing sessions). Until now only the first had a
+                                   button, and it did not reach the social-media campaign at all. *@
+                                <div style="padding:8px 0 0;display:flex;flex-wrap:wrap;gap:8px;">
                                     <form method="post" asp-page-handler="ToggleTest" style="display:inline;">
                                         <input type="hidden" name="SessionId" value="@r.Id" />
                                         @{ GridStateFields(); }
                                         <button type="submit" class="btn-secondary" style="font-size:12px;"
-                                                title="A test session never reaches the public pages or the public agenda; inside the hub it is visible to ring 0/1 only.">
+                                                title="A test session never reaches the public pages or the public agenda, is never announced on social media, and none of its speakers are rendered into a track or session graphic. Inside the hub it is visible to ring 0/1 only.">
                                             @(r.UsedForTesting ? "Remove TEST flag" : "Mark as TEST session")
                                         </button>
                                     </form>
+                                    <form method="post" asp-page-handler="ToggleSoMeExcluded" style="display:inline;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        <button type="submit" class="btn-secondary" style="font-size:12px;"
+                                                title="A real session that is never announced on LinkedIn and never rendered into a track or session graphic — for sessions with nothing to announce, such as the Welcome and Closing sessions. It stays fully public everywhere else.">
+                                            @(r.ExcludeFromSoMeAnnouncements
+                                                ? "Announce on social media again"
+                                                : "Exclude from social media")
+                                        </button>
+                                    </form>
+                                    @* 🔴 §1208 — THE LEGACY FLAG, SHOWN ONLY WHEN IT IS SET. Operator
+                                       2026-09-12: *"i think we use it so define if it is a tst
+                                       session, validate if that is true"*. It is NOT how a test
+                                       session is defined — the button above is — but it IS read as
+                                       an exclusion, and PROD rows carry it. So it was an invisible
+                                       reason for a session to be missing from the whole campaign,
+                                       with no way out. Clear-only: a second way to SET it would be
+                                       two controls for one idea. *@
+                                    @if (r.IsTestData)
+                                    {
+                                        <form method="post" asp-page-handler="ClearLegacyTestData" style="display:inline;">
+                                            <input type="hidden" name="SessionId" value="@r.Id" />
+                                            @{ GridStateFields(); }
+                                            <button type="submit" class="btn-secondary" style="font-size:12px;"
+                                                    title="An older flag (IsTestData) that nothing in the hub can set any more. While it is on, this session is never announced on social media and its speakers are left out of the graphics. Clearing it puts the session back in the campaign.">
+                                                Clear legacy test flag
+                                            </button>
+                                        </form>
+                                    }
                                 </div>
+                                @if (r.IsTestData)
+                                {
+                                    <p class="muted" style="font-size:12px;margin:4px 0 0;">
+                                        <strong>Legacy test-data flag is set.</strong> This session is
+                                        kept out of the social-media campaign by an older flag that no
+                                        button here sets any more. If that is not what you want, use
+                                        <em>Clear legacy test flag</em> above.
+                                    </p>
+                                }
+                                @if (r.UsedForTesting || r.ExcludeFromSoMeAnnouncements)
+                                {
+                                    <p class="muted" style="font-size:12px;margin:4px 0 0;">
+                                        @(r.UsedForTesting ? "TEST session" : "Excluded from social media")
+                                        — not announced, and its speakers are left out of the track and
+                                        session graphics. Any planned post for it is removed from the
+                                        <a asp-page="/Organizer/SoMeQueue">post queue</a> on the next
+                                        planner run (restorable in the post editor).
+                                    </p>
+                                }
                                 <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
                                     <form method="post" asp-page-handler="Edit"
                                           style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">

@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Tasks;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Participants;
@@ -79,11 +80,19 @@ public sealed class ParticipantChecklistBuilder
             .Select(p => p.SponsorCompanyId)
             .FirstOrDefaultAsync(ct);
 
+        // §1081 — the shared predicate: assigned to them, OR their sponsor company's shared row.
+        // Hand-written here until four copies existed and a fifth (TaskReminderBuilder) forgot it.
+        // 🔴 §1082 — SYSTEM-CLOSED ROWS ARE INVISIBLE HERE, and that is the half that makes
+        // "close instead of delete" safe. A retired row is State=Done, so without this filter every
+        // "Completed" list would absorb it and the participant would be shown work they never did —
+        // a sponsor congratulated for nine tasks they never saw. It is not open either: the question
+        // simply stopped being asked, so it belongs in neither list.
+        // 🔑 ClosedReason is NULL on everything a person actually completed (see /Sponsor/Tasks), so
+        // "is it set" is exactly the right test.
         var all = await _db.Tasks
-            .Where(t => t.EventId == eventId
-                        && (t.AssignedParticipantId == participantId
-                            || (sponsorCompanyId != null
-                                && t.SponsorCompanyId == sponsorCompanyId)))
+            .Where(t => t.EventId == eventId)
+            .VisibleTo(participantId, sponsorCompanyId)
+            .Where(TaskClosure.NotSystemClosed)
             .Select(t => new { t.Id, t.Title, t.DueDate, t.State, t.SourceKey, t.Description })
             .ToListAsync(ct);
 

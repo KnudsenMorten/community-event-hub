@@ -46,14 +46,27 @@ public static class SponsorTaskDefinitions
             IsMandatory: false),
 
         // ── EVERY SPONSOR ────────────────────────────────────────────────────
-        new TaskDefinition(
-            Key: "sponsor.initial-onboarding",
-            Audience: TaskAudience.For(ParticipantRole.Sponsor),
-            Title: "Initial onboarding of sponsor",
-            Due: new TaskDue.FromConfig("sponsorDescription"),
-            Reminders: TaskReminderCadence.Standard,
-            Completion: new TaskCompletion.Manual(),
-            BodyRef: "sponsor/initial-onboarding"),
+        //
+        // 🔒 §1081 — "sponsor.initial-onboarding" IS RETIRED. DO NOT RE-ADD IT.
+        //
+        // Operator 2026-08-13: *"i think that initial onboarding is legacy before we had get started
+        // wizard … it is being replaced by get started"*. The definition itself said so — due
+        // `FromConfig("sponsorDescription")`, `Completion: Manual()`, and auto-closed by
+        // SponsorOrderPullService the moment a `CompanyDescription` was saved. That is exactly the
+        // Get Started "company" step, written before the wizard existed.
+        //
+        // 🔑 Keeping both meant one missing description produced TWO chases — the Get Started digest
+        // naming the blank fields AND this task's own reminder cadence — in different words, about
+        // the same fact. Measured on prod when this was decided: all 8 past-due copies belonged to
+        // companies whose description was blank, i.e. every one was a duplicate of the wizard step.
+        //
+        // Nothing is lost. The obligation is stricter now (the company step also requires the SoMe
+        // branding text, and the short description for exhibitors), it is chased on the §232 digest
+        // cadence, and `/Organizer/SponsorDeliverables` still shows the "Contract & onboarding"
+        // stage — that stage never read this task for its state, only for its deadline.
+        //
+        // Rows already raised are retired (State=Done, ClosedReason=SupersededByGetStarted) by the
+        // event-wide sweep in SponsorOrderPullService. Closed, never deleted — his instruction.
 
         // ── [§676] and [§670] — THE SHARED TWO-BUTTON DECISION ───────────────
         //

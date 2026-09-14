@@ -1,40 +1,39 @@
 # Community Event Hub
 
-> **Run a tech-community conference without the spreadsheet chaos.** One open-source web app where every participant signs in with a PIN, lands on a hub built for their role, and self-services everything they owe — book a hotel night, accept a speaker slot, pick a polo size, capture a booth lead, RSVP to the dinner. Organizers get live dashboards, gentle reminders and one back office to run it all. Fork it, configure it in JSON, deploy it on Azure.
+> **Run a tech-community conference without the spreadsheet chaos.** One open-source web app where every speaker, volunteer, sponsor, partner and attendee signs in with an e-mailed PIN, lands on a hub built for their role, and self-services everything they owe — book a hotel night, RSVP to the dinner, pick a master class, upload their slides or booth artwork. Organizers get a command center, gentle automatic reminders, a social-media campaign planner and one back office to run it all. Configure it for your event and deploy it on Azure.
 
 > **Free for any community to use.** Built by Microsoft MVP **Morten Knudsen** ([aka.ms/morten](https://aka.ms/morten)).
-> Public mirror: <https://github.com/KnudsenMorten/community-event-hub>.
+> Public repository: <https://github.com/KnudsenMorten/community-event-hub>.
 
-| Public landing page | …and on a phone |
+| Sign-in page | …and on a phone |
 |---|---|
-| [![The public sign-in page](docs/img/public-login.png)](docs/img/public-login.png) | [![The public sign-in page on mobile](docs/img/public-login-mobile.png)](docs/img/public-login-mobile.png) |
+| [![The sign-in page](docs/img/public-login.png)](docs/img/public-login.png) | [![The sign-in page on mobile](docs/img/public-login-mobile.png)](docs/img/public-login-mobile.png) |
 
-*The public front door — event details, programme and a sign-in, no login required. The whole hub is mobile-first, so it looks and works the same on the phone in an attendee's hand at the venue.*
+*The way in: no password, just an e-mailed one-time code — or one tap from any e-mail the hub sends. The whole hub is mobile-first, so it works the same on the phone in an attendee's hand at the venue.*
 
 ---
 
 ## What it is
 
-Community Event Hub (CEH) is the **behind-the-scenes operational layer** for a community conference. It is **not** a public event site or a ticketing system — it sits *alongside* those (see [How it fits with Zoho Backstage](#how-it-fits-with-zoho-backstage)) and owns the work: crew sign-in, self-service forms, tasks & reminders, sponsor deliverables, volunteer planning, exports and the organizer back office.
+Community Event Hub (CEH) is the **behind-the-scenes operational layer** for a community conference. It is **not** your public event site or ticketing system — it sits *alongside* them (see [How it fits with your event platform](#how-it-fits-with-your-event-platform)) and owns the work: crew sign-in, onboarding, self-service forms, tasks and reminders, sponsor deliverables, volunteer planning, master-class seats, e-mail, social-media announcements, exports and the organizer back office.
 
-It is built to be **evergreen and multi-community**. The codebase is generic (`CommunityHub`); everything about an edition — community name, dates, venue, hostname, deadlines, sponsors, content — lives in an `Events` row plus per-edition JSON. A new edition or a whole new community is **a new row + config, not a code change**. The project is open-sourced from the **Experts Live Denmark** instance that runs the conference; a sanitized public template is published openly while the real config, logos and production settings stay private.
+It is built to be **evergreen**. The codebase is generic (`CommunityHub`); everything about an edition — community name, dates, venue, rooms, deadlines, sponsor rules, wording — lives in an `Events` database row plus per-edition configuration. A new edition is **a new row and new config, not a code change**. The project is open-sourced from the instance that runs a live community conference; this repository is the sanitized template, while that event's real configuration, content and settings stay private.
 
 ## Who it's for
 
-The hub gives every persona its own tailored, mobile-first surface — and organizers a single place to run everything:
-
 | Persona | What they get |
 |---|---|
-| **Organizer** | Command center + cross-role overview, live dashboard, fast search/sort/paged grids, participant management (edit / delete-safely / bulk / act-as / secure links), pre-selection & onboarding queues, the action queue for late changes, a task-allocation queue, an Email Center + broadcast, sessions & Sessionize, sponsor admin + leads, volunteer structure & buckets, multi-hotel, swag/travel/lunch/dinner overviews, exports & printable run-sheets, social-graphics + LinkedIn scheduling, and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Speaker / Masterclass speaker** | A speaker hub with a milestone tracker and countdowns, "My sessions", an editable public bio (tabbed) seeded from Sessionize but owned by them, a public-profile preview, preferred-email routing, calendar-subscribe for deadlines, attendee questions, share graphics, a public master-class logistics page, and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Volunteer** | "My schedule" (all shifts, time-ordered, with per-shift instructions and calendar subscribe), self-service shifts (confirm / decline / swap), "My tasks" grouped by area, a help channel to their supervisor, a supervisor dashboard if they run a category, and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Sponsor** | A single sponsor portal (`/Sponsor`) with company profile, booth tier, logistics quick-links, an "Our Booth" page, the deliverables checklist, a leads read-view and order/invoice status; booth lead-capture and a secured Leads API; tasks generated from what they bought; and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Media (press / photo / video)** | A crew hub with its own welcome mail and Get-Started wizard, hotel booking with check-in/check-out registration, dinner and party sign-up, the "who's coming" attendee telemetry view, and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Event partner** | The same style of crew hub as Media — but its own role with its own welcome, Get-Started tasks, hotel + check-in/out, dinner and party sign-up — kept separate so partner entitlements can evolve independently. |
-| **Attendee** | A "My Event" home with a countdown, master-class status, a personal agenda (ask-a-question and rate-the-session links), self check-in on event days, the self-service hotel/swag/lunch forms, and the AI Community Helper to ask about speakers, sessions and key times. |
-| **Anyone (no login)** | A public front door (`/`), the programme (`/Sessions`, `/Speakers`), the sponsors page (`/Sponsors`), master-class logistics, per-session ask + rate pages, and the call-for-speakers survey. |
+| **Organizer** | A command center that ranks what needs attention today, a live dashboard, one status board for every role with filters and chase lists, fast searchable grids with bulk actions, "switch to user" to see the hub as someone else, pre-selection and onboarding queues, catering and hotel numbers you can order against, the Email Center and full e-mail log, per-feature switches and release rings, background-job health and cadence, exports and printable run-sheets, a searchable audit log, and the social-media campaign planner. |
+| **Speaker** | A Get-Started wizard for everything the event needs from them, one task list with due dates, their sessions and public profile, promotion graphics ready to share, the posts the hub has planned about their session, logistics forms (hotel, dinner, lunch, gift, travel reimbursement where eligible), and session feedback delivered after the talk. |
+| **Volunteer** | Sign-up and availability in their own words, a pre-selection path to becoming active, their assignments with who to ask, a help channel to their supervisor, and the same logistics forms where they apply. |
+| **Sponsor** | Their company's tasks generated from what they bought, uploads that complete the task when the file arrives, company details, their webshop orders, booth information with live venue photos, the posts announcing them, and reminders that reach the whole coordinator team. |
+| **Media & event partner** | Their own crew hub with a welcome, Get-Started steps, hotel, dinner and party sign-up, and aggregate "who's coming" insights. |
+| **Attendee** | A welcome matched to their ticket, the in-hub master-class chooser (pick, switch, or join the waitlist), party sign-up and event information. |
+| **Anyone (no login)** | The public programme — `/Sessions`, `/Speakers`, `/Agenda`, `/MasterClasses`, `/Sponsors`, `/Contributors` — plus a per-session QR rating page. |
 
-> The detailed public feature catalog is **[`docs/FEATURES.md`](docs/FEATURES.md)**; the architecture, build, deploy and runbook are in **[`docs/DESIGN.md`](docs/DESIGN.md)**.
+Every signed-in person also gets the **AI Community Helper**, which answers questions about speakers, sessions and key times from the published programme only.
+
+> The full delivered-feature catalog is **[`docs/FEATURES.md`](docs/FEATURES.md)**; architecture, build, deploy and runbook are in **[`docs/DESIGN.md`](docs/DESIGN.md)**.
 
 ---
 
@@ -42,33 +41,12 @@ The hub gives every persona its own tailored, mobile-first surface — and organ
 
 - [What it is](#what-it-is)
 - [Who it's for](#who-its-for)
+- [By the numbers](#by-the-numbers)
 - [See it in action](#see-it-in-action)
 - [Why it exists](#why-it-exists)
-- [Feature areas](#feature-areas)
-  - [1. Platform — built for every edition](#1-platform--built-for-every-edition)
-  - [2. Sign-in & embedding](#2-sign-in--embedding)
-  - [3. Crew profiles & roles](#3-crew-profiles--roles)
-    - [Your profile, your hub](#your-profile-your-hub)
-    - [Managing people, safely](#managing-people-safely)
-    - [Volunteer work structure](#volunteer-work-structure--run-a-big-pool-without-a-bottleneck)
-    - [Volunteer "My schedule" + self-service shifts](#volunteer-my-schedule--self-service-shifts)
-    - [Buckets & resource allocation](#buckets--resource-allocation--plan-staffing-then-commit)
-    - [Onboarding lifecycle](#onboarding-lifecycle--from-sign-up-to-set-up)
-    - [Multi-hotel management](#multi-hotel-management)
-  - [4. Self-service forms](#4-self-service-forms)
-  - [5. Tasks & reminders](#5-tasks--reminders)
-  - [6. Sessions & surveys](#6-sessions--surveys)
-  - [7. Sponsors](#7-sponsors)
-  - [8. Sponsor leads](#8-sponsor-leads)
-  - [9. Attendees & masterclass reconciliation](#9-attendees--masterclass-reconciliation)
-  - [10. Email & notifications](#10-email--notifications)
-  - [11. Organizer hub](#11-organizer-hub)
-  - [12. Hosting & reliability](#12-hosting--reliability)
-  - [13. Accessibility](#13-accessibility)
-  - [14. Bilingual UI — English & Danish](#14-bilingual-ui--english--danish)
-  - [15. Social graphics & post scheduling](#15-social-graphics--post-scheduling)
-  - [16. AI Community Helper](#16-ai-community-helper)
-- [How it fits with Zoho Backstage](#how-it-fits-with-zoho-backstage)
+- [Key features by area](#key-features-by-area)
+- [How it works](#how-it-works)
+- [How it fits with your event platform](#how-it-fits-with-your-event-platform)
 - [Getting started](#getting-started)
 - [Configuration model](#configuration-model)
 - [Embedding](#embedding)
@@ -79,51 +57,48 @@ The hub gives every persona its own tailored, mobile-first surface — and organ
 
 ---
 
+## By the numbers
+
+Measured on this repository on 2026-09-14.
+
+| | |
+|---|---|
+| Delivered features in the catalog | **222** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
+| Application code (C#, excluding migrations) | **211,770** lines in 1,053 files |
+| Razor views | **43,076** lines in 261 files (203 pages) |
+| Scheduled background jobs | **43** timer-triggered functions, plus an order webhook |
+| Database migrations | **259** EF Core migrations |
+| Branded e-mail templates | **39** |
+| Automated tests | **6,770** xUnit tests (144,778 lines of test code), plus Pester and Playwright suites |
+| Infrastructure as code | **7** Bicep files (1,071 lines) |
+
+---
+
 ## See it in action
 
-Every screenshot below is captured **headlessly** against a locally-run instance seeded with **synthetic demo data** (a fictional "Demo Community Conf" with placeholder people and sponsors).
+Every screenshot is the real product, captured automatically by a headless test that signs in and photographs each page at desktop **and** phone width. **Names, e-mail addresses, companies and photographs are synthetic** — the capture replaces every one before the picture is taken.
 
 | Organizer command center | Speaker hub (mobile) |
 |---|---|
 | [![Organizer command center](docs/img/organizer-command-center.png)](docs/img/organizer-command-center.png) | [![Speaker hub on mobile](docs/img/speaker-hub-mobile.png)](docs/img/speaker-hub-mobile.png) |
-| *"Is the event on track, what do I do next?" — one screen triages the whole event.* | *Mobile-first throughout: a speaker's milestone tracker and sessions at ~390px.* |
+| *"Is the event on track, what do I do next?" — one screen triages the whole event.* | *Mobile-first throughout: a speaker's sessions and next steps at ~390px.* |
 
-| Volunteer "My schedule" | Sponsor self-service |
+| Volunteer assignments | Sponsor home |
 |---|---|
-| [![Volunteer schedule](docs/img/volunteer-schedule.png)](docs/img/volunteer-schedule.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Every shift, time-ordered, with who to ask and one-tap calendar subscribe.* | *The in-hub Sponsor area: company details, booth, tasks, leads and order status.* |
+| [![Volunteer assignments](docs/img/volunteer-schedule.png)](docs/img/volunteer-schedule.png) | [![Sponsor home](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
+| *What a volunteer is doing, and when, with who to ask.* | *A sponsor's own area of the hub.* |
 
-| Volunteer schedule (mobile) | Attendee "My Event" (mobile) |
+| Task checklist | Get-Started wizard |
 |---|---|
-| [![Volunteer schedule on mobile](docs/img/volunteer-schedule-mobile.png)](docs/img/volunteer-schedule-mobile.png) | [![Attendee My Event on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
-| *Built for someone standing at the venue: a volunteer checks their next shift on their phone.* | *Every attendee's home — the in-hub Master Class chooser (pick / switch / waitlist) and status — in the palm of their hand.* |
+| [![Task checklist with a completion percentage](docs/img/unified-task-checklist.png)](docs/img/unified-task-checklist.png) | [![Get-Started wizard showing one step at a time](docs/img/wizard-inline-stepper.png)](docs/img/wizard-inline-stepper.png) |
+| *One task list per person with a live completion percentage.* | *One step at a time, with the real form in place and save-and-next.* |
 
-> Every persona surface is designed phone-first (~360px) and tested headlessly at that width, so the experience above is the same on a laptop at the organizer desk and a phone on the show floor.
-
-> ℹ️ The role menus were redesigned in the 2026 edition (see the menu maps below). Fresh screenshots of each redesigned menu are being captured; the maps below are the source of truth in the meantime.
-
-### More of the experience
-
-| Unified task list | In-wizard inline stepper |
+| AI Community Helper | Attendee home (mobile) |
 |---|---|
-| [![Unified task list with a completion percentage](docs/img/unified-task-checklist.png)](docs/img/unified-task-checklist.png) | [![In-wizard inline stepper showing Step X of N](docs/img/wizard-inline-stepper.png)](docs/img/wizard-inline-stepper.png) |
-| *One task list per person — a "Task checklist" with a live completion %, so everyone sees what's left in one place.* | *A guided, one-step-at-a-time wizard: "Step X of N", a progress bar and Previous / Save&next — onboarding without a wall of fields.* |
-
-| Sponsor "Our Booth" | Organizer task-allocation queue |
-|---|---|
-| [![Sponsor Our Booth page with booth number](docs/img/sponsor-our-booth.png)](docs/img/sponsor-our-booth.png) | [![Organizer task-allocation queue with live coverage](docs/img/organizer-allocation-queue.png)](docs/img/organizer-allocation-queue.png) |
-| *Each sponsor sees their own booth number and the expo map — no email thread needed.* | *Allocate organizer-owned tasks with live red/green coverage, queue a draft, then commit (nobody is notified until commit).* |
-
-| AI Community Helper | AI Community Helper (mobile) |
-|---|---|
-| [![AI Community Helper chat panel with a question and answer](docs/img/ai-community-helper.png)](docs/img/ai-community-helper.png) | [![AI Community Helper chat panel on mobile](docs/img/ai-community-helper-mobile.png)](docs/img/ai-community-helper-mobile.png) |
-| *A grounded, role-aware assistant — it answers only from the public programme and the signed-in person's own data.* | *Phone-first: the helper opens to a near-full-width chat panel on a phone.* |
-
-> The new views above are also phone-first — mobile captures: [unified task list](docs/img/unified-task-checklist-mobile.png), [inline stepper](docs/img/wizard-inline-stepper-mobile.png), [sponsor "Our Booth"](docs/img/sponsor-our-booth-mobile.png) and the [organizer allocation queue](docs/img/organizer-allocation-queue-mobile.png).
+| [![AI Community Helper chat panel](docs/img/ai-community-helper.png)](docs/img/ai-community-helper.png) | [![Attendee home on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
+| *A grounded, role-aware assistant that answers only from the published programme.* | *Built for someone walking up to the venue.* |
 
 ## Full screen gallery
-
-Every screen below is the real product, captured automatically by a headless test that signs in, walks the hub and photographs each page at desktop **and** phone width. **Names, e-mail addresses, companies and photographs are synthetic** — the capture replaces every one before the picture is taken, and the run fails if a single real value survives, so nothing here is anybody's data.
 
 Each entry links to its full-size desktop capture; append `-mobile` to any filename for the phone version.
 
@@ -132,15 +107,15 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 
 | Screen | What it shows |
 |---|---|
-| [Sign-in](docs/img/public-login.png) | The public front door — the passwordless way in |
+| [Sign in](docs/img/public-login.png) | Passwordless: an e-mailed one-time code, or one tap from any hub e-mail |
 | [Sessions](docs/img/public-sessions.png) | The public catalogue with live filters for type, length, room, date, track and level |
 | [Master classes](docs/img/public-masterclasses.png) | Full-day sessions, with capacity and booking state |
+| [Session detail](docs/img/public-session-detail.png) | One session with its speakers |
 | [Speakers](docs/img/public-speakers.png) | The published line-up (unpublished speakers are never shown) |
 | [Sponsors](docs/img/public-sponsors.png) | Sponsors by tier, from the sponsor records themselves |
-| [Agenda](docs/img/public-agenda.png) | The schedule grid |
+| [Agenda](docs/img/public-agenda.png) | The schedule, day by day |
 | [Contributors](docs/img/public-contributors.png) | Everyone who helped build the event |
-| [About / introduction](docs/img/public-about.png) | The in-hub product introduction |
-| [Sign in](docs/img/public-login.png) | Passwordless: an e-mailed one-time code, or one-tap from any hub e-mail |
+| [About](docs/img/public-about.png) | The in-hub product introduction |
 
 </details>
 
@@ -152,17 +127,17 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | [Hub home](docs/img/hub-home.png) | Where every role lands: what you owe, when it is due |
 | [Your tasks](docs/img/unified-task-checklist.png) | Every obligation with a deadline and a progress rollup |
 | [Speaker hub](docs/img/speaker-hub.png) | A speaker's own sessions, times, rooms and outstanding items |
-| [Speaker tasks](docs/img/speaker-tasks.png) | Bio, photo, slides, travel — each dated, each with its own reminder rhythm |
+| [Speaker tasks](docs/img/speaker-tasks.png) | Bio, photo, slides, travel — each dated |
 | [Speaker readiness](docs/img/speaker-readiness.png) | "Am I done?" answered, rather than guessed |
 | [Speaker graphics](docs/img/speaker-graphics.png) | Ready-made promotion artwork to download and share |
 | [Speaker announcements](docs/img/speaker-announcements.png) | The posts the hub has planned about their session |
-| [Sponsor portal](docs/img/sponsor-portal.png) | Self-service for the whole sponsorship |
-| [Sponsor booth](docs/img/sponsor-our-booth.png) | Stand number, expo map and what is still owed |
+| [Sponsor home](docs/img/sponsor-portal.png) | The sponsor's own area of the hub |
+| [Sponsor booth](docs/img/sponsor-our-booth.png) | Stand information, venue photos and what is still owed |
 | [Sponsor deliverables](docs/img/sponsor-deliverables.png) | Every contracted item, tracked with a deadline |
 | [Sponsor announcements](docs/img/sponsor-announcements.png) | Their own posts, and what each is waiting for |
 | [Volunteer sign-up](docs/img/volunteer-signup.png) | Availability in the volunteer's own words |
-| [Volunteer schedule](docs/img/volunteer-schedule.png) | The shifts that availability turned into |
-| [Attendee My Event](docs/img/attendee-my-event.png) | Their master class, party booking and agenda |
+| [Volunteer assignments](docs/img/volunteer-schedule.png) | The work that availability turned into |
+| [Attendee home](docs/img/attendee-my-event.png) | Master class and party booking |
 | [Profile](docs/img/profile.png) | The details every role maintains themselves |
 
 </details>
@@ -173,12 +148,12 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | Screen | What it shows |
 |---|---|
 | [Dashboard](docs/img/organizer-dashboard.png) | The state of the edition at a glance |
-| [Command centre](docs/img/organizer-command-center.png) | What needs a human today, ranked |
+| [Command center](docs/img/organizer-command-center.png) | What needs a human today, ranked |
 | [Participants](docs/img/organizer-participants.png) | Everyone, filterable by role, status, company and rollout ring |
 | [Attendees](docs/img/organizer-attendees.png) | Ticket holders, reconciled against the ticketing system |
 | [Sessions](docs/img/organizer-sessions.png) | The programme, with rooms, tracks and levels |
-| [Action queue](docs/img/organizer-allocation-queue.png) | Allocate organizer-owned work with live coverage |
-| [E-mail centre](docs/img/organizer-email-center.png) | Preview exactly what will be sent, before it sends |
+| [Action queue](docs/img/organizer-allocation-queue.png) | Late changes and work waiting for an organizer |
+| [E-mail center](docs/img/organizer-email-center.png) | Preview exactly what will be sent, before it sends |
 | [E-mail log](docs/img/organizer-email-log.png) | Every message, its state, and retries |
 | [Background jobs](docs/img/organizer-jobs.png) | Cadence and health of every scheduled routine |
 | [Graphics](docs/img/organizer-graphics.png) | Speaker, session and sponsor artwork generation |
@@ -206,50 +181,22 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 
 </details>
 
-**Looking for the written catalogue instead?** [`docs/FEATURES.md`](docs/FEATURES.md) lists every delivered feature with the date it shipped.
-
-## Role menus (2026 redesign)
-
-Each role sees only what's theirs — a focused, mobile-first menu. `▸` marks a fold-out section; `↗` opens an external site (Zoho exhibitor dashboard / webshop) in a new tab.
-
-**Attendee** — deliberately minimal:
-`Home` · `Master Class` (the in-hub 3-section chooser — pick / switch / waitlist, all on one page) · `My plan` · `Community Helper`
-
-**Speaker:**
-`Home` · `My tasks` (now also where "Am I ready?" readiness lives — no separate `/Speaker/Readiness` leaf) · `My profile` · `Sessions` · `My Sessions` · `Master Class Q&A` (master-class speakers only) · `Bio` · `Calendar` · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Speaker Gift · Travel reimbursement) · `Contact Organizers` · `Community Helper`
-
-**Sponsor:**
-`Home` · `My profile` · `Sponsor Webshop ▸` (Buy extra services ↗ · Sponsor orders · Linked contacts) · `Exhibitor & Booth Details ▸` (Exhibitor Profile ↗ · Booth Members ↗ · Exhibitor Materials ↗ · Promotional Banner ↗) · `Sponsor Tasks` (now also where the deliverables % lives) · `Leads ▸` (Leads ↗ · Inquiries ↗ · Capture leads · My leads export) · `Event logistics ▸` (a single fold-out leading with `Booth run-of-show` · `Our Booth` · Hotel · Appreciation Dinner · Lunch) · `Contact Organizers` · `Community Helper`
-
-**Volunteer:**
-`Home` · `My tasks` · `My profile` · `My schedule` (shifts + tasks, with confirm / decline / request-swap) · `My availability` (per-day full / half / blocked) · `Supervisor` (supervisors only) · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Volunteer Gift · Important dates) · `Community Helper`
-> Volunteers also sign up via an anonymous shift-survey link (no account needed) that captures their availability.
-
-**Organizer** — a lean hub menu; each hub opens a button-grid of its admin pages:
-`Home` · `Command center` · `Dashboard` · `Find person` · `People` · `Sessions & speakers` · `Comms` · `Social media` · `Sponsors` · `Volunteers` · `Logistics` · `Setup` · `Audit log` · `Community Helper`
-
 ---
 
 ## Why it exists
 
 **Goals**
 
-- Build an **open-source community event platform** other communities can re-use — to help scale the Microsoft (and adjacent) community by automating manual work.
-- Give **speakers / volunteers / sponsors / attendees** one self-service hub to submit data and complete tasks, and to see and manage their own submissions.
-- **Centralize tasks** — one overview, not five.
-- **Better change management** — hotel changes, speaker changes, etc. flow through the hub instead of email threads.
-- **More automation, fewer manual touches** per participant.
-- **Sync data to subsystems** — Backstage / webshop / company directory, read where it makes sense.
-- **Automate deliverables to partners** — hotel rooming list, catering overviews, swag / polo orders.
+- An **open-source community event platform** other communities can re-use, so running a conference takes fewer manual touches.
+- One **self-service hub** where speakers, volunteers, sponsors and attendees submit what the event needs and see what they still owe.
+- **Tasks in one place** — one overview, not five — and **change management** through the hub instead of e-mail threads.
+- **Data flowing to and from the systems you already use** — call for speakers, ticketing, webshop, finance — and **deliverables for partners** (rooming lists, catering numbers, swag orders) produced automatically.
 
-**Problems it solves** (vs. how a conference is usually run today)
+**Problems it solves**
 
-- Move out of spreadsheets into a database — automation instead of manual merges.
-- Avoid static forms — they generate endless follow-up and Excel reconciliation.
-- Simplify the system landscape — drop tools like Microsoft Planner with tenant integration for sponsors.
-- Collect info only from the selected people, away from Sessionize / generic forms.
-- More self-service so organizers don't update on people's behalf (avoids human mistakes).
-- Minimize email — only send for overdue tasks.
+- Spreadsheets and static forms that generate endless follow-up and manual reconciliation.
+- Organizers updating details on people's behalf, and the mistakes that come with it.
+- Too much e-mail: the hub nudges only when something is actually due.
 
 <details>
 <summary>Architecture at a glance (diagrams)</summary>
@@ -261,435 +208,398 @@ Each role sees only what's theirs — a focused, mobile-first menu. `▸` marks 
 
 ---
 
-## Feature areas
+## Key features by area
 
-The sections below mirror the chapters of the public feature catalog. Each is a summary — see **[`docs/FEATURES.md`](docs/FEATURES.md)** for the full per-audience detail and **[`docs/DESIGN.md`](docs/DESIGN.md)** for how it works.
+A summary of what is delivered today. Each area has much more detail — and the date every piece shipped — in **[`docs/FEATURES.md`](docs/FEATURES.md)**.
 
-### 1. Platform — built for every edition
+### Platform & configuration
 
-One hub, every year, every community. The codebase, repo, Azure resources and namespaces are all generic `CommunityHub` — the year appears only in the web address and the event's display name. Launching a new edition (or onboarding a new community) is a new `Events` row plus per-edition JSON, never a rebuild or a fork. Everything about an edition — event details, sponsors, content, hotel, integrations, speaker deadlines — is configuration you edit, not code you change. A sanitized public template is published openly while your real config, logos and production settings stay private.
+- A new edition or a new community is **a new `Events` row plus configuration**, never a rebuild.
+- **Every capability has a switch** and is off until you turn it on for your edition; release rings let you open features and e-mail to your own test accounts first, then a few real people, then everyone.
+- Rooms, session lengths and audience levels, webshop product rules and job cadences are **configuration you edit**, not code.
+- Accounts **marked as test data** stay out of every total a supplier invoices you for — rooms, meals, head counts.
+- A public template that **builds from a fresh clone**, with sanitized starter configuration.
 
-→ [`docs/FEATURES.md` §1](docs/FEATURES.md#1-platform--built-for-every-edition) · architecture in [`docs/DESIGN.md` §1–2](docs/DESIGN.md#1-system-overview)
+### Sign-in & embedding
 
-### 2. Sign-in & embedding
+- **Passwordless**: a one-time PIN by e-mail that expires in 15 minutes, with lockout and rate limiting and messages that never reveal whether an address is registered.
+- **One-tap sign-in links** in the hub's e-mails, revocable, and a "remember me" choice.
+- Signed-out visitors go straight to sign-in; the public programme pages stay reachable on their own addresses.
+- Hub access follows the person's ticket or role, and the hub **embeds safely** inside your event portal.
 
-- **One-time PIN by email — no new account.** Crew sign in with just their email; the hub sends a 6-digit PIN that expires in 15 minutes and works once. Safeguards built in: rate limiting (5/hour per email), lockout after repeated wrong tries, constant-time verification, and neutral messaging that never reveals whether an email is registered. PINs are never logged in plaintext.
-- **"Stay signed in" your way.** At login you choose a session length — a day, a week (default), a month, or until you sign out — and the session refreshes itself as you keep using the hub.
-- **Magic-link login.** Invitation emails can carry a tap-to-sign-in link (valid 7 days) so crew land straight in their hub without typing a PIN.
-- **Pre-filled login links.** `/Login?email=<address>` opens the sign-in page with the email pre-filled (pure convenience — it never bypasses the PIN), and works in every environment because each link uses that environment's own base URL.
-- **Ready for single sign-on.** Identity is isolated behind an `IIdentityProvider` seam so a verified SSO provider can be added later without disrupting the PIN experience.
-- **Embeds safely in your event portal.** The hub runs inside an existing conference platform (e.g. a Zoho Backstage embed) with CSP `frame-ancestors` and `SameSite=None; Secure` cookies; security never depends on trusting the embed.
+### People, roles & onboarding
 
-→ [`docs/FEATURES.md` §2](docs/FEATURES.md#2-sign-in--embedding--frictionless-no-new-passwords) · design in [`docs/DESIGN.md` §4](docs/DESIGN.md#4-auth-identity--embedding)
+- **One main role plus add-on "hats"** (a speaker who is also a sponsor contact), with entitlements counted once.
+- A **Get-Started wizard for every role** that shows only the steps that apply, renders each real form in place, opens with a welcome, and names exactly what is missing.
+- A **pre-selection queue** for volunteers and other applicants, with an availability grid, undo and reversible deactivation.
+- **One status board** for every role with filters, chase lists and e-mail export; add a person by hand before any sync knows them.
+- **Volunteer structure** with categories, supervisors, help requests and an allocation pipeline that stays silent until an organizer commits.
+- **Speaker categories** (community, sponsor, guest) and media picture and video libraries.
 
-### 3. Crew profiles & roles
+### Self-service forms & logistics
 
-Everyone who works your event — from the lead organizer to a first-time volunteer — gets **one profile and one hub built around their role**, so they only ever see what is theirs to do.
+- **Hotel** across several hotels, with room blocks, confirmation numbers and a rooming list.
+- **Appreciation dinner** with structured diet and allergy capture, a kitchen allergy roll-up and a run-sheet.
+- **Catering numbers you can order against** and lunch lists for both days.
+- **Party RSVP**, swag choices, a two-step **travel reimbursement** offered only to people who can claim it, and a group-photo planner.
+- Every form shows when it was last saved; edits close to the deadline become organizer action items.
 
-#### Your profile, your hub
+### Tasks & reminders
 
-Each person has one profile per edition — name, contact details, role, accreditation (MVP / Expert / RD / MS Employee), awards, clothing sizes, and status flags. **What it does for you:** every signed-in person gets a **"My profile"** page they own (they can only ever change their own details — never anyone else's), so personal info stays current without an organizer typing it for them. A single shared **Resources** page (venue, floor plan, event site, exhibitor guide, organizer contact) gives everyone one always-current place for the practical info, maintained by organizers as edition settings — no developer needed. Every role gets a hub built around what that person actually needs to do — Organizer, Speaker, Masterclass Speaker, Volunteer, Sponsor, Speaker-Sponsor, Video, Photography, VIP, Attendee — and new crew get a friendly one-time welcome page the first time they arrive.
+- **One checklist per person** with a completion percentage and overdue badges.
+- **Uploads inside the task** — a sponsor's logo or a speaker's slides complete the task when the file arrives.
+- A reminder engine that never double-sends, with the **repeat interval set per message and per role**; calendar invites arrive by e-mail.
+- Sponsor reminders reach the **whole coordinator team**; Get-Started reminders show what is done and what is open.
 
-#### Managing people, safely
+### Sessions, speakers & programme
 
-Organizers can filter crew by role/status and activate or deactivate anyone in a click — deactivated people can no longer sign in. Every grid row has a full **Edit** action (name, email, persona/role, active state, sponsor-company link) and a **Delete** behind a confirmation. **Why it matters:** nothing important is ever silently lost — people with linked data (sessions, tasks, claims, history) are **deactivated** rather than permanently removed, while a never-engaged row is fully cleaned up; bulk deactivate is available and every removal is audited.
+- **Hourly Sessionize import** of accepted speakers and sessions, with a dry-run preview and safe endpoint switching.
+- **Public `/Sessions`, `/Speakers`, `/Agenda`, `/MasterClasses` and `/Contributors`** pages with filters for track, level, length and time slot; only published speakers appear.
+- **The hub owns the schedule**: edit any session, mark keynotes and all-tracks sessions, and get told when your public event site disagrees.
+- **Session feedback by QR code**, turned into per-session reports delivered to the speakers.
+- A master-class Q&A board and ready-to-share promotion material for speakers.
 
-**Add somebody the sync has not heard of yet.** People arrive before the systems know about them — a volunteer says yes in a corridor, a booth contact is named a fortnight before the paperwork. A **"New participant"** button opens a short form (first name, last name, email, active/inactive, role) and creates a **real participant** you can assign work to immediately; the shortness is deliberate, since pre-staging is about getting somebody into the system, not filling in a profile on their behalf. Email identifies the person, so a later import merges rather than duplicates, and **nobody is emailed unless you tick the box** — adding ten people while working through a list should not send ten messages you weren't ready to send.
+### Sponsors & exhibitors
 
-**Test accounts are marked, and the mark is what counts.** Profiles can be tagged as **test/dummy data**, so the whole synthetic cast can be wiped at go-live in one step without touching a real registration — and, more usefully day to day, **anything marked as test data drops out of every operational total**: hotel rooms and the rooming list, lunch, swag and polo sizes, the party head count, the appreciation dinner, the kitchen's allergy roll-up and the headcount tiles. Rehearsal accounts fill in forms — that is the point of them — but those answers used to land in the numbers you order against. The lists and the numbers changed together, so a total and the names printed beside it always still agree. The exclusion follows the **mark**, never a guess about which accounts *look* synthetic: counting one meal too many wastes a meal, while missing one leaves a real person without lunch, and those are not the same mistake. Test accounts stay fully visible where you manage people — they simply stop being something a supplier invoices you for.
+- A sponsor is a **company**; its tasks are generated from what it bought and de-duplicated across orders.
+- A public **`/Sponsors`** page by tier and a booth page with **live venue photos** served from your document library.
+- Optional **exhibitor sync** to your event platform, **webshop and finance integration** with clear ownership of each field, and withdrawal of lapsed sponsors.
+- **Coupon pools and volume packages** with invoicing and a usage page for the customer.
+- A sponsor **Leads API** with a lead pipeline and quality scoring.
 
-#### Volunteer work structure — run a big pool without a bottleneck
+### Attendees & master-class seats
 
-For events with dozens of volunteers, the organizing team can't be everyone's single point of contact. Organizers build a three-level work tree — **Categories → Subcategories → Tasks** — and appoint a trusted volunteer as the **supervisor** of a category, giving them management rights for just that area (alongside an organizer **lead** for oversight). **What you get:** supervisors run their own area's dashboard (add work, assign volunteers, move tasks along); volunteers see a **"My tasks"** view grouped by category; and a built-in **help channel** lets a stuck volunteer ask their supervisor for help in one tap — the supervisor is emailed (lead CC'd) so they don't have to be watching a screen. Mobile-first for use at the venue.
+- The **master-class chooser** runs in the hub — pick, switch or join a waitlist — and a class is **never oversold**.
+- Separate welcomes for **1-day and 2-day** ticket holders; reassigned and cancelled tickets are handled cleanly.
+- An organizer attendee browser and aggregate **"who's coming"** insights that name nobody.
 
-#### Volunteer "My schedule" + self-service shifts
+### E-mail & notifications
 
-Every volunteer gets one mobile-first page answering "what am I doing, and when?" — all their shifts time-ordered (dated first, undated last), showing where/when and **who to ask** (supervisor + lead), with per-shift instructions and one-tap **calendar subscribe** (or a single-shift `.ics`). They also stay in control of their own shifts: **confirm** they can take one, **decline** it (with an optional reason — a coordinator is automatically signalled to reassign), or **request a swap** — all surfaced on the organizer action queue, with one-tap undo. They can only ever act on shifts they are actually assigned to. *(No self event-check-in — that stays in Zoho Backstage.)*
+- **Branded templates** rendered for every e-mail client, with an in-hub editor and test sends.
+- **Release rings, a kill switch and a welcome safety cap** keep a half-configured environment from mailing real people; a send that reached nobody says so.
+- A **complete e-mail log** with re-send, and a Comms page showing who got what.
+- Paced sending and repeat suppression so nobody receives the same message twice.
 
-![Volunteer "My schedule" with shifts and calendar subscribe](docs/img/volunteer-schedule.png)
-*A volunteer's whole day in one place: shifts time-ordered, who to ask, and one-tap calendar subscribe — and it works just the same on a phone at the venue (see the mobile shot above).*
+### Organizer back office
 
-#### Buckets & resource allocation — plan staffing, then commit
+- **Command center, dashboard and cross-role overview**, with every number a link into the matching list.
+- Fast server-side search, sort and paging, **bulk actions**, **switch to user** and scoped secure links — all audited.
+- **Exports and printable run-sheets**, data-freshness monitoring per integration, and an **audit log** in local time.
 
-A planning surface turns a long task list into a staffed plan, with a draft-it-then-commit workflow so nothing is assigned by accident. **Import** the volunteer plan (CSV) to build buckets and tasks, see **red/green coverage** (needed vs assigned) at a glance, get **AI-assisted** suggestions for any missing pre-requisite or expectation, map people into a **draft** and watch coverage simulate live — then **Commit** to make assignments real (or **Discard** the draft). Two organizers can plan at once without stepping on each other.
+### Social media & graphics
 
-Beyond drafting buckets, a **task-allocation pipeline** turns availability into staffed work and routes it cleanly. An **availability auto-assign engine** matches open work to the people who said they're free, and the result lands in **role-routed queues** — a volunteer queue, an organizer queue, and a *tracked-only* queue (work owned by a Responsible Team that no one is emailed about). The whole staging area is a **SILENT queue**: editing, re-routing and re-assigning inside it sends **no email**, so organizers can shuffle a plan freely. Only when an organizer **commits** does the hub emit **batched, per-person notifications** — one tidy summary per assignee, not a storm of edits. Supporting it: **auto-generated task descriptions** from the title (so a one-line task still reads clearly), **all-organizer edit** of any task, and an **Excel export / import round-trip** with a stable per-task **GUID upsert** so a plan can be worked in a spreadsheet and re-imported without ever duplicating a row. The organizer view is `/Organizer/OrganizerAllocation`.
+- **Graphics** for speakers, sessions and sponsors, kept in one shared document library.
+- A **post editor with live variables** that publishes to your LinkedIn company page, **tagging speakers and sponsor contacts** where LinkedIn allows it and telling you who it could not tag.
+- A **campaign planner**: per-category rounds and start dates, a holiday pause, a capacity view that tells you whether the campaign fits, and a "not ready" reason on every held-back post.
+- Posts are **approved as they come due**, and your own artwork is never overwritten.
 
-#### Onboarding lifecycle — from sign-up to set-up
+### AI Community Helper
 
-A clear path from "someone is interested" to "they're ready to go", with organizers in control of who comes on board. Prospective volunteers, speakers and media land in a **pre-selection queue** (inactive → preselected → active; only an active person can sign in); organizers validate and activate one or many at once, and clear duplicates/spam. Each activated person then runs a short, **persona-tailored onboarding wizard** that covers only the steps that apply to them, tracked on an **onboarding dashboard** by stage and persona — and an organizer can re-open a single step to trigger a friendly reminder if something changes.
+- Answers plain-language questions from the **published** speakers, sessions and schedule only — an unpublished speaker is a hard gate.
+- Learns from a **curated document folder** you maintain, with no deploy.
 
-#### Speaker self-service, consolidated
+### Hosting, reliability & safety
 
-Speakers manage everything about themselves on one **Speaker Details** page — first/last name, bio + socials, photo, Microsoft accreditation (multi-select, mapped to their Zoho speaker **Skills**), country, and an optional preferred contact email — with a single **Save & sync to Zoho**. The Sessionize import seeds these and pulls each speaker's profile picture into SharePoint, and new speakers default to a locked release ring so nothing is published or emailed until an organizer promotes them. Anyone can sign in with their primary **or an alternate email**. A **Help Promote** page hands speakers ready-made social graphics + a one-tap **publish to LinkedIn** (through the hub's reviewed posting path — safely queued and posting nothing until a LinkedIn connection is enabled), with an opt-in email the moment their graphics are released. Session details (time + location) come from the live agenda, and speakers are emailed automatically if their session moves.
-
-#### Multi-hotel management
-
-When the rooms don't all fit in one hotel, organizers define each hotel (name, address, reception contact), assign each person to a hotel in one click, and see everyone **grouped by hotel** with per-hotel headcounts and confirmed counts. Record a per-person reservation number once a hotel returns it, and those details — assigned hotel, its address and the confirmation number — flow straight into each person's hotel calendar invite, so everyone sees exactly where they're staying.
-
-→ [`docs/FEATURES.md` §3](docs/FEATURES.md#3-crew-profiles--roles--the-right-hub-for-each-person)
-
-### 4. Self-service forms
-
-Short, mobile-friendly forms wired so completing them does the right follow-up automatically:
-
-- **Appreciation dinner** — RSVP with a calendar invite, and capture dietary needs.
-- **Hotel** — book a room and get a hotel calendar invite; feeds the rooming list and room-night forecast.
-- **Lunch** — sign up for pre-day and main-day lunch.
-- **Speaker info & editable bio** — speakers manage their own details and edit their **public bio** in tabbed sections (Bio · Tagline · Links & Social · Photo · Sessions); their edits are kept and the nightly Sessionize sync won't overwrite them (see §6).
-- **Preferred email for calendar & messages** — a speaker can set a preferred address; when set, **all** calendar invites and emails (from the hub *and* Zoho Backstage) go there, while their Sessionize email stays their sign-in and match key.
-- **Swag** — choose polo, jacket and award preferences.
-- **Travel** — a clear **two-step** flow (**Step 1: Upload Receipt**, then **Step 2: Request Travel Reimbursement**, with Step 2 blocked until a receipt is uploaded) that creates the matching payout task and emails the claim + receipts to the finance inbox for automatic bookkeeping.
-- **Volunteer sign-up** — a single guided, multi-step wizard (about-you → availability → agreement, with the Code of Conduct and Privacy Policy linked) that sets up the right tasks per volunteer.
-- **Get-started wizard for every role** — speakers, sponsors, organizers, volunteers, event partners and media each get a guided flow that shows **only the steps they're entitled to** (a self-funded speaker doesn't see hotel/travel/swag; a supported one does), marks a step **done automatically from saved data**, and keeps the "step X of Y" count honest. The same entitlement gate closes any form a person isn't entitled to. **"Get started" is now a true inline stepper, not a link list** — each step's real form renders **in place** with **Prev / Next** and **save-and-advance**, so a person fills in a step and moves straight to the next without ever leaving the wizard (and "Save & next" advances in sequence rather than looping on a not-yet-done step). The speaker flow opens with an **optional "Calendar email" step** so a speaker can set the address their calendar invites and reminders go to before anything else.
-- **"Last saved" + auto-save** — every save shows when it was last saved, and Company Details auto-saves plain fields (with a quiet *Saving… / Saved* status) so nothing is lost to a forgotten Save.
-- **Structured dietary & allergy capture** — the dinner and speaker forms use a structured picker (diet choice + common-allergen tick-boxes, free text only for anything not listed), so the caterer gets real head-counts instead of a pile of notes; day-catering and the dinner are tracked separately.
-- **Every form confirms it saved** — submitting any self-service form shows the same clear "saved" banner, announced to screen readers and dismissable, so no submit is silent.
-- **In-place guidance when something's missing** — forms flag exactly which field needs attention right next to it and re-check on the server, so nothing slips through.
-- **Late-change alerts** — edits to hotel/dinner/shift details *after* the change deadline notify organizers; edits before the deadline stay quiet.
-
-→ [`docs/FEATURES.md` §4](docs/FEATURES.md#4-self-service-forms--crew-fill-in-their-own-details)
-
-### 5. Tasks & reminders
-
-Every person sees only their own tasks, ticks them off, and the list fills itself from the forms they complete and the role they hold. **One consistent "what do I still owe" checklist** — pending, done, and a clear **overdue** badge with days late — now renders through **one unified task page** shared across the hub home, the Tasks page and the attendee My-Event page (and includes a sponsor contact's company-scoped tasks), so the checklist never says "all done" while work is still outstanding; pending items deep-link straight to the form that completes them. The page leads with a single **"Task checklist" completion %** so everyone sees at a glance how much they still owe, and role-specific signals fold into the same list — a speaker's **"Am I ready?" readiness** and a sponsor's **deliverables progress** are surfaced in **My Tasks** rather than living on a separate page.
-
-Each speaker automatically gets a dated task for every key milestone (for the current edition: submit title + abstract for masterclass speakers, verify bio + photo in the hub, upload a draft preview deck, upload the final deck — each on its own deadline, configurable per edition). A **speaker hub** turns those milestones into one mobile-first tracker: a progress bar, per-milestone cards with a live countdown ("12 days to go" / "due today" / "overdue 3 days"), one-tap Mark done / Reopen, and a clear "next up" — plus a **"My sessions"** card (title, day/time, room or "to be scheduled", co-speakers, a jump to attendee questions, and the public session link once announced) and a **preview of their public profile** exactly as attendees will see it once they're selected for the line-up.
-
-A gentle, reliable reminder engine sends on a per-type cadence — speaker milestones counting down (plus an overdue nudge), a weekly round-up of what is still open, weekly sponsor and form chasers, a short series for general tasks — and it never double-sends, quietly catching up if a day is missed. Everything (on/off, cadence, wording, recipients incl. CC/BCC/escalation) is tuned through settings, not code. **A recurring reminder's repeat interval is set per message and, where a message reaches several roles, per role** — so sponsors can be chased at one interval and speakers at another, each counted from the last send to that person and stopping the moment they are done. The guiding principle is to nudge only when something is actually overdue.
-
-**Sync to your own calendar.** Every speaker, volunteer and organizer can subscribe their hub deadlines and shifts to the calendar they already use (Outlook / Google / Apple) with a short, friendly subscribe link (private per person, resettable), or download a single item as `.ics` — new and moved deadlines flow through automatically, with a pop-up a week and a day before each due date. When an organizer **activates** a person, their activation email even carries a calendar invite for the event itself. A single edition-wide switch (on by default) turns calendar sync on or off.
-
-![Speaker hub milestone tracker](docs/img/speaker-hub.png)
-*The speaker hub centres on "My sessions" — when and where each talk is, with public-page, social-promote and calendar-sync links; deadlines and "Am I ready?" readiness now live in My Tasks.*
-
-→ [`docs/FEATURES.md` §5](docs/FEATURES.md#5-tasks--reminders--nothing-slips-no-inbox-spam) · jobs in [`docs/DESIGN.md` §5](docs/DESIGN.md#5-jobs-scheduled-timers)
-
-### 6. Sessions & surveys
-
-- **Pull speakers from the Sessionize API.** Connect a Sessionize API endpoint and the hub pulls the **accepted**-speaker list automatically (nightly, or on demand from an organizer button), creating/updating speakers (matched on email, never overwriting roles) and reporting skipped rows. *Setup:* in Sessionize open the event → **API/Embed** → new API endpoint → name it → **JSON** → include all built-in fields → enable the **speaker emails** advanced field (required, or every speaker is skipped — email is the match key) → configure the **accepted-speakers** view → **save** → copy the endpoint id (`https://sessionize.com/api/v2/<your-event-id>/view/All`). The endpoint id is ordinary operator configuration (not a secret): set it in your per-edition config (`integrations.<edition>.json` or a gitignored custom config). Keep the real id out of the public mirror, but it is plain config — not a Key Vault secret.
-- **Switch the endpoint safely.** An organizer endpoint-settings page lets you set or change the Sessionize endpoint id (and view) in the hub without a redeploy. Changing it (the typical case: switching from call-for-speakers to the accepted line-up) asks how to treat speakers already imported — **Replace** (the normal production full re-seed) or **Merge** (for testing only; a delta that never flushes a speaker's own edits) — and never starts an import on its own.
-- **Sessions come across too, linked to their speakers.** The same pull imports your **sessions** (linking each to its speaker(s), with co-speakers and multiple-sessions handled), upserting by Sessionize id so nothing is duplicated. **Add your own sessions** (e.g. a sponsor session) directly in the hub — clearly marked and safe across re-imports. Each session carries a **type** (Master Class / Tech Session / Sponsor Session) and a **length**, and the list filters by both.
-- **Preview before you import; delete safely.** A **dry-run preview** shows exactly how many speakers would be created / updated / left unchanged and which curated bios a full import would overwrite, before the real import (a separate, confirmed click). Organizers can **delete a bad or duplicate session** behind a confirmation — a session that has collected attendee questions, evaluations or master-class bookings is protected.
-- **Or import speakers from a spreadsheet.** Prefer files? Upload a Sessionize export; the hub reads columns in any order, with the same create/update rules, skip reporting, and automatic one-time welcome (speakers only; the API pull is the path that also brings sessions).
-- **Speakers own their bio — Sessionize just seeds it.** Each speaker's public profile (bio, tagline, LinkedIn / X / blog, photo) is seeded from Sessionize but belongs to the speaker once they touch it; the nightly **delta** sync only fills empty/untouched fields and never flushes their edits, while a one-click **"Full import"** is the deliberate complete re-seed.
-- **Push approved speaker bios to your public Backstage site — safely.** When the line-up is set, the hub can mirror each approved speaker's bio to your Zoho Backstage speaker page. No one goes public by accident: a speaker is only made visible when explicitly approved (a per-speaker switch that starts off), until then their bio is written only as a hidden draft, and there is no automatic/scheduled push. *(◻ live activation pending — built and tested, off by default.)*
-- **Tell a speaker when their session moves.** A speaker's session shows its **time and location from the live agenda**, the public-session link points at the platform's session details, and a background engine watches the agenda for **time/location changes** and **emails the affected speaker** when their slot moves. It's organizer-controllable and release-gated, and seeds quietly the first time so no one is emailed for a change that didn't really happen.
-
-#### A public programme anyone can browse (no login)
-
-- **A public front door at `/`** — event name, dates and venue, a Visit-event / Sign-in call to action, and cards into the public Sessions, Speakers, Sponsors and Master Classes pages. Signed-in crew still go straight to their hub.
-- **`/Sessions` + `/Sessions/{id}`** — the live edition's sessions with speaker(s), type, length, room and time; filter by type/length/room and search by title, speaker or room. Each session has its own shareable detail page (abstract, cross-linked speakers, links to master-class info and "ask the speaker", and a one-click **"Add to my calendar"** `.ics`).
-- **`/Speakers` + `/Speakers/{id}`** — this year's published speakers (photo, tagline, their sessions); only speakers the organizers chose to publish appear, with a friendly "coming soon" until then.
-
-| Public speaker lineup | Public session detail |
-|---|---|
-| [![Public speakers page](docs/img/public-speakers.png)](docs/img/public-speakers.png) | [![Public session detail](docs/img/public-session-detail.png)](docs/img/public-session-detail.png) |
-| *Only published speakers appear; each links to their sessions and back.* | *Every talk has a shareable page with "Add to my calendar" and "ask the speaker".* |
-
-#### At and around the room
-
-- **A QR code for every room.** The hub generates a per-room QR, stores the image on your **SharePoint**, and attaches its link to every session in the room so each speaker gets a **"Download QR"** button for their slides. *(Honestly reports "not wired" until SharePoint is set up, rather than inventing a link.)*
-- **Collect session feedback.** Two evaluation paths reach the speaker's preferred inbox: a physical **HappyOrNot** smiley box (results one-click emailed to the speaker(s) after the talk), and a **public, no-login QR rating page** (`/sessions/<token>/evaluate`) — tap a 1–5 smiley plus an optional comment, fully anonymous, with light anti-abuse. Organizers get a **results dashboard** with per-session and per-room averages, counts and comments.
-- **Let attendees ask questions before the event.** Every session has a **public, no-login link** (`/sessions/<token>/ask`, addressed by an unguessable per-session token). Questions stay inside the hub — never posted publicly — and reach only organizers and the session's speakers (ask anonymously if you like); speakers see and answer their own sessions' questions, visible to co-speakers too.
-- **Public master-class logistics page + Zoho Booking sync.** Every master class gets its own clean, no-login page where speakers/organizers publish setup instructions ("bring your laptop charged", what to install). Pull the people who **booked a master class** straight into the hub from **Zoho Booking** (one-way; Booking stays source-of-truth); re-running never duplicates, and newly-booked people land in the validation queue.
-
-- **Public, no-login surveys.** A 3-step survey at its own web address (pick a track → rank topics → set your level), with a live results dashboard anyone can view, spam protection built in, and no sign-in required.
-- **Call-for-speakers demand survey.** Weighted topic rankings, per-track breakdowns and a level distribution on a shareable results page that helps shape the agenda. Surveys are mobile-first with per-step imagery and per-track deep links, and are defined entirely in JSON under `src/CommunityHub/App_Data/Surveys/<slug>.json` — adding one is a config change, not a migration.
-
-→ [`docs/FEATURES.md` §6](docs/FEATURES.md#6-sessions--surveys--from-call-for-speakers-to-the-schedule) · import design in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
-
-### 7. Sponsors
-
-A sponsor is a **company, not a single contact** — every contact at a company sees that company's shared tasks. Company and contact details (including who signs and who coordinates) come from your central company directory, which the hub reads as source-of-truth and never duplicates; sponsor-facing text always shows the company's chosen public name (with a fallback chain). Booth tasks are generated automatically from what each sponsor bought — shared booth basics plus per-tier extras (Platinum / Diamond / Gold) — de-duplicated across orders so a company never sees an item twice. A baseline checklist (logo, onboarding, description, attendee-bag insert, app-game) is set up for every sponsor; deadlines are anchored to the event date or first order, all configurable. Task wording is hand-curated for clarity; instructions render long URLs as clean buttons; each task can have its own upload folder with change alerts. Organizers can add/link/remove coordinators, set the default signer and coordinator, and create or edit tasks targeted at all exhibitors, all sponsors, or a specific tier. Work the platform handles behind the scenes is never shown to sponsors as a to-do.
-
-- **A public sponsors page at `/Sponsors`.** A clean, no-login page lists your sponsor companies **grouped by tier** (Platinum, Diamond, Gold, Feature, other supporters), each with logo (a tidy initials badge as fallback), public company name and optional website link, with a friendly empty state before sponsors are announced.
-- **A single sponsor portal at `/Sponsor`.** Signed-in sponsors get a self-service home that pulls together everything about their sponsorship: company profile and logo, booth tier, booth & logistics quick-links (floor plan, exhibitor guide), their **deliverables checklist** (now surfaced through Sponsor Tasks, the same pending/completed view used across the hub), a read view of their **leads**, and **order & invoice status** drawn from the records the hub holds (it says so plainly where invoicing isn't configured rather than inventing one). Each sponsor sees only their own company's data.
-- **An "Our Booth" page with live venue images.** A sponsor's **Event logistics** fold-out leads with a **"Booth run-of-show"** and an **"Our Booth"** page that shows the venue and booth-area photos **live from the organizers' SharePoint** — served through the hub's own image proxy, so pictures stay current the moment an organizer drops a new one, with **no SharePoint link ever exposed** to the sponsor. (Until SharePoint is configured the page simply shows nothing rather than a broken link.)
-- **Accounting that keeps itself in step (🟡 optional, off until configured).** New sponsors flow into your accounting system as customers with the right contact roles, webshop orders become accounting orders (all idempotent), a new sponsor's **tax-id is validated up front**, and foreign-currency orders get a **currency check** with today's rate when a rate source is configured. Until accounting/webshop credentials are set, it shows exactly what it *would* do and never touches a live system.
-- **Booth sponsors become exhibitors, kept in step.** A sponsor whose package includes a booth is **created as an exhibitor** in your booth platform automatically, with the right booth category and slot, and updated in place when the slot is assigned later. A sponsor can add booth members and **really remove** them; the engine **self-heals** stale links, **fills in blank** website / LinkedIn / X / description fields across the webshop, the hub and the booth platform (never overwriting a set value), and protects the contact email from a known platform lock-out. It **never deletes a sponsor/exhibitor record** (their leads and identity are tied to it), and when something fails it sends an **operator alert carrying the actual error** — delivered regardless of release-ring gating. *(Booth-platform credentials and one pinned category id are operator config; until set it runs in a safe no-write mode.)*
-
-| Public sponsors page | Sponsor self-service |
-|---|---|
-| [![Public sponsors page](docs/img/public-sponsors.png)](docs/img/public-sponsors.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Sponsors grouped by tier, with an initials badge when no logo is uploaded.* | *The in-hub Sponsor area — company details, booth, tasks, leads and orders.* |
-
-→ [`docs/FEATURES.md` §7](docs/FEATURES.md#7-sponsors--managed-as-companies-with-the-right-tasks) · integrations in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
-
-### 8. Sponsor leads
-
-A full lead pipeline for booth leads. **Capture leads at the booth, right in the hub** — booth staff type in the people they meet (name, email or phone, company, job title, interest) from any phone with no app install or scanner setup; each lead is screened for junk on the way in and shows in a "recently captured" list, requiring at least an email or phone so every lead is followable-up. This works alongside the Zoho Backstage scanner — use either or both. Each sponsor also gets a secured **Leads API** (JSON or CSV) with ready-made script samples and a browser-friendly "Your Leads API" page, with its own revocable access key/token (shown once, stored only as a secure hash). Leads live in a real pipeline with a live admin grid — Reply, mark Processed, set Interest, flag Ignore/Junk — and nothing is ever hard-deleted (soft status preserves rows so the screen keeps learning from operator overrides). Sponsors can opt into a daily digest or near-real-time alerts of new leads, junk skipped, recipients defaulting to all the company's contacts. Each lead gets a 0–100 heuristic quality score and label; only unmistakable test entries are auto-junked, everything else stays advisory.
-
-→ [`docs/FEATURES.md` §8](docs/FEATURES.md#8-sponsor-leads--capture-screen-and-route-booth-leads) · pipeline + Zoho CRM pull (gated off by default) in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
-
-### 9. Attendees & masterclass reconciliation
-
-The hub compares two-day tickets against masterclass bookings and surfaces the mismatches — no booking, no ticket, or duplicate bookings — with branded chaser emails to sort them out. Attendees are synced in for visibility with deep links back to the booking system; the hub never re-does seat reservations, capacity or waitlists. "Same person, two emails" cases are resolved by a human or the attendee via a chaser, never auto-merged. Organizers get a clean, read-only attendee browser with summary tiles, search, filters and a CSV export that handles accented names; corrections happen at the source system.
-
-- **A "My Event" dashboard for attendees.** Every attendee gets one mobile-first home with a live countdown (or "Happening now" during the event), their Master Class status (reserved / not booked / double-booked, with a deep-link to manage the booking), and the practical info — dates plus the venue as a one-tap map link.
-- **A rebuilt in-hub Master Class page (`/MyMasterClass`).** One clean **three-section** page — your current pick, the master classes you can switch to, and a waitlist — so an attendee chooses, **switches**, or joins a waitlist without leaving the hub. Switching is an **atomic move** guarded by a **hard overbooking check**: a seat is only ever given up once the new one is secured, and a class that's full is never oversold (you're offered its waitlist instead). Every option shows **live booked / capacity / waitlist counts**, your **position** if you're waitlisted, and an inline flash that confirms exactly what happened.
-- **A personal agenda on "My Event".** A **My sessions** card (the session they reserved), the **full agenda** with their own session highlighted, and quick links to their hotel, swag and lunch forms plus the public agenda — each session links to its details, to **ask the speaker a question**, and to **rate the session** afterwards. Read-only; booking still happens at the source.
-- **Self check-in — "I'm here".** On the event days a ticket-holding attendee can tap one button to check themselves in (recorded and shown back to them) — self-service, idempotent, open only during the event window, and never re-implementing turnstiles or badge scanning.
-
-| Attendee "My Event" | …on a phone |
-|---|---|
-| [![Attendee hub](docs/img/attendee-my-event.png)](docs/img/attendee-my-event.png) | [![Attendee hub on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
-
-*The attendee hub leads with the in-hub Master Class chooser — pick, switch or join the waitlist on one page — alongside ticket and booking status. Built phone-first for the person walking up to the venue.*
-
-→ [`docs/FEATURES.md` §9](docs/FEATURES.md#9-attendees--masterclass-reconciliation--one-clear-picture) · reconciler in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
-
-### 10. Email & notifications
-
-All mail is sent through a professional relay from your event sender address, rendered by one branded template engine (a shared branded shell + per-type content + `{{token}}` substitution) built to render correctly across clients including Outlook — and **every** email is on-brand, including sign-in invitations, manual task nudges and travel-payout confirmations. Organizers get an **Email Center** to preview any template safely, send a one-click test to themselves, and watch a delivery pulse.
-
-- **A one-tap welcome email for every role.** A warm, mobile-first welcome with a single **"Open my Event Hub — signs you in automatically"** button (a genuine secure auto-login link) and a per-role line about what their hub is for. It explains how the Hub sits alongside the public Zoho Backstage site, and ships as both designed HTML and plain text.
-- **Per-persona onboarding emails that send themselves.** Each crew group (volunteer / speaker / media / sponsor / organizer) has its own short set of getting-started emails; the moment an organizer **activates** someone they receive their group's set automatically — and never twice, even if re-activated.
-- **Broadcast to exactly the people you mean.** Send one personalized message ("Hi {FirstName}") to a precisely chosen audience: filter by **role group**, by **status** (active / inactive / both), with a one-tick **"exclude test users"** safeguard (on by default) so a real broadcast never reaches the synthetic test cast. **Start from a reusable template** (blank / announcement / reminder / welcome) then edit freely; you see the **recipient count and the actual filtered list** before sending. Sending is resilient (a bad address never stops the batch) and resume-safe.
-- **A complete email log.** Every email the hub sends — welcome, sign-in codes, reminders, broadcasts, onboarding and manual re-sends — is recorded; organizers get a log view (all emails and per-person, filterable by name/email) with subject, category, the address it went to, any CC, and whether it succeeded. Nothing is sent off the books.
-- **Re-send to one person + a secondary email (optional CC).** From the Email Center, pick a person and a template and send it again. Anyone can add an **extra address** that gets copied on every email to them — purely additive, on top of their primary (or, for speakers, preferred) address.
-
-→ [`docs/FEATURES.md` §10](docs/FEATURES.md#10-email--notifications--on-brand-controllable-safe) · email system in [`docs/DESIGN.md` §7](docs/DESIGN.md#7-email-system)
-
-### 11. Organizer hub
-
-Run the whole event from one place, through a menu that splits cleanly into a tidy **"My event"** bar (Home, profile, tasks, resources, just the forms that apply) and a single **"Organizer area"** dropdown that gathers every management tool — grouped into collapsible sections (People, Sessions, Comms, Sponsors, Volunteers, Logistics) with the three most-used tools (Organizer home, Command center, Dashboard) pinned at the top. A regular attendee, speaker, volunteer or sponsor never sees the management tools.
-
-- **A command-center landing — "is the event on track, what do I do next?"** One screen triages the whole event: registrations (and how many active), attendee numbers, onboarding completion % overall and per group, hotel / swag / lunch / dinner headcounts, sessions scheduled vs needing a slot, and sponsor status — topped by a prioritized **"what needs my attention"** call-out (overdue tasks, due today, unassigned shifts, open help requests, people waiting to be approved, reconciliation mismatches, unscheduled sessions). Every number is a button into the matching, pre-filtered list, and an "all clear" message instead of an invented red badge. Read-only.
-- **A cross-role event overview.** One read-only page answering "where does the whole event stand?" — participation by role, task completion per role and category, speaker milestone progress, volunteer coverage (assigned vs open), sponsor task/lead totals and attendee check-in numbers, with "needs attention" tiles.
-- **Find a person fast — search, filter and sort everyone.** A dedicated **"Find a person"** box searches every participant by **name or email** with a one-tap jump to that person. The full **Participants** grid carries the same power: free-text search on name + email, filter by **status** (active / inactive / everyone), by **persona/role** and by **sponsor company**, and **sort** by name, email, persona or status. The same fast, **server-side** search / sort / pagination is on the Participants, Speakers, Attendees, Sessions, Sponsor-leads and Sponsors grids so long lists stay fast.
-- **Bulk participant operations, safely.** Tick several people and deactivate, reactivate or change role in one action — behind a confirmation that states how many rows were selected — safe to re-run (already-in-state rows skipped) and reporting exactly how many changed.
-- **Act as a participant, or hand off via a secure link.** From the grid an organizer can **"Switch to user"** to navigate the whole app exactly as that person sees it and act on their behalf — a banner names who is being helped, "Return to organizer" exits, and every switch/return/on-behalf change is written to an **acting-as audit log**. A lighter **"Modify on behalf"** quick-edit changes a couple of logistics fields without leaving the organizer seat. For a VP/speaker whose admin is handled by an assistant, an organizer can issue a **secure link** scoped to just that one person — time-bound, revocable, and audited.
-- **Exports & printable run-sheets — on-site operations on paper.** An **"Exports & run-sheets"** page gives both **downloadable CSVs** and **print-friendly run-sheets** for the lists you carry to the floor: the **attendee list**, the **lunch headcount**, **room & session sheets** (running order per room with each session's room-QR link and speakers), the **volunteer rota**, and **badge data** (name, role, company). Read-only; not an event check-in tool (that lives in your ticketing system).
-
-A **live dashboard** shows form completion, participants by role, tasks and overdues, sponsor completion, attendee mismatches and volunteer coverage, plus live pipeline cards for leads and event prep. An **action queue** surfaces late changes (a hotel/dinner edit close to the lock date) as items grouped by type with live open counts, resolvable with a note and exportable to CSV. Practical **data grids** for participants and hotel bookings (inline active and check-in/out toggles, filters) and tasks (inline edit), each with CSV export. Plus the management areas:
-
-- **Speakers** — import from the Sessionize API or an Excel export, set participation, activate/deactivate, dashboard, send overdue reminders, add/update/delete dated tasks.
-- **Hotel** — export the rooming list (hotel-grade `.xlsx`), import confirmation IDs, send updated calendar invites, dashboard.
-- **Travel reimbursement** — overview of claims, register payout, send confirmation.
-- **Swag** — multi-sheet vendor spreadsheet for polo/award/jacket orders, dashboard.
-- **Group photos** — register a company + contact, schedule a slot, send calendar invites that *update* rather than duplicate (stable ICS UID).
-- **App game** — register a sponsor's gift and send the branded gift reminder to every active sponsor contact.
-- **Lunch & dinner overviews** — pre-/main-day lunch numbers and the appreciation-dinner list with allergies; booth overview.
-- **Sponsor admin area** — manage the sponsor task catalog, run the leads pipeline (issue/rotate/revoke keys, set notification preferences, action leads), and watch a sponsor status dashboard sorted overdue-first.
-
-| Command center | Live dashboard |
-|---|---|
-| [![Organizer command center](docs/img/organizer-command-center.png)](docs/img/organizer-command-center.png) | [![Organizer dashboard](docs/img/organizer-dashboard.png)](docs/img/organizer-dashboard.png) |
-| *Prioritized "what needs my attention" with every number a link into the matching list.* | *Form completion, participants by role, tasks, sponsor and volunteer coverage at a glance.* |
-
-→ [`docs/FEATURES.md` §11](docs/FEATURES.md#11-organizer-hub--run-the-whole-event-from-one-place) · feature surface in [`docs/DESIGN.md` §8](docs/DESIGN.md#8-feature-surface-hubs--organizer-areas)
-
-### 12. Hosting & reliability
-
-The full environment (database, web app, scheduled jobs, storage, secret vault, logging and monitoring) is **defined as code** (Bicep): Azure SQL, App Service, Azure Functions, Storage, Key Vault, Log Analytics + Application Insights — separate dev + prod instances per event (e.g. `rg-communityhub-dev`, `rg-communityhub-prod`). Background jobs handle reminders, order pulls, attendee reconciliation, portal sync, sponsor-lead delivery and upload-change watching on their own schedules, each individually switchable. **Scripted, safe deploys** build a versioned artifact, deploy and health-check, with one-command rollback; **production releases are zero-downtime** (deploy to a staging slot, warm up, then swap — dev stays on B1, prod runs S2 with a slot). The app absorbs Azure SQL cold-starts gracefully (EF retry) so it runs happily on cost-efficient, auto-pausing infrastructure (~€25/month per instance; +~€100/month for the prod tier with its slot). Production sits a tier above the minimum on purpose: on the smaller tier a cold start took roughly two and a half minutes and the zero-downtime swap timed out waiting for it. Schema is versioned via EF migrations and **kept in sync across dev and prod every release**. Publishing to the public template runs through a controlled, allow-listed (denylist) process with a dry-run pre-flight; protected branches, required reviews and secret scanning keep the codebase safe; each environment binds its own verified custom domain with a managed certificate. **Dev mirrors prod's data** so dev is a faithful rehearsal — the only deliberate difference is that all development email is redirected to a single test address; synthetic test accounts are tagged (`IsTestUser`) so they never skew real counts.
-
-#### Safe-by-default outbound email (release rings)
-
-Outbound email is guarded so a half-configured or pre-launch environment can never spam real people:
-
-- **Dev redirect.** In development, every outbound mail is sent to one test inbox, with the subject prefixed `[TEST -> original@addr]` — so the whole flow is exercised without reaching real participants.
-- **Release rings in production.** Each person sits in a **rollout ring**, and mail only reaches the rings you have opened. You bring an edition live by **raising the rings** — starting with your own rehearsal accounts, then a handful of real people who get things early, then everyone — rather than by maintaining a list of addresses. A **kill switch** stops all outbound mail at once if something looks wrong.
-- **A drop is recorded as a drop.** When a send reaches **nobody** because everyone was outside the open rings, the organizer is told so honestly rather than shown a false "done" — and the mail is logged as a deliberate policy decision, not as a failure, so nothing tries to retry it later.
-
-→ [`docs/FEATURES.md` §12](docs/FEATURES.md#12-hosting--reliability--production-grade-by-design) · infra/deploy/runbook in [`docs/DESIGN.md` §11–15](docs/DESIGN.md#11-infrastructure-bicep--environments)
-
-### 13. Accessibility
-
-The participant-facing pages target **WCAG 2.1 AA** (markup, ARIA and CSS only — no data-model change): correct page language for screen readers, a **skip-to-main-content** link, a visible keyboard focus ring everywhere, a real navigation landmark with "you are here", grouped form choices as proper fieldsets, and an accessible survey wizard. An **axe-core** test suite scans the login, survey and per-role hub pages so regressions are caught.
-
-**Consistent, honest feedback after every action.** A shared set of UX building blocks gives the whole hub the same dependable behaviour: a tidy **"✓ Saved" / error banner** (success fades, errors stay until dealt with, both announced to screen readers, always dismissable); **to-the-point form errors** shown next to the field that needs fixing; and a clear **"are you sure?"** confirmation before big or irreversible actions, stating exactly how many people will be affected. Success/failure is reported truthfully after every send and QR provisioning — a real send confirms "sent at &lt;time&gt; — N recipient(s)"; a send that reached **nobody** (everyone filtered out, or already sent) is shown as a distinct, clearly-not-a-success notice explaining why. Colour- and icon-coded (green success, blue "nothing happened", red error), announced to screen readers, in English and Danish.
-
-→ [`docs/FEATURES.md` §13](docs/FEATURES.md#13-accessibility--usable-by-keyboard-and-screen-reader-2026-06-15)
-
-### 14. Bilingual UI — English & Danish
-
-Every participant-facing page can be shown in **English (default) or Danish**, with a small **English / Dansk** switcher in the top bar of every page (including the anonymous sign-in page and inside the embedded view). The choice is remembered in a cookie and the page honours the browser's preferred language by default; the declared `lang` switches with it so a screen reader pronounces copy correctly. The whole participant surface is translated — first-run onboarding, every self-service form, sponsor pages, attendee detail, the survey wizard and results, organizer navigation and hub status cards. Strings live in one shared resource file per language, so adding a language or translating more pages is a resource-file edit, not a code rewrite.
-
-→ [`docs/FEATURES.md` §14](docs/FEATURES.md#14-bilingual-ui--english-and-danish-2026-06-15)
-
-### 15. Social graphics & post scheduling
-
-The hub produces **ready-to-share social graphics** for speakers and sponsors (a polished PNG composed from a template background plus photo/logo and name, cross-platform with no special server setup), keeps every graphic and speaker picture in **one shared file store (SharePoint)**, and lets speakers share their own — all with an **organizer approval step** so nothing is visible to a speaker until released. Organizers can swap in their own artwork behind the same link. On a **"My share graphics"** page speakers download the PNG or open a ready-to-edit LinkedIn/X draft (including an "I'm speaking at …" button) — the hub never posts on anyone's behalf.
-
-A **LinkedIn company-page post scheduler** lets organizers queue posts (Speaker / Sponsor / Ad-hoc) with a scheduled time, auto-written text (your manual edit always wins), and the right **approved** graphic attached automatically — a still-unapproved graphic is never attached (the post publishes text-only with a clear note until it's released). Preview exactly what will publish, toggle a post active/inactive without deleting it, with compliant tagging (sponsor posts tag the signer, coordinator and company; speaker posts tag organizers only) plus a 5-minute speaker heads-up email and publish notifications. Nothing is ever double-posted.
-
-The same shared file store also powers a **reusable, server-proxied live-image** component: any page can show pictures straight from a SharePoint folder (e.g. the venue and booth photos behind the sponsor "Our Booth" page) through the hub's own image proxy — the file stays in SharePoint, the link is never exposed to the visitor, and dropping a new photo on SharePoint updates the page with no deploy.
-
-**Speakers get tagged, not just named.** A `{Speakers}` variable turns the speakers on a session or track into real LinkedIn **mentions**, so the speaker is notified and the post reaches their network too. It uses LinkedIn's own official lookup — no third-party service and no scraping. LinkedIn only permits a company page to mention people who **follow that page**, so anyone who doesn't is shown by their full name exactly as before, and the hub **tells you who it could not tag**, why, and links straight to their profile so you can do it by hand. On a real line-up roughly three in four speakers tag automatically — and asking speakers to follow the page during onboarding raises that on its own. `{SpeakerNames}` still writes plain names for copy where you'd rather not tag anyone.
-
-**Every mentionable person is looked up once, and remembered.** LinkedIn lookups are slow and rate-limited, and a person's id never changes — so the hub resolves each one once and a daily background job quietly fills in anyone new, covering speakers and sponsor contacts alike (a speaker, a signer and an event coordinator are all just people with an account). It refuses to do two things: it **never guesses** — where two people share a name it compares their actual profile links, and says so rather than tagging the wrong person on your company page — and it **never treats a failure as an answer**, so a rate-limited lookup is recorded as a failure to retry, not as "this person doesn't follow you". One clears by itself; the other doesn't.
-
-**The post editor tells you when an edit is unsaved.** Walking a campaign means pressing **Next** a lot, and **Next** is an ordinary link — so anything typed and not saved simply vanished, silently. That is not hypothetical: it once cost a post that published carrying a paragraph already deleted. Now an **"Unsaved changes"** marker appears the moment the text differs from what loaded, and any action that would discard it — Next, Previous, approving, deleting, rescheduling — asks first. Saving never asks, because saving is the thing being protected.
-
-**Track announcements wait for the line-up, not for a date.** A post that names a track's speakers can never pick anyone up once it has published, so the hub works out readiness from the data: a track whose newest session arrived a week ago has stopped growing. That rule had a blind spot worth knowing about, found by measuring — while the Call for Speakers was still open, every track looked *finished*, because each held only its handful of early confirmed sessions and "nothing new for weeks" is indistinguishable from a settled line-up. Whether the intake has landed is a property of the **whole** programme, so readiness is now the latest of this track's newest session, the newest session anywhere in the edition, and the day your Call for Speakers closes. After that the data takes over again: if your intake lands a fortnight late, the announcements move a fortnight with it, automatically. A track that keeps growing still waits longer than one that has finished.
-
-**The scheduler spreads by default — and lets you say when it shouldn't.** Announcements are normally distributed evenly across the months before the event, so no week is crowded and no kind of post disappears for a month. Some things want the opposite: master classes are confirmed early and deserve to land as a **moment**, not a drip. Name a start date and they all go out together from that day, filling forward at your normal posts-per-day. Crucially this also **moves posts you have already approved**, in both directions — a master class that had drifted into December comes back into your week — because a date that only steered future posts would have changed nothing you could see. Only the date changes: the wording, the picture and the approval stay exactly as you left them, your posts-per-day limit still wins, and the run report tells you how many moved. Leave the date empty and everything spreads as before.
-
-*External connections (the SharePoint tenant/site and LinkedIn page + token) are set up by the operator with their own credentials; until configured, the hub still generates graphics and builds drafts — it simply runs in a safe, no-post mode.*
-
-→ [`docs/FEATURES.md` §15](docs/FEATURES.md#15-social-media-graphics--shared-file-store-2026-06-15)
-
-### 16. AI Community Helper
-
-Every signed-in person — attendee, speaker, volunteer, sponsor **and** organizer — gets a built-in **AI Community Helper**: a chat panel that answers "who's speaking on X?", "when's the lunch break?", "which sessions cover Y?" in plain language. It is **grounded**, not guessing: it only ever answers from the event's own facts — the **published** speakers, their skills, the sessions and the schedule (key times like lunch on each day) — plus a short, operator-maintained **"Contact the organizers"** reference. It also reads from an **operator-curated SharePoint reference folder** (Markdown, text, Word, PDF or Excel), so organizers can teach the helper something new — a venue FAQ, a travel note, a sponsor briefing — simply by **dropping or replacing a file on SharePoint**; the helper reflects it within minutes, with **no deploy**.
-
-Privacy is enforced at the source: an **unpublished speaker is a hard gate** — they never surface in an answer until organizers publish them — and every retrieval is **authorized at fetch time**, so the helper can only ever ground on what the asker is allowed to see. The chat panel scrolls long replies so a detailed answer never overflows.
-
-→ [`docs/FEATURES.md` §22](docs/FEATURES.md#22-ai-community-helper--ask-anything-grounded-and-privacy-gated-2026-06-27) · design in [`docs/DESIGN.md`](docs/DESIGN.md)
+- The whole environment is **infrastructure as code** (Bicep); production deploys can go through a **staging slot and swap** with instant rollback.
+- **Test mode and an external-write master switch** keep a dev environment from changing shared systems; integrations run in a safe no-write mode until configured.
+- Transient failures are retried rather than reported as permanent; a deliberate skip is not a failure.
+- Participant pages target **WCAG 2.1 AA**, with automated accessibility checks.
 
 ---
 
-## How it fits with Zoho Backstage
+## How it works
 
-Community Event Hub is the **behind-the-scenes self-service companion** to your public event site — it does **not** replace Zoho Backstage. The two stay in their lanes:
+```
+             Browser / event-portal iframe
+                          │
+                 ┌────────▼─────────┐        ┌───────────────────────┐
+                 │  Web app (.NET)  │        │ Functions app (.NET)  │
+                 │  Razor Pages     │        │ scheduled jobs +      │
+                 │  hubs, organizer │        │ order webhook         │
+                 │  area, Leads API │        │                       │
+                 └───┬─────────┬────┘        └────┬─────────────┬────┘
+                     │  CommunityHub.Core (shared domain, EF Core, e-mail, integrations)
+                     ▼         ▼                  ▼             ▼
+               Azure SQL   Key Vault         Storage      Application Insights
+          (managed identity, no passwords)
 
-- **Backstage owns the public-facing event** — the public site, the published schedule, ticketing, capacity/waitlists and the booth lead scanner. The Hub never re-implements seat reservations or turnstiles.
-- **The Hub owns the operational layer** — crew sign-in, self-service forms, tasks & reminders, sponsor deliverables, volunteer planning, exports and the organizer back office.
-- **Data flows where it makes sense, not in circles.** The Hub **embeds** safely inside a Backstage portal as a seamless panel; it **pulls** accepted speakers and sessions from the **Sessionize** API and master-class bookings from **Zoho Booking** (those systems stay source-of-truth); it can **push** approved speaker bios out to Backstage speaker pages (off until you explicitly approve a line-up); and a speaker's **preferred email** is honoured by both the Hub *and* Backstage. Attendees are synced in for visibility with deep links back, but bookings are always managed at the source.
+   Optional integrations: Sessionize · Zoho Backstage · WooCommerce · finance/ERP ·
+   SharePoint document library · LinkedIn company page · SMTP relay · AI provider
+```
 
-### One-way by design: the Hub owns the schedule
+- **Two apps, one core.** The web app serves every hub and the organizer area; the Functions app runs the scheduled work (reminders, imports, reconciliation, social-media dispatch, report publishing). Both use `CommunityHub.Core`, so a rule is written once.
+- **The database is the source of truth**, versioned with EF Core migrations that the web app applies at startup.
+- **Configuration decides the event**: the active `Events` row plus per-edition files and app settings, with secrets in Key Vault.
+- **Safe by default**: every feature switch starts off, e-mail is ring-gated, and external writes are blocked outside production until you allow them.
 
-Sessions have exactly **one owner, and it is the Hub**. The call-for-speakers system keeps the
-*content* — title, abstract and the speaker line-up are copied in on every import — while the
-**schedule, room, track and tags belong to the Hub** the moment a session exists there. Neither of
-the other systems ever writes those back.
+Details: [`docs/DESIGN.md`](docs/DESIGN.md) — system overview, data model, integrations, jobs, e-mail, infrastructure and deploy.
 
-- If the call-for-speakers system disagrees, you get **one email** telling you what differs. Nothing
-  is changed; the Hub's value may well be the right one, and you decide.
-- If the public event site disagrees, you get an **action email** naming the field and the value to
-  set — because that platform's session API can create a session but never update one, so a person
-  has to make the change there. That one **keeps reminding you** until it matches, because a wrong
-  public agenda is not something to tell someone once.
-- The event platform **never writes back into the Hub.** That is fixed in the code with no setting,
-  so it cannot be switched on by accident.
+---
 
-*The venue signage screens are the deliberate exception: they mirror the event platform's own agenda
-directly, including the breaks, meals and party the session list does not model.*
+## How it fits with your event platform
 
-![The Hub embedded inside the public event portal](docs/img/image2.png)
-*The Hub embeds seamlessly inside the public event portal — sign-in works inside the iframe.*
+Community Event Hub is the **behind-the-scenes companion** to your public event site and ticketing — it does not replace them. The upstream instance runs alongside Zoho Backstage; the integrations are optional.
+
+- **Your event platform keeps** the public event site, ticket sales, check-in and the booth lead scanner.
+- **The hub owns** crew sign-in and onboarding, forms, tasks and reminders, sponsor deliverables, volunteer planning, master-class seat allocation, e-mail and the organizer back office.
+- **Data flows where it makes sense.** The hub pulls accepted speakers and sessions from Sessionize and tickets and orders from your platform, can push sessions, speakers and exhibitors out to it, and embeds inside its portal.
+
+### One-way by design: the hub owns the schedule
+
+Sessions have exactly **one owner, and it is the hub**. The call-for-speakers system keeps the *content* — title, abstract and the speaker line-up are copied in on every import — while the **schedule, room, track and tags belong to the hub** the moment a session exists there.
+
+- If the call-for-speakers system disagrees, you get **one e-mail** telling you what differs. Nothing is changed; you decide.
+- If the public event site disagrees, you get an **action e-mail** naming the field and the value to set, and it **keeps reminding you** until it matches.
+- The event platform **never writes back into the hub**; that is fixed in code, with no setting.
+
+![The hub embedded inside the public event portal](docs/img/image2.png)
+*The hub embeds inside the public event portal — sign-in works inside the iframe.*
 
 ---
 
 ## Getting started
 
-Want to run your own edition? You will need an Azure subscription, the `az` and `dotnet` 8 tooling, an SMTP relay for transactional email, and a DNS zone you can add a CNAME to.
+Everything below uses only what is in this repository plus the standard Azure and .NET command-line
+tools. It deploys one environment; repeat with `prod` for a second one.
 
-Prerequisites:
+**You need**
 
-- Azure subscription you can deploy to (one resource group per environment is fine)
-- `az` CLI (>= 2.50), `bicep` (bundled with az), `dotnet` 8 SDK, `gh` CLI optional
-- A Brevo (or any SMTP-relay) account for transactional email
-- A DNS zone you can add a CNAME to
+- An Azure subscription where you can create resource groups, and an **Entra (Azure AD) group** that
+  will administer the SQL server (you should be a member of it).
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) (`global.json` pins 10.0.x), Azure CLI ≥ 2.60
+  with Bicep (`az bicep install`), `jq`, `bash`, and `zip`.
+- An SMTP relay account for transactional e-mail (the code is built around Brevo, but any relay with
+  a username + key works) and a verified sender address.
+- A DNS zone you can add a CNAME and TXT record to (optional — the default `*.azurewebsites.net`
+  hostname works without one).
+
+### 1. Clone and build
 
 ```bash
-# 1. clone (then set baseName + your own subscription)
-gh repo clone KnudsenMorten/community-event-hub
+git clone https://github.com/KnudsenMorten/community-event-hub.git
 cd community-event-hub
-#   - edit infra/main.dev.parameters.json / main.prod.parameters.json (baseName, region, sizes)
-#   - export AZURE_SUBSCRIPTION_ID=<your subscription id>   # deploy.sh pins this so a deploy
-#                                                           #   can't land in the wrong sub
-
-# 2. deploy infra (App Service Plan, SQL Server + DB, Key Vault, Functions
-#    plan, Storage, Log Analytics, App Insights). No SQL password needed:
-#    the SQL server is Azure-AD-only and the apps authenticate via managed identity.
-./scripts/deploy.sh dev --whatif   # preview first
-./scripts/deploy.sh dev            # or `prod`
-
-# 3. set secret values straight into Key Vault (Brevo SMTP, WooCommerce, Company Manager, Zoho, ...)
-./scripts/set-secrets.sh dev
-
-# 4. apply EF migrations against the env's SQL (Azure-AD auth; add your client IP to the
-#    SQL firewall temporarily if needed, then remove it)
-dotnet ef database update --project src/CommunityHub.Core --startup-project src/CommunityHub
-
-# 5. seed your Event row + a few test participants (edit values first; use your own addresses)
-./tools/seed-dev.ps1
-
-# 6. publish + deploy the app code (web + jobs)
-./tools/deploy-app.ps1 -Env dev            # build -> timestamped artifact -> deploy -> health check
-./tools/deploy-app.ps1 -Env dev -App jobs  # the Functions app, same scripted way
-
-# 7. bind your custom domain (after the CNAME verifies)
-az webapp config hostname add --resource-group rg-<baseName>-dev \
-  --webapp-name <webAppName> --hostname hub.your-event.example
+dotnet build CommunityHub.sln -c Release
 ```
 
-`tools/rollback-app.ps1` redeploys any kept artifact (or, on prod, an instant slot swap-back). Full step-by-step — DNS, certs, post-deploy settings, and the operate playbook — is in **[`docs/DESIGN.md` §12 (deploy)](docs/DESIGN.md#12-deploy-rollback--zero-downtime)** and **[§15 (runbook)](docs/DESIGN.md#15-operational-runbook)**.
+### 2. Parameters for your environment
+
+```bash
+cp infra/main.dev.parameters.example.json infra/main.dev.parameters.json
+```
+
+Edit it: `baseName` (lowercase letters and digits, **at most 12 characters** — it becomes part of every
+resource name), `sqlAadAdminLogin` + `sqlAadAdminObjectId` (your Entra SQL admin group), and optionally
+`customDomain` and `backstageEmbedOrigin`. Keep the filled-in file out of any public fork.
+
+### 3. Deploy the infrastructure
+
+```bash
+az login
+export AZURE_SUBSCRIPTION_ID=<your-subscription-id>   # required: the script refuses to guess
+./scripts/deploy.sh dev --whatif                      # preview, changes nothing
+./scripts/deploy.sh dev
+```
+
+This creates `rg-<baseName>-dev` with Log Analytics + Application Insights, Key Vault, an Entra-only
+Azure SQL server + serverless database, storage, a Linux App Service plan + web app and a Functions app
+— all with managed identities, no SQL password. The outputs print the web app hostname, Functions app
+name, Key Vault name and SQL server name; you need them below.
+
+### 4. Secrets
+
+```bash
+./scripts/set-secrets.sh dev
+```
+
+It prompts for each secret and writes it straight to Key Vault; leave anything you do not use blank.
+Then point the apps at them. On **both** the web app and the Functions app set (Azure portal →
+*Environment variables*, or `az webapp config appsettings set` / `az functionapp config appsettings set`):
+
+| App setting | Value |
+|---|---|
+| `Email__SmtpHost` / `Email__SmtpPort` | your relay, e.g. `smtp-relay.brevo.com` / `587` |
+| `Email__SmtpUsername` | `@Microsoft.KeyVault(VaultName=<keyVaultName>;SecretName=brevo-smtp-username)` |
+| `Email__SmtpKey` | `@Microsoft.KeyVault(VaultName=<keyVaultName>;SecretName=brevo-smtp-key)` |
+| `Email__FromAddress` / `Email__FromDisplayName` | your verified sender and community name |
+| `Email__OrganizerInbox` | your organizers' mailbox |
+| `Email__SpeakerSessionAlsoTo` | who is copied on speaker session changes (can be your organizer inbox) |
+
+⚠️ Several `Email` defaults in code still name the upstream community's own mailboxes. Set these before
+the first mail goes out. Every other integration (webshop, Zoho, SharePoint, LinkedIn, Sessionize, …) is
+optional and stays off until you configure its section — see [`config-examples/`](config-examples/README.md)
+and [`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference).
+
+### 5. Give the apps access to the database
+
+The web app creates and upgrades the schema itself at startup (EF Core migrations), using its managed
+identity. Connect to the database **as a member of your Entra SQL admin group** (Azure portal → the
+database → *Query editor*, or `sqlcmd` with Entra authentication) and run, with your own resource names:
+
+```sql
+CREATE USER [<webAppName>] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [<webAppName>];
+ALTER ROLE db_datawriter ADD MEMBER [<webAppName>];
+ALTER ROLE db_ddladmin   ADD MEMBER [<webAppName>];
+
+CREATE USER [<functionsAppName>] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [<functionsAppName>];
+ALTER ROLE db_datawriter ADD MEMBER [<functionsAppName>];
+```
+
+`<webAppName>` is the first label of the web app hostname from step 3.
+
+### 6. Per-edition configuration
+
+```bash
+mkdir -p config
+cp config-examples/event.example.json             config/event.eldk27.json
+cp config-examples/sponsor.example.json           config/sponsor.eldk27.json
+cp config-examples/speaker-deadlines.example.json config/speaker-deadlines.eldk27.json
+```
+
+Edit them for your event. The file names above are the paths the code reads by default; to use your own
+names, set `EventConfig__EventConfigPath`, `SponsorConfig__SponsorConfigPath` and
+`SpeakerDeadlines__ConfigPath` on both apps. `config/` is packaged into both apps at publish time, so do
+this **before** step 7. [`config-examples/README.md`](config-examples/README.md) explains every file,
+and which task and welcome texts you write yourself.
+
+### 7. Publish and deploy the code
+
+```bash
+dotnet publish src/CommunityHub/CommunityHub.csproj -c Release -r linux-x64 --self-contained false -o publish-out/web
+dotnet publish src/CommunityHub.Jobs/CommunityHub.Jobs.csproj -c Release -o publish-out/jobs
+(cd publish-out/web  && zip -qr ../web.zip  .)
+(cd publish-out/jobs && zip -qr ../jobs.zip .)
+
+az webapp deploy --resource-group rg-<baseName>-dev --name <webAppName> --src-path publish-out/web.zip --type zip
+az functionapp deployment source config-zip --resource-group rg-<baseName>-dev --name <functionsAppName> --src publish-out/jobs.zip
+curl -fsS https://<webAppName>.azurewebsites.net/health
+```
+
+The first start applies all migrations, which can take a minute on a paused serverless database.
+Build the zip with forward-slash entry names (`zip`, or `tar -a -cf` on Windows) — Windows PowerShell
+5.1's `Compress-Archive` writes backslashes, which Linux App Service rejects.
+
+### 8. Create your edition and first organizer
+
+Run once against the database (as in step 5). Use your own values; `Code` should match `edition.code`
+in `config/event.eldk27.json`.
+
+```sql
+DECLARE @now datetimeoffset = SYSDATETIMEOFFSET();
+
+INSERT INTO [Events] ([CommunityName], [Code], [DisplayName], [StartDate], [EndDate], [PreDayDate],
+                      [VenueName], [HubHostname], [IsActive], [LockDate], [CreatedAt])
+VALUES (N'Demo Community', N'DEMO27', N'Demo Community Conference 2027', '2027-03-02', '2027-03-03',
+        '2027-03-01', N'Riverside Convention Center', N'hub.your-event.example', 1, NULL, @now);
+
+-- Role 0 = Organizer. LifecycleState 2 = Active (sign-in needs IsActive AND Active).
+-- Ring 0 = the earliest release ring, so your own account receives mail from day one.
+INSERT INTO [Participants] ([EventId], [Email], [FullName], [Role], [IsActive], [LifecycleState], [Ring], [CreatedAt])
+VALUES (SCOPE_IDENTITY(), N'you@your-event.example', N'Your Name', 0, 1, 2, 0, @now);
+```
+
+Open `https://<webAppName>.azurewebsites.net/Login`, enter that address, and sign in with the PIN it
+mails you. Everything else — people, sessions, sponsors, feature switches and release rings — is managed
+from the organizer area from here on.
+
+### 9. Custom domain (optional)
+
+Create a CNAME from your hostname to `<webAppName>.azurewebsites.net` and the `asuid.<hostname>` TXT
+record Azure shows you, then:
+
+```bash
+az webapp config hostname add --resource-group rg-<baseName>-dev --webapp-name <webAppName> --hostname hub.your-event.example
+az webapp config ssl create  --resource-group rg-<baseName>-dev --name <webAppName> --hostname hub.your-event.example
+```
+
+### Going further
+
+- **Production with zero downtime.** Scale the prod plan to Standard, add a `staging` slot, give the
+  slot's managed identity (`<webAppName>/slots/staging`) the same Key Vault and database access, deploy to
+  the slot (`--slot staging`), check `/health` there, then `az webapp deployment slot swap`. Swap back to
+  roll back. Details in [`docs/DESIGN.md` §12](docs/DESIGN.md#12-deploy-rollback--zero-downtime).
+- **Dev safety.** `testModeEnabled` in the dev parameters keeps integrations read-only, and setting
+  `Email__RedirectAllTo` on the dev apps sends every mail to one inbox.
+- **Run it locally.** See [`docs/DESIGN.md` §10](docs/DESIGN.md#10-build--local-dev) (use a SQL login
+  locally; integrated authentication is not supported without one).
+- **Tests.** `dotnet test CommunityHub.sln` runs offline. About 200 of the tests check the upstream
+  event's own content files (task texts, welcome copy, edition config), which are not part of this
+  template, and fail in a fresh clone; the rest need nothing external.
 
 ---
 
 ## Configuration model
 
-Two layers decide "which event are we serving":
+Two layers decide which event is served:
 
-**The active `Events` row** (`IsActive = 1`) — login, dashboard, and reminder jobs all resolve "current event" via that flag. Roll over to a new edition by inserting a new row, marking it active, and (optionally) deactivating the previous. Per-event fields: `Code` (e.g. `ELDK27`), `CommunityName`, `DisplayName`, `StartDate` / `EndDate` / `PreDayDate`, `VenueName` / `HubHostname` / `IsActive` / `LockDate`.
+- **The active `Events` row** (`IsActive = 1`) — sign-in, dashboards and scheduled jobs resolve "the
+  current event" from it. Roll over to a new edition by inserting a new row, marking it active and
+  deactivating the previous one.
+- **Per-edition files under `config/`** — event identity, dates, venue, rooms, sponsor rules, speaker
+  deadlines — plus task and welcome texts in Markdown. Start from [`config-examples/`](config-examples/README.md).
 
-**Per-edition JSON** under `config/*.<edition>.json` — event, hotel, integrations, sponsor, content and speaker-deadline files (each validated on load against its `_schema` key; secrets are Key Vault references by name only). See the full table in **[`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference)**.
-
-App-wide settings live in App Service configuration and resolve to Key Vault references for secrets:
-
-- `Sql:ConnectionStringTemplate` + `Sql:AdminUser` (+ `Sql:AdminPassword` → KV)
-- `Email:SmtpHost` / `SmtpPort` / `FromAddress` (+ `SmtpUsername` / `SmtpKey` → KV)
-- `Email:RedirectAllTo` — **dev-only test mode**; when set, every outbound mail is redirected here and the subject is prefixed `[TEST -> original@addr]`. Leave EMPTY in prod (prod uses an `Email:OnlySendTo` allowlist instead).
-- `Embedding:BackstageOrigin` — CSP `frame-ancestors` (the Backstage origin list; empty blocks the iframe).
+App-wide settings are App Service / Functions **app settings**, with secrets as Key Vault references:
+`Sql:ConnectionStringTemplate` (emitted by the Bicep; the apps authenticate with their managed identity),
+the `Email` section, `Embedding:BackstageOrigin`, `TestMode:Enabled`, `Integrations:AllowExternalWrites`,
+and one section per optional integration. Outbound e-mail is controlled by **release rings** plus
+`Email:KillSwitch`; `Email:RedirectAllTo` is for dev only. The full reference is
+[`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference).
 
 ---
 
 ## Embedding
 
-The hub is designed to embed inside an existing event-management tool (the upstream instance embeds it inside Zoho Backstage). To embed:
+The hub can run inside an existing event portal (the upstream instance embeds it in Zoho Backstage):
 
-1. Set `Embedding:BackstageOrigin` to the embedding origin(s) (e.g. `https://backstage.example.com`).
-2. The app strips `X-Frame-Options` and emits a CSP `frame-ancestors <origin>` header on every response.
-3. PIN login + magic-link tokens work inside an iframe (cookies are `SameSite=None; Secure` behind HTTPS).
+1. Set `Embedding:BackstageOrigin` (app setting `Embedding__BackstageOrigin`, or `backstageEmbedOrigin` in
+   the parameters file) to the portal origin, e.g. `https://your-event-portal.example`.
+2. The app then sends `Content-Security-Policy: frame-ancestors <origin>` on every response; an empty
+   value blocks framing.
+3. PIN sign-in and one-tap links work inside the iframe (cookies are `SameSite=None; Secure`).
 
-Embed snippet template lives at `tools/backstage-embed-snippet.html`. More in **[`docs/DESIGN.md` §4](docs/DESIGN.md#4-auth-identity--embedding)**.
+```html
+<iframe src="https://hub.your-event.example/" title="Community Event Hub"
+        style="width:100%; min-height:1200px; border:0; display:block;" loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-write; clipboard-read"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox">
+</iframe>
+```
+
+More in [`docs/DESIGN.md` §4](docs/DESIGN.md#4-auth-identity--embedding).
 
 ---
 
 ## Repository layout
 
 ```
+CommunityHub.sln
 src/
-  CommunityHub/             ASP.NET Core 8 Razor Pages web app (+ Leads API, /health)
-  CommunityHub.Core/        Domain + Data + Email + Reminders + Integrations (shared)
-  CommunityHub.Jobs/        Azure Functions worker — reminders, pulls, reconciliation, watchers
-
+  CommunityHub/             ASP.NET Core (.NET 10) Razor Pages web app — every hub, the organizer area, Leads API, /health
+  CommunityHub.Core/        Domain, EF Core data + migrations, e-mail, reminders, integrations (shared by both apps)
+  CommunityHub.Jobs/        Azure Functions (isolated worker) — scheduled jobs and the order webhook
+tests/
+  CommunityHub.Core.Tests/  xUnit — services, scenarios, config
+  CommunityHub.Web.Tests/   xUnit — page models, routing, markup rules
+  playwright/               Browser suites (need a running instance and planted sign-in PINs)
+  *.Tests.ps1               Pester feature and smoke suites
 infra/
-  main.bicep                Infra (App Service, SQL, KV, Functions, Storage, Log Analytics, App Insights)
-  modules/                  One Bicep per Azure resource type
-  main.{dev|prod}.parameters.json    Per-environment parameters (provide your own in a fork)
-  DEV_TO_PROD_PARITY.md     Live dev->prod parity checklist
-
+  main.bicep, modules/      The whole Azure environment as code
+  main.{dev,prod}.parameters.example.json   Copy to main.<env>.parameters.json and fill in
 scripts/
-  deploy.sh                 Idempotent `az deployment group create` of infra/main.bicep
-  set-secrets.sh            Write KV secret values from prompts
-  seed-<edition>.sql        Your own edition seed SQL (Event row + participants; keep it private)
-
+  deploy.sh                 Create the resource group and deploy infra/main.bicep
+  set-secrets.sh            Write secret values into Key Vault from prompts
+  Export-SqlBacpac.ps1      Export the database to a .bacpac
+config-examples/            Sanitized starter config for your edition (copy into config/)
+templates/emails/           The branded e-mail templates the apps render (layout + one file per mail)
 docs/
-  FEATURES.md               Public feature catalog (delivered features)
-  DESIGN.md                 Architecture + data model + integrations + build + deploy + runbook
-
-templates/
-  emails/                   Branded email templates (layout + per-type content); packaged into
-                            BOTH publish bundles by the csproj files — rendered at runtime, so
-                            first-class code, not an example
-
-config-examples/
-  templates/emails/         Historical copies kept for the community fork docs
-
-tools/
-  seed-dev.ps1              Seed an Event row + test participants (one per role)
-  deploy-app.ps1            Build + zip (forward-slash entries) + deploy web/jobs; slot-swap on prod
-  rollback-app.ps1          Instant slot swap-back / artifact redeploy (web + jobs)
-  enable-slot-deploys.ps1   One-time S1 + staging-slot + slot-MSI Key Vault grant (for prod)
-  plant-test-pins.ps1       DEV-only: plant known-PIN LoginPin rows for the Playwright suites
-  CommunityHub.OneShot/     Console CLI to run one job once locally
+  FEATURES.md               Every delivered feature, by date
+  DESIGN.md                 Architecture, data model, integrations, jobs, e-mail, infra, deploy, runbook
+  img/                      Screenshots used by the docs
 ```
 
-This repo is a sanitized template — it ships generic placeholders, not event-specific data. Keep your own production data (the `Events` row, real logos, prod parameter files, edition seed SQL and per-edition `config/*.json`) in a private copy; never commit it here.
+This repository is the sanitized public template. Your real `config/`, parameter files, logos and data
+belong in a private copy.
 
 ---
 
@@ -697,19 +607,23 @@ This repo is a sanitized template — it ships generic placeholders, not event-s
 
 | Doc | What it covers |
 |---|---|
-| **[`docs/FEATURES.md`](docs/FEATURES.md)** | Public feature catalog — the delivered feature set, by audience (the 16 areas above). |
-| **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, jobs, email, build, infra, deploy, and the operational runbook. |
+| **[`docs/FEATURES.md`](docs/FEATURES.md)** | The complete delivered feature catalog — an index of every entry with its ship date, then the detail. |
+| **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, scheduled jobs, e-mail, build, infrastructure, deploy and the operational runbook. |
+| **[`config-examples/README.md`](config-examples/README.md)** | Every per-edition configuration file, where it goes and what reads it. |
+| [`docs/ROLE-FLOWS.md`](docs/ROLE-FLOWS.md), [`docs/UX-FLOWS-DETAILED.md`](docs/UX-FLOWS-DETAILED.md), [`docs/SECURITY-NOTES.md`](docs/SECURITY-NOTES.md) | Supporting design notes. |
 
-Newly built capabilities are folded directly into the relevant feature area above (and into [`docs/FEATURES.md`](docs/FEATURES.md)). The public mirror is updated milestone-by-milestone — for per-release detail see the commit history (`git log --oneline`); every public commit message carries the private-repo source sha for traceability.
+The public mirror is updated milestone by milestone; every public commit names the private source commit
+it came from.
 
 ---
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Use it for your community event, fork it, redistribute, no warranty.
+MIT — see [`LICENSE`](LICENSE). Use it for your community event, fork it, redistribute it; no warranty.
 
 ---
 
 ## Status
 
-Active development for the next edition. The public mirror is updated milestone-by-milestone — see commit messages tagged with the private-repo source sha for traceability. Issues / PRs welcome.
+In active use for a live conference edition and under active development. Issues and pull requests are
+welcome.

@@ -26,6 +26,16 @@
             <strong>@Model.Approved</strong> approved ·
             <strong>@Model.Published</strong> published
         </p>
+        @if (Model.NotReady > 0)
+        {
+            @* 🔴 §1206 — of the held ones, how many are not waiting for HIM. *@
+            <p class="muted">
+                <strong>@Model.NotReady</strong> of the held posts are <strong>not ready</strong> —
+                they are waiting on a logo, a description, a graphic or a speaker link, named under each
+                one below. They keep their place in the plan; if a date passes before the missing piece
+                arrives, the planner moves that post to the next free slot.
+            </p>
+        }
         <p class="muted">
             Approve or edit any of these in the <a asp-page="/Organizer/SoMeQueue">queue</a>.
         </p>
@@ -54,6 +64,15 @@
                         {
                             <span class="set-tag on">approved</span>
                         }
+                        else if (!string.IsNullOrWhiteSpace(post.Blocker))
+                        {
+                            @* 🔴 §1206 — NOT READY, and what is missing. Operator 2026-09-12: *"show
+                               then as not ready, like some graphics missing"*. Distinct from the
+                               badge below: that one waits for HIM, this one waits for someone else. *@
+                            <span class="set-tag off" title="@post.Blocker">
+                                ⏳ not ready — @CommunityHub.Core.Integrations.SoMeReadiness.Chip(post.Blocker)
+                            </span>
+                        }
                         else
                         {
                             @* 🔒 §824.21a — held is the safety model, so the calendar states it
@@ -61,6 +80,14 @@
                             <span class="set-tag off">held — not approved</span>
                         }
                     </div>
+
+                    @if (!string.IsNullOrWhiteSpace(post.Blocker))
+                    {
+                        @* §854 — the full sentence, because it names WHO owes the missing piece. *@
+                        <div class="muted" style="margin-top:4px;">
+                            Waiting on: @CommunityHub.Core.Integrations.SoMeReadiness.Short(post.Blocker)
+                        </div>
+                    }
 
                     @* "and how", not just when: the actual words, and the graphic that goes with them. *@
                     <div style="margin-top:6px;white-space:pre-wrap;">@post.PreviewText</div>

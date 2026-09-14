@@ -1,0 +1,60 @@
+@page "/unsubscribe"
+@model CommunityHub.Pages.UnsubscribeModel
+@{
+    ViewData["Title"] = "Event mails";
+    Layout = "_Layout";
+    var e = Model.HttpContext.Request.Query["e"].ToString();
+    var t = Model.HttpContext.Request.Query["t"].ToString();
+}
+
+@* 🔒 A link that lands in an inbox must not become a search result. *@
+@section Head {
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+}
+
+<div class="card">
+    <h1>Event mails</h1>
+
+    @if (!Model.LinkIsValid)
+    {
+        @* ⚠️ One message for "wrong signature", "no address" and "expired configuration" alike —
+           telling a stranger which one it is confirms whether an address exists. *@
+        <p class="error">This link is not valid.</p>
+        <p class="muted">
+            If you would like to stop receiving mails about @(Model.EventName ?? "the event"),
+            reply to any of them and we will take you off the list.
+        </p>
+    }
+    else if (Model.JustDone)
+    {
+        <p class="ok">Done — we will not send you any more mails about @Model.EventName.</p>
+        <p class="muted">
+            <strong>@Model.Email</strong> has been removed. Anything you have already booked is
+            unaffected: this only stops event mailings.
+        </p>
+    }
+    else if (Model.AlreadyDone)
+    {
+        <p class="ok">You are already unsubscribed.</p>
+        <p class="muted"><strong>@Model.Email</strong> receives no mailings about @Model.EventName.</p>
+    }
+    else
+    {
+        <p>
+            Stop sending mails about <strong>@Model.EventName</strong> to
+            <strong>@Model.Email</strong>?
+        </p>
+        <p class="muted" style="font-size:13.5px;">
+            You are receiving them because you have taken part in one of our events before. This
+            only stops event mailings — it does not affect a ticket or a booking you already have.
+        </p>
+
+        @* 🔴 The POST is the act. A GET would let a mail scanner unsubscribe somebody who never
+           clicked, and nobody would ever know it happened. *@
+        <form method="post" asp-route-e="@e" asp-route-t="@t">
+            <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Unsubscribe me
+            </button>
+        </form>
+    }
+</div>

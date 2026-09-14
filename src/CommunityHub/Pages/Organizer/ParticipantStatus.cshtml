@@ -1,0 +1,353 @@
+@page
+@using CommunityHub.Core.Participants
+@using CommunityHub.Core.Sponsors
+@model CommunityHub.Pages.Organizer.ParticipantStatusModel
+@{
+    ViewData["Title"] = "Participant status";
+
+    // §1085 — the step keys and the sponsor field keys are resolved HERE, not in Core: the hub ships
+    // en + da-DK and the board deliberately returns keys + a resx prefix rather than English.
+    Func<string, string, string> title = (prefix, key) =>
+    {
+        var s = Localizer[prefix + key].Value;
+        // A key with no resx entry resolves to the key itself — show something readable rather
+        // than "booth-checkin".
+        return string.Equals(s, prefix + key, StringComparison.Ordinal) ? key : s;
+    };
+}
+
+<style>
+    /* Mobile-first (~360px): the board is a horizontal scroller, the filter bar wraps. */
+    .ps-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin:0 0 14px; }
+    .ps-filters label { display:block; font-size:12px; color:#6b7280; margin-bottom:3px; }
+    .ps-filters select { padding:6px 8px; font-size:13px; min-width:150px; }
+    .ps-filters .ps-actions { display:flex; gap:8px; align-items:center; }
+
+    .ps-summary { font-size:13px; color:#6b7280; margin:0 0 6px; }
+    .ps-summary strong { color:var(--el-darkblue); }
+    .ps-fresh { font-size:12px; color:#8a8f9c; margin:0 0 12px; }
+
+    .ps-bar-wrap { background:#eef0f4; border-radius:999px; height:10px; overflow:hidden; width:110px; max-width:36vw; }
+    .ps-bar { height:100%; border-radius:999px; display:block; }
+    .ps-bar.low  { background:#dc2626; }
+    .ps-bar.mid  { background:#d97706; }
+    .ps-bar.high { background:#0a6; }
+    .ps-pct { font-weight:700; color:var(--el-darkblue); }
+
+    .ps-table { border-collapse:collapse; width:100%; font-size:13px; min-width:760px; }
+    .ps-table th, .ps-table td { padding:8px; text-align:left; vertical-align:top; }
+    .ps-table thead tr { border-bottom:2px solid #ddd; }
+    .ps-table tbody tr { border-bottom:1px solid #eee; }
+    .ps-table tbody tr.atrisk { background:#fdf6f5; }
+
+    .ps-name { font-weight:600; color:var(--el-darkblue); }
+    .ps-sub { color:#8a8f9c; font-size:12px; }
+    .ps-open { margin:0; padding:0; list-style:none; font-size:12px; color:#555; }
+    .ps-open li { margin:0 0 2px; }
+    .ps-fields { color:#9a6b00; }
+    .ps-chip { display:inline-block; font-size:12px; border-radius:999px; padding:1px 9px; white-space:nowrap; }
+    .ps-chip.done    { background:#eafaf2; color:#0a6; }
+    .ps-chip.overdue { background:#fdeceb; color:#9b261a; font-weight:700; }
+    .ps-chip.none    { color:#aab0bb; }
+    .ps-pager { display:flex; gap:12px; align-items:center; font-size:13px; margin-top:14px; }
+</style>
+
+<div class="card">
+    <h1>Participant status</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            One board for every role — who has finished their Get Started checklist, who has not, and
+            what is still open. The completion figures are the participant's own wizard progress, the
+            same numbers they see on their page, so this board and their screen always agree.
+            Sponsors are listed <strong>per company</strong>: their checklist and their tasks belong to
+            the company, not to one contact. At-risk (overdue) rows first.
+        </p>
+
+@* 🔴 §1212 — `autocomplete="off"` ON THE FORM AND EVERY CONTROL. Operator 2026-09-12: *"i hit
+   refresh while selecting sponsor but it newer filters on sponsors"*, with the dropdown reading
+   "Sponsor" and the URL carrying no role at all.
+
+   ⚠️ THE DROPDOWN WAS LYING, and the server was right. On a reload the browser RESTORES the last
+   value a select had, overriding the `selected` attribute the server rendered. So the control said
+   Sponsor while the page had been built for every role — and every number on screen, including the
+   email export, answered the wrong question. Turning restoration off makes the control state and the
+   URL the same fact again. *@
+        <form method="get" class="ps-filters" autocomplete="off">
+            <div>
+                <label for="role">Role</label>
+                <select id="role" name="role" autocomplete="off" onchange="this.form.submit()">
+                    <option value="">All roles</option>
+                    @foreach (var r in CommunityHub.Pages.Organizer.ParticipantStatusModel.Roles)
+                    {
+                        <option value="@r" selected="@(Model.RoleFilter == r)">@r</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label for="state">Status</label>
+                <select id="state" name="state" autocomplete="off" onchange="this.form.submit()">
+                    <option value="@ParticipantStatusFilter.All" selected="@(Model.StateFilter == ParticipantStatusFilter.All)">All</option>
+                    <option value="@ParticipantStatusFilter.Overdue" selected="@(Model.StateFilter == ParticipantStatusFilter.Overdue)">Overdue tasks</option>
+                    <option value="@ParticipantStatusFilter.NotStarted" selected="@(Model.StateFilter == ParticipantStatusFilter.NotStarted)">Not started</option>
+                    <option value="@ParticipantStatusFilter.InProgress" selected="@(Model.StateFilter == ParticipantStatusFilter.InProgress)">In progress</option>
+                    <option value="@ParticipantStatusFilter.Complete" selected="@(Model.StateFilter == ParticipantStatusFilter.Complete)">Complete</option>
+                </select>
+            </div>
+            @* 🔴 §1212 — test rows OFF by default, with the option to bring them back. *@
+            <div>
+                <label for="test">Test users</label>
+                <select id="test" name="test" autocomplete="off" onchange="this.form.submit()">
+                    <option value="false" selected="@(!Model.IncludeTest)">Hidden</option>
+                    <option value="true" selected="@Model.IncludeTest">Included</option>
+                </select>
+            </div>
+            <div class="ps-actions">
+                @* 🔑 ALWAYS a submit button, not only in `noscript`. The auto-submitting select is a
+                   convenience; when it does not fire — a keyboard change, a restored value, a slow
+                   page — there has to be a way to apply the filter that does not depend on it. *@
+                <button type="submit">Apply</button>
+                <a asp-page="/Organizer/ParticipantStatus"
+                   asp-route-role="@Model.RoleFilter"
+                   asp-route-state="@Model.StateFilter"
+                   asp-route-test="@Model.IncludeTest"
+                   asp-route-refresh="true">Refresh</a>
+            </div>
+        </form>
+
+        @* §854 — say WHICH filters produced these numbers, so the board can never silently disagree
+           with the controls above it again. *@
+        <p class="ps-fresh" role="status">
+            Showing <strong>@(Model.RoleFilter?.ToString() ?? "all roles")</strong>,
+            status <strong>@Model.StateFilter</strong>,
+            test users <strong>@(Model.IncludeTest ? "included" : "hidden")</strong>.
+        </p>
+
+        <p class="ps-summary" role="status">
+            <strong>@Model.AllRows.Count</strong> row@(Model.AllRows.Count == 1 ? "" : "s") &middot;
+            <strong>@Model.CompleteCount</strong> complete &middot;
+            <strong>@Model.InProgressCount</strong> in progress &middot;
+            <strong>@Model.NotStartedCount</strong> not started &middot;
+            <strong>@Model.OverdueCount</strong> with overdue tasks &middot;
+            average completion <strong>@Model.AveragePercent%</strong>
+        </p>
+
+        @* ⚠️ Say how old the numbers are. A cached board that silently shows 90-second-old work
+           reads as broken to whoever just finished a step — the Refresh link above rebuilds it. *@
+        <p class="ps-fresh">
+            Figures built @Model.BuiltAt.UtcDateTime.ToString("HH:mm:ss") UTC@(Model.WasRebuilt ? " (just now)" : "").
+        </p>
+
+        @* 🔴 §1211 — THE ADDRESSES, ON THE BOARD THAT KNOWS THEM. Operator 2026-09-12: *"why would
+           you fx not have a filter here where i can export email or similar"* — after collecting them
+           by hand. The list follows the ROLE + STATUS filters across ALL pages, so "every sponsor
+           still in progress" is one copy rather than one per fifty rows. *@
+        @if (Model.ChaseEmails.Count > 0)
+        {
+            <details class="ps-emails" open>
+                <summary>
+                    <strong>@Model.ChaseEmails.Count</strong> email address@(Model.ChaseEmails.Count == 1 ? "" : "es")
+                    for these @Model.MatchCount row@(Model.MatchCount == 1 ? "" : "s") — copy for BCC
+                </summary>
+                <p class="ps-fresh" style="margin:6px 0;">
+                    Sponsors are represented by their <strong>event coordinators</strong>; everyone else
+                    by their own address. Change the filters above and this list follows.
+                </p>
+                <textarea id="ps-email-box" readonly rows="4"
+                          aria-label="Email addresses for the filtered rows"
+                          style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;">@Model.ChaseEmailLine</textarea>
+                <p style="margin:6px 0 0;">
+                    <button type="button" class="btn" id="ps-copy-emails">Copy all</button>
+                    <a class="btn btn-ghost" href="mailto:?bcc=@Uri.EscapeDataString(Model.ChaseEmailLine)">
+                        Open in mail client
+                    </a>
+                </p>
+
+                @if (Model.CompaniesWithNoCoordinator.Count > 0)
+                {
+                    @* 🛑 §854 — a shorter list must never be a silent one. These companies are in the
+                       filter and in NOBODY's inbox: the automatic reminders have no recipient either. *@
+                    <p class="error" style="margin-top:8px;">
+                        <strong>@Model.CompaniesWithNoCoordinator.Count</strong> of these companies have
+                        <strong>no event coordinator</strong>, so they are not in the list above and
+                        nothing is chasing them:
+                        @string.Join(", ", Model.CompaniesWithNoCoordinator)
+                    </p>
+                }
+            </details>
+
+            @* Progressive enhancement: the textarea is selectable without this. *@
+            <script>
+                (function () {
+                    var btn = document.getElementById('ps-copy-emails');
+                    var box = document.getElementById('ps-email-box');
+                    if (!btn || !box) return;
+                    btn.addEventListener('click', function () {
+                        box.select();
+                        box.setSelectionRange(0, box.value.length);
+                        var done = function () { btn.textContent = 'Copied';
+                            setTimeout(function () { btn.textContent = 'Copy all'; }, 1500); };
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(box.value).then(done, function () {
+                                try { document.execCommand('copy'); done(); } catch (e) { /* select is enough */ }
+                            });
+                        } else {
+                            try { document.execCommand('copy'); done(); } catch (e) { /* select is enough */ }
+                        }
+                    });
+                })();
+            </script>
+        }
+
+        @if (Model.Rows.Count == 0)
+        {
+            <p style="color:#6b7280;">No participants match this filter.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;position:relative;">
+                <table class="ps-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Role</th>
+                            <th scope="col">Completion</th>
+                            <th scope="col">Still open</th>
+                            <th scope="col">Tasks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        var cls = row.Percent >= 100 ? "high" : row.Percent >= 50 ? "mid" : "low";
+                        <tr class="@(row.Overdue ? "atrisk" : "")">
+                            <td>
+                                <div class="ps-name">@row.Name</div>
+                                <div class="ps-sub">
+                                    @if (row.SponsorCompanyId is not null)
+                                    {
+                                        <text>@row.ContactCount contact@(row.ContactCount == 1 ? "" : "s")</text>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(row.Email))
+                                    {
+                                        <text>@row.Email</text>
+                                    }
+                                </div>
+                            </td>
+                            <td>@row.Role</td>
+                            <td>
+                                @if (!row.HasWizard)
+                                {
+                                    @* A sponsor contact with no company has no checklist. Reporting
+                                       0% would read as "has done nothing", which is not true. *@
+                                    <span class="ps-chip none" title="No Get Started checklist applies">&ndash;</span>
+                                }
+                                else
+                                {
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                        <span class="ps-pct">@row.Percent%</span>
+                                        <span class="ps-bar-wrap">
+                                            <span class="ps-bar @cls" style="width:@(row.Percent)%;"></span>
+                                        </span>
+                                    </div>
+                                    <div class="ps-sub">@row.DoneCount of @row.EvaluableCount steps</div>
+                                }
+                            </td>
+                            <td>
+                                @if (!row.HasWizard)
+                                {
+                                    <span class="ps-sub">No checklist — this contact has no company link.</span>
+                                }
+                                else if (row.OpenStepKeys.Count == 0)
+                                {
+                                    <span class="ps-chip done">&#10003; complete</span>
+                                }
+                                else
+                                {
+                                    <ul class="ps-open">
+                                        @foreach (var key in row.OpenStepKeys)
+                                        {
+                                            <li>
+                                                @title(row.StepTitlePrefix, key)
+                                                @* §854/§1081 — NAME THE FIELDS, not just the step. The same
+                                                   sentence the sponsor's own reminder uses, so organizer and
+                                                   sponsor read one fact rather than two. *@
+                                                @if (key == "company" && row.MissingFieldKeys.Count > 0)
+                                                {
+                                                    <span class="ps-fields">
+                                                        &mdash; @string.Join(", ", row.MissingFieldKeys.Select(f =>
+                                                            title(SponsorCompanyContent.ResourcePrefix, f)))
+                                                    </span>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </td>
+                            <td>
+                                @if (row.OverdueTaskCount > 0)
+                                {
+                                    <span class="ps-chip overdue">@row.OverdueTaskCount overdue</span>
+                                    @if (row.EarliestOverdueDue is not null)
+                                    {
+                                        <div class="ps-sub" style="color:#9b261a;">
+                                            since @row.EarliestOverdueDue.Value.ToString("dd MMM")
+                                        </div>
+                                    }
+                                }
+                                else if (row.OpenTaskCount > 0)
+                                {
+                                    <span class="ps-sub">@row.OpenTaskCount open</span>
+                                }
+                                else
+                                {
+                                    <span class="ps-chip none">&ndash;</span>
+                                }
+                                <div style="margin-top:4px;">
+                                    @if (row.SponsorCompanyId is not null)
+                                    {
+                                        <a asp-page="/Organizer/SponsorDeliverables" class="ps-sub">Deliverables &rarr;</a>
+                                    }
+                                    else
+                                    {
+                                        <a asp-page="/Organizer/EditParticipant" asp-route-id="@row.ParticipantId" class="ps-sub">Open &rarr;</a>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (Model.TotalPages > 1)
+            {
+                <div class="ps-pager">
+                    @if (Model.PageNumber > 1)
+                    {
+                        <a asp-page="/Organizer/ParticipantStatus" asp-route-role="@Model.RoleFilter"
+                           asp-route-state="@Model.StateFilter" asp-route-p="@(Model.PageNumber - 1)">&larr; Previous</a>
+                    }
+                    <span>Page @Model.PageNumber of @Model.TotalPages (@Model.MatchCount rows)</span>
+                    @if (Model.PageNumber < Model.TotalPages)
+                    {
+                        <a asp-page="/Organizer/ParticipantStatus" asp-route-role="@Model.RoleFilter"
+                           asp-route-state="@Model.StateFilter" asp-route-p="@(Model.PageNumber + 1)">Next &rarr;</a>
+                    }
+                </div>
+            }
+        }
+
+        <p style="margin-top:16px;">
+            <a asp-page="/Organizer/People">&larr; Back to People</a>
+        </p>
+    }
+</div>

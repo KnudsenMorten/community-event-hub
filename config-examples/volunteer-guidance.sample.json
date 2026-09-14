@@ -1,0 +1,10 @@
+{
+  "_schema": "eldk-hub/volunteer-guidance-config@1",
+  "_doc": "OPTIONAL AI guidance for volunteer-task pre-requisites / expectations, bound from the VolunteerGuidance configuration section (app settings / environment / Key Vault). Gated on ApiKey: leave it blank (the default) and the hub uses a built-in heuristic generator with no network call and no secret. Supply a real key only via the environment (VolunteerGuidance__ApiKey) or a Key Vault reference, never in a file.",
+  "VolunteerGuidance": {
+    "ApiKey": "",
+    "BaseUrl": "https://api.anthropic.com",
+    "Model": "claude-opus-4-8",
+    "MaxTokens": 400
+  }
+}

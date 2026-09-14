@@ -20,19 +20,33 @@ public class SoMeQueueModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SoMeQueueService _queue;
     private readonly SoMeSubjectLabeller _subjects;
+    private readonly TimeProvider _clock;
+    private readonly SoMeReadiness _readiness;
 
     public SoMeQueueModel(
         ICurrentParticipantAccessor participant,
         SoMeQueueService queue,
-        SoMeSubjectLabeller subjects)
+        SoMeSubjectLabeller subjects,
+        TimeProvider clock,
+        // §1206 — the shared readiness rule, so this list says the same thing the settings page and
+        // the calendar say about the same post.
+        SoMeReadiness readiness)
     {
         _participant = participant;
         _queue = queue;
         _subjects = subjects;
+        _clock = clock;
+        _readiness = readiness;
     }
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
+
+    /// <summary>§1193 — the post the last Activate/Deactivate acted on, so the row can say so.</summary>
+    public int? ActionedPostId { get; private set; }
+
+    /// <summary>§1193 — whether that action was REFUSED. Drives the colour and the anchor.</summary>
+    public bool ActionFailed { get; private set; }
 
     public IReadOnlyList<SoMePost> Posts { get; private set; } = Array.Empty<SoMePost>();
 
@@ -51,6 +65,21 @@ public class SoMeQueueModel : PageModel
     /// <summary>§889 — one post TYPE at a time, the same axis the editor filters on.</summary>
     [BindProperty(SupportsGet = true)] public SoMeTemplateKind? Kind { get; set; }
 
+    /// <summary>
+    /// 🔴 §1209 — filter by CATEGORY (Type 1, 2a, 2b, 2c, 3, 4, 5), matching the Type column.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"remember to include it in filter as well"</i>, right after the
+    /// column started naming 2a/2b/2c. A column and a filter that disagree is worse than either
+    /// alone — reading "2a" on a row and then having no way to see the other 2a posts.</para>
+    ///
+    /// <para>🔒 <c>Kind</c> is KEPT and still applied. It is in bookmarked URLs and in the links other
+    /// pages build, and a filter that silently stopped working would look like the queue had lost
+    /// posts. The two compose: <c>Kind</c> narrows to a template kind, <c>Category</c> to one of the
+    /// three schedules inside it.</para>
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public SoMeAnnouncementCategory? Category { get; set; }
+
     /// <summary>§889 — <c>date</c> (default) · <c>id</c> · <c>type</c> · <c>state</c>.</summary>
     [BindProperty(SupportsGet = true)] public string? Sort { get; set; }
 
@@ -64,6 +93,68 @@ public class SoMeQueueModel : PageModel
     /// unique copy: *"the post i cannot find has a picture with 500 tickets"*.)
     /// <para>Resolved in two batched lookups for the whole page, never one per row.</para>
     /// </remarks>
+    /// <summary>
+    /// §1168 — posts that will really publish WITHOUT an image, as the dispatcher would decide.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ NOT <c>SoMePost.IsAwaitingApprovedGraphic</c>, which reads only the ref stamped at planning
+    /// time. A graphic released after the post was planned never back-fills that stamp, so the badge
+    /// said "no graphic" about posts that publish with one — the operator's 2026-09-03 report.
+    /// </remarks>
+    public IReadOnlySet<int> AwaitingGraphicPostIds { get; private set; } = new HashSet<int>();
+
+    /// <summary>
+    /// 🔴 §1206 — the HELD posts that could not be approved even if he clicked, and why.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"show then as not ready, like some graphics missing"</i>.</para>
+    ///
+    /// <para>⚠️ <b>The queue had one blocker out of a dozen.</b> "no graphic" was the only readiness
+    /// signal on the row, so a post waiting on a sponsor's social text, a session's description or an
+    /// unlinked co-speaker looked perfectly fine — and pressing Activate on it did nothing visible
+    /// (§1193's report, whose real cause was this). Every reason now reaches the row, from the same
+    /// <see cref="SoMeReadiness"/> the settings page and the calendar use.</para>
+    /// </remarks>
+    public IReadOnlyDictionary<int, string> NotReadyReasons { get; private set; } =
+        new Dictionary<int, string>();
+
+    /// <summary>How many rows are held back — the page's own count of §918's "19".</summary>
+    public int NotReadyCount => NotReadyReasons.Count;
+
+    /// <summary>
+    /// §1209 — the master classes in this edition, so a Type 2 row can say 2a rather than "Type 2".
+    /// </summary>
+    /// <remarks>
+    /// 🔑 ONE query for the whole page (§889: "two queries for a whole page, never one per row").
+    /// </remarks>
+    private IReadOnlySet<int> _masterClassSessionIds = new HashSet<int>();
+
+    /// <summary>
+    /// 🔴 §1209 — the post's CATEGORY in his words: Type 1, 2a, 2b, 2c, 3, 4, 5.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"can you update the type column to reflect the 2a, 2b, 2c names
+    /// instead if type = 2"</i>. The queue printed the TEMPLATE KIND, and three categories share one
+    /// kind — so master classes, technical sessions and sponsor speaker sessions were all "Type 2"
+    /// while the settings page that governs their (different) dates calls them 2a, 2b and 2c.</para>
+    ///
+    /// <para>🔑 Same labels as that page, from <see cref="SoMeCategoryRules.Label"/>, so the two
+    /// cannot drift apart.</para>
+    /// </remarks>
+    public string TypeLabel(SoMePost p)
+    {
+        ArgumentNullException.ThrowIfNull(p);
+
+        if (p.TemplateKind is null) return "—";
+
+        var category = SoMeCategoryRules.CategoryOf(
+            p.TemplateKind, p.SubjectKey, _masterClassSessionIds);
+
+        return category is { } c
+            ? SoMeCategoryRules.Label(c)
+            : SoMeTemplateCatalog.Title(p.TemplateKind.Value);
+    }
+
     public IReadOnlyDictionary<int, string> SubjectLabels { get; private set; } =
         new Dictionary<int, string>();
 
@@ -182,6 +273,20 @@ public class SoMeQueueModel : PageModel
         var problem = await _queue.TrySetActiveAsync(me.EventId, PostId, SetActive, me.Email, ct);
         Message = problem
             ?? (SetActive ? "Post activated." : "Post deactivated (won't publish).");
+
+        // 🔴 §1193 — AND IT IS SHOWN ON THE ROW, not only at the top of the page.
+        //
+        // Operator 2026-09-12: *"when i click activate nothing happens"* — on post #320454, six rows
+        // into a 54-row list. The refusal was generated correctly and rendered in the page-level
+        // message at the very TOP, which was scrolled off screen. He worked out the real reason
+        // himself from elsewhere, which is the tell: the button looked broken.
+        //
+        // 🔑 This is §887.2 exactly, in a second place. That fixed the editor's date save for the
+        // same reason — *"saving from down here looked like nothing happened at all"* — and the
+        // lesson did not travel to the queue, where the distance between control and message is
+        // larger still.
+        ActionedPostId = PostId;
+        ActionFailed = problem is not null;
         await LoadAsync(me.EventId, ct);
         return Page();
     }
@@ -209,6 +314,15 @@ public class SoMeQueueModel : PageModel
         TotalPosts = all.Count;
 
         SubjectLabels = await _subjects.LabelsForAsync(eventId, all, ct);
+        AwaitingGraphicPostIds = await _queue.AwaitingGraphicAsync(eventId, all, ct);
+
+        // 🔴 §1206 — asked for the WHOLE edition, not the current page, so the summary line can say
+        // how many are held back in total rather than how many happen to be in view. Only held posts
+        // are asked about (see SoMeReadiness), which is a few dozen rows.
+        NotReadyReasons = await _readiness.HeldReasonsAsync(all, ct);
+
+        // §1209 — one query, so the Type column can tell 2a from 2b.
+        _masterClassSessionIds = (await _queue.MasterClassSessionIdsAsync(eventId, ct)).ToHashSet();
 
         // §889 — search the BODY, because that is how he identifies a post. Case-insensitive and
         // substring: "500 tickets" should find it without him recalling the exact wording.
@@ -235,6 +349,16 @@ public class SoMeQueueModel : PageModel
             all = all.Where(p => p.TemplateKind == Kind).ToList();
         }
 
+        // 🔴 §1209 — and by CATEGORY, the same names the Type column prints. Applied AFTER the
+        // master-class ids are loaded, or 2a and 2b could not be told apart.
+        if (Category is not null)
+        {
+            all = all
+                .Where(p => SoMeCategoryRules.CategoryOf(
+                    p.TemplateKind, p.SubjectKey, _masterClassSessionIds) == Category)
+                .ToList();
+        }
+
         // §889 — sortable. Date is the default because the queue IS a calendar; the others exist so
         // he can group a type together or bring the un-approved ones to the top.
         all = (Sort ?? "date").ToLowerInvariant() switch
@@ -242,7 +366,12 @@ public class SoMeQueueModel : PageModel
             "id"    => all.OrderByDescending(p => p.Id).ToList(),
             "type"  => all.OrderBy(p => p.TemplateKind).ThenBy(p => p.ScheduledAtUtc).ToList(),
             "state" => all.OrderBy(p => StateOf(p)).ThenBy(p => p.ScheduledAtUtc).ToList(),
-            _       => all.OrderBy(p => p.ScheduledAtUtc).ToList(),
+            // 🔴 §1169 — THE NEXT POST FIRST, not the start of the campaign. Operator 2026-09-03:
+            // *"i also dont want to show all published at the top, but the next one"*. Plain
+            // ascending opened the queue on August, with the thing he had to act on below the fold.
+            // Upcoming nearest-first, then history newest-first — the same split §936 already made
+            // in the editor, here applied to a list holding both.
+            _       => SoMeQueueOrder.NextFirst(all, _clock.GetUtcNow()).ToList(),
         };
 
         Posts = all;

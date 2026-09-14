@@ -209,17 +209,32 @@
         {
             // Intentionally empty — only the event-site button shows.
         }
-        else if (ticketBanner.Visible && !string.IsNullOrEmpty(ticketBanner.Href))
-        {
-            <a class="ticket-info" href="@ticketBanner.Href" target="_blank" rel="noopener">@ticketBanner.Message &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
-        }
         else if (eventStartsAt is { } startsAt)
         {
             @* 🔴 §1003 — THE COUNTDOWN IS TO THE EVENT, NOT THE TICKET SALE. Operator 2026-08-09:
                *"it was a count down for the event start date 9th feb 2027 at 9:00 - like 'ELDK27
                starts in xxx'"*. §995 built it against ticketSale.opensAtLocal, which was the wrong
                target — it counted down to a date that passes months before the event and then
-               stopped meaning anything. Segmented DAYS/HOURS/MINUTES/SECONDS per his mock-up. *@
+               stopped meaning anything. Segmented DAYS/HOURS/MINUTES/SECONDS per his mock-up.
+
+               🔴 §1070 — AND IT NOW OUTRANKS THE "on sale" MESSAGE. Operator 2026-08-11, at 08:00
+               when the sale opened: *"the header we introduced yesterday with the countdown is now
+               gone and replaced with a tickets are now on sale … let me get the event countdown
+               back"*.
+
+               ⚠️ NOTHING WAS CHANGED — and that is the point worth keeping. This branch used to sit
+               BELOW the on-sale link. Before the sale opened the banner had no Href, so that branch
+               did not match and the countdown rendered; the moment the sale opened the banner gained
+               one, the higher branch started matching, and it displaced the countdown. A precedence
+               bug is invisible until the lower-priority condition finally becomes true — which here
+               was a DATE, so it shipped fine and broke months later on a timer.
+
+               🛑 THE COUNTDOWN AND NOTHING ELSE. Operator 2026-08-11, after I offered to keep the
+               ticket link by making the countdown itself clickable: *"the event countdown must win -
+               remove the tickets are now on sale, so we have only the countdown"*.
+               ⇒ No link, no tooltip, no screen-reader echo of the on-sale wording — the topbar is a
+               countdown while there is an event to count down to. "Visit event site →" beside it is
+               how someone navigates; the bar does not need a second destination. *@
             <span class="ceh-countdown" data-event-countdown="@startsAt.ToString("o")" aria-live="off">
                 <span class="cd-label">@eventCode starts in</span>
                 <span class="cd-seg"><b data-cd="d">—</b><i>DAYS</i></span>
@@ -227,6 +242,11 @@
                 <span class="cd-seg"><b data-cd="m">—</b><i>MINUTES</i></span>
                 <span class="cd-seg"><b data-cd="s">—</b><i>SECONDS</i></span>
             </span>
+        }
+        else if (ticketBanner.Visible && !string.IsNullOrEmpty(ticketBanner.Href))
+        {
+            @* Reached only once the event has STARTED (no countdown target left). *@
+            <a class="ticket-info" href="@ticketBanner.Href" target="_blank" rel="noopener">@ticketBanner.Message &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
         }
         else if (ticketBanner.Visible && ticketBanner.OpensAt is { } opensAt)
         {

@@ -32,6 +32,31 @@ public interface IEmailSender
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// §1121 — send ONE HTML email addressed to SEVERAL primary (<b>To:</b>) recipients.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why this is not the CC overload.</b> A CC says "for your information"; these
+    /// recipients are co-owners of the job the mail describes (operator 2026-08-25: <i>"put in to
+    /// field"</i> · <i>"not cc"</i>). Used by <see cref="EngineAlertSender"/> for the speaker /
+    /// session organizer to-dos that must reach the shared inbox and named organizers together.</para>
+    ///
+    /// <para>🔑 <b>Why not a send per address.</b> One mail keeps one thread, so a reply saying
+    /// "done" is visible to everyone who could otherwise duplicate the work.</para>
+    ///
+    /// <para>Each address is independently ring-gated + redirected, exactly as a CC is. If every
+    /// address is dropped, no mail is sent. The DEFAULT implementation here joins the addresses into
+    /// the single-recipient overload so existing senders and the many test doubles keep compiling and
+    /// no recipient is silently lost; <see cref="BrevoEmailSender"/> overrides it and builds a real
+    /// multi-recipient To: line.</para>
+    /// </remarks>
+    Task SendToManyAsync(
+        IReadOnlyCollection<string> toEmails,
+        string subject,
+        string htmlBody,
+        CancellationToken cancellationToken = default)
+        => SendAsync(string.Join(", ", toEmails), subject, htmlBody, cancellationToken);
+
+    /// <summary>
     /// Send a single HTML email with an optional <b>Reply-To</b> address (name +
     /// email) so that an organizer hitting "Reply" replies to <paramref name="replyTo"/>
     /// (e.g. the person who actually asked) rather than the configured From mailbox.
@@ -156,6 +181,84 @@ public sealed class EmailOptions
     /// on holiday is how a 5-minute ops window gets missed.</para>
     /// </remarks>
     public string OrganizerInbox { get; set; } = "info@expertslive.dk";
+
+    /// <summary>
+    /// §1121 — extra addresses that go on the <b>To:</b> line, next to
+    /// <see cref="OrganizerInbox"/>, for the organizer to-do mails about <b>speakers and
+    /// sessions</b>: the held-speaker ACTION mail and the Backstage "apply this manually" notices
+    /// for the <i>Speakers</i> / <i>Agenda &amp; sessions</i> areas. Comma- or semicolon-separated;
+    /// EMPTY disables the whole behaviour and the mails go to the shared inbox alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25: <i>"add kea@expertslive.dk to reminder emails related to sessions
+    /// + speakers organizer tasks, so they are sent to both info@expertslive.dk and
+    /// kea@expertslive.dk"</i>, then <i>"include this mail kent.agerlund@twoday.com besides
+    /// info@expertslive.dk"</i> — followed by <i>"put in to field"</i> · <i>"not cc"</i>.</para>
+    ///
+    /// <para>🔒 <b>Speakers and sessions ONLY, and that narrowness is the point.</b> The same
+    /// notifier also carries <i>Exhibitor profiles</i>, <i>Sponsors / exhibitors</i>, <i>Coupon
+    /// invoicing</i> and <i>Webshop orders</i>; the weekly <i>volunteers awaiting review</i> mail
+    /// rides the same sender. He was asked and named speakers + sessions, so widening this to "every
+    /// ops mail" would sign two people up for four kinds of mail they did not ask for — which is how
+    /// a recipient learns to filter the whole family away, including the one that mattered.</para>
+    ///
+    /// <para>⚠️ §1124 — this setting is the EXTRAS. Nothing should read it directly any more: call
+    /// <see cref="SpeakerSessionRecipients"/>, which is the whole audience.</para>
+    ///
+    /// <para>🔒 <b>Defaulted IN CODE, not via an app setting</b> — the same §462 reasoning as
+    /// <see cref="OrganizerInbox"/> directly above: app settings swap with the deployment slot, so a
+    /// recipient list that lived only in a slot setting could lose an address on a swap and fail
+    /// silently. Config may still override it per environment.</para>
+    /// </remarks>
+    public string SpeakerSessionAlsoTo { get; set; } = "kea@expertslive.dk, kent.agerlund@twoday.com";
+
+    /// <summary>
+    /// §1121 — <see cref="SpeakerSessionAlsoTo"/> parsed into addresses: split on comma/semicolon,
+    /// trimmed, blanks and duplicates removed. Empty when the setting is blank.
+    /// </summary>
+    public IReadOnlyList<string> SpeakerSessionAlsoToList() =>
+        (SpeakerSessionAlsoTo ?? string.Empty)
+            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>
+    /// §1124 — <b>THE</b> audience for an organizer PENDING-TASK mail about speakers or sessions:
+    /// <see cref="OrganizerInbox"/> first, then <see cref="SpeakerSessionAlsoTo"/>. One list, seven
+    /// consumers.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25, after an audit showed §1121 had reached only 2 of the 7 such
+    /// mails: <i>"all 7 (so include the 5 extra and send to kent. add info@expertslive.dk to the
+    /// missing one as well and remove mok@expertslive.dk. make it consitent"</i>.</para>
+    ///
+    /// <para>🔑 <b>"Make it consistent" is a structural instruction, not a copy-paste one.</b> The
+    /// seven mails had drifted to five different answers for "who should see this" — four constants
+    /// spelling out <c>info@</c> independently, one falling through to the developer mailbox, and two
+    /// reached only by §1121. Pasting a third address into each of them would have produced the same
+    /// drift with a longer list. ⇒ The audience is defined ONCE, here, and every site asks for it.
+    /// The next speaker/session mail is then correct by construction rather than by remembering.</para>
+    ///
+    /// <para>🔒 <b>The developer mailbox is deliberately NOT in this list</b> (<i>"remove
+    /// mok@expertslive.dk"</i>). §493 reserves <c>mok@</c> for SYSTEM alerts; a queue of pending
+    /// approvals is organizer work, and routing it to one person is what made it invisible when that
+    /// person was busy — the same reasoning §874 used for the held-speaker mail.</para>
+    ///
+    /// <para>⚠️ An empty <see cref="OrganizerInbox"/> does not silently drop the mail: the extras
+    /// still receive it. Only an empty list overall means nobody is told, and that is a
+    /// configuration choice, not an accident of one blank field.</para>
+    /// </remarks>
+    public IReadOnlyList<string> SpeakerSessionRecipients()
+    {
+        var all = new List<string>();
+        if (!string.IsNullOrWhiteSpace(OrganizerInbox)) all.Add(OrganizerInbox.Trim());
+        foreach (var extra in SpeakerSessionAlsoToList())
+        {
+            if (all.Any(a => string.Equals(a, extra, StringComparison.OrdinalIgnoreCase))) continue;
+            all.Add(extra);
+        }
+        return all;
+    }
 
     /// <summary>
     /// TEST MODE redirect. When non-empty, every outbound mail's To: is replaced

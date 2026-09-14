@@ -48,6 +48,16 @@
     .tl-metric { background:#f7f9fc; border:1px solid #e6eaf2; border-radius:10px; padding:12px; text-align:center; }
     .tl-metric .v { font-size:30px; font-weight:800; color:var(--el-darkblue,#1D3380); line-height:1; }
     .tl-metric .k { color:#6b7280; font-size:12.5px; margin-top:4px; }
+    /* §1067 — the headline count. Mobile-first: 46px at ~360px so it still fits one line, stepping
+       up on a wider screen. Deliberately larger and darker than the three percentage cards — it is
+       the number he is watching during a sale, and the one the other three are proportions of. */
+    .tl-headline { background:#f7f9fc; border:1px solid #e6eaf2; border-radius:10px;
+                   padding:16px 12px; text-align:center; margin:0 0 12px; }
+    .tl-headline .v { font-size:46px; font-weight:800; color:var(--el-darkblue,#1D3380);
+                      line-height:1; letter-spacing:-1px; }
+    .tl-headline .k { color:#6b7280; font-size:13.5px; margin-top:6px; text-transform:uppercase;
+                      letter-spacing:.06em; font-weight:600; }
+    @@media (min-width:620px) { .tl-headline .v { font-size:62px; } }
     .tl-graph { display:flex; align-items:flex-end; gap:2px; height:120px; padding:8px 0; border-bottom:1px solid #e6eaf2; overflow-x:auto; }
     .tl-gbar { flex:0 0 8px; background:var(--el-blue,#008BD2); border-radius:2px 2px 0 0; min-height:2px; }
     /* 🔴 §1052 — EACH TOPIC IS ITS OWN BLOCK. Operator 2026-08-10: "make more space after each
@@ -108,6 +118,19 @@ else
        With no attendees the denominator is 0, so we render "—" instead of "0%". *@
     var hasAttendees = Model.Data.TotalAll > 0;
     Func<int, string> pctCard = p => hasAttendees ? $"{p}%" : "—";
+    @* 🔴 §1067 — THE COUNT ITSELF, and bigger than the rest. Operator 2026-08-11: *"extra big number
+       here - attendee count"*.
+       ⚠️ This RELAXES §181 ("every headline card is a PERCENTAGE, never a raw count") — deliberately,
+       and it costs nothing that rule was protecting: the breakdown tables below already print raw
+       counts (30, 18, …) on the public and sponsor pages, so the absolute figure was never secret.
+       What §181 actually prevented was a row of bare numbers with no denominator; that still holds,
+       because this card IS the denominator the other three are percentages OF. Showing it makes the
+       row easier to read, not looser. *@
+    <div class="tl-headline">
+        <div class="v">@(hasAttendees ? Model.Data.TotalAll.ToString() : "—")</div>
+        <div class="k">attendees registered</div>
+    </div>
+
     <div class="tl-metrics">
         <div class="tl-metric"><div class="v">@pctCard(Model.Data.Pct2DayAll)</div><div class="k">bought a 2-day ticket</div></div>
         <div class="tl-metric"><div class="v">@pctCard(Model.Data.WordOfMouthPct)</div><div class="k">heard via word of mouth</div></div>
@@ -144,5 +167,21 @@ else
     @* §69 — drop the "Aggregate figures from Zoho Backstage ·" prefix (don't expose the source system).
        §127 — "Updated" is the last-successful-SYNC time (when the mirror was refreshed), not the
        wall-clock the page rendered; fall back to render time only if the edition was never synced. *@
-    <p class="tl-foot">Updated @((Model.Data.LastSyncAtUtc ?? Model.Data.GeneratedAtUtc).ToString("d MMM yyyy HH:mm 'UTC'"))</p>
+    @* §1063 — say WHEN THE NEXT ONE IS DUE, not just when the last one was. Operator 2026-08-11:
+       *"we need to show that in the footer, so people can see next refresh time - it shows only
+       Updated 11 Aug 2026 06:14 UTC"*. A lone "Updated" timestamp leaves the reader to guess whether
+       a number is stale or simply unchanged.
+       🔒 The cadence is READ from the job's configuration (see AttendeeTelemetry.RefreshEveryMinutes),
+       never typed here — a hard-coded "10 minutes" becomes a lie the moment he changes the interval.
+       ⚠️ "next ≈" with a tilde on purpose: the run is a timer the host may serve a little late, so an
+       exact-looking time would be a promise the system cannot keep. *@
+    var updatedAt = Model.Data.LastSyncAtUtc ?? Model.Data.GeneratedAtUtc;
+    var every = Model.Data.RefreshEveryMinutes;
+    <p class="tl-foot">
+        Updated @updatedAt.ToString("d MMM yyyy HH:mm 'UTC'")
+        @if (every is int m && m > 0)
+        {
+            @:· refreshes every @m minute@(m == 1 ? "" : "s") · next ≈ @updatedAt.AddMinutes(m).ToString("HH:mm 'UTC'")
+        }
+    </p>
 }

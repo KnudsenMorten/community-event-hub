@@ -36,13 +36,13 @@ public sealed class CouponClaimInviteComposerTests
 
         Assert.Equal("Coupon-link for Experts Live Denmark 2027 (ELDK27) Ticket claim", subject);
         Assert.Contains("Thank You again for your support", html);
-        Assert.Contains("20 pre-paid", html);                       // the count they check first
+        Assert.Contains("<strong>20</strong> pre-paid", html);                       // the count they check first
         Assert.Contains("2-day tickets", html);                     // the CLASS NAME, never its id
         Assert.Contains("#/buyTickets?promoCode=", html);
         Assert.Contains("Extend with more tickets", html);
         Assert.Contains("DKK 3000/EURO390", html);                  // whole kroner, not 3000.00
-        Assert.Contains("I have sent invoice #170", html);
-        Assert.Contains("reference: Registration fee", html);
+        Assert.Contains("I have sent invoice <strong>#170</strong>", html);
+        Assert.Contains("reference: <strong>Registration fee</strong>", html);
         Assert.Contains("Experts Live Denmark organizer-team", html);
     }
 
@@ -56,7 +56,7 @@ public sealed class CouponClaimInviteComposerTests
         Assert.DoesNotContain("pre-paid", html);
         Assert.DoesNotContain("Extend with more tickets", html);
         Assert.DoesNotContain("I have sent invoice", html);
-        Assert.Contains("We will invoice you bi-weekly when a ticket is claimed.", html);
+        Assert.Contains("We will invoice you <strong>every 2 weeks</strong> when a ticket is claimed.", html);
         Assert.Contains("We will add the reference Registration fee", html);
     }
 
@@ -69,16 +69,25 @@ public sealed class CouponClaimInviteComposerTests
     /// the system actively broke. Now the same number that paces the invoicing writes the sentence,
     /// so changing one changes the other.
     /// </remarks>
+    /// <remarks>
+    /// ⚰️ §1105 — <b>"bi-weekly" / "weekly" / "monthly" became "every 2 weeks" / "every week" /
+    /// "every month"</b> (operator 2026-08-20: *"we dont understand this wording"*). "Bi-weekly" in
+    /// English means BOTH twice a week and every two weeks, and this sentence tells a customer how
+    /// often they will be invoiced — the one place an ambiguity costs a reply. The rule the test
+    /// exists for is unchanged: the sentence is written from the SAME number that paces the
+    /// invoicing, so the promise cannot drift from the mechanism.
+    /// </remarks>
     [Theory]
-    [InlineData(14, "bi-weekly")]
-    [InlineData(7, "weekly")]
-    [InlineData(30, "monthly")]
+    [InlineData(14, "every 2 weeks")]
+    [InlineData(7, "every week")]
+    [InlineData(30, "every month")]
+    [InlineData(1, "every day")]
     [InlineData(21, "every 21 days")]
     [InlineData(0, "for each claim")]
     public void The_billing_cadence_is_stated_from_the_real_interval(int days, string expected)
     {
         var (_, html) = CouponClaimInviteComposer.Build(AdHoc(days));
-        Assert.Contains($"We will invoice you {expected} when a ticket is claimed.", html);
+        Assert.Contains($"We will invoice you <strong>{expected}</strong> when a ticket is claimed.", html);
     }
 
     /// <summary>
@@ -91,7 +100,7 @@ public sealed class CouponClaimInviteComposerTests
         var (_, html) = CouponClaimInviteComposer.Build(Prepaid(invoice: null));
 
         Assert.DoesNotContain("I have sent invoice", html);
-        Assert.Contains("20 pre-paid", html);       // …but the rest of the mail still stands
+        Assert.Contains("<strong>20</strong> pre-paid", html);       // …but the rest of the mail still stands
     }
 
     [Fact]
@@ -150,5 +159,68 @@ public sealed class CouponClaimInviteComposerTests
 
         Assert.Contains("DKK 3250/EURO425", html);
         Assert.DoesNotContain("DKK 3000", html);
+    }
+
+    // =====================================================================
+    //  §1093 — the partner's usage link
+    // =====================================================================
+
+    /// <summary>
+    /// 🔑 This mail is the ONE thing CEH sends the partner directly — every other coupon mail goes
+    /// to <c>info@</c>. So it is the only place the monitor link can reach them without an organizer
+    /// copying a URL out of the admin page by hand.
+    /// </summary>
+    [Fact]
+    public void The_usage_link_is_included_when_the_partner_has_one()
+    {
+        var (_, html) = CouponClaimInviteComposer.Build(
+            AdHoc() with { MonitorUrl = "https://hub.example.test/monitor/abc123" });
+
+        Assert.Contains("https://hub.example.test/monitor/abc123", html);
+        Assert.Contains("no login needed", html, StringComparison.OrdinalIgnoreCase);
+        // ⚠️ The page shows other people's names and e-mails; a partner forwarding the link should
+        // be told what they are forwarding.
+        Assert.Contains("confidential", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 🔒 No link ⇒ the WHOLE section is omitted, heading included. A "Follow who has signed up"
+    /// heading with nothing under it reads as a broken mail, and it invites a reply asking where
+    /// the link is.
+    /// </summary>
+    [Fact]
+    public void No_link_means_no_section_at_all()
+    {
+        var (_, html) = CouponClaimInviteComposer.Build(AdHoc());
+
+        Assert.DoesNotContain("Follow who has signed up", html);
+        Assert.DoesNotContain("/monitor/", html);
+    }
+
+    /// <summary>
+    /// The link belongs AFTER the invoice paragraph: it is how the partner checks the invoice they
+    /// were just told about. Before it, it is a curiosity.
+    /// </summary>
+    [Fact]
+    public void The_usage_link_comes_after_the_invoice_paragraph()
+    {
+        var (_, html) = CouponClaimInviteComposer.Build(
+            AdHoc() with { MonitorUrl = "https://hub.example.test/monitor/abc123" });
+
+        var invoice = html.IndexOf("Invoice:", StringComparison.Ordinal);
+        var usage = html.IndexOf("Follow who has signed up", StringComparison.Ordinal);
+
+        Assert.True(invoice >= 0 && usage >= 0);
+        Assert.True(invoice < usage, "the usage link answers the invoice, so it follows it");
+    }
+
+    /// <summary>A prepaid partner gets it too — they have the most to track.</summary>
+    [Fact]
+    public void A_prepaid_invite_carries_the_link_as_well()
+    {
+        var (_, html) = CouponClaimInviteComposer.Build(
+            Prepaid() with { MonitorUrl = "https://hub.example.test/monitor/xyz789" });
+
+        Assert.Contains("https://hub.example.test/monitor/xyz789", html);
     }
 }

@@ -104,6 +104,27 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>§1040 — shareable, revocable views of who has bought a ticket for one company.</summary>
     public DbSet<AttendeeMonitor> AttendeeMonitors => Set<AttendeeMonitor>();
 
+    /// <summary>§1077 — volume-package company entities (≥10 attendees ⇒ keynote, social, group photo).</summary>
+    public DbSet<VolumePackageCompany> VolumePackageCompanies => Set<VolumePackageCompany>();
+
+    /// <summary>§1077 — one appended row per entity per day, so a qualification history exists.</summary>
+    public DbSet<VolumePackageQualificationSnapshot> VolumePackageQualificationSnapshots => Set<VolumePackageQualificationSnapshot>();
+
+    /// <summary>§1077 stage 5 — the photo timeslots an organizer defines for the planner to choose from.</summary>
+    public DbSet<GroupPhotoSlot> GroupPhotoSlots => Set<GroupPhotoSlot>();
+
+    /// <summary>§1080 — mass-mail campaigns: a template, an audience, and the acts that let it send.</summary>
+    public DbSet<MailCampaign> MailCampaigns => Set<MailCampaign>();
+
+    /// <summary>§1080 — the imported list of previous editions' attendees. NEVER Participants.</summary>
+    public DbSet<ExternalRecipient> ExternalRecipients => Set<ExternalRecipient>();
+
+    /// <summary>§1080 — one row per person per campaign: what makes a batched send resumable.</summary>
+    public DbSet<MailCampaignRecipient> MailCampaignRecipients => Set<MailCampaignRecipient>();
+
+    /// <summary>§1080 — addresses campaigns must skip: unsubscribed, bounced, complained.</summary>
+    public DbSet<MailSuppression> MailSuppressions => Set<MailSuppression>();
+
     /// <summary>Last-successful-sync markers, one per (EventId, Key) — drives the
     /// telemetry "Updated &lt;t&gt;" footer (REQUIREMENTS §125/§127).</summary>
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
@@ -149,6 +170,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
     /// <summary>§324: minted LinkedIn OAuth tokens (the org/page posting token).</summary>
     public DbSet<Integrations.LinkedInOAuthToken> LinkedInOAuthTokens => Set<Integrations.LinkedInOAuthToken>();
+
+    /// <summary>§1142 — the ONE shared Zoho access token (a cache, not a record; never backed up).</summary>
+    public DbSet<Integrations.ZohoTokenLease> ZohoTokenLeases => Set<Integrations.ZohoTokenLease>();
     public DbSet<SpeakerBackstageEmailSync> SpeakerBackstageEmailSyncs => Set<SpeakerBackstageEmailSync>();
     public DbSet<SessionizeEndpointSetting> SessionizeEndpointSettings => Set<SessionizeEndpointSetting>();
     public DbSet<TravelReimbursement> TravelReimbursements => Set<TravelReimbursement>();
@@ -176,6 +200,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SponsorTokenVersion> SponsorTokenVersions => Set<SponsorTokenVersion>();
     public DbSet<GroupPhotoRegistration> GroupPhotoRegistrations => Set<GroupPhotoRegistration>();
     public DbSet<AppGameParticipation> AppGameParticipations => Set<AppGameParticipation>();
+
+    /// <summary>§1165 — organizer reservations of swag-catalogue items.</summary>
+    public DbSet<SwagCatalogHold> SwagCatalogHolds => Set<SwagCatalogHold>();
+
+    /// <summary>§1165k — euro credits granted to sponsors for catalogue items.</summary>
+    public DbSet<SwagCatalogCredit> SwagCatalogCredits => Set<SwagCatalogCredit>();
     public DbSet<ErpCustomerLink> ErpCustomerLinks => Set<ErpCustomerLink>();
     public DbSet<ErpOrderLink> ErpOrderLinks => Set<ErpOrderLink>();
     // §787 — the per-edition coupon → billing-type → ERP-customer mapping the operator maintains on
@@ -224,6 +254,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<EventSoMePostOccurrence> EventSoMePostOccurrences => Set<EventSoMePostOccurrence>();
     /// <summary>§842.2 — per-type announcement frequency. A row is an OVERRIDE of the §824.1 default.</summary>
     public DbSet<SoMeCadenceSetting> SoMeCadenceSettings => Set<SoMeCadenceSetting>();
+
+    /// <summary>§1187 — one rule per announcement category: rounds, start date, end date.</summary>
+    public DbSet<SoMeCategoryRule> SoMeCategoryRules => Set<SoMeCategoryRule>();
+
+    /// <summary>§1195 — the per-round start dates behind each category rule.</summary>
+    public DbSet<SoMeCategoryRound> SoMeCategoryRounds => Set<SoMeCategoryRound>();
     public DbSet<SoMeSettings> SoMeSettings => Set<SoMeSettings>();
 
     /// <summary>§824.2C: per-edition OVERRIDES of the five shipped post templates. A row exists ONLY
@@ -1687,6 +1723,19 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => x.Kind).IsUnique();
         });
 
+        // --- ZohoTokenLease (§1142: one shared access token per credential) --
+        //
+        // 🔒 The unique index is not tidiness — it is the second half of the refresh lock. Two
+        // instances racing to CREATE the row both "win" without it, and the point of the table is
+        // that exactly one instance talks to Zoho's token endpoint at a time.
+        b.Entity<Integrations.ZohoTokenLease>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CredentialKey).IsRequired().HasMaxLength(64);
+            e.Property(x => x.AccessToken).IsRequired().HasMaxLength(2000);
+            e.HasIndex(x => x.CredentialKey).IsUnique();
+        });
+
         // --- SpeakerBackstageEmailSync (Backstage email propagation queue) --
         b.Entity<SpeakerBackstageEmailSync>(e =>
         {
@@ -1727,6 +1776,131 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => x.EventId).IsUnique();
         });
 
+
+        // --- §1077 Volume package -------------------------------------------------
+        b.Entity<VolumePackageCompany>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CustomName).IsRequired().HasMaxLength(200);
+            // Multi-value fields are stored as text, not child tables: they are short lists an
+            // organizer edits as text, and a join table per list would triple the schema for no
+            // query we actually run (matching happens in memory, once per daily pass).
+            e.Property(x => x.Domains).HasMaxLength(2000);
+            e.Property(x => x.CouponCodes).HasMaxLength(2000);
+            e.Property(x => x.LinkedEmails).HasMaxLength(4000);
+            e.Property(x => x.ErpCustomerNumbers).HasMaxLength(1000);
+            e.Property(x => x.ApproverEmail).HasMaxLength(320);
+            e.Property(x => x.ApproverName).HasMaxLength(200);
+            e.Property(x => x.ApproverMobile).HasMaxLength(60);
+            e.Property(x => x.GroupPhotoContactEmail).HasMaxLength(320);
+            e.Property(x => x.GroupPhotoContactName).HasMaxLength(200);
+            e.Property(x => x.GroupPhotoContactMobile).HasMaxLength(60);
+            e.Property(x => x.LinkedInUrl).HasMaxLength(500);
+            e.Property(x => x.LogoWebPath).HasMaxLength(1000);
+            e.Property(x => x.LogoPrintPath).HasMaxLength(1000);
+            e.Property(x => x.BenefitsApprovedByEmail).HasMaxLength(320);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+
+            // §1077 stage 3 — the wizard token. Same treatment as AttendeeMonitor.Token, for the
+            // same reason: it is the credential for an UNAUTHENTICATED page, so the lookup that
+            // resolves it must be an INDEX, and UNIQUE so one link can never resolve to two
+            // companies. 🔒 The index is FILTERED to non-null — most rows never have a link, and a
+            // plain unique index would let exactly one of them hold NULL.
+            e.Property(x => x.WizardToken).HasMaxLength(64);
+            e.HasIndex(x => x.WizardToken).IsUnique().HasFilter("[WizardToken] IS NOT NULL");
+
+            e.HasIndex(x => new { x.EventId, x.CustomName });
+
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §1080: mass mail --------------------------------------------------
+        b.Entity<MailCampaign>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            e.Property(x => x.TemplateKey).HasMaxLength(200);
+            e.Property(x => x.Audience).HasConversion<int>();
+            e.Property(x => x.State).HasConversion<int>();
+            e.Property(x => x.CreatedByEmail).HasMaxLength(320);
+            e.Property(x => x.DryRunAcknowledgedByEmail).HasMaxLength(320);
+            e.HasIndex(x => new { x.EventId, x.State });
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<MailCampaignRecipient>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.State).HasConversion<int>();
+            e.Property(x => x.Error).HasMaxLength(400);
+            // 🔴 One row per address per campaign: the guarantee that nobody is mailed twice, held
+            // by the database rather than by the loop that happens to be running.
+            e.HasIndex(x => new { x.MailCampaignId, x.Email }).IsUnique();
+            // The batch query: pending rows of one campaign, in order.
+            e.HasIndex(x => new { x.MailCampaignId, x.State });
+            e.HasOne(x => x.Campaign).WithMany().HasForeignKey(x => x.MailCampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<ExternalRecipient>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            e.Property(x => x.FullName).HasMaxLength(200);
+            e.Property(x => x.CompanyName).HasMaxLength(200);
+            e.Property(x => x.SourceEdition).HasMaxLength(100);
+            e.Property(x => x.ImportBatch).HasMaxLength(200);
+            e.Property(x => x.ImportedByEmail).HasMaxLength(320);
+            // 🔒 One row per address per edition: re-importing the same spreadsheet must UPDATE the
+            // list rather than double every recipient in it.
+            e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<MailSuppression>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            e.Property(x => x.Reason).HasConversion<int>();
+            e.Property(x => x.Detail).HasMaxLength(1000);
+            // 🔴 One suppression per address per edition, and it is the lookup every send makes.
+            e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §1077 stage 5: the photo timeslots -----------------------------
+        b.Entity<GroupPhotoSlot>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Location).HasMaxLength(200);
+            e.Property(x => x.Label).HasMaxLength(200);
+
+            // 🔒 One slot per moment per edition. Two rows at the same time is two companies in
+            // front of the camera at once — the one mistake a photo schedule cannot recover from on
+            // the day, and far cheaper to prevent here than to notice at 09:30.
+            e.HasIndex(x => new { x.EventId, x.StartUtc }).IsUnique();
+
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<VolumePackageQualificationSnapshot>(e =>
+        {
+            e.HasKey(x => x.Id);
+
+            // 🔒 One row per entity per DAY: the daily job must be safe to re-run (a retry, a manual
+            // trigger) without appending a second answer for the same day.
+            e.HasIndex(x => new { x.VolumePackageCompanyId, x.OnDate }).IsUnique();
+
+            e.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.VolumePackageCompanyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         // --- AttendeeMonitor (§1040) ----------------------------------------
         b.Entity<AttendeeMonitor>(e =>
         {
@@ -2146,6 +2320,65 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasIndex(x => new { x.EventId, x.ScheduledAtUtc });
+        });
+
+        // --- SwagCatalogCredit (§1165k) ----------------------------------------
+        b.Entity<SwagCatalogCredit>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Code).IsRequired().HasMaxLength(120);
+            e.Property(x => x.CreatedByEmail).IsRequired().HasMaxLength(256);
+            e.Property(x => x.RevokedByEmail).HasMaxLength(256);
+            e.Property(x => x.RevokedReason).HasMaxLength(500);
+            e.Property(x => x.Note).HasMaxLength(1000);
+            // 🔒 Explicit precision: money must never be stored at the provider's default, where a
+            // value can be silently truncated (the warning EF already emits for other decimals here).
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One code is one credit. A duplicate would make "which grant did the sponsor spend?"
+            // unanswerable at exactly the moment somebody asks.
+            e.HasIndex(x => new { x.EventId, x.Code }).IsUnique();
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
+        });
+
+        // --- SwagCatalogHold (§1165) -------------------------------------------
+        b.Entity<SwagCatalogHold>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.ProductName).IsRequired().HasMaxLength(300);
+            e.Property(x => x.CreatedByEmail).IsRequired().HasMaxLength(256);
+            e.Property(x => x.ReleasedByEmail).HasMaxLength(256);
+            e.Property(x => x.ReleasedReason).HasMaxLength(500);
+            e.Property(x => x.Note).HasMaxLength(1000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 ONE LIVE HOLD PER ITEM, enforced by the database rather than by a check-then-write.
+            //
+            // Two organizers reserving the same item in the same minute is exactly the situation a
+            // "is it free? then take it" read cannot survive, and the whole point of the feature is
+            // that an item promised twice is worse than an item not promised at all.
+            //
+            // ⚠️ The filter is on ReleasedAt, NOT on ExpiresAt — an index cannot compare against
+            // "now". That is precisely why the sweep must RELEASE an expired hold rather than just
+            // let it lapse: a row that is past its expiry but still unreleased would block the item
+            // for ever, which is the bug the expiry exists to prevent.
+            e.HasIndex(x => new { x.EventId, x.ProductId })
+                .IsUnique()
+                .HasFilter("[ReleasedAt] IS NULL");
+
+            // The organizer view and the sweep both read "what is live".
+            e.HasIndex(x => new { x.EventId, x.ReleasedAt });
         });
 
         // --- AppGameParticipation ----------------------------------------------
@@ -2654,6 +2887,40 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // post, so a second path from Event would be ambiguous to SQL Server (cf. SoMePost).
             e.HasOne(x => x.Post).WithMany(x => x.Occurrences)
                 .HasForeignKey(x => x.EventSoMePostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §1187: per-CATEGORY announcement rule (rounds + start + end) -----
+        // 🔴 Supersedes SoMeCadenceSetting below, which held only the round count and was keyed on
+        // the coarser SoMeTemplateKind. Kept in place while rows are seeded across; see
+        // SoMeCategoryRules.
+        b.Entity<SoMeCategoryRule>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Category).HasConversion<int>();
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+
+            // 🔒 One row per category per edition — the same reason SoMeCadenceSetting has its
+            // unique index: without it a double-submit makes "what is this category's rule?" a
+            // matter of insertion order.
+            e.HasIndex(x => new { x.EventId, x.Category }).IsUnique();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §1195: the per-ROUND start dates ---------------------------------
+        b.Entity<SoMeCategoryRound>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Category).HasConversion<int>();
+
+            // 🔒 One row per round per category per edition, for the same reason as the rule above.
+            e.HasIndex(x => new { x.EventId, x.Category, x.RoundNumber }).IsUnique();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

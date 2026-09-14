@@ -20,6 +20,12 @@ public readonly record struct ExternalLinkResult(ExternalLinkState State, string
 {
     public bool IsGone => State == ExternalLinkState.Gone;
     public bool IsUnknown => State == ExternalLinkState.Unknown;
+
+    /// <summary>
+    /// §1221 — the remote SAID "not found" but not in a form trusted as definite (Zoho's 400
+    /// "Sponsor not found"). <see cref="State"/> stays Unknown; a caller may count these over time.
+    /// </summary>
+    public bool NotFoundReported { get; init; }
 }
 
 /// <summary>

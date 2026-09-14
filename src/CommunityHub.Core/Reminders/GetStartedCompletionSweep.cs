@@ -28,25 +28,21 @@ public sealed class GetStartedCompletionSweep
 {
     private readonly CommunityHubDbContext _db;
     private readonly GetStartedCompletionNotifier _notifier;
-    private readonly SpeakerWizardService _speakerWizard;
-    private readonly RoleWizardService _roleWizard;
-    private readonly AttendeeWizardService _attendeeWizard;
-    private readonly SponsorWizardService _sponsorWizard;
+
+    /// <summary>
+    /// §1085 — the SHARED role→wizard map. This class used to carry its own <c>switch (role)</c>,
+    /// one of three identical copies; the status board would have been the fourth.
+    /// </summary>
+    private readonly WizardProgressReader _wizards;
 
     public GetStartedCompletionSweep(
         CommunityHubDbContext db,
         GetStartedCompletionNotifier notifier,
-        SpeakerWizardService speakerWizard,
-        RoleWizardService roleWizard,
-        AttendeeWizardService attendeeWizard,
-        SponsorWizardService sponsorWizard)
+        WizardProgressReader wizards)
     {
         _db = db;
         _notifier = notifier;
-        _speakerWizard = speakerWizard;
-        _roleWizard = roleWizard;
-        _attendeeWizard = attendeeWizard;
-        _sponsorWizard = sponsorWizard;
+        _wizards = wizards;
     }
 
     /// <summary>
@@ -127,34 +123,12 @@ public sealed class GetStartedCompletionSweep
     }
 
     /// <summary>
-    /// Is this person's wizard 100% complete? Uses the SAME wizard services the pages render from,
-    /// so "complete" here can never drift from what the participant sees on their own progress bar.
-    /// A role with no wizard is never complete — there is nothing to finish.
+    /// Is this person's wizard 100% complete? Read through <see cref="WizardProgressReader"/>, i.e.
+    /// from the SAME wizard services the pages render, so "complete" here can never drift from what
+    /// the participant sees on their own progress bar. A role — or a sponsor contact with no company
+    /// — with no wizard is never complete: there is nothing to finish.
     /// </summary>
     private async Task<bool> IsCompleteAsync(
-        int eventId, int participantId, ParticipantRole role, CancellationToken ct)
-    {
-        switch (role)
-        {
-            case ParticipantRole.Speaker:
-                return (await _speakerWizard.BuildAsync(eventId, participantId, ct)).AllDone;
-
-            case ParticipantRole.Attendee:
-                return (await _attendeeWizard.BuildAsync(eventId, participantId, ct)).AllDone;
-
-            case ParticipantRole.Sponsor:
-            {
-                // Sponsor is company-scoped; without a company there is no wizard to complete.
-                var companyId = await _db.Participants.AsNoTracking()
-                    .Where(x => x.Id == participantId)
-                    .Select(x => x.SponsorCompanyId)
-                    .FirstOrDefaultAsync(ct);
-                if (string.IsNullOrWhiteSpace(companyId)) return false;
-                return (await _sponsorWizard.BuildAsync(eventId, participantId, ct)).AllDone;
-            }
-
-            default:
-                return (await _roleWizard.BuildAsync(eventId, participantId, ct)).AllDone;
-        }
-    }
+        int eventId, int participantId, ParticipantRole role, CancellationToken ct) =>
+        (await _wizards.ReadAsync(eventId, participantId, role, ct)).AllDone;
 }

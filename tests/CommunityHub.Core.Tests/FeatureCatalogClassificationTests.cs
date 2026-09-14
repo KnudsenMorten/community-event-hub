@@ -121,7 +121,7 @@ public sealed class FeatureCatalogClassificationTests
             "some-scheduling", "linkedin-queue", "reminder-jobs", "digest-emails",
             "welcome-email", "magic-link", "surveys",
             // §23 residual: the remaining advanced sync jobs + their web triggers.
-            "sponsor-order-pull", "sponsor-leads", "sponsor-upload-watch", "attendee-reconcile",
+            "sponsor-order-pull", "sponsor-leads", "attendee-reconcile",
             FeatureCatalog.OutboundEmailKey,
         };
 
@@ -175,7 +175,7 @@ public sealed class FeatureCatalogClassificationTests
                  {
                      // §252 F7: economic-erp-sync removed (inert duplicate toggle).
                      "sessionize-import", "sponsor-order-pull", "attendee-reconcile",
-                     "backstage-sync", "sponsor-upload-watch",
+                     "backstage-sync",
                  })
         {
             var d = FeatureCatalog.Find(key)!;

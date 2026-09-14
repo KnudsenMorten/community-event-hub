@@ -38,6 +38,51 @@ public sealed record SponsorOrderPullResult(
 /// </summary>
 public sealed class SponsorOrderPullService
 {
+    /// <summary>The retired legacy key — see <see cref="MayPrune"/>.</summary>
+    internal const string RetiredOnboardingSuffix = ":initial-onboarding-of-sponsor";
+
+    /// <summary>
+    /// 🔴 §1081 — MAY THIS PULL-MANAGED SPONSOR TASK BE DELETED?
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>THIS PRUNE DESTROYED 15 PROD ROWS ON 2026-08-13, FOUR OF THEM COMPLETED.</b>
+    /// Removing <c>sponsor.initial-onboarding</c> from the registry took its key out of
+    /// <c>desiredKeys</c>, and the first pull after the deploy hard-deleted every row — while the
+    /// operator's instruction for that retirement had been explicit: <i>"auto-close the task (never
+    /// delete)"</i>. The retirement sweep does exactly that, but it runs AFTER the per-company loop,
+    /// so the prune got there first and the net effect was the delete he had ruled out.</para>
+    ///
+    /// <para>🔑 <b>The rule was already written down one file away.</b> <c>WizardStepTaskSeeder</c>'s
+    /// prune says it in words — <i>"Only OPEN rows go: a completed form's Done task keeps its audit
+    /// trail"</i> — and this prune never got the same guard. So a config RENAME could ALWAYS have
+    /// silently erased who completed what and when; removing a definition was simply the first thing
+    /// that actually triggered it.</para>
+    ///
+    /// <para>⚠️ Deleting a Done row destroys <c>CompletedAt</c>, <c>CompletedByParticipantId</c> and
+    /// the deadline <c>SponsorDeliverablesService</c> reads — none recoverable from config, because
+    /// they record what PEOPLE did, not what the catalog says.</para>
+    ///
+    /// <para>🔒 It is <b>extracted and internal</b> so the decision to delete production data is a
+    /// method with tests, rather than a clause inside a query that nothing covered. This service had
+    /// no tests at all, which is why it shipped.</para>
+    /// </remarks>
+    internal static bool MayPrune(
+        string? sourceKey, TaskState state, string keyPrefix, IReadOnlyCollection<string> desiredKeys)
+    {
+        if (sourceKey is null || !sourceKey.StartsWith(keyPrefix, StringComparison.Ordinal)) return false;
+
+        // 🔒 Completed work is HISTORY, never an orphan.
+        if (state == TaskState.Done) return false;
+
+        // 🔒 The retired legacy key, even while still OPEN: the sweep that closes it runs after this
+        // loop, and that window is exactly how the 15 rows were lost.
+        if (sourceKey.EndsWith(RetiredOnboardingSuffix, StringComparison.Ordinal)) return false;
+
+        // Everything else the CURRENT config no longer produces is a genuine orphan — e.g. a renamed
+        // title, whose slug (and therefore SourceKey) changed and left the old row behind.
+        return !desiredKeys.Contains(sourceKey);
+    }
+
     private readonly CommunityHubDbContext _db;
     private readonly WooCommerceClient _woo;
     private readonly SponsorConfigLoader _configLoader;
@@ -48,6 +93,7 @@ public sealed class SponsorOrderPullService
     private readonly SponsorContactSyncService _contactSync;
     private readonly SharePointUploadClient _sharePoint;
     private readonly DocLibrary.IDocLibraryPathResolver? _paths;
+    private readonly Email.EngineAlertSender? _alerts;
     private readonly ILogger<SponsorOrderPullService> _log;
 
     public SponsorOrderPullService(
@@ -64,8 +110,12 @@ public sealed class SponsorOrderPullService
         // 🔴 §784.14 — the DocLibrary registry, so per-sponsor upload folders are created under the
         // SAME root every other reader uses. Optional (last, defaulted) so existing constructions
         // and tests keep compiling; null ⇒ the legacy config root, which is what shipped before.
-        DocLibrary.IDocLibraryPathResolver? paths = null)
+        DocLibrary.IDocLibraryPathResolver? paths = null,
+        // §1161 — so an orphaned Zoho record reaches him by MAIL, not only the action queue.
+        // Optional/defaulted like `paths` above, so existing constructions and tests keep working.
+        Email.EngineAlertSender? alerts = null)
     {
+        _alerts = alerts;
         _paths = paths;
         _db = db;
         _woo = woo;
@@ -100,12 +150,14 @@ public sealed class SponsorOrderPullService
 
         SponsorTaskExpander expander;
         SponsorProductClassifier classifier;
+        SponsorZohoCategoryMapper zohoCategories;
         BoothWallSpecs? wallSpecs;
         try
         {
             var config = _configLoader.Load(_configOptions.SponsorConfigPath);
             expander = new SponsorTaskExpander(config);
             classifier = new SponsorProductClassifier(config);
+            zohoCategories = new SponsorZohoCategoryMapper(config);
             wallSpecs = config.BoothWallSpecs;
         }
         catch (FileNotFoundException ex)
@@ -122,6 +174,13 @@ public sealed class SponsorOrderPullService
         var editionFacts = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // Fetched once: the orphan items already raised, so a re-detection does not duplicate.
+        var knownOrphans = await _db.OrganizerActionItems
+            .Where(a => a.EventId == activeEvent.Id
+                        && a.Type == Reminders.OrganizerActionItemService.TypeZohoRecordOrphaned
+                        && a.ResolvedAt == null)
+            .Select(a => a.Summary)
+            .ToListAsync(ct);
         var orders = await _woo.GetOrdersAsync("completed", ct);
         var created = 0;
         // §682 — tasks refused by the length guard below. Counted and returned so a
@@ -146,6 +205,20 @@ public sealed class SponsorOrderPullService
         // the order is gone. Collected during the pass so the sweep below judges on THIS run's
         // evidence rather than on the age of a timestamp.
         var seenUnmatched = new HashSet<string>(StringComparer.Ordinal);
+        // §1161 — markers for Zoho records a company no longer earns, so the sweep can close an
+        // item once the record is gone (or the order comes back).
+        var seenOrphans = new HashSet<string>(StringComparer.Ordinal);
+        // §1161 — only the orphans raised for the FIRST time this run are mailed. The dedup above
+        // already suppresses a repeat in the queue; mailing the same list every five minutes would
+        // be the §302 "70-mail night" rebuilt in a new place.
+        var newOrphanLines = new List<string>();
+
+        // §1172 — every company this run actually WALKED. A company with no completed orders never
+        // enters the loop below, so it can only be judged from outside it. See the sweep after the
+        // loop for why that matters.
+        var walkedCompanyIds = ordersByCompany
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
 
         foreach (var group in ordersByCompany)
         {
@@ -209,6 +282,11 @@ public sealed class SponsorOrderPullService
             // under this name and 6 source files read it, so it keeps the name rather than
             // acquiring a second one that means the same thing.
             var companyHasSession = false;
+            // §1157 — every Zoho sponsor CATEGORY this company's products put it under. A
+            // company that buys three categories' worth of products must end up as three Zoho
+            // sponsor records; the category used to be derived from the booth tier, which filed
+            // every non-booth sponsorship under "Silver sponsors" (operator 2026-08-31).
+            var companyZohoCategories = new List<string>();
             // 🔴 §1034 — did the company buy any SPONSORSHIP at all? See the classification below.
             var companyIsSponsor = false;
             // §299 b10: lines no classification rule matched — surfaced to organizers.
@@ -219,6 +297,7 @@ public sealed class SponsorOrderPullService
                 foreach (var item in order.LineItems)
                 {
                     var cls = classifier.Classify(item.CategoriesText, item.ProductName);
+                    companyZohoCategories.AddRange(zohoCategories.MapProduct(item.CategoriesText));
                     if (cls.Kind == SponsorProductKind.Session) companyHasSession = true;
                     // 🔴 §1034 — IS THIS A SPONSORSHIP PRODUCT, OR JUST SOMETHING THEY BOUGHT?
                     // Operator 2026-08-10: *"we have the definitions based on the webshop products
@@ -530,6 +609,7 @@ public sealed class SponsorOrderPullService
                 }
             }
 
+            // (see MayPrune below for what may be deleted, and what may never be)
             // PRUNE orphans: delete this company's pull-managed tasks (SourceKey
             // "sponsor:{companyId}:…") that the CURRENT config no longer produces —
             // e.g. a task whose title was renamed (the slug, hence the SourceKey,
@@ -539,18 +619,30 @@ public sealed class SponsorOrderPullService
             if (desiredKeys.Count > 0)
             {
                 var keyPrefix = $"sponsor:{companyId}:";
-                var orphans = await _db.Tasks
+                // 🔑 §1081 — candidates are loaded by PREFIX and filtered by `MayPrune`, so the rule
+                // that decides a deletion is one testable method instead of a clause buried in a
+                // query nothing covered. The candidate set is ONE company's sponsor tasks (a handful
+                // by construction), so reading them to decide in memory costs nothing.
+                var candidates = await _db.Tasks
                     .Where(t => t.EventId == activeEvent.Id
                                 && t.SponsorCompanyId == companyId
                                 && t.SourceKey != null
-                                && t.SourceKey.StartsWith(keyPrefix)
-                                && !desiredKeys.Contains(t.SourceKey))
+                                && t.SourceKey.StartsWith(keyPrefix))
                     .ToListAsync(ct);
+                var orphans = candidates
+                    .Where(t => MayPrune(t.SourceKey, t.State, keyPrefix, desiredKeys))
+                    .ToList();
                 if (orphans.Count > 0)
                 {
-                    _db.Tasks.RemoveRange(orphans);
+                    // 🔴 §1082 — RETIRED, NOT DELETED (operator 2026-08-13: *"do we agree that you
+                    // dont delete, but close them (as they were inactive)"*). A row the catalog
+                    // stopped producing is closed and labelled, so the decision is reversible and
+                    // auditable; the previous hard delete destroyed 15 prod rows the first time a
+                    // definition was removed.
+                    var now = DateTimeOffset.UtcNow;
+                    foreach (var t in orphans) Tasks.TaskClosure.Retire(t, TaskClosedReason.RetiredFromCatalog, now);
                     _log.LogInformation(
-                        "SponsorOrderPullService: pruned {N} orphaned task(s) for {Co} (renamed/removed in config).",
+                        "SponsorOrderPullService: retired {N} orphaned task(s) for {Co} (renamed/removed in config).",
                         orphans.Count, companyName);
                 }
             }
@@ -588,7 +680,7 @@ public sealed class SponsorOrderPullService
                 var companyPackage = SponsorPackageMapper.FromBoothTier(companyTier);
                 if (info is null)
                 {
-                    _db.SponsorInfos.Add(new SponsorInfo
+                    var fresh = new SponsorInfo
                     {
                         EventId = activeEvent.Id,
                         SponsorCompanyId = companyId,
@@ -599,11 +691,21 @@ public sealed class SponsorOrderPullService
                         // §1034 — the three flags, from the products (his definition).
                         IsSponsor = companyIsSponsor,
                         IsExhibitor = companyTier != BoothTier.None,
-                    });
+                        // §1163 — the CURRENT truth, rewritten every run (not raise-only).
+                        HasCurrentBoothOrder = companyTier != BoothTier.None,
+                    };
+                    // §1157 — record which Zoho headings the purchase entitles them to. The
+                    // provisioner creates one record per entry; nothing is created here.
+                    SponsorZohoLinks.MergeCategories(fresh, companyZohoCategories);
+                    _db.SponsorInfos.Add(fresh);
                 }
                 else
                 {
                     var changed = false;
+                    // §1157 — RAISE-ONLY, like the tier below: a category is added when a product
+                    // grants it and never taken away. CEH has no delete path into Zoho (§56), so
+                    // dropping one here would leave a live record nothing owned any more.
+                    if (SponsorZohoLinks.MergeCategories(info, companyZohoCategories)) changed = true;
                     if (BoothTierRanking.Weight(companyTier) > BoothTierRanking.Weight(info.Tier))
                     {
                         info.Tier = companyTier;
@@ -637,12 +739,90 @@ public sealed class SponsorOrderPullService
                         info.IsSponsor = true;
                         changed = true;
                     }
+                    // 🔴 §1163 — OVERWRITTEN EVERY RUN, unlike everything around it.
+                    //
+                    // Operator 2026-08-31: *"i have cancelled the order"* · *"but the sponsor still
+                    // have 1 order - but it is not exhibitor anymore"*. The raise-only fields below
+                    // cannot express that: they still say "booth", so the provisioner kept trying to
+                    // re-create the exhibitor record he had just deleted by hand.
+                    var currentlyExhibiting = companyTier != BoothTier.None;
+                    if (info.HasCurrentBoothOrder != currentlyExhibiting)
+                    {
+                        info.HasCurrentBoothOrder = currentlyExhibiting;
+                        changed = true;
+                    }
+
                     if (companyTier != BoothTier.None && !info.IsExhibitor)
                     {
                         info.IsExhibitor = true;
                         changed = true;
                     }
                     if (changed) info.UpdatedAt = DateTimeOffset.UtcNow;
+
+                    // 🔴 §1161 — A ZOHO RECORD THIS COMPANY NO LONGER EARNS.
+                    //
+                    // Operator 2026-08-31: *"i also need to get email on this, as i cancelled the
+                    // exhibitor order for 2linkit, so it must be removed … as it is only founding
+                    // partner now"*.
+                    //
+                    // 🔑 WHY IT HAS TO BE DETECTED HERE. Everything CEH stores about entitlement is
+                    // RAISE-ONLY — the tier, the package, the session flag and §1157's category set
+                    // all survive a cancellation on purpose, so an organizer's manual correction is
+                    // never undone by a re-pull. That means no stored field can answer "is this
+                    // still earned?". Only THIS loop knows, because it has just recomputed the
+                    // company's entitlement from the live completed orders.
+                    //
+                    // 🔒 CEH does not delete in Zoho (§56) — a record carries the company's leads
+                    // and identity, and un-listing a sponsor is a human decision. So the outcome is
+                    // an action item he can act on, never an automatic removal.
+                    //
+                    // ⚠️ Only reachable for a company that STILL has completed orders: one whose
+                    // orders were all cancelled never enters this loop, so its records are not
+                    // detected here. That is the honest limit of an orders-driven sweep, and it
+                    // fails toward silence rather than toward mass false orphans if a pull returns
+                    // partial data.
+                    var orphans = new List<string>();
+
+                    if (!string.IsNullOrWhiteSpace(info.ZohoExhibitorId) && companyTier == BoothTier.None)
+                    {
+                        orphans.Add(
+                            $"exhibitor record {info.ZohoExhibitorId} — no booth product in their "
+                            + "current orders");
+                    }
+
+                    foreach (var link in SponsorZohoLinks.Read(info))
+                    {
+                        // An empty category is a pre-§1157 record whose heading was never recorded;
+                        // "unknown" is not "unearned", so it is never reported as an orphan.
+                        if (string.IsNullOrWhiteSpace(link.CategoryName)) continue;
+                        if (companyZohoCategories.Contains(link.CategoryName, StringComparer.OrdinalIgnoreCase)) continue;
+
+                        orphans.Add(
+                            $"sponsor record {link.ZohoSponsorId} under '{link.CategoryName}' — no "
+                            + "product in their current orders maps to that category");
+                    }
+
+                    foreach (var orphan in orphans)
+                    {
+                        var marker = $"{companyName}: {orphan}";
+                        // Recorded BEFORE the dedup skip (§757): an item that already exists is
+                        // still being re-detected and must not be swept away as resolved.
+                        seenOrphans.Add(marker);
+                        if (knownOrphans.Any(s => s.StartsWith(marker, StringComparison.Ordinal))) continue;
+
+                        _db.OrganizerActionItems.Add(new OrganizerActionItem
+                        {
+                            EventId = activeEvent.Id,
+                            Type = Reminders.OrganizerActionItemService.TypeZohoRecordOrphaned,
+                            Summary = $"{marker}. Remove it by hand in Backstage — CEH never deletes "
+                                      + "a Zoho record, because it carries the company's leads and "
+                                      + "identity. This closes itself once the record is gone or the "
+                                      + "order comes back.",
+                        });
+                        newOrphanLines.Add(marker);
+                        _log.LogWarning("SponsorOrderPull: ORPHANED Zoho record for '{Company}': {Orphan}",
+                            companyName, orphan);
+                    }
                 }
             }
 
@@ -723,7 +903,10 @@ public sealed class SponsorOrderPullService
             var keysToClose = new HashSet<string>(StringComparer.Ordinal);
             if (boothMembersOnFile) keysToClose.Add($"sponsor:{companyId}:register-booth-members");
             if (wallUploadOnFile)   keysToClose.Add($"sponsor:{companyId}:upload-sponsor-wall-design-in-vector-format");
-            if (overviewOnFile)     keysToClose.Add($"sponsor:{companyId}:initial-onboarding-of-sponsor");
+            // 🔒 §1081 — `initial-onboarding-of-sponsor` is NO LONGER CLOSED HERE, because it is no
+            // longer RAISED at all: the Get Started "company" step owns that obligation now. The
+            // rows that already exist are retired by the sweep after this loop — event-wide, because
+            // a company with no new orders never reaches this per-company block.
 
             if (keysToClose.Count > 0)
             {
@@ -739,6 +922,46 @@ public sealed class SponsorOrderPullService
                     t.CompletedAt ??= DateTimeOffset.UtcNow;
                 }
             }
+        }
+
+        // 🔴 §1081 — RETIRE `initial-onboarding-of-sponsor`, EVENT-WIDE.
+        //
+        // Operator 2026-08-13: *"i think that initial onboarding is legacy before we had get started
+        // wizard … it is being replaced by get started"* — he is right, and the definition read that
+        // way: due from config, completion Manual, auto-closed the moment a CompanyDescription was
+        // saved. That is the Get Started "company" step, written before the wizard existed.
+        //
+        // 🔑 Keeping both meant ONE missing description produced TWO chases in different words on
+        // different cadences — the "two mechanisms that happen to agree" split §1081 exists to
+        // remove. The definition is gone (so no sponsor is given one again) and the rows already
+        // raised are retired here.
+        //
+        // 🔒 CLOSED, NEVER DELETED (his instruction): the row keeps its deadline and, for the
+        // companies that finished it, the fact that they did. `ClosedReason` distinguishes this from
+        // work somebody actually did — a retirement is not a completion, and a completion ratio that
+        // counted it as one would overstate how ready the sponsors are.
+        //
+        // ⚠️ Event-wide and OUTSIDE the per-company loop: the loop only visits companies present in
+        // THIS pull, so a sponsor with no new orders would keep their legacy task for ever.
+        // ⚠️ `State != Done` rather than `== Open`, so an InProgress row is retired too.
+        var legacyOnboarding = await _db.Tasks
+            .Where(t => t.EventId == activeEvent.Id
+                        && t.State != TaskState.Done
+                        && t.SourceKey != null
+                        && t.SourceKey.StartsWith("sponsor:")
+                        && t.SourceKey.EndsWith(":initial-onboarding-of-sponsor"))
+            .ToListAsync(ct);
+        foreach (var t in legacyOnboarding)
+        {
+            t.State = TaskState.Done;
+            t.CompletedAt ??= DateTimeOffset.UtcNow;
+            t.ClosedReason = TaskClosedReason.SupersededByGetStarted;
+        }
+        if (legacyOnboarding.Count > 0)
+        {
+            _log.LogInformation(
+                "§1081: retired {N} legacy 'initial onboarding of sponsor' task(s) — superseded by Get Started.",
+                legacyOnboarding.Count);
         }
 
         // Save both new ParticipantTask rows AND any SponsorUploadLocation
@@ -819,12 +1042,101 @@ public sealed class SponsorOrderPullService
         // 🔒 Guarded on the pull having actually returned orders. A Woo outage returns an empty
         // list, and sweeping on that evidence would resolve every open item at once — the same
         // "an empty read is indistinguishable from a real empty" trap as §301b and §754.3.
+        // 🔴 §1172 — THE COMPANIES THE LOOP NEVER WALKED.
+        //
+        // §1161 detects a Zoho record a company no longer earns, but only for companies the pull
+        // walks — and it walks companies that HAVE completed orders. I wrote that limit down as
+        // acceptable. It is not: operator 2026-09-03 cancelled a supplier's last order because the
+        // company re-registered under a new VAT number, which is precisely the case that produces
+        // a company with NO completed orders. Its Zoho sponsor and exhibitor records would have sat
+        // there unreported for ever — the one company most in need of the mail was the one company
+        // guaranteed not to get it.
+        //
+        // ⚠️ 🔒 GUARDED ON THE PULL HAVING RETURNED ORDERS, and that guard is the whole safety.
+        // A WooCommerce outage returns an empty list, and every company would then look
+        // order-less — reporting every Zoho record in the event as orphaned in one mail. Same
+        // "an empty read is indistinguishable from a real empty" trap as §301b, §326aw and §754.3.
+        if (orders.Count > 0)
+        {
+            var unwalked = await _db.SponsorInfos
+                .IgnoreQueryFilters()
+                .Where(s => s.EventId == activeEvent.Id && !s.IsTestData)
+                .ToListAsync(ct);
+
+            foreach (var info in unwalked)
+            {
+                if (walkedCompanyIds.Contains(info.SponsorCompanyId)) continue;
+
+                var name = string.IsNullOrWhiteSpace(info.CompanyName)
+                    ? info.SponsorCompanyId
+                    : info.CompanyName!;
+
+                var records = new List<string>();
+                if (!string.IsNullOrWhiteSpace(info.ZohoExhibitorId))
+                    records.Add($"exhibitor record {info.ZohoExhibitorId}");
+                foreach (var zid in SponsorZohoLinks.AllSponsorIds(info))
+                    records.Add($"sponsor record {zid}");
+
+                if (records.Count == 0) continue;
+
+                var orphan = string.Join(" and ", records)
+                    + " — this company has NO completed orders at all";
+                var marker = $"{name}: {orphan}";
+                seenOrphans.Add(marker);
+                if (knownOrphans.Any(s => s.StartsWith(marker, StringComparison.Ordinal))) continue;
+
+                _db.OrganizerActionItems.Add(new OrganizerActionItem
+                {
+                    EventId = activeEvent.Id,
+                    Type = Reminders.OrganizerActionItemService.TypeZohoRecordOrphaned,
+                    Summary = $"{marker}. Every order was cancelled or moved, so nothing entitles it "
+                              + "to a Zoho record any more. Remove them by hand in Backstage — CEH "
+                              + "never deletes one, because it carries the company's leads and "
+                              + "identity. This closes itself if an order comes back.",
+                });
+                newOrphanLines.Add(marker);
+                _log.LogWarning(
+                    "SponsorOrderPull: ORPHANED Zoho record for '{Company}' (no completed orders): {Orphan}",
+                    name, orphan);
+            }
+
+            if (_db.ChangeTracker.HasChanges()) await _db.SaveChangesAsync(ct);
+        }
+
+        // §1161 — ONE mail per run, listing only what was newly detected.
+        if (newOrphanLines.Count > 0 && _alerts is not null)
+        {
+            try
+            {
+                var rows = string.Join(string.Empty, newOrphanLines
+                    .Select(l => $"<li>{System.Net.WebUtility.HtmlEncode(l)}</li>"));
+                await _alerts.AlertAsync(
+                    $"Zoho: {newOrphanLines.Count} record(s) no longer earned",
+                    "<p>These Zoho records exist for a company whose <b>current</b> webshop orders no "
+                    + "longer earn them — typically an order cancelled after the record was created.</p>"
+                    + $"<ul>{rows}</ul>"
+                    + "<p>CEH never deletes a Zoho record: it carries the company's leads and "
+                    + "identity, and un-listing a sponsor is your decision, not an unattended job's. "
+                    + "<b>Remove them by hand in Backstage.</b></p>"
+                    + "<p>Each item closes itself in the organizer action queue once the record is "
+                    + "gone, or if the order comes back. You will not be mailed about the same one "
+                    + "twice.</p>",
+                    ct,
+                    throttleKey: "zoho-record-orphaned");
+            }
+            catch (Exception ex)
+            {
+                // The queue item is already stored; a failed mail must never break the pull.
+                _log.LogWarning(ex, "SponsorOrderPull: orphaned-record alert mail failed; ignored.");
+            }
+        }
+
         if (orders.Count > 0)
         {
             try
             {
                 var (closed, stillOpen) = await AutoResolveObsoleteActionItemsAsync(
-                    activeEvent.Id, seenUnmatched, ct);
+                    activeEvent.Id, seenUnmatched, seenOrphans, ct);
                 // 🔒 Logged on EVERY run, including zero. Logging only when something closed made
                 // "the queue is already drained" and "the sweep never ran" produce identical
                 // silence — which is exactly the ambiguity I then could not resolve from the logs
@@ -886,7 +1198,7 @@ public sealed class SponsorOrderPullService
     /// </remarks>
     /// <returns>How many were closed, and how many remain open after the sweep.</returns>
     private async Task<(int Closed, int StillOpen)> AutoResolveObsoleteActionItemsAsync(
-        int eventId, HashSet<string> seenUnmatched, CancellationToken ct)
+        int eventId, HashSet<string> seenUnmatched, HashSet<string> seenOrphans, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
         var closed = 0;
@@ -914,6 +1226,15 @@ public sealed class SponsorOrderPullService
                 why = "Closed automatically (§757): this product is no longer unmatched — a "
                       + "classification rule now covers it, or the order is gone. The pull "
                       + "re-checked and did not raise it again.";
+            }
+            // §1161 — the orphaned Zoho record was not re-detected: it has been removed in
+            // Backstage, or the order that earns it is back.
+            else if (item.Type == Reminders.OrganizerActionItemService.TypeZohoRecordOrphaned
+                     && !seenOrphans.Any(m => item.Summary.StartsWith(m, StringComparison.Ordinal)))
+            {
+                why = "Closed automatically (§1161): the pull re-checked and this Zoho record is no "
+                      + "longer unearned — it has been removed in Backstage, or the order that "
+                      + "earns it is back.";
             }
 
             if (why is null) continue;

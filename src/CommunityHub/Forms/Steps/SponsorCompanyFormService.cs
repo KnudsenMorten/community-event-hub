@@ -103,9 +103,11 @@ public sealed class SponsorCompanyFormService : IWizardFormService
         }
 
         var info = await GetOrCreateInfoAsync(eventId, companyId, ct);
-        info.WebsiteUrl         = NormaliseOrNull(model.WebsiteUrl);
-        info.LinkedInUrl        = NormaliseOrNull(model.LinkedInUrl);
-        info.TwitterUrl         = NormaliseOrNull(model.TwitterUrl);
+        // 🔒 §1081/§1126 — WebsiteUrl, LinkedInUrl and TwitterUrl are NOT written here. The WEBSHOP
+        // is authoritative for all three and the reconcile OVERWRITES CEH from it
+        // (WebshopOwnedFields.ApplyAll). All three render read-only with a "Change on the webshop"
+        // hand-off; dropping the writes is what makes that real rather than cosmetic, since a
+        // readonly input still POSTs its value. See the matching note in CompanyDetails.cshtml.cs.
         info.CompanyDescription = NormaliseOrNull(model.CompanyOverview);
         info.SocialMediaIntro   = NormaliseOrNull(model.SocialMediaBrandingText);
         if (info.HasBooth)   // the short description is exhibitor-only (mirrors the page)

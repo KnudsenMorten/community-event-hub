@@ -95,6 +95,27 @@ public enum AuditOutcome
     Success = 0,
     Failure = 1,
     Denied = 2,
+
+    /// <summary>
+    /// §1061 — the action was deliberately WITHHELD by policy. Today: a mail a rollout ring held back.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"a dropped email due to ring-gate should not show as failure …
+    /// it should show as dropped, not failed"</i>.</para>
+    ///
+    /// <para>🔴 <b>Why this is not <see cref="Failure"/>.</b> Nothing went wrong: the ring gate was
+    /// asked, and it said no — the system worked exactly as configured. Filing it as a failure made a
+    /// healthy run read as ~18 errors, buried real failures among them, and invited someone to "fix"
+    /// a system behaving as designed.</para>
+    ///
+    /// <para>⚠️ <b>And not <see cref="Denied"/> either</b>, which already means an ACTOR was refused
+    /// permission (an authorization decision about a person). This is an audience decision about a
+    /// message. Reusing Denied would make "who was refused access?" unanswerable.</para>
+    ///
+    /// <para>🔒 Stored as an int, so this is additive — no migration, and every existing row keeps
+    /// its meaning.</para>
+    /// </remarks>
+    Dropped = 3,
 }
 
 /// <summary>Where an audited action originated.</summary>

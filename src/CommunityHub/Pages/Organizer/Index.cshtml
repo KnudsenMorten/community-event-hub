@@ -60,8 +60,11 @@
                         <tr style="border-bottom:1px solid #eee;">
                             <td>@a.FirstName @a.LastName</td>
                             <td>@a.Email</td>
-                            <td>@a.TicketStatus</td>
-                            <td>@a.BookingStatus</td>
+                            @* §1077 — the organizer-facing LABEL ("2-day" / "1-day"), not the enum
+                               name. This table printed "TwoDay" on the organizer HOME, which is the
+                               first page anybody opens. *@
+                            <td>@a.TicketStatus.Label()</td>
+                            <td>@a.BookingStatus.Label()</td>
                         </tr>
                     }
                 </table>

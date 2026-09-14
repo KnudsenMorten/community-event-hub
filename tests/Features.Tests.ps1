@@ -926,6 +926,35 @@ Describe "12. Hosting & reliability" {
         $pub | Should -Match '\[switch\]\$WhatIf'       -Because "a pre-flight dry run is required"
     }
 
+    # FEATURE (2026-09-14): the public mirror BUILDS. A community cloned it and `dotnet build` died
+    # with MSB3202 because CommunityHub.sln still listed the tools/ console projects the denylist
+    # strips. ACCEPTANCE: the publish script rewrites a published solution to name only published
+    # projects (and drops a solution folder that removal empties), and refuses a published csproj
+    # whose ProjectReference points at a stripped project. Runs the REAL function against the REAL
+    # solution -- not a regex over the script.
+    It "The published solution names only projects the public mirror ships" {
+        $pubPath = Join-Path $script:RepoRoot 'tools/publish-to-public.ps1'
+        if (-not (Test-Path $pubPath)) { Set-ItResult -Skipped -Because 'the publish script is maintainer tooling and is not part of the public mirror'; return }
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($pubPath, [ref]$null, [ref]$null)
+        $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-PublishedSolutionText' }, $true) | Select-Object -First 1
+        $fn | Should -Not -BeNullOrEmpty -Because "the solution rewrite must exist as a callable function"
+        . ([scriptblock]::Create($fn.Extent.Text))
+
+        $sln = Join-Path $script:RepoRoot 'CommunityHub.sln'
+        $r = Get-PublishedSolutionText -SolutionPath $sln -IsPublished { param($p) -not ($p -like 'tools/*') }
+        $r.Text    | Should -Not -Match 'tools\\CommunityHub\.'        -Because "no stripped tools/ project may remain in the published solution"
+        $r.Text    | Should -Match 'src\\CommunityHub\\CommunityHub\.csproj' -Because "published projects must stay"
+        $r.Text    | Should -Match 'tests\\CommunityHub\.Core\.Tests' -Because "published test projects must stay"
+        $r.Dropped | Should -Contain 'tools (solution folder)'          -Because "a folder emptied by the removal goes with it"
+        foreach ($m in [regex]::Matches($r.Text, '"(?<p>[^"]+\.csproj)"')) {
+            Test-Path (Join-Path $script:RepoRoot $m.Groups['p'].Value) | Should -BeTrue -Because "every remaining project path must exist"
+        }
+        foreach ($g in @('A3327396-0DAB-44A3-A4F6-B47BBC88D9E7', '3A83DFD0-EE4E-45AE-8BBF-F35082C20DC6')) {
+            if ((Get-Content $sln -Raw) -match $g) { $r.Text | Should -Not -Match $g -Because "a removed project's configuration and nesting lines go too" }
+        }
+        (Get-Content $pubPath -Raw) | Should -Match 'ProjectReference' -Because "a published csproj referencing a stripped project must block the publish"
+    }
+
     # FEATURE (live): the /health liveness probe returns 200. This is the cheapest
     # "is the app up" check and is what the discovery probe already used.
     It "Health probe returns 200 (Live)" -Tag 'Live' {

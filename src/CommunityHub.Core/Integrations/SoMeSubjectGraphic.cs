@@ -73,7 +73,42 @@ public sealed class SoMeSubjectGraphic
     {
         var rows = await _db.GraphicAssets
             .AsNoTracking()
-            .Where(g => g.EventId == eventId && g.FileName != null && g.FileName != "")
+            // 🔒 §1060(g) — RELEASED ONLY. Every other consumer of GraphicAssets already filters this
+            // (BrandingGraphicsProvider and SpeakerGraphicVisibility both label it "THE GATE";
+            // SpeakerGraphicsReadyNotifier and Organizer/Sessions do the same) — and this class, the
+            // one on the path that publishes artwork TO THE PUBLIC, did not.
+            //
+            // ⚠️ The claim that used to stand here — *"since §784.12(a) graphics are BORN Released,
+            // this filter removes nothing"* — was FALSE FOR SPONSORS, and §1178 is what it cost.
+            //
+            // 🔴 §1178 — A SPONSOR ROW IS BORN `Generated`, ON PURPOSE, AND FOR A DIFFERENT GATE.
+            // `GraphicsService.InitialStatusFor` returns `Generated` for `GraphicAssetType.Sponsor`
+            // alone, with its own reasoning: sponsor artwork is internal-only and it feeds
+            // `BrandingGraphicsProvider`, "auto-releasing them would change which artwork the branding
+            // surfaces pick up, which is a different decision nobody has made". That reasoning is
+            // sound and is NOT reversed here.
+            //
+            // 🔑 But it means NO Type 4 sponsor post has been able to carry its graphic since §1060(g)
+            // added this filter. The two halves disagreed in the worst possible way:
+            //   • the planner's own plannability gate asks only `FileName != null` ⇒ the sponsor IS
+            //     announceable, and a post gets planned;
+            //   • this map (Released only) ⇒ no graphic ⇒ `ImageRef` stamped NULL at plan time, the
+            //     queue badge reads "no graphic", the approval gate blocks on "waiting for the
+            //     graphic", and the dispatcher publishes TEXT-ONLY.
+            // Operator 2026-09-12: *"linkedin planner is wrong or the linkedin post calender when it
+            // comes to some graphics readiness. take surveil as example"* — Surveil (company 36)
+            // uploaded its logo 2026-08-25 13:50 and `sponsor-36.png` was rendered at 13:55. The file
+            // has existed for a fortnight; the campaign could not see it. §1143 predicted exactly this
+            // ("the likely explanation if Surveil's row turns out to exist") and left it open.
+            //
+            // 🔒 ⇒ RELEASE IS THE BRANDING GATE, NOT THE ANNOUNCEMENT GATE. Track, session and tier
+            // artwork is speaker-facing and keeps the §1060(g) gate exactly as it was. A sponsor row
+            // is admitted on `FileName` alone, because for sponsors "released" was never a state
+            // anything could reach and a gate nothing can pass is not a control — it is an outage.
+            .Where(g => g.EventId == eventId
+                        && (g.Status == GraphicAssetStatus.Released
+                            || g.Type == GraphicAssetType.Sponsor)
+                        && g.FileName != null && g.FileName != "")
             .OrderBy(g => g.CreatedAt)
             .Select(g => new { g.StableKey, g.FileName, g.Type, g.SessionId, g.SponsorCompanyId })
             .ToListAsync(ct);
@@ -103,6 +138,30 @@ public sealed class SoMeSubjectGraphic
 
         return map;
     }
+
+    /// <summary>
+    /// §1178 — THE PICTURE THIS POST WILL ACTUALLY PUBLISH WITH. The dispatcher's rule, as a function.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>Four surfaces answered this question and only two of them asked the dispatcher.</b>
+    /// Operator 2026-09-12: <i>"linkedin planner is wrong or the linkedin post calender when it comes
+    /// to some graphics readiness"</i>. §1168 fixed the queue BADGE by resolving late; the Post
+    /// calendar, the sponsor/speaker announcement preview and <c>/some-post-media</c> all went on
+    /// printing the ref stamped at plan time. So one page said "no graphic" while another showed one,
+    /// about the same post — and neither was necessarily what would publish.</para>
+    ///
+    /// <para>🔑 The rule is exactly <c>SoMeDispatchService.ResolveImageAsync</c>'s: for a
+    /// subject-owned post (types 1–4) the subject's CURRENT graphic wins; the stamp is only the
+    /// fallback. For a Type 5 or an ad-hoc post the stamp IS the answer, because somebody chose it.
+    /// One function, so a preview and a publish cannot disagree — the §932 lesson.</para>
+    /// </remarks>
+    public static string? Effective(IReadOnlyDictionary<string, string> map, SoMePost post) =>
+        IsSubjectOwned(post)
+            ? Lookup(map, post.SubjectKey) ?? NullIfBlank(post.ImageRef)
+            : NullIfBlank(post.ImageRef);
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>The graphic for one subject key, handling the track name→slug asymmetry.</summary>
     /// <remarks>

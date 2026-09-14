@@ -64,6 +64,9 @@ public sealed class SoMeBundleBuildService
     private string SponsorLogosFolder =>
         _paths.TryResolve(DocLibrary.DocLibraryPaths.SponsorLogoWeb, out var p) ? p : string.Empty;
 
+    private string SponsorGraphicsFolder =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.SponsorGraphicsSponsors, out var p) ? p : string.Empty;
+
     public SoMeBundleBuildService(
         CommunityHubDbContext db,
         GraphicsService graphics,
@@ -92,10 +95,25 @@ public sealed class SoMeBundleBuildService
     /// them. Counted, never silent: it is the difference between "nothing to do" and "held back".
     /// </param>
     /// <param name="SessionsSkippedNoPhoto">Sessions where NOT ONE speaker had a photo.</param>
+    /// <param name="TrackGraphicsRetired">
+    /// §1214 — track graphics un-released because their track no longer has any sessions. The file
+    /// is kept; the track returning releases it again.
+    /// </param>
+    /// <param name="StaleOverriddenTracks">
+    /// §1214 — tracks whose graphic the operator replaced BY HAND and whose line-up has since
+    /// changed. Named, never rebuilt: overwriting his own artwork is worse than a stale file.
+    /// </param>
     public sealed record BundleResult(
         int TrackBundles, int SponsorBundles, int TracksSkippedNoPhoto, bool Inert = false,
         int SessionGraphics = 0, int SponsorGraphics = 0,
-        int SessionsLeftToUpload = 0, int SessionsSkippedNoPhoto = 0);
+        int SessionsLeftToUpload = 0, int SessionsSkippedNoPhoto = 0,
+        int TrackGraphicsRetired = 0,
+        IReadOnlyList<string>? StaleOverriddenTracks = null)
+    {
+        /// <summary>Never null, so a caller can just enumerate.</summary>
+        public IReadOnlyList<string> StaleOverrides =>
+            StaleOverriddenTracks ?? Array.Empty<string>();
+    }
 
     /// <summary>Build every graphic the edition's five-output taxonomy calls for.</summary>
     /// <remarks>
@@ -141,8 +159,24 @@ public sealed class SoMeBundleBuildService
 
         var unmatched = new List<string>();
 
-        var tracks = await BuildTrackBundlesAsync(eventId, template, eventLogo, photos, unmatched, ct);
-        var sessions = await BuildSessionGraphicsAsync(eventId, template, eventLogo, photos, unmatched, ct);
+        // 🔴 §1178 — resolved ONCE for the whole sweep and handed to both builders, so a track GIF and
+        // a session graphic can never disagree about which sessions are announceable. An array, not
+        // the set, because EF translates `ICollection<T>.Contains` into `IN (…)` and an
+        // `IReadOnlySet<T>` is not one.
+        var excludedSessionIds =
+            (await new SoMeSubjectScope(_db).ExcludedSessionIdsAsync(eventId, ct)).ToArray();
+
+        if (excludedSessionIds.Length > 0)
+        {
+            _log.LogInformation(
+                "§1178 bundles: {Count} session(s) excluded from the campaign get NO graphic "
+                + "(ids {Ids}).", excludedSessionIds.Length, string.Join(", ", excludedSessionIds.Take(50)));
+        }
+
+        var tracks = await BuildTrackBundlesAsync(
+            eventId, template, eventLogo, photos, unmatched, excludedSessionIds, ct);
+        var sessions = await BuildSessionGraphicsAsync(
+            eventId, template, eventLogo, photos, unmatched, excludedSessionIds, ct);
         var sponsors = await BuildSponsorBundlesAsync(eventId, template, eventLogo, ct);
 
         if (unmatched.Count > 0)
@@ -171,21 +205,130 @@ public sealed class SoMeBundleBuildService
         return new BundleResult(
             tracks.Built, sponsors.Bundles, tracks.NoPhoto,
             SessionGraphics: sessions.Built, SponsorGraphics: sponsors.Singles,
-            SessionsLeftToUpload: sessions.LeftToUpload, SessionsSkippedNoPhoto: sessions.NoPhoto);
+            SessionsLeftToUpload: sessions.LeftToUpload, SessionsSkippedNoPhoto: sessions.NoPhoto,
+            // §1214 — the two outcomes that need a human, carried out of the sweep rather than
+            // living only in the log.
+            TrackGraphicsRetired: tracks.Retired,
+            StaleOverriddenTracks: tracks.StaleOverrides);
     }
 
     // ---- tracks ------------------------------------------------------------------------
 
-    private async Task<(int Built, int Current, int NoPhoto)> BuildTrackBundlesAsync(
-        int eventId, byte[] template, byte[]? eventLogo, PhotoIndex photos,
-        List<string> unmatched, CancellationToken ct)
+    /// <summary>
+    /// 🔴 §1214 — RETIRE a track graphic whose track no longer exists, and NAME an organizer's own
+    /// artwork that its line-up has outgrown.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two gaps recorded in REQUIREMENTS and fixed together because they are the same shape: a
+    /// graphic that is still handed out while the thing it depicts has moved on.</para>
+    ///
+    /// <para>🔴 <b>(a) A track that loses all its sessions keeps its GIF.</b> The sweep builds from
+    /// the sessions that EXIST, so a track whose last session was deleted, retracked, or excluded
+    /// (§1178) simply stops appearing in the query — the loop never sees it, nothing retires the old
+    /// asset, and <c>SoMeSubjectGraphic</c> keeps attaching it to that track's posts. The picture on
+    /// the company page then shows speakers who are no longer in that track.
+    /// ⇒ Its asset is UN-RELEASED (<c>Released</c> → <c>Generated</c>), which is exactly the gate
+    /// <c>SoMeSubjectGraphic</c> reads, so it stops being published. 🔒 The file and the row survive:
+    /// the track coming back releases it again on the next sweep, and nothing is destroyed for a
+    /// condition that is often temporary (a session moved between tracks mid-edit).</para>
+    ///
+    /// <para>🔴 <b>(b) An organizer-overridden graphic is never rebuilt — correctly — and nobody is
+    /// told.</b> <c>GenerateTrackBundleAsync</c> returns the existing asset untouched when
+    /// <c>IsOrganizerOverridden</c> is set, which is right: his artwork is his. But the line-up can
+    /// change afterwards, and then his file names the wrong people with nothing anywhere saying so.
+    /// ⇒ The computed input hash is compared with the stored one and a MISMATCH IS REPORTED. Never
+    /// rebuilt: overwriting the work he did by hand is the one outcome worse than a stale file.</para>
+    ///
+    /// <para>🔑 §854 applied to pictures: both outcomes are named — the track and the reason — not
+    /// counted. A count cannot be acted on, and these both need a human decision.</para>
+    /// </remarks>
+    internal async Task<(int Retired, IReadOnlyList<string> StaleOverrides)> ReconcileTrackGraphicsAsync(
+        int eventId, IReadOnlySet<string> liveSlugs,
+        IReadOnlyDictionary<string, string> computedHashes, CancellationToken ct)
     {
-        // Same "active session" filter the pull uses, so the two never disagree about what counts.
+        var assets = await _db.GraphicAssets
+            .Where(g => g.EventId == eventId && g.Type == GraphicAssetType.TrackBundle)
+            .ToListAsync(ct);
+
+        if (assets.Count == 0) return (0, Array.Empty<string>());
+
+        var retired = 0;
+        var stale = new List<string>();
+        var retiredNames = new List<string>();
+
+        foreach (var asset in assets)
+        {
+            var slug = asset.StableKey ?? string.Empty;
+            if (slug.Length == 0) continue;
+
+            // (b) — his own artwork, against the line-up it was made for.
+            if (asset.IsOrganizerOverridden)
+            {
+                if (computedHashes.TryGetValue(slug, out var expected)
+                    && !string.IsNullOrEmpty(asset.InputHash)
+                    && !string.Equals(asset.InputHash, expected, StringComparison.Ordinal))
+                {
+                    stale.Add(slug);
+                }
+
+                // 🛑 An overridden asset is never un-released either, even for a vanished track.
+                // That is his decision to reverse, not a sweep's.
+                continue;
+            }
+
+            // (a) — the track is gone from the live set.
+            if (!liveSlugs.Contains(slug) && asset.Status == GraphicAssetStatus.Released)
+            {
+                asset.Status = GraphicAssetStatus.Generated;
+                retired++;
+                retiredNames.Add(slug);
+            }
+        }
+
+        if (retired > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            _log.LogWarning(
+                "§1214: un-released {Count} track graphic(s) whose track no longer has any sessions: "
+                + "{Tracks}. The file is kept — the track returning releases it again.",
+                retired, string.Join(", ", retiredNames));
+        }
+
+        if (stale.Count > 0)
+        {
+            _log.LogWarning(
+                "§1214: {Count} track graphic(s) you replaced by hand no longer match their line-up: "
+                + "{Tracks}. They are NOT rebuilt — re-upload or clear the override to regenerate.",
+                stale.Count, string.Join(", ", stale));
+        }
+
+        return (retired, stale);
+    }
+
+    private async Task<(int Built, int Current, int NoPhoto, int Retired, IReadOnlyList<string> StaleOverrides)>
+        BuildTrackBundlesAsync(
+        int eventId, byte[] template, byte[]? eventLogo, PhotoIndex photos,
+        List<string> unmatched, int[] excludedSessionIds, CancellationToken ct)
+    {
+        // 🔴 §1178 — THE SAME EXCLUSIONS THE PLANNER USES. Operator 2026-09-12: *"the graphics for
+        // security track is wrong as no test session speakers must be included"*.
+        //
+        // 🔑 This query filtered `!IsTestData` and nothing else, and `IsTestData` is a column NOTHING
+        // in the codebase has ever written (§909 shipped the column and four readers; no UI, no
+        // service, no seed, no migration sets it). So the effective filter here was *none*: a session
+        // he had marked "TEST" on the Sessions page (which writes `UsedForTesting`), or excluded from
+        // announcements, or excluded by title, still had every one of its speakers rendered as a frame
+        // into the track GIF that goes on the company page.
+        //
+        // ⚠️ §905's test-SPEAKER filter below is a different rule and is KEPT — it removes a test
+        // account from an otherwise real session. This new one removes the whole session. The Security
+        // track needed both: §905 took out two test exhibitor speakers, and this takes out the four
+        // organizers who are speakers on the test Master Class.
         var rows = await _db.Sessions
             .AsNoTracking()
             .Where(s => s.EventId == eventId
                         && !s.IsServiceSession
-                        && !s.IsTestData   // §909
+                        && !excludedSessionIds.Contains(s.Id)
                         && s.Track != null && s.Track != ""
                         && s.SessionSpeakers.Any())
             // 🔴 §905 — NO TEST SPEAKERS IN A PUBLISHED GRAPHIC. Operator 2026-08-06:
@@ -208,7 +351,21 @@ public sealed class SoMeBundleBuildService
                 }))
             .ToListAsync(ct);
 
-        if (rows.Count == 0) return (0, 0, 0);
+        // 🔴 §1214 — the LIVE track set, computed before the early return below. A sweep that finds
+        // no sessions at all still has to retire the graphics of the tracks that just vanished;
+        // returning first would make "everything was deleted" the one case nothing is cleaned up.
+        var liveSlugs = rows
+            .Select(r => Slug(r.Track))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (rows.Count == 0)
+        {
+            var (retiredOnly, staleOnly) =
+                await ReconcileTrackGraphicsAsync(eventId, liveSlugs, hashes, ct);
+            return (0, 0, 0, retiredOnly, staleOnly);
+        }
 
         var built = 0;
         var current = 0;
@@ -250,12 +407,21 @@ public sealed class SoMeBundleBuildService
                 DesignVersion, "track", track.Key,
                 string.Join("|", speakers.Select(s => $"{s.ParticipantId}:{s.Name}")));
 
+            // §1214(b) — kept so an organizer-overridden asset can be compared against the line-up
+            // it would have if the engine still owned it.
+            hashes[Slug(track.Key)] = hash;
+
             var outcome = await _graphics.GenerateTrackBundleAsync(
                 eventId, Slug(track.Key), track.Key, template, frames, eventLogo, hash, ct: ct);
             if (outcome.Rendered) built++; else current++;
         }
 
-        return (built, current, noPhoto);
+        // 🔴 §1214 — AFTER the builds, so a track rebuilt on this very sweep is in the live set and
+        // its freshly written hash is the one compared against.
+        var (retired, staleOverrides) =
+            await ReconcileTrackGraphicsAsync(eventId, liveSlugs, hashes, ct);
+
+        return (built, current, noPhoto, retired, staleOverrides);
     }
 
     // ---- sessions (phase 2) ------------------------------------------------------------
@@ -278,7 +444,7 @@ public sealed class SoMeBundleBuildService
     /// </remarks>
     private async Task<(int Built, int Current, int NoPhoto, int LeftToUpload)> BuildSessionGraphicsAsync(
         int eventId, byte[] template, byte[]? eventLogo, PhotoIndex photos,
-        List<string> unmatched, CancellationToken ct)
+        List<string> unmatched, int[] excludedSessionIds, CancellationToken ct)
     {
         // The same "active session" filter the pull and the track sweep use, so the three never
         // disagree about what counts as a session.
@@ -286,10 +452,13 @@ public sealed class SoMeBundleBuildService
             .AsNoTracking()
             .Where(s => s.EventId == eventId
                         && !s.IsServiceSession
-                        // §909 — a test session gets no graphic either. The graphic is what makes a
-                        // session announceable (§846), so building one for a fixture would put it
-                        // back in the running through a side door.
-                        && !s.IsTestData
+                        // 🔒 §1178 — the planner's OWN exclusion set (§909's IsTestData, §299's
+                        // UsedForTesting, §1060(h)'s ExcludeFromSoMeAnnouncements, §927's title
+                        // patterns). The graphic is what makes a session announceable (§846), so
+                        // building one for an excluded session puts it back in the running through a
+                        // side door — which is precisely what `!IsTestData` alone allowed, that column
+                        // never having been written by anything.
+                        && !excludedSessionIds.Contains(s.Id)
                         && s.SessionSpeakers.Any())
             .Select(s => new
             {
@@ -398,6 +567,26 @@ public sealed class SoMeBundleBuildService
         if (sponsors.Count == 0) return (0, 0);
 
         var logoFiles = await _store.ListAsync(SponsorLogosFolder, ct);
+
+        // 🔴 §1143 — THE ROW SAYS THE GRAPHIC EXISTS. RECONCILE THAT AGAINST THE FOLDER.
+        //
+        // Operator 2026-08-28: *"if i delete a sharepoint file, it must detect it is gone and reset
+        // the state"* — reported as "the some graphics service is broken … i do see the surveil
+        // graphics file, but maybe someone must tell the planner it exists".
+        //
+        // 🔑 THE FILE IS A SIDE EFFECT; THE ROW IS THE RECORD — and nothing kept them honest.
+        // `StoreAndUpsertAsync` uploads to SharePoint FIRST and writes the row SECOND, with no
+        // transaction across the two, so a failure between them leaves a file with no row. The
+        // reverse — a row whose file has been deleted — was worse, because BOTH consumers trust the
+        // row: `SoMeScheduleService` plans a sponsor purely because a row exists, and this sweep
+        // skips a rebuild when `InputHash` still matches. So a deleted file was permanent: never
+        // rebuilt, while the planner went on scheduling posts for artwork that was gone.
+        //
+        // 🔒 Reset, do not delete. The StableKey/link contract means the row's identity must
+        // survive; clearing the file fields + the hash makes the sponsor NOT plannable (§1143 adds
+        // the FileName condition to that gate) AND makes this sweep rebuild it on the same run.
+        // Self-healing in one pass rather than a report someone has to act on.
+        await ReconcileMissingSponsorGraphicsAsync(eventId, ct);
 
         // Resolve + download each sponsor's logo ONCE: the tier bundle and that sponsor's own
         // graphic are the same bytes, and this folder is a Graph call per file.
@@ -829,6 +1018,105 @@ public sealed class SoMeBundleBuildService
     }
 
     /// <summary>A stable hash of everything composed into a graphic.</summary>
+    /// <summary>
+    /// §1143 — which recorded file names are NO LONGER in the folder listing.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>An EMPTY listing yields NOTHING, and that is the important line in this method.</b>
+    /// "The folder came back empty" and "every file was deleted" are the same value and completely
+    /// different facts. Treating them alike would wipe the file fields off every row in the edition
+    /// and un-plan the whole sponsor campaign on one Graph blip — a self-inflicted outage far worse
+    /// than the stale row it was cleaning up.</para>
+    ///
+    /// <para>🔑 Pure and public so the sweep and its tests compute the SAME answer — the
+    /// <see cref="SessionGraphicInputHash"/> pattern, for the same reason: a rule that lives in a
+    /// private method gets a second, drifting copy the moment anything else needs it.</para>
+    /// </remarks>
+    public static IReadOnlySet<string> MissingGraphicFileNames(
+        IEnumerable<string?> presentFileNames, IEnumerable<string?> recordedFileNames)
+    {
+        var present = presentFileNames
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // 🔒 Nothing visible ⇒ we learned nothing. Never "everything is gone".
+        if (present.Count == 0)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        return recordedFileNames
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!)
+            .Where(n => !present.Contains(n))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// §1143 — clear every sponsor-graphic row whose SharePoint file is no longer there.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Fail-CLOSED on a listing failure, in the sense that matters: it does nothing.</b>
+    /// An empty or failed listing must never be read as "every file was deleted" — that would wipe
+    /// the file fields off every row in the edition and un-plan the entire sponsor campaign because
+    /// of one Graph blip. So an empty listing returns early: the only safe interpretation of "I
+    /// could not see the folder" is "I know nothing", never "it is empty".</para>
+    ///
+    /// <para>⚠️ This is the same class of mistake as §854's fallback (announcing a sponsor whose
+    /// artwork does not exist) pointed the other way, and the same one the attendee reconcile had to
+    /// learn: a short read is not a deletion.</para>
+    /// </remarks>
+    private async Task<int> ReconcileMissingSponsorGraphicsAsync(int eventId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(SponsorGraphicsFolder)) return 0;
+
+        IReadOnlyList<SharePointFileRef> present;
+        try { present = await _store.ListAsync(SponsorGraphicsFolder, ct); }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "SoMe graphics reconcile: could not list '{Folder}' — no row was reset.",
+                SponsorGraphicsFolder);
+            return 0;
+        }
+
+        var rows = await _db.GraphicAssets
+            .Where(g => g.EventId == eventId
+                        && g.Type == Domain.GraphicAssetType.Sponsor
+                        && g.FileName != null)
+            .ToListAsync(ct);
+
+        var missing = MissingGraphicFileNames(
+            present.Select(f => f.Name), rows.Select(r => r.FileName));
+
+        var reset = 0;
+        foreach (var row in rows)
+        {
+            if (!missing.Contains(row.FileName!)) continue;
+
+            _log?.LogWarning(
+                "SoMe graphics reconcile: '{File}' (sponsor {Sponsor}) is GONE from SharePoint — "
+                + "resetting the row so it is rebuilt and the sponsor is not planned meanwhile.",
+                row.FileName, row.SponsorCompanyId);
+
+            // Clearing FileName is what un-readies the sponsor (§1143's planner condition); clearing
+            // InputHash is what defeats the rebuild short-circuit. Both are needed: either alone
+            // leaves the system asserting something untrue.
+            row.FileName = null;
+            row.InputHash = null;
+            row.SharePointPath = null;
+            row.SharePointUrl = null;
+            row.StorageItemId = null;
+            // A deleted file cannot still be an organizer's chosen artwork, and leaving this set
+            // would make the rebuild below refuse to run.
+            row.IsOrganizerOverridden = false;
+            row.Status = Domain.GraphicAssetStatus.Generated;
+            reset++;
+        }
+
+        if (reset > 0) await _db.SaveChangesAsync(ct);
+        return reset;
+    }
+
     private static string HashOf(params string[] parts) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(string.Join("", parts))))[..32];

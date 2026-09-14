@@ -40,7 +40,7 @@ public sealed class SoMeSubjectGraphicTests
         // The graphic as it stands now — rebuilt as a GIF when the second speaker joined.
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.Session, SessionId = 12,
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Session, SessionId = 12,
             StableKey = "session:12", FileName = "session-12.gif",
             CreatedAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
         });
@@ -60,13 +60,13 @@ public sealed class SoMeSubjectGraphicTests
         db.GraphicAssets.AddRange(
             new GraphicAsset
             {
-                EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
+                EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
                 StableKey = "sponsor:co-1", FileName = "sponsor-co-1-old.png",
                 CreatedAt = new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
             },
             new GraphicAsset
             {
-                EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
+                EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
                 StableKey = "sponsor:co-1", FileName = "sponsor-co-1-new.png",
                 CreatedAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
             });
@@ -84,7 +84,7 @@ public sealed class SoMeSubjectGraphicTests
         using var db = NewDb();
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.TrackBundle,
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.TrackBundle,
             StableKey = "track:ai-for-makers-copilot-agents",
             FileName = "track-ai-for-makers-copilot-agents.gif",
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
@@ -108,7 +108,7 @@ public sealed class SoMeSubjectGraphicTests
         using var db = NewDb();
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.Session, SessionId = 12,
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Session, SessionId = 12,
             StableKey = "session:12", FileName = "session-12.gif",
             CreatedAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
         });

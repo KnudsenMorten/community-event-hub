@@ -20,6 +20,17 @@
     .ci-grid label { display:block; font-size:12px; color:#6b7280; }
     .ci-grid input, .ci-grid select { min-width:0; max-width:100%; }
     .ci-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+
+    /* 🔴 §1100 — A FORM MUST LOOK LIKE ONE FORM. Two adjacent form elements with no boundary is how
+       "Save" silently discarded the ticket class and quantity typed just above it: those fields
+       belong to the allocation form, Save posts the settings form, and nothing on screen said so
+       (operator 2026-08-20: *"bug when i click save it forgets the ticket class + amount"* ·
+       *"i also find that it is very confusing to do this"*). Each block is now a titled panel
+       ending in its own button. */
+    .ci-block { border:1px solid #e3e7ee; border-radius:10px; padding:10px 12px; margin:12px 0; background:#fcfdff; }
+    .ci-block > h4 { margin:0 0 2px; font-size:13.5px; }
+    .ci-block > .ci-meta { margin:0 0 6px; }
+    .ci-block.buy { background:#f7fbf8; border-color:#cfe6d6; }
 </style>
 
 <div class="card">
@@ -94,12 +105,17 @@
     <form method="post" asp-page-handler="Save">
         <input type="hidden" name="SettingId" value="0" />
         <div class="ci-grid">
-            <div>
+            @* §1108 — WIDE ENOUGH FOR A REAL CODE (operator 2026-08-21: *"double the width of the
+               coupon name - this cannot fit there ELDK27-Arrow-Denmark-pool2"*). The names in use
+               are ~28 characters, and the default input width showed about half of one — so the
+               field he types most, and the one that must match Backstage EXACTLY, was the one he
+               could not read back. *@
+            <div style="flex:0 1 340px;">
                 <label for="new-name">Coupon name</label>
                 @* §797.3 — the redirect loses posted fields, so a refused name comes back here
                    rather than having to be typed again. *@
                 <input id="new-name" type="text" name="CouponName" required maxlength="200"
-                       value="@(Model.DraftCouponName ?? "")" />
+                       value="@(Model.DraftCouponName ?? "")" style="width:100%;" />
             </div>
             <div>
                 <label for="new-bt">Billing type</label>
@@ -155,7 +171,7 @@
             &mdash; set the billing type and the e-conomic customer below and the next hourly run
             picks them up &mdash; or a <strong>prepaid pool</strong> is out of tickets or has no
             e-conomic invoice number recorded against it (§795.2), which means nothing here says the
-            partner was ever billed for what they bought.
+            customer was ever billed for what they bought.
         </p>
     </div>
 }
@@ -184,16 +200,24 @@
             {
                 <span class="ci-chip warn">needs a decision</span>
             }
+            @* 🔴 §1099 — THESE TWO BADGES USED THE SAME THREE WORDS FOR TWO DIFFERENT THINGS.
+               Both said "never invoiced": on a free coupon that means nobody is ever billed, and on
+               a prepaid one it means no PER-CLAIM invoice — while the pool purchase itself is
+               invoiced, booked and shown a few lines below as "invoice 170 (booked)" beside "all
+               purchases billed". Read together they contradicted each other (operator 2026-08-20:
+               *"wording seems conflicting, is it invoiced or not"*).
+
+               🔑 The fix is to name the SUBJECT of the sentence. "Never invoiced" is only safe when
+               there is nothing else on the page that IS invoiced. *@
             else if (r.BillingType == CouponBillingType.NoInvoicing)
             {
-                <span class="ci-chip muted">never invoiced</span>
+                <span class="ci-chip muted">free &mdash; nobody is billed</span>
             }
             else if (r.Setting?.IsPrepaid == true)
             {
-                @* §794 — prepaid is NEVER invoiced. Saying "prepaid" rather than "billable" is the
-                   point: this partner already paid, and billing them per claim would charge them
-                   twice for tickets they own. *@
-                <span class="ci-chip ok">prepaid &mdash; drawn from pool, never invoiced</span>
+                @* §794 — the partner already paid for the allocation, so billing them per claim
+                   would charge them twice for tickets they own. *@
+                <span class="ci-chip ok">prepaid &mdash; paid up front; claims are not invoiced</span>
             }
             else if (r.Setting?.IsInvoiceable == true)
             {
@@ -339,39 +363,6 @@
                     </div>
 
                     <div class="ci-actions" style="margin:0 0 8px 0;">
-                        @* 🔴 §992 — INCREASE TO A NEW TOTAL (was "Buy more (add N)"). He types the
-                           same number he sets in Backstage; CEH works out the delta and invoices
-                           only that. It still adds a PURCHASE ROW — nothing edits a total, so
-                           "which invoice covers which tickets" stays answerable (§798.4). *@
-                        <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin:0;">
-                            <input type="hidden" name="SettingId" value="@r.Setting!.Id" />
-                            <input type="hidden" name="PoolTicketClassId" value="@p.TicketClassId" />
-                            <div>
-                                <label for="top-@p.AllocationId">Increase to (new total)</label>
-                                <input id="top-@p.AllocationId" type="number" name="PoolTargetTotal"
-                                       min="@(purchasedTotal + 1)" placeholder="@(purchasedTotal + 10)"
-                                       style="width:110px;" />
-                            </div>
-                            <div>
-                                <label for="toppr-@p.AllocationId">Unit price (DKK)</label>
-                                <input id="toppr-@p.AllocationId" type="number" name="PoolUnitPriceDkk"
-                                       min="0" step="0.01" value="@Model.DefaultUnitPriceDkk" placeholder="@Model.DefaultUnitPriceDkk" style="width:120px;" />
-                            </div>
-                            <div>
-                                <label for="topinv-@p.AllocationId">Invoice no. (optional)</label>
-                                <input id="topinv-@p.AllocationId" type="text" name="PoolErpInvoiceNumber"
-                                       maxlength="60" style="width:140px;" />
-                            </div>
-                            <button type="submit" class="btn">Increase &amp; invoice</button>
-                        </form>
-                        <div class="ci-meta" style="flex-basis:100%;margin:-4px 0 4px 0;">
-                            Enter the <strong>new total</strong>, not how many to add &mdash; the same
-                            number you then set as the code&rsquo;s max in Backstage. This pool covers
-                            <strong>@purchasedTotal</strong> today, so entering @(purchasedTotal + 10)
-                            invoices the 10 extra. <strong>The code itself never changes</strong>, so
-                            order links already sent out keep working.
-                        </div>
-
                         <form method="post" asp-page-handler="SetPoolThreshold" class="ci-grid" style="margin:0;">
                             <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
                             <div>
@@ -400,6 +391,52 @@
                             </button>
                         </form>
                     </div>
+
+                    @* 🔴 §1103 — THE EXTEND SITS AT THE BOTTOM, AFTER THE POOL'S OWN FACTS (operator
+                       2026-08-20: *"move also the extend below the other info so it is kept
+                       together"*). It used to be wedged between the purchase line and the Warn /
+                       Remove / Close row, which split the pool's STATUS across the one control that
+                       changes it and put a money-spending form in the middle of read-only facts.
+                       Status first, then the actions on it.
+
+                       🔒 §992 — he types the same number he will set in Backstage; CEH derives the
+                       delta and invoices only that. It still adds a PURCHASE ROW rather than editing
+                       a total, so "which invoice covers which tickets" stays answerable (§798.4). *@
+                    <div class="ci-block buy" style="margin:8px 0 0;">
+                        <h4>Increase this pool &mdash; this raises an invoice for the difference</h4>
+                        <p class="ci-meta">
+                            Same ticket class (<strong>@Model.TicketClassDisplay(p.TicketClassId, p.Label)</strong>).
+                            A different class is a new coupon.
+                        </p>
+                        <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin-top:0;">
+                            <input type="hidden" name="SettingId" value="@r.Setting!.Id" />
+                            <input type="hidden" name="PoolTicketClassId" value="@p.TicketClassId" />
+                            <div>
+                                <label for="top-@p.AllocationId">Increase to (new total)</label>
+                                <input id="top-@p.AllocationId" type="number" name="PoolTargetTotal"
+                                       min="@(purchasedTotal + 1)" placeholder="@(purchasedTotal + 10)"
+                                       style="width:110px;" />
+                            </div>
+                            <div>
+                                <label for="toppr-@p.AllocationId">Unit price (DKK)</label>
+                                <input id="toppr-@p.AllocationId" type="number" name="PoolUnitPriceDkk"
+                                       min="0" step="0.01" value="@Model.DefaultUnitPriceDkk" placeholder="@Model.DefaultUnitPriceDkk" style="width:120px;" />
+                            </div>
+                            <div>
+                                <label for="topinv-@p.AllocationId">Invoice no. (optional)</label>
+                                <input id="topinv-@p.AllocationId" type="text" name="PoolErpInvoiceNumber"
+                                       maxlength="60" style="width:140px;" />
+                            </div>
+                            <button type="submit" class="btn">Increase &amp; invoice</button>
+                        </form>
+                        <p class="ci-meta" style="margin:6px 0 0;">
+                            Enter the <strong>new total</strong>, not how many to add &mdash; the same
+                            number you then set as the code&rsquo;s max in Backstage. This pool covers
+                            <strong>@purchasedTotal</strong> today, so entering @(purchasedTotal + 10)
+                            invoices the 10 extra. <strong>The code itself never changes</strong>, so
+                            order links already sent out keep working.
+                        </p>
+                    </div>
                 }
                 <div class="ci-meta" style="margin-top:4px;">
                     Cancelled tickets return to the pool automatically &mdash; the balance is worked
@@ -418,7 +455,15 @@
         @if (r.Invoices.Count > 0)
         {
             <div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#f8fafc;">
-                <div class="ci-meta" style="margin-bottom:4px;"><strong>e-conomic invoices</strong></div>
+                @* §1100 — SAY WHAT THE LIST IS. Operator 2026-08-20, seeing two of them: *"i have 2
+                   invoice - is the second for top-up"*. Yes — one per PURCHASE, so the original
+                   allocation and each later increase each have their own. The reference beside each
+                   (CouponPrepaid-1, -2, …) is what distinguishes them, and it was already on screen
+                   without anything saying it was the answer to that question. *@
+                <div class="ci-meta" style="margin-bottom:4px;">
+                    <strong>e-conomic invoices for this coupon</strong> &mdash; one per purchase:
+                    the first allocation, then one for each increase.
+                </div>
                 @foreach (var inv in r.Invoices)
                 {
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:2px 0;">
@@ -498,20 +543,49 @@
            where the balance and the earlier invoices are. *@
         @if (r.Setting is not null && r.Setting.IsPrepaid)
         {
-            <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin-top:8px;">
+            <div class="ci-block buy">
+            <h4>Buy tickets into a new pool &mdash; this raises an invoice</h4>
+            <p class="ci-meta">
+                A separate action from the coupon settings below: it ends at
+                <strong>Create Invoice</strong>. Pressing <em>Save</em> further down will <strong>not</strong>
+                record what you type here.
+            </p>
+            <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin-top:0;">
                 <input type="hidden" name="SettingId" value="@r.Setting.Id" />
+                @* 🔴 §1103 — DEFAULT TO THE CLASS THIS COUPON ALREADY SELLS (operator 2026-08-20:
+                   *"the extend should default to the ticket class that was already bought"*). The
+                   list is ordered by the edition's classes, so the browser preselected the FIRST one
+                   — 1-day — on a coupon whose pool is 2-day. One slip and the coupon carries two
+                   pools of different classes, which is not how he sells: *"if customer wants to buy
+                   ither ticket classes we add a new coupon"*.
+
+                   🔒 The other classes stay SELECTABLE, as he asked. This is a default, not a
+                   restriction — the hub should make the usual thing effortless and the unusual thing
+                   possible, not forbid it. *@
+                @{
+                    var existingClassId = r.Pools.FirstOrDefault()?.Balance.TicketClassId;
+                }
                 <div>
                     <label for="pc-@r.Setting.Id">Ticket class</label>
                     <select id="pc-@r.Setting.Id" name="PoolTicketClassId">
                         @foreach (var kv in Model.TicketClassLabels)
                         {
-                            <option value="@kv.Key">@kv.Value</option>
+                            <option value="@kv.Key" selected="@(kv.Key == existingClassId)">@kv.Value</option>
                         }
                         @foreach (var pv in r.Pools.Where(pv => !Model.TicketClassLabels.ContainsKey(pv.Balance.TicketClassId)))
                         {
-                            <option value="@pv.Balance.TicketClassId">@Model.TicketClassDisplay(pv.Balance.TicketClassId, pv.Balance.Label)</option>
+                            <option value="@pv.Balance.TicketClassId" selected="@(pv.Balance.TicketClassId == existingClassId)">@Model.TicketClassDisplay(pv.Balance.TicketClassId, pv.Balance.Label)</option>
                         }
                     </select>
+                    @if (existingClassId is not null)
+                    {
+                        <span style="display:block;font-size:11.5px;color:#6b7280;max-width:230px;">
+                            This coupon already sells
+                            <strong>@Model.TicketClassDisplay(existingClassId, r.Pools.First().Balance.Label)</strong>.
+                            A different class is normally a <em>new coupon</em> — to add more of the
+                            same, use <em>Increase to new total</em> above.
+                        </span>
+                    }
                 </div>
                 <div>
                     <label for="pq-@r.Setting.Id">Tickets bought</label>
@@ -543,8 +617,12 @@
                 You will also get an e-mail to create the promo code in Backstage &mdash; there is no
                 coupon API, so that step stays manual.
             </p>
+            </div>
         }
 
+        <div class="ci-block">
+        <h4>Coupon settings</h4>
+        <p class="ci-meta">Who is billed, how the split works, and what the customer receives. Ends at <strong>Save</strong>.</p>
         <form method="post" asp-page-handler="Save">
             <input type="hidden" name="SettingId" value="@(r.Setting?.Id ?? 0)" />
             <input type="hidden" name="CouponName" value="@r.CouponName" />
@@ -638,9 +716,23 @@
                     <input id="note-@r.CouponName" type="text" name="Notes"
                            value="@(r.Setting?.Notes ?? "")" maxlength="400" style="width:100%;" />
                 </div>
-                @* §1016d — the billing PERIOD, per coupon. Claims accumulate and are invoiced
-                   together once this many days have passed since the last invoice for this
-                   coupon; blank uses the edition default, 0 invoices on every pass. *@
+                @* 🔴 §1107 — THE NEXT FOUR FIELDS ARE AD-HOC ONLY (operator 2026-08-21: *"it makes no
+                   sense to show invoice every 14 days for a prepaid coupon"*). He is right, and it
+                   applies to all four rather than just the cadence:
+
+                     • Invoice every (days) — batches CLAIMS into an invoice. A prepaid claim is
+                       never invoiced (§794): it draws on a pool that was paid for up front.
+                     • Agreed price / ticket and the invoiced % — the §1091 split, which only exists
+                       where the claim itself is billed.
+                     • Max tickets (cap) — a prepaid pool's ceiling IS its purchased quantity, shown
+                       on the allocation above. A second cap here would be a number that could
+                       disagree with it.
+
+                   ⚠️ Keyed on the SAVED billing type, not the dropdown's current value — the page
+                   does not re-render as he changes it. So switching prepaid → ad-hoc shows the
+                   fields after the first Save, which the note below says. *@
+                @if (r.BillingType == CouponBillingType.ClaimableAdHocPaymentByCustomer)
+                {
                 <div style="flex:0 1 150px;">
                     <label for="ivl-@r.CouponName">Invoice every (days)</label>
                     <input id="ivl-@r.CouponName" type="number" name="InvoiceIntervalDays" min="0" step="1"
@@ -655,17 +747,202 @@
                         }
                     </span>
                 </div>
-                <button type="submit" class="btn">Save</button>
+                @* 🔴 §1091 — THE SPLIT. Two fields, and the labels carry the whole meaning:
+                   the percentage is the share the LINKED COMPANY is invoiced, not the attendee's
+                   discount. At 50/50 both readings give the same number, so the ambiguity only
+                   shows up the first time somebody types 30 — which is exactly why the operator
+                   asked for "clear notice that this is the percentage the linked company will be
+                   invoiced of". *@
+                <div style="flex:0 1 170px;">
+                    <label for="price-@r.CouponName">Agreed price / ticket (DKK)</label>
+                    <input id="price-@r.CouponName" type="number" name="AgreedUnitPriceDkk"
+                           min="0" step="0.01"
+                           value="@(r.Setting?.AgreedUnitPriceDkk?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                           placeholder="Zoho price" style="width:100%;" />
+                    <span style="display:block;font-size:11.5px;color:#6b7280;">
+                        Blank = the price the ticket actually sold for in Zoho.
+                    </span>
+                </div>
+                <div style="flex:0 1 190px;">
+                    <label for="share-@r.CouponName">Linked company is invoiced</label>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <input id="share-@r.CouponName" type="number" name="InvoicedSharePercent"
+                               min="1" max="100" step="1"
+                               value="@(r.Setting?.InvoicedSharePercent?.ToString() ?? "")"
+                               placeholder="100" style="width:100%;" />
+                        <span style="font-weight:600;">%</span>
+                    </div>
+                    <span style="display:block;font-size:11.5px;color:#6b7280;">
+                        <strong>Of the price above — this is what @(string.IsNullOrWhiteSpace(r.Setting?.ErpCustomerNumber?.ToString()) ? "the linked company" : "customer " + r.Setting!.ErpCustomerNumber) is billed.</strong>
+                        Blank = 100%. The attendee pays the rest by card, so set the matching
+                        discount on the promo code in Backstage yourself — CEH cannot.
+                    </span>
+                </div>
+                @* §1094 — the agreed ceiling for a capped ad-hoc coupon. 🔴 CEH cannot ENFORCE it:
+                   the limit that stops a claim is the one on the promo code in Backstage, which has
+                   no API. This is what the hub reports and invoices against, and raising it re-sends
+                   the Backstage instruction so the two stay in step. *@
+                <div style="flex:0 1 165px;">
+                    <label for="cap-@r.CouponName">Max tickets (cap)</label>
+                    <input id="cap-@r.CouponName" type="number" name="ClaimCapTickets" min="1" step="1"
+                           value="@(r.Setting?.ClaimCapTickets?.ToString() ?? "")"
+                           placeholder="no limit" style="width:100%;" />
+                    <span style="display:block;font-size:11.5px;color:#6b7280;">
+                        Blank = uncapped. Must match the limit on the code in Backstage —
+                        the hub reports against it but cannot enforce it.
+                    </span>
+                </div>
+                }
+                else if (r.BillingType == CouponBillingType.AllocatedPrepaymentByCustomer)
+                {
+                    <div style="flex:1 1 100%;">
+                        <span class="ci-meta">
+                            Prepaid: the quantity, price and ceiling live on the
+                            <strong>allocation above</strong> — claims draw on what was paid for, so
+                            there is no billing period, no split and no separate cap.
+                        </span>
+                    </div>
+                }
+                else if (r.Setting is not null)
+                {
+                    <div style="flex:1 1 100%;">
+                        <span class="ci-meta">
+                            Pick <strong>Ad-hoc invoicing when claimed</strong> and Save to set a
+                            billing period, an agreed price, a split or a cap.
+                        </span>
+                    </div>
+                }
+                @* 🔴 §1098 — WHAT THIS CUSTOMER RECEIVES ON A SCHEDULE. Both OFF by default and ticked
+                   by hand (operator 2026-08-20: *"i prefer i set the tick on manually, so it isnt on
+                   by default"*). Off is the safe direction: the failure mode of ON is a customer
+                   contacted who should not have been, and that cannot be taken back.
+
+                   🔴 §1111 — THE CLAIM-MAIL TICK IS GONE (operator 2026-08-21: *"i dont get the point
+                   of having this tick … if there is also a button"*). He was right and it was a
+                   defect, not a preference: the tick's ONLY effect was to make "Send the claim link
+                   now" refuse. Two consents for one act, and the second one is invisible from where
+                   the button is. These two remain because they gate things that happen WITHOUT him —
+                   a link he has not issued, a mail on a timer. The claim invite has a button, and
+                   pressing it is the decision.
+
+                   🔑 The "one-off sale" category is these two left unticked, the claim button never
+                   pressed, and an invoice interval of 7 — a configuration, not a new billing type,
+                   because it collects money exactly like any other ad-hoc coupon. *@
+                <div style="flex:1 1 100%;border-top:1px solid #eef0f4;margin-top:8px;padding-top:8px;">
+                    <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">
+                        <strong>What this customer gets automatically</strong> — both off unless you
+                        tick them. (The claim link is not here: it goes when you press
+                        <em>Send the claim link now</em> below.)
+                    </div>
+                    <label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-weight:400;">
+                        <input type="checkbox" name="IssueUsageLink" value="true"
+                               @(r.Setting?.IssueUsageLink == true ? "checked" : "") />
+                        Include in their secure usage link
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-weight:400;">
+                        <input type="checkbox" name="SendUsageStatusMail" value="true"
+                               @(r.Setting?.SendUsageStatusMail == true ? "checked" : "") />
+                        Send the status mail every 2 weeks
+                    </label>
+                    <span style="display:block;font-size:11.5px;color:#6b7280;margin-top:4px;">
+                        A one-off invoice sale wants neither — leave them unticked, don't send the
+                        claim link, and set <em>Invoice every</em> to 7 days.
+                    </span>
+                </div>
+                <button type="submit" class="btn primary">Save coupon settings</button>
             </div>
         </form>
+        </div>
+
+        @* 🔴 §1094b — AN OUTSTANDING REQUEST FROM THE PARTNER, shown where he can act on it. The
+           ad-hoc cap box and the prepaid "increase to new total" box are both on this row; a
+           request that lives only in an e-mail gets read once and then forgotten. *@
+        @if (Model.CapRequestByCoupon.TryGetValue(r.CouponName, out var req))
+        {
+            <div style="margin-top:8px;padding:10px 12px;background:#fff7ed;border-left:4px solid #ea580c;border-radius:6px;font-size:13px;">
+                <strong>This customer has asked for @req.Requested ticket(s) in total</strong>
+                <span class="muted">— requested @req.At.ToString("d MMM yyyy HH:mm")</span>
+                <div style="margin-top:6px;color:#6b7280;">
+                    Raise the limit on the promo code in Backstage first — CEH cannot, and its number
+                    must not promise a ceiling Zoho will refuse.
+                </div>
+                @if (r.BillingType == CouponBillingType.ClaimableAdHocPaymentByCustomer)
+                {
+                    <form method="post" asp-page-handler="ApplyCapRequest" style="margin-top:8px;">
+                        <input type="hidden" name="SettingId" value="@(r.Setting?.Id ?? 0)" />
+                        <button type="submit" class="btn">Set cap to @req.Requested</button>
+                        <span class="muted" style="font-size:11.5px;">
+                            No invoice — an ad-hoc coupon is billed as tickets are claimed.
+                        </span>
+                    </form>
+                }
+                else
+                {
+                    <div style="margin-top:6px;">
+                        <strong>Prepaid:</strong> use <em>Increase to new total</em> on the pool below
+                        and enter <strong>@req.Requested</strong> — that invoices only the difference.
+                    </div>
+                }
+            </div>
+        }
+
+        @* 🔴 §1093 — THE PARTNER'S OWN VIEW OF THEIR USAGE. One link per BILLING CUSTOMER, not per
+           coupon: Arrow sees every code billed to them through this single URL, and a code added
+           next month appears in it automatically. Created by the coupon sweep; shown here because
+           this is the page an organizer is on when a partner asks to see their sign-ups. *@
+        @if (r.ErpCustomerNumber is { } cust && Model.MonitorLinkByCustomer.TryGetValue(cust, out var monitorUrl))
+        {
+            <div style="margin-top:8px;padding:8px 10px;background:#f6f8fa;border-radius:6px;font-size:12.5px;">
+                <strong>Usage link for this customer</strong> — read-only, no login, safe to send:
+                <br />
+                <a href="@monitorUrl" target="_blank" rel="noopener" style="word-break:break-all;">@monitorUrl</a>
+                <span style="display:block;color:#6b7280;margin-top:4px;">
+                    @* §1116 — the name, with the number in brackets; a bare 9-digit id tells nobody
+                       which customer this link belongs to. *@
+                    Shows everyone who used <em>any</em> coupon billed to @Model.CustomerLabel(cust) — including
+                    codes added later. Revoke it on
+                    <a asp-page="/Organizer/AttendeeMonitors">Attendee monitors</a>.
+                </span>
+            </div>
+        }
         @* 🔴 §1016c — TELL THE REQUESTER. The only coupon mail that leaves the building: every
            other one goes to info@ and asks an organizer to do something. Preview first, always —
            it reaches a paying partner and there is no undo. *@
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+            @* 🔴 §1095 — THE ONE-CLICK PATH (operator: *"i prefer to have you send this
+               automatically"*). Confirming the Backstage code exists is the only fact CEH cannot
+               discover, and it is exactly what must be true before an invite saying "you can now
+               start claiming" is honest. Pressing it sends the mail, usage link included. The
+               preview button beside it stays for reading first, and for re-sending. *@
+            @* 🔴 §1106 — ONE BUTTON LOOKS LIKE THE ANSWER (operator 2026-08-21: *"i dont know what to
+               click to send the info"*). Two buttons of identical blue weight sat side by side and
+               neither label said which one SENDS: "Code is live in Backstage → notify customer" reads
+               as a status change, and "Notify requester…" reads as the send. It is the other way
+               round. Now the sending one is the only primary and says "Send", and the other is a
+               plain secondary that says it only shows you the mail. *@
+            @if (r.Setting is not null && r.Setting.ClaimInviteSentAt is null)
+            {
+                <form method="post" asp-page-handler="ConfirmCodeLive" style="display:inline;">
+                    <input type="hidden" name="InviteSettingId" value="@r.Setting.Id" />
+                    <button type="submit" class="btn primary">
+                        &#9993; Send the claim link now
+                    </button>
+                </form>
+                <span style="font-size:11.5px;color:#6b7280;">
+                    (confirms the code is live in Backstage, then e-mails the customer)
+                </span>
+            }
             <form method="post" asp-page-handler="PreviewInvite" style="display:inline;">
                 <input type="hidden" name="InviteSettingId" value="@(r.Setting?.Id ?? 0)" />
-                <button type="submit" class="btn" @(r.Setting is null ? "disabled" : "")>
-                    Notify requester&hellip;
+                @* §1093 — "again" when it has already gone: the stamp never blocked a re-send, but a
+                   button reading the same as the first-time one beside "Sent 12 Aug" looks like it
+                   would duplicate, so it was not pressed. *@
+                <button type="submit" style="background:none;border:1px solid #d1d5db;color:#374151;
+                                             padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;"
+                        @(r.Setting is null ? "disabled" : "")>
+                    @(r.Setting?.ClaimInviteSentAt is null
+                        ? "Show me the mail first…"
+                        : "Send again…")
                 </button>
             </form>
             @if (r.Setting?.ClaimInviteSentAt is { } sent)
@@ -674,6 +951,10 @@
                     Sent @sent.ToString("d MMM yyyy HH:mm")
                     @(string.IsNullOrWhiteSpace(r.Setting.ClaimInviteSentToEmail)
                         ? "" : $"to {r.Setting.ClaimInviteSentToEmail}")
+                    @if (r.ErpCustomerNumber is { } mc && Model.MonitorLinkByCustomer.ContainsKey(mc))
+                    {
+                        <text>— re-send to include their usage link (you preview it first).</text>
+                    }
                 </span>
             }
             else
@@ -714,7 +995,7 @@
                         <input type="hidden" name="InviteSettingId" value="@preview.SettingId" />
                         <button type="submit" class="btn">Send this email to @preview.ToEmail</button>
                         <span style="font-size:12px;color:#6b7280;margin-left:8px;">
-                            This goes to the partner. There is no undo.
+                            This goes to the customer. There is no undo.
                         </span>
                     </form>
                 }

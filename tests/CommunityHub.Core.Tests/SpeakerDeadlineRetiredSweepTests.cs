@@ -77,10 +77,21 @@ public sealed class SpeakerDeadlineRetiredSweepTests : IDisposable
 
         await Seeder(db).SeedAsync(EventId);
 
-        Assert.Empty(await db.Tasks
-            .Where(t => t.Title == "Submit session title and abstract").ToListAsync());
-        Assert.Empty(await db.Tasks
-            .Where(t => t.SourceKey == "seed:speaker:abstract").ToListAsync());
+        // §1082 — SWEPT now means RETIRED, not deleted. §264 retired this deadline by DELETING its
+        // rows, which is exactly the pattern the operator ruled out on 2026-08-13 — a speaker who had
+        // already submitted their title and abstract lost the record of having done so. The outcome
+        // §264 wanted (nobody keeps seeing a retired task) is delivered by closing it: the rows are
+        // Done, labelled as a system closure, and filtered out of every participant-facing list.
+        var swept = await db.Tasks
+            .Where(t => t.Title == "Submit session title and abstract"
+                        || t.SourceKey == "seed:speaker:abstract")
+            .ToListAsync();
+        Assert.NotEmpty(swept);                                            // kept for audit
+        Assert.All(swept, t => Assert.Equal(TaskState.Done, t.State));     // and no longer asked
+        Assert.All(swept, t => Assert.Equal(TaskClosedReason.RetiredFromCatalog, t.ClosedReason));
+
+        // 🔑 The property that actually matters: none of them is visible as the speaker's own work.
+        Assert.Empty(swept.Where(t => !CommunityHub.Core.Tasks.TaskClosure.IsSystemClosed(t)));
     }
 
     // ---- fixture ----------------------------------------------------------

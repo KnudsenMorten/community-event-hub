@@ -440,6 +440,13 @@ public sealed class SpeakerDeadlineSeeder
             // above: this loop only runs with a non-empty config in hand. Mirrors
             // the orphan-prune precedent in SponsorOrderPullService.
             {
+                // 🔴 §1082 — RETIRED, NOT DELETED. This prune had the SAME fault that destroyed 15
+                // sponsor rows on 2026-08-13 (four of them completed), over a bigger population:
+                // 357 speaker tasks on prod. It never fired only because no speaker deadline had
+                // been renamed or retired recently — exactly how the sponsor one sat harmless until
+                // a definition was removed. A rename changes a title's slug, hence its SourceKey,
+                // orphaning the old row INCLUDING a completed one with its CompletedAt and
+                // CompletedByParticipantId.
                 var keyPrefix = $"speakerdl:{speaker.Id}:";
                 var orphans = await _db.Tasks
                     .Where(t => t.EventId == eventId
@@ -449,7 +456,8 @@ public sealed class SpeakerDeadlineSeeder
                     .ToListAsync(ct);
                 if (orphans.Count > 0)
                 {
-                    _db.Tasks.RemoveRange(orphans);
+                    foreach (var t in orphans)
+                        Tasks.TaskClosure.Retire(t, TaskClosedReason.RetiredFromCatalog, DateTimeOffset.UtcNow);
                     removed += orphans.Count;
                 }
             }
@@ -471,7 +479,12 @@ public sealed class SpeakerDeadlineSeeder
             .ToListAsync(ct);
         if (exSpeakerOrphans.Count > 0)
         {
-            _db.Tasks.RemoveRange(exSpeakerOrphans);
+            // 🔴 §1082 — RETIRED, NOT DELETED. Someone who stops being a speaker has usually already
+            // DONE some of these; deleting the rows erased that they did. Closing keeps the record,
+            // stops the reminders just as effectively (a Done task is never chased), and is
+            // reversible if the role change was a mistake.
+            foreach (var t in exSpeakerOrphans)
+                Tasks.TaskClosure.Retire(t, TaskClosedReason.RetiredFromCatalog, DateTimeOffset.UtcNow);
             removed += exSpeakerOrphans.Count;
         }
 
@@ -512,7 +525,13 @@ public sealed class SpeakerDeadlineSeeder
             .ToListAsync(ct);
         if (retiredTitleAbstract.Count > 0)
         {
-            _db.Tasks.RemoveRange(retiredTitleAbstract);
+            // 🔴 §1082 — RETIRED, NOT DELETED. §264 retired this deadline by DELETING its rows, which
+            // is the exact pattern the operator ruled out on 2026-08-13 (*"auto-close the task (never
+            // delete)"*). A speaker who had already submitted their title and abstract lost the
+            // record of having done so. The outcome he wanted — nobody keeps seeing a retired task —
+            // is achieved just as well by closing it.
+            foreach (var t in retiredTitleAbstract)
+                Tasks.TaskClosure.Retire(t, TaskClosedReason.RetiredFromCatalog, DateTimeOffset.UtcNow);
             removed += retiredTitleAbstract.Count;
         }
 

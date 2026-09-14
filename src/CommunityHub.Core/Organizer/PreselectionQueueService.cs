@@ -126,6 +126,89 @@ public sealed class PreselectionQueueService
             .ToListAsync(ct);
     }
 
+    /// <summary>The outcome of a §1146d reset.</summary>
+    public enum ResetOutcome
+    {
+        /// <summary>No such row in this edition.</summary>
+        NotFound,
+
+        /// <summary>Already Inactive — nothing to undo.</summary>
+        NoChange,
+
+        /// <summary>🔒 Refused: the person is ONBOARDED. See the remarks on <see cref="ResetAsync"/>.</summary>
+        RefusedActive,
+
+        /// <summary>Shortlisting withdrawn; the sign-up itself is untouched.</summary>
+        Reset,
+    }
+
+    /// <summary>
+    /// §1146d — take a PRESELECTED row back to Inactive, WITHOUT deleting the sign-up.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-28: <i>"i also want a possibility to Reset a preselection (or remove)
+    /// but NOT delete the sign-up"</i>.</para>
+    ///
+    /// <para>🔑 <b>This is the ONE backward move on the lifecycle, and it is safe precisely because
+    /// of what Preselected is.</b> Preselected grants nothing — it cannot sign in, it has had no
+    /// welcome, it is a note to ourselves that we intend to include this person. Undoing a note is
+    /// not the same kind of act as undoing access, which is why <see cref="AdvanceAsync"/> stays
+    /// forward-only and this stops short of it.</para>
+    ///
+    /// <para>🔒 <b>An ACTIVE row is REFUSED, not reset.</b> They have signed in and been welcomed;
+    /// silently returning them to the queue would revoke a login somebody is using and leave a
+    /// welcomed person looking un-invited. Removing an onboarded volunteer is deactivation — a
+    /// different, deliberate action that already exists on this page.</para>
+    ///
+    /// <para>⚠️ <b>Nothing is deleted.</b> Not the participant, not their availability answers, not
+    /// their photo, not their consent. The row goes back to where it was the moment they signed up,
+    /// which is exactly what he asked for and the whole difference from the delete button.</para>
+    /// </remarks>
+    public async Task<ResetOutcome> ResetAsync(
+        int eventId, int participantId, CancellationToken ct = default)
+    {
+        var person = await _db.Participants
+            .FirstOrDefaultAsync(p => p.EventId == eventId && p.Id == participantId, ct);
+        if (person is null) return ResetOutcome.NotFound;
+
+        if (person.LifecycleState == ParticipantLifecycleState.Active) return ResetOutcome.RefusedActive;
+        if (person.LifecycleState == ParticipantLifecycleState.Inactive) return ResetOutcome.NoChange;
+
+        person.LifecycleState = ParticipantLifecycleState.Inactive;
+        await _db.SaveChangesAsync(ct);
+        return ResetOutcome.Reset;
+    }
+
+    /// <summary>§1146c — one queue row, scoped to the edition. Null when it is not this event's.</summary>
+    public Task<Participant?> FindInEventAsync(
+        int eventId, int participantId, CancellationToken ct = default) =>
+        _db.Participants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.EventId == eventId && p.Id == participantId, ct);
+
+    /// <summary>
+    /// §1146c — set a participant's release RING (operator 2026-08-28).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 Event-scoped like every other mutation here: an id from another edition writes
+    /// nothing rather than reaching across the boundary.</para>
+    ///
+    /// <para>⚠️ The ring is not part of the lifecycle and is deliberately NOT forward-only — unlike
+    /// <see cref="AdvanceAsync"/>, it must be correctable in both directions. Putting somebody on a
+    /// narrower ring by mistake has to be undoable from the same control.</para>
+    /// </remarks>
+    public async Task<bool> SetRingAsync(
+        int eventId, int participantId, Settings.Ring ring, CancellationToken ct = default)
+    {
+        var person = await _db.Participants
+            .FirstOrDefaultAsync(p => p.EventId == eventId && p.Id == participantId, ct);
+        if (person is null) return false;
+
+        person.Ring = ring;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
     /// <summary>Advance every selected row to <see cref="ParticipantLifecycleState.Preselected"/>.</summary>
     public Task<QueueResult> PreselectAsync(
         int eventId, IEnumerable<int> participantIds, CancellationToken ct = default)

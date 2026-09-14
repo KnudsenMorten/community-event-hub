@@ -98,7 +98,12 @@ public static class BreadcrumbBuilder
             ["/organizer/welcomelinks"]          = "/organizer/people",
             // §1040 — Volume Package monitors, carded on People beside the two sign-in-link pages.
             ["/organizer/attendeemonitors"]      = "/organizer/people",
+            ["/organizer/volumepackage"]         = "/organizer/people",
             ["/organizer/pendingspeakers"]       = "/organizer/people",
+            // §1085 — the all-roles status board. Carded on People AND on the Sponsor Admin hub
+            // (deep-linked to ?role=Sponsor); primary = People, because "who still owes me
+            // something?" is a question about PEOPLE and the sponsor view is one filter of it.
+            ["/organizer/participantstatus"]     = "/organizer/people",
             ["/organizer/economiccontacts"]      = "/organizer/people",
             ["/organizer/sponsorwebshopcompany"] = "/organizer/people",
 
@@ -143,6 +148,8 @@ public static class BreadcrumbBuilder
             // filed only under Comms is why he could not find it.
             ["/organizer/sometemplates"]         = "/organizer/some",
             ["/organizer/somescheduler"]         = "/organizer/some",
+            // §1215 — posting capacity, carded on the hub (§1199 had it planner-link only).
+            ["/organizer/somecapacity"]          = "/organizer/some",
             // §834 — the setup wizard. §835 — the campaign calendar.
             ["/organizer/somesetup"]             = "/organizer/some",
             ["/organizer/somecalendar"]          = "/organizer/some",
@@ -158,6 +165,8 @@ public static class BreadcrumbBuilder
             ["/organizer/somesettings"]          = "/organizer/some",
 
             // Volunteers hub
+            // §1146e — the availability overview, moved off the Volunteers hub onto its own page.
+            ["/organizer/volunteeravailability"] = "/organizer/volunteers",
             ["/organizer/volunteerstructure"]    = "/organizer/volunteers",
             ["/organizer/bucketallocation"]      = "/organizer/volunteers",
             ["/organizer/allocationscenarios"]   = "/organizer/volunteers",

@@ -31,4 +31,24 @@ public sealed record ConfirmModalModel(
     string ConfirmLabel,
     string CancelLabel,
     bool Danger = false,
-    string? DefaultCount = null);
+    string? DefaultCount = null,
+
+    /// <summary>
+    /// §1146f — when set, the user must TYPE this exact word before Confirm is enabled.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-28: <i>"make sure that the delete button requires a seconday
+    /// confirmation like type in DELETE"</i>.</para>
+    ///
+    /// <para>🔑 <b>The point is to break muscle memory, not to add a step.</b> A plain modal on a
+    /// button that sits at the end of every row is dismissed reflexively — the dialog is in the same
+    /// place every time and Enter is already under the finger. Typing a word cannot be done by
+    /// reflex, and it is the one confirmation that reliably survives a fast, repetitive page.</para>
+    ///
+    /// <para>🔒 Matched EXACTLY (trimmed). A case-insensitive compare would let "delete" through,
+    /// which is close enough to reflex to defeat the purpose.</para>
+    ///
+    /// <para>Progressive enhancement is preserved: with JS off the modal is inert and the trigger
+    /// performs its native action, exactly as before this option existed.</para>
+    /// </remarks>
+    string? RequireTypedWord = null);

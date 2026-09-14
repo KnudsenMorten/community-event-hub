@@ -73,19 +73,70 @@ public sealed class LunchLogisticsProducerTests
         return -1;
     }
 
-    /// <summary>🔒 THE RULE: the sign-up decides, not the role.</summary>
+    /// <summary>
+    /// 🔒 THE RULE: for the roles that ARE asked, the sign-up decides — not a guess from the role.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ §1086 — this test used two ORGANIZERS, and that was a bad fixture rather than a bad rule:
+    /// an organizer is never SHOWN the pre-day checkbox (<c>PreDayAutoCountedRole</c>), so
+    /// "same role, said no" was a state the product cannot produce. It now uses volunteers, who are
+    /// genuinely asked. The auto-counted crew have their own test below.
+    /// </remarks>
     [Fact]
     public async Task Only_people_who_SIGNED_UP_for_the_pre_day_lunch_are_on_the_sheet()
     {
         using var db = NewDb();
-        var ada = await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);
-        var grace = await AddAsync(db, "Grace Hopper", ParticipantRole.Organizer);
+        var ada = await AddAsync(db, "Ada Lovelace", ParticipantRole.Volunteer);
+        var grace = await AddAsync(db, "Grace Hopper", ParticipantRole.Volunteer);
         await SignUpAsync(db, ada, preDay: true);
         await SignUpAsync(db, grace, preDay: false);     // same role, said no
 
         var names = Names(await BuildAsync(db));
 
         Assert.Equal(["Ada Lovelace"], names);
+    }
+
+    /// <summary>
+    /// 🔴 §1086 — THE CREW ARE ON THE SHEET WITHOUT ANSWERING ANYTHING. Organizers, media and
+    /// event partners are never shown a pre-day checkbox, so their stored <c>false</c> means "never
+    /// asked". The file used to read it as "not eating" and left every one of them out of the
+    /// venue's order.
+    /// </summary>
+    [Fact]
+    public async Task Always_on_site_crew_are_counted_without_a_sign_up()
+    {
+        using var db = NewDb();
+        await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);       // no LunchSignup at all
+        var media = await AddAsync(db, "Grace Hopper", ParticipantRole.Media);
+        await SignUpAsync(db, media, preDay: false);                          // stored false = unasked
+
+        var names = Names(await BuildAsync(db));
+
+        Assert.Equal(["Ada Lovelace", "Grace Hopper"], names.Order());
+    }
+
+    /// <summary>
+    /// 🔴 §1086 — A SPONSOR WHO TICKED WAS COUNTED TWICE: once as a named cover, and again inside
+    /// their company's booth-member count. Their pre-day heads are company-level by design (§298).
+    /// </summary>
+    [Fact]
+    public async Task A_sponsor_who_ticked_the_box_is_not_double_counted_against_their_booth_team()
+    {
+        using var db = NewDb();
+        var contact = await AddAsync(db, "Sponsor Contact", ParticipantRole.Sponsor);
+        await SignUpAsync(db, contact, preDay: true);
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "c1",
+            BoothCheckInSlot = BoothCheckInSlots.S0900, BoothCheckInMemberCount = 3,
+        });
+        await db.SaveChangesAsync();
+
+        var file = await BuildAsync(db);
+
+        Assert.Empty(Names(file));                                     // not named…
+        Assert.Equal(3, SummaryValue(file, "Sponsor booth members (from booth check-in)"));
+        Assert.Equal(3, SummaryValue(file, "Total covers"));           // …and counted once
     }
 
     [Fact]
@@ -172,6 +223,179 @@ public sealed class LunchLogisticsProducerTests
 
         Assert.Equal(first.ContentKey, second.ContentKey);
     }
+
+    // ---- §1086 — the Master Class audience eats the pre-day lunch --------------------------
+
+    private static async Task AddAttendeeAsync(
+        CommunityHubDbContext db, string name, TicketStatus ticket,
+        MirrorState mirror = MirrorState.Active)
+    {
+        db.Attendees.Add(new Attendee
+        {
+            EventId = EventId, FullName = name, Email = $"{name.Replace(' ', '.')}@example.test",
+            TicketStatus = ticket, MirrorState = mirror,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// 🔴 THE REPORTED BUG (operator 2026-08-14): <i>"logistics lunch preday must contain any
+    /// attendees that booked a 2-day ticket. i think it is missing in the calculation and excel
+    /// export"</i>. The pre-day IS the Master Class day — every 2-day holder is in the room.
+    /// </summary>
+    [Fact]
+    public async Task Two_day_ticket_holders_are_counted_on_the_pre_day()
+    {
+        using var db = NewDb();
+        var ada = await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);
+        await SignUpAsync(db, ada, preDay: true);
+        await AddAttendeeAsync(db, "Two Day One", TicketStatus.TwoDay);
+        await AddAttendeeAsync(db, "Two Day Two", TicketStatus.TwoDay);
+
+        var file = await BuildAsync(db);
+
+        Assert.Equal(1, SummaryValue(file, "Signed-up covers (named)"));
+        Assert.Equal(2, SummaryValue(file, "Attendees with a 2-day ticket (Master Class)"));
+        Assert.Equal(3, SummaryValue(file, "Total covers"));
+    }
+
+    /// <summary>
+    /// ⚠️ A 1-day ticket does NOT admit you to the Master Class, so that person is not in the
+    /// building on the pre-day and must not be catered for.
+    /// </summary>
+    [Fact]
+    public async Task A_one_day_ticket_holder_is_NOT_counted_on_the_pre_day()
+    {
+        using var db = NewDb();
+        await AddAttendeeAsync(db, "One Day", TicketStatus.Other);
+        await AddAttendeeAsync(db, "No Ticket", TicketStatus.None);
+
+        Assert.Equal(0, SummaryValue(await BuildAsync(db), "Attendees with a 2-day ticket (Master Class)"));
+    }
+
+    /// <summary>§326as — a cancelled ticket keeps its row for audit and stops being a cover.</summary>
+    [Fact]
+    public async Task A_cancelled_two_day_ticket_is_not_a_cover()
+    {
+        using var db = NewDb();
+        await AddAttendeeAsync(db, "Gone Away", TicketStatus.TwoDay, MirrorState.Cancelled);
+
+        Assert.Equal(0, SummaryValue(await BuildAsync(db), "Attendees with a 2-day ticket (Master Class)"));
+    }
+
+    /// <summary>
+    /// 🔑 The count is part of the CHANGE KEY: a ticket sold today must make the file "changed"
+    /// today, or the venue keeps yesterday's order.
+    /// </summary>
+    [Fact]
+    public async Task Selling_a_two_day_ticket_changes_the_content_key()
+    {
+        using var db = NewDb();
+        var ada = await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);
+        await SignUpAsync(db, ada, preDay: true);
+        var before = await BuildAsync(db);
+
+        await AddAttendeeAsync(db, "Late Buyer", TicketStatus.TwoDay);
+
+        Assert.NotEqual(before.ContentKey, (await BuildAsync(db)).ContentKey);
+    }
+
+    // ---- §1086b — the MAIN-DAY lunch file, and no diets on a lunch sheet -------------------
+
+    private static async Task<GeneratedFile> BuildMainDayAsync(CommunityHubDbContext db) =>
+        (await new LunchLogisticsProducer(db).BuildAllAsync(EventId, "ELDK27"))
+        .Single(f => f.FileName == "eldk27-lunch-day2-mainday.xlsx");
+
+    /// <summary>
+    /// 🔴 Operator 2026-08-14: <i>"make the main day lunch excel with named crew"</i>. The file name
+    /// has been supported since §3.5 and nothing ever produced it, so the event's biggest catering
+    /// order lived only on an organizer screen.
+    /// </summary>
+    [Fact]
+    public async Task The_main_day_lunch_file_names_the_crew_and_counts_the_attendees()
+    {
+        using var db = NewDb();
+        await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);
+        await AddAsync(db, "Grace Hopper", ParticipantRole.Speaker);
+        await AddAsync(db, "Test Account", ParticipantRole.Volunteer);   // real person for this test
+        await AddAttendeeAsync(db, "Two Day", TicketStatus.TwoDay);
+        await AddAttendeeAsync(db, "One Day", TicketStatus.Other);
+        await AddAttendeeAsync(db, "Cancelled", TicketStatus.TwoDay, MirrorState.Cancelled);
+
+        var file = await BuildMainDayAsync(db);
+
+        // Named crew — no sign-up needed: main-day lunch is ordered for everyone (§326h).
+        Assert.Equal(["Ada Lovelace", "Grace Hopper", "Test Account"], Names(file).Order());
+        Assert.Equal(3, SummaryValue(file, "Crew, speakers, volunteers and sponsors (named)"));
+        // Both ticket classes eat on the main day; the cancelled one does not.
+        Assert.Equal(2, SummaryValue(file, "Attendees (every live ticket, 1-day and 2-day)"));
+        Assert.Equal(5, SummaryValue(file, "Total covers"));
+    }
+
+    /// <summary>
+    /// 🔒 §1086b — <b>NO DIET ON A LUNCH SHEET.</b> Operator 2026-08-14: <i>"we do not support diets
+    /// in the onboarding regarding lunch … we must not include this in the dialog in ceh except for
+    /// the appreciation dinner"</i>.
+    /// <para>⚠️ The column that was there read a dietary surface NOTHING in CEH writes, so the venue
+    /// received an always-empty "Diet / allergies" column — which reads as "nobody has a dietary
+    /// need", not as "we do not collect this".</para>
+    /// </summary>
+    [Fact]
+    public async Task No_lunch_sheet_carries_a_diet_column()
+    {
+        using var db = NewDb();
+        var ada = await AddAsync(db, "Ada Lovelace", ParticipantRole.Volunteer);
+        await SignUpAsync(db, ada, preDay: true);
+
+        foreach (var file in await new LunchLogisticsProducer(db).BuildAllAsync(EventId, "ELDK27"))
+        {
+            if (!file.FileName.Contains("lunch")) continue;
+            using var wb = new XLWorkbook(new MemoryStream(file.Content));
+            var headers = wb.Worksheets.First().Row(1).CellsUsed().Select(c => c.GetString()).ToList();
+            Assert.DoesNotContain(headers, h => h.Contains("Diet", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(headers, h => h.Contains("allerg", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>
+    /// …and the sheet SAYS why, rather than leaving the venue to wonder. An absent column is
+    /// ambiguous; a sentence naming the real process is not.
+    /// </summary>
+    [Fact]
+    public async Task The_lunch_summary_states_that_diets_are_agreed_with_the_venue()
+    {
+        using var db = NewDb();
+        await AddAsync(db, "Ada Lovelace", ParticipantRole.Organizer);
+
+        var file = await BuildMainDayAsync(db);
+        using var wb = new XLWorkbook(new MemoryStream(file.Content));
+        var summary = wb.Worksheet("Catering summary");
+        var text = string.Join(" ", Enumerable.Range(1, 12).Select(r => summary.Cell(r, 1).GetString()));
+
+        Assert.Contains("ordering process", text);
+        Assert.Contains("Appreciation Dinner", text);
+    }
+
+    /// <summary>
+    /// 🔒 The file and <c>/Organizer/Lunch</c> must give ONE answer — the defect being fixed was
+    /// that the page counted these people and the spreadsheet did not. Both now read
+    /// <see cref="LogisticsAudience.PreDayAttendees"/>; this pins the rule itself.
+    /// </summary>
+    [Fact]
+    public async Task The_shared_rule_selects_exactly_the_active_two_day_holders()
+    {
+        using var db = NewDb();
+        await AddAttendeeAsync(db, "Keeps Ticket", TicketStatus.TwoDay);
+        await AddAttendeeAsync(db, "Cancelled", TicketStatus.TwoDay, MirrorState.Cancelled);
+        await AddAttendeeAsync(db, "One Day", TicketStatus.Other);
+
+        var preDay = await LogisticsAudience.PreDayAttendees(db.Attendees, EventId).ToListAsync();
+        var anyTicket = await LogisticsAudience.CountableAttendees(db.Attendees, EventId).ToListAsync();
+
+        Assert.Equal(["Keeps Ticket"], preDay.Select(a => a.FullName));
+        // Main day admits every ticket class — the cancelled row is still out.
+        Assert.Equal(["Keeps Ticket", "One Day"], anyTicket.Select(a => a.FullName).Order());
+    }
 }
 
 /// <summary>
@@ -190,13 +414,19 @@ public sealed class BreakfastLogisticsTests
             .UseInMemoryDatabase($"breakfast-{Guid.NewGuid():N}")
             .Options);
 
+    /// <remarks>
+    /// ⚠️ §1086 — VOLUNTEERS, not organizers. These fixtures are about the breakfast ESTIMATE
+    /// riding on the lunch head-count, and an organizer is auto-counted for the pre-day whatever
+    /// they answer (they are never asked), which would make "did not sign up for the pre-day" an
+    /// impossible state to seed. The auto-count rule has its own tests.
+    /// </remarks>
     private static async Task AddAsync(
         CommunityHubDbContext db, string name, bool active = true, bool lunchPreDay = false)
     {
         var p = new Participant
         {
             EventId = EventId, FullName = name, Email = $"{name.Replace(' ', '.')}@example.test",
-            Role = ParticipantRole.Organizer, IsActive = active,
+            Role = ParticipantRole.Volunteer, IsActive = active,
         };
         db.Participants.Add(p);
         await db.SaveChangesAsync();
@@ -272,6 +502,33 @@ public sealed class BreakfastLogisticsTests
         var file = (await BuildAsync(db)).Single(f => f.FileName == "eldk27-breakfast-day2-mainday.xlsx");
 
         Assert.Equal(1, Covers(file));       // ceil(1 × 0.75)
+    }
+
+    /// <summary>
+    /// 🔴 §1086 — the breakfast head-counts ride on the lunch ones, so the missing attendees were
+    /// missing here too: the MAIN day counts every ticket class, the PRE day only the 2-day holders
+    /// who are admitted to the Master Class.
+    /// </summary>
+    [Fact]
+    public async Task Attendees_are_in_both_breakfast_head_counts_by_the_right_rule()
+    {
+        using var db = NewDb();
+        await AddAsync(db, "Ada Lovelace", lunchPreDay: true);       // 1 crew, pre-day + main day
+        db.Attendees.AddRange(
+            new Attendee { EventId = EventId, FullName = "Two Day", Email = "t@example.test",
+                TicketStatus = TicketStatus.TwoDay, MirrorState = MirrorState.Active },
+            new Attendee { EventId = EventId, FullName = "One Day", Email = "o@example.test",
+                TicketStatus = TicketStatus.Other, MirrorState = MirrorState.Active },
+            new Attendee { EventId = EventId, FullName = "Cancelled", Email = "c@example.test",
+                TicketStatus = TicketStatus.TwoDay, MirrorState = MirrorState.Cancelled });
+        await db.SaveChangesAsync();
+
+        var files = await BuildAsync(db);
+
+        // Pre-day: 1 crew sign-up + 1 two-day attendee = 2 heads → ceil(1.5) = 2.
+        Assert.Equal(2, Covers(files.Single(f => f.FileName == "eldk27-breakfast-day1-preday.xlsx")));
+        // Main day: 1 crew + 2 live attendees (any class) = 3 heads → ceil(2.25) = 3.
+        Assert.Equal(3, Covers(files.Single(f => f.FileName == "eldk27-breakfast-day2-mainday.xlsx")));
     }
 
     /// <summary>

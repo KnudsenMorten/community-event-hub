@@ -108,15 +108,36 @@ public class BrevoEmailSender : IEmailSender
     /// <summary>
     /// §302 default e-mail font (operator 2026-07-24: "the chosen font make it impossible
     /// to read the mail … change all email fonts to use aptos or ariel as default").
-    /// Inline-built mails (engine alerts, Zoho change mails, digests) carry NO
-    /// font-family, so clients fall back to their serif default. This chokepoint wraps
-    /// any body WITHOUT a font declaration in an Aptos→Segoe UI→Arial container;
-    /// templated mails (which style themselves) are left untouched.
+    /// Wraps EVERY body in an Aptos→Segoe UI→Arial container so nothing falls back to the
+    /// client's serif default. Inner declarations still win — this only sets a floor.
     /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>§1089 — THIS USED TO SKIP ANY BODY CONTAINING THE STRING "font-family", AND THAT
+    /// IS WHY THE SPEAKER-APPROVAL MAIL ARRIVED IN TIMES NEW ROMAN</b> (operator 2026-08-19:
+    /// *"email looks hard to read + font"*).</para>
+    ///
+    /// <para>The guard was asking a semantic question — <i>"does this mail style itself?"</i> — with
+    /// a substring test. A mail whose PROSE carries no font at all, but which contains one
+    /// <see cref="Organizer.SpeakerApprovalService"/> button (and every button declares a
+    /// <c>font-family</c> for its own label), answered <b>yes</b>. So the wrapper was skipped for the
+    /// whole document and every paragraph fell back to serif — while the buttons, carrying their own
+    /// font, stayed sans. That mismatch is exactly what his screenshot showed, and it is the tell:
+    /// <b>one styled element deep in the body silently opted the entire mail out.</b></para>
+    ///
+    /// <para>🔑 The fix is to stop asking the question. Wrapping is a DEFAULT, not an override: an
+    /// inline <c>font-family</c> on any descendant beats one inherited from an ancestor, so a
+    /// self-styling templated mail renders exactly as before, and a partly-styled one now gets a
+    /// sane floor for the parts nobody styled. There is no case where "no font at all" was wanted.
+    /// ⇒ Cheaper and safer than a smarter detector, which would have been the same bug with a better
+    /// regex — and would have failed again the next time a helper grew a style attribute.</para>
+    ///
+    /// <para>🔒 Safe to apply unconditionally: no mail body in this codebase is a full
+    /// <c>&lt;html&gt;</c> document (checked 2026-08-19) — they are all fragments, which is what the
+    /// send path has always assumed.</para>
+    /// </remarks>
     public static string ApplyDefaultFont(string? htmlBody)
     {
         if (string.IsNullOrWhiteSpace(htmlBody)) return htmlBody ?? string.Empty;
-        if (htmlBody.Contains("font-family", StringComparison.OrdinalIgnoreCase)) return htmlBody;
         return "<div style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;"
              + "font-size:14px;line-height:1.5;color:#111827;\">" + htmlBody + "</div>";
     }
@@ -458,13 +479,48 @@ public class BrevoEmailSender : IEmailSender
         CancellationToken cancellationToken = default)
         => SendInternalAsync(toEmail, subject, htmlBody, cc: null, replyTo, cancellationToken);
 
+    /// <summary>
+    /// §1121 — ONE mail, SEVERAL To: recipients (see <see cref="IEmailSender.SendToManyAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Delegates to <see cref="SendInternalAsync"/> with the FIRST address as the primary and the
+    /// rest as <c>additionalTo</c>, so the ring gate, the kill switch, the DEV redirect, the outcome
+    /// seam and the operator BCC are the SAME code the single-recipient path runs. A parallel send
+    /// routine for "the multi-recipient case" is how one of those silently stops applying to half
+    /// the mail.
+    /// </remarks>
+    public Task SendToManyAsync(
+        IReadOnlyCollection<string> toEmails,
+        string subject,
+        string htmlBody,
+        CancellationToken cancellationToken = default)
+    {
+        var addresses = (toEmails ?? Array.Empty<string>())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(a => a.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (addresses.Count == 0)
+        {
+            throw new ArgumentException("At least one recipient address is required.", nameof(toEmails));
+        }
+
+        return SendInternalAsync(
+            addresses[0], subject, htmlBody, cc: null, replyTo: null, cancellationToken,
+            additionalTo: addresses.Skip(1).ToList());
+    }
+
     private async Task SendInternalAsync(
         string toEmail,
         string subject,
         string htmlBody,
         IReadOnlyCollection<string>? cc,
         EmailReplyTo? replyTo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        // §1121 — extra PRIMARY (To:) recipients. Null/empty ⇒ the original single-recipient
+        // behaviour, unchanged for every existing caller.
+        IReadOnlyCollection<string>? additionalTo = null)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
         {
@@ -503,12 +559,16 @@ public class BrevoEmailSender : IEmailSender
             IsBodyHtml = true,
         };
         message.To.Add(actualTo);
+        // §1121 — extra PRIMARY recipients. Each is its own recipient, so it gets the SAME ring gate
+        // and the SAME redirect as the primary; de-duplicated against what is already on the message
+        // because a DEV RedirectAllTo collapses every address onto one inbox.
+        AddAdditionalTo(message, await RingFilterAddressesAsync(additionalTo, cancellationToken));
         // Optional Reply-To (e.g. the AiHelper asker) so a "Reply" reaches the person,
         // not the From mailbox. Never ring-gated — it is a header, not a recipient.
         AddReplyTo(message, replyTo);
         // Each CC is its own recipient ⇒ ring-gate it too (an out-of-ring or
         // unresolvable CC is dropped; the primary send is unaffected).
-        AddCc(message, await RingFilterCcAsync(cc, cancellationToken));
+        AddCc(message, await RingFilterAddressesAsync(cc, cancellationToken));
         // The mail is ACTUALLY sending now (it passed the ring gate + kill switch):
         // add the operator BCC so it mirrors only what really goes out.
         AddOperatorBcc(message);
@@ -651,19 +711,20 @@ public class BrevoEmailSender : IEmailSender
         return ex is IOException or System.Net.Sockets.SocketException or TimeoutException;
     }
 
-    // Ring-gate each CC the same way as the primary recipient (REQUIREMENTS §23):
-    // an out-of-ring or unresolvable CC is dropped (and logged) before the message
-    // is built (§234: a CC address unknown by address still resolves via the ambient
-    // EmailContext.ParticipantId — e.g. a participant's SecondaryEmail — so it is
-    // gated by the PERSON's ring). Returns the kept subset (null in ⇒ null out).
-    // A dropped CC never fails the primary send and is not recorded as a drop on
-    // the IEmailDeliveryOutcome seam (that seam reflects the primary recipient).
-    private async Task<IReadOnlyCollection<string>?> RingFilterCcAsync(
-        IReadOnlyCollection<string>? cc, CancellationToken ct)
+    // Ring-gate each SECONDARY address (a CC, or a §1121 extra To:) the same way as the primary
+    // recipient (REQUIREMENTS §23): an out-of-ring or unresolvable address is dropped (and logged)
+    // before the message is built (§234: an address unknown BY ADDRESS still resolves via the
+    // ambient EmailContext.ParticipantId — e.g. a participant's SecondaryEmail — so it is gated by
+    // the PERSON's ring). Returns the kept subset (null in ⇒ null out).
+    //
+    // A dropped secondary never fails the primary send and is not recorded as a drop on the
+    // IEmailDeliveryOutcome seam (that seam reflects the primary recipient).
+    private async Task<IReadOnlyCollection<string>?> RingFilterAddressesAsync(
+        IReadOnlyCollection<string>? addresses, CancellationToken ct)
     {
-        if (cc is null || cc.Count == 0) return cc;
-        var kept = new List<string>(cc.Count);
-        foreach (var raw in cc)
+        if (addresses is null || addresses.Count == 0) return addresses;
+        var kept = new List<string>(addresses.Count);
+        foreach (var raw in addresses)
         {
             if (string.IsNullOrWhiteSpace(raw)) continue;
             if (await ShouldRingDropAsync(raw.Trim(), ct)) continue; // logged inside
@@ -672,8 +733,32 @@ public class BrevoEmailSender : IEmailSender
         return kept;
     }
 
+    // §1121 — add each EXTRA PRIMARY recipient to the To: line. Same shape as AddCc, and
+    // deliberately so: ring-filtering happened upstream (RingFilterAddressesAsync), the kill switch
+    // dropped the whole send before we got here, and each address takes the SAME redirect as the
+    // primary. De-dup against what is already on the message, because a DEV RedirectAllTo collapses
+    // every address onto one inbox and would otherwise put it on the To: line three times.
+    private void AddAdditionalTo(MailMessage message, IReadOnlyCollection<string>? extra)
+    {
+        if (extra is null) return;
+        foreach (var raw in extra)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var (actualTo, _) = ApplyRedirect(raw.Trim(), string.Empty);
+            var already = message.To.Concat(message.CC)
+                .Any(a => string.Equals(a.Address, actualTo,
+                    StringComparison.OrdinalIgnoreCase));
+            if (already) continue;
+            try { message.To.Add(actualTo); }
+            catch (FormatException)
+            {
+                _log?.LogInformation("Email extra recipient skipped (bad format): {To}", raw);
+            }
+        }
+    }
+
     // Add each CC, each independently subject to the same redirect as the primary
-    // recipient (ring-gating already happened in RingFilterCcAsync). A CC redirected
+    // recipient (ring-gating already happened in RingFilterAddressesAsync). A CC redirected
     // to the same dev inbox as the To would duplicate, so de-dup against addresses
     // already on the message.
     private void AddCc(MailMessage message, IReadOnlyCollection<string>? cc)
@@ -683,7 +768,7 @@ public class BrevoEmailSender : IEmailSender
         {
             if (string.IsNullOrWhiteSpace(raw)) continue;
             var (actualCc, _) = ApplyRedirect(raw.Trim(), string.Empty);
-            // CCs are already ring-filtered upstream (RingFilterCcAsync) and the kill
+            // CCs are already ring-filtered upstream (RingFilterAddressesAsync) and the kill
             // switch dropped the whole send before we got here, so just add the CC.
             var already = message.To.Concat(message.CC)
                 .Any(a => string.Equals(a.Address, actualCc,

@@ -56,6 +56,28 @@ public class AuditTrailModel : PageModel
     /// </remarks>
     [BindProperty(SupportsGet = true)] public bool ShowEngine { get; set; }
 
+    /// <summary>
+    /// §1061 — show mail a rollout ring deliberately withheld. OFF by default.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-11, mid ticket-sale: <i>"this is just noise now and makes it hard to view and
+    /// follow"</i> — one run held 18 mails and sent 2, so the holds WERE the page.
+    /// 🔒 Hidden, never discarded: it is the evidence that answers "why did this speaker not get the
+    /// mail?", and that question is asked precisely when the rows are inconvenient.
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public bool ShowDropped { get; set; }
+
+    /// <summary>
+    /// §1061 — multi-select categories. Operator: <i>"in the filter, i want to have a multi-select of
+    /// categories, so I can filter on specific"</i>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <see cref="Category"/> (singular) is deliberately KEPT and still honoured when this is
+    /// empty, so every existing link, bookmark and saved export URL keeps working. A filter rename
+    /// that silently changes what an old URL returns is worse than no rename.
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public string[]? Cats { get; set; }
+
     public IReadOnlyList<AuditEntry> Rows { get; private set; } = Array.Empty<AuditEntry>();
     public int TotalCount { get; private set; }
     public bool Capped => TotalCount > PageSize;
@@ -93,7 +115,36 @@ public class AuditTrailModel : PageModel
     {
         var q = _db.AuditEntries.AsNoTracking().Where(e => e.EventId == eventId);
 
-        if (!string.IsNullOrWhiteSpace(Category)
+        // 🔴 §1061 — RING-DROPPED MAIL IS HIDDEN BY DEFAULT. Operator 2026-08-11: *"ring-gated mails
+        // that logs as failed dont show on the audit page in the default view. i need to have a
+        // 'Show Dropped mails (ring-gated)' feature"*.
+        //
+        // 🔑 It is not noise to be deleted — it is the evidence that the gate is working, and he
+        // needs it when he asks "why did this speaker not get the mail?". So it is HIDDEN, never
+        // discarded, and one checkbox brings it back.
+        // ⚠️ Note the ordering: this applies REGARDLESS of the category filter, unlike ShowEngine
+        // below. Picking "Email" from the list is asking about mail, not asking to see every
+        // policy hold — and with 18 drops to 2 sends, the holds would be the whole page.
+        if (!ShowDropped)
+        {
+            q = q.Where(e => e.Outcome != AuditOutcome.Dropped);
+        }
+
+        // §1061 — MULTI-SELECT categories. `Category` (singular) is kept so every existing link,
+        // bookmark and export URL still works; `Cats` is the new multi-valued form and wins when
+        // present.
+        var chosen = (Cats ?? [])
+            .Select(c => Enum.TryParse<AuditCategory>(c, out var v) ? (AuditCategory?)v : null)
+            .Where(v => v is not null)
+            .Select(v => v!.Value)
+            .Distinct()
+            .ToList();
+
+        if (chosen.Count > 0)
+        {
+            q = q.Where(e => chosen.Contains(e.Category));
+        }
+        else if (!string.IsNullOrWhiteSpace(Category)
             && Enum.TryParse<AuditCategory>(Category, out var cat))
         {
             q = q.Where(e => e.Category == cat);
@@ -148,13 +199,41 @@ public class AuditTrailModel : PageModel
         Rows = await q.OrderByDescending(e => e.OccurredUtc).Take(PageSize).ToListAsync(ct);
     }
 
-    private static string BuildCsv(IReadOnlyList<AuditEntry> rows)
+    /// <summary>
+    /// The export's CSV body — rows in, file out. §1136a made it PUBLIC so the column contract can be
+    /// pinned directly, the same reason §403 exposed <c>HotelFormService.StayWindowFor</c>: it is
+    /// pure, and a timezone in an export is exactly the kind of thing that is wrong silently.
+    /// </summary>
+    public static string BuildCsv(IReadOnlyList<AuditEntry> rows)
     {
+        // §1136a (operator 2026-08-25: *"export can also be in local time, please"*, then *"i dont
+        // like the (Copenhagen) or OccuredCopenhagen - change to Local instead of Copenhagen"*) —
+        // the export leads with LOCAL time, matching what the page now shows by default.
+        //
+        // 🔑 The column is named for the ROLE it plays ("the local reading"), not for the city that
+        // happens to define it this year. The zone itself is still Europe/Copenhagen and still comes
+        // from one place; the header just stops asserting a city to whoever opens the file.
+        //
+        // 🔒 UTC IS KEPT, not replaced. Two reasons, and both matter for an AUDIT export:
+        //   • Nothing is lost. An export reconciled against an older one still has the exact column
+        //     it had before, under the same name — so the two files can still be compared.
+        //   • A timezone is only safe when it is LABELLED. Silently shifting the values under the
+        //     old `OccurredUtc` header would make every historic export disagree with every new one
+        //     with nothing on the page or in the file to explain why.
+        //
+        // ⚠️ This does change the COLUMN ORDER: the local column is first, so a reader that keys on
+        // POSITION rather than header name shifts by one. Appending it last would have avoided that
+        // but buried the column he asked for behind twelve others, in a file whose whole purpose is
+        // being read by a human in Excel.
         var sb = new StringBuilder();
-        sb.AppendLine("OccurredUtc,Category,Action,Actor,OnBehalfOf,Role,Outcome,Source,TargetType,TargetId,Summary,Detail,Path");
+        sb.AppendLine("OccurredLocal,OccurredUtc,Category,Action,Actor,OnBehalfOf,Role,Outcome,Source,TargetType,TargetId,Summary,Detail,Path");
         foreach (var r in rows)
         {
-            sb.Append(C(r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',')
+            // 🔒 The SAME authority the page uses (SoMeDisplayTime.ToDanish, §844.5), so an exported
+            // timestamp can never disagree with the one on screen for the same row.
+            sb.Append(C(CommunityHub.Core.Integrations.SoMeDisplayTime
+                          .ToDanish(r.OccurredUtc).ToString("yyyy-MM-dd HH:mm:ss"))).Append(',')
+              .Append(C(r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',')
               .Append(C(r.Category.ToString())).Append(',')
               .Append(C(r.Action)).Append(',')
               .Append(C(r.ActorEmail)).Append(',')

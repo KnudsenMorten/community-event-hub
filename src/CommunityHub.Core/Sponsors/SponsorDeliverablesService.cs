@@ -168,9 +168,14 @@ public sealed class SponsorDeliverablesService
                 g => (IReadOnlyList<TaskRow>)g.Select(t => new TaskRow(Slug(t.SourceKey), t.State, t.DueDate)).ToList(),
                 StringComparer.Ordinal);
 
+        // 🔴 §1071 — ACTIVE CONTACTS ONLY, here as well as on the dashboard. Operator 2026-08-11:
+        // *"it still shows old sponsors that was deactivated"* — reported against the dashboard, and
+        // this board had the identical omission. ⚠️ Fixing one page and not the other would have
+        // produced two sponsor lists that disagree, which is worse than both being wrong the same way.
         var participantCompanies = (await _db.Participants
                 .Where(p => p.EventId == eventId
                             && p.Role == ParticipantRole.Sponsor
+                            && p.IsActive
                             && p.SponsorCompanyId != null)
                 .Select(p => p.SponsorCompanyId!).Distinct().ToListAsync(ct))
             .ToHashSet(StringComparer.Ordinal);
@@ -245,7 +250,16 @@ public sealed class SponsorDeliverablesService
     {
         var isExhibitor = IsExhibitor(info, members, materials, wallFile, wallAudit, tasks);
 
-        var onboardingDone = !string.IsNullOrWhiteSpace(info?.CompanyDescription);
+        // §1081 — the FOURTH consumer of the one predicate. This used to test CompanyDescription
+        // alone, so an organizer saw "Contract & onboarding ✓" for a sponsor who was still missing
+        // their SoMe branding text — disagreeing with the sponsor's own wizard, with the Get Started
+        // digest, and with SoMeApprovalGate, which was blocking that company's posts for exactly
+        // that field. One question, one answer, on every surface.
+        //
+        // 🔑 The DEADLINE still comes from the retired `initial-onboarding-of-sponsor` task's row,
+        // and that keeps working precisely because those rows are CLOSED rather than deleted
+        // (operator: *"auto-close the task (never delete)"*) — EarliestDue does not filter by state.
+        var onboardingDone = SponsorCompanyContent.StatusOf(info).AllDelivered;
         var logoDone =
             !string.IsNullOrWhiteSpace(info?.LogoRasterPath)
             || !string.IsNullOrWhiteSpace(info?.LogoVectorPath)

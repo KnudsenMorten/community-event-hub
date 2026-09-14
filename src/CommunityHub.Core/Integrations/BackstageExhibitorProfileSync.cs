@@ -77,9 +77,13 @@ public sealed class BackstageExhibitorProfileSync
                 return false;
             }
 
-            var ok = await _zoho.UpdateExhibitorAsync(
+            var outcome = await _zoho.UpdateExhibitorAsync(
                 token!, match.Id, companyOverview, companyShortDescription, ct,
                 companyName: companyName, contactFirstName: contactFirstName, contactLastName: contactLastName);
+            // §1154 — this method returns "did the value land", so only Written counts. The
+            // distinction between Refused and Unavailable is acted on by the RECONCILE, which is
+            // the caller that turns a failure into work for a human.
+            var ok = outcome == ZohoClient.ZohoWriteOutcome.Written;
             if (ok)
             {
                 _log.LogInformation("Backstage exhibitor profile pushed for '{Co}' (id {Id}).", companyName, match.Id);

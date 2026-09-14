@@ -15,16 +15,105 @@
     {
         <p>Register each company's group photo session, schedule the slot,
            and send a calendar invite to the <strong>appointed company lead</strong>.
-           The group photo is a perk for the larger packages: only companies with
-           <strong>more than @CommunityHub.Core.Domain.GroupPhotoRegistration.QualifyingTicketThreshold tickets</strong>
-           (volume package) qualify &mdash; enter the ticket count below. Re-sending
-           after a slot move <strong>updates</strong> the lead's existing calendar
-           entry (stable invite id).</p>
+           The group photo is a perk for the volume packages: companies with
+           <strong>@CommunityHub.Core.Domain.GroupPhotoRegistration.QualifyingTicketThreshold tickets or more</strong>
+           qualify. Companies tracked on the
+           <a asp-page="/Organizer/VolumePackage">Volume Package</a> page fill their ticket count in
+           automatically. Re-sending after a slot move <strong>updates</strong> the lead's existing
+           calendar entry (stable invite id).</p>
 
         @if (!string.IsNullOrEmpty(Model.Notice))
         {
             <p class="info">@Model.Notice</p>
         }
+
+        @* ================= §1077 stage 5 — slots, plan, publish ================= *@
+        <div style="margin:16px 0;padding:12px 14px;border:1px solid #cfe6fb;background:#f4faff;border-radius:8px;">
+            <h2 style="margin:0 0 6px;font-size:17px;">Timeslots and planning</h2>
+            <p class="muted" style="margin:0 0 10px;font-size:13.5px;">
+                Enter the slots you have available; the planner fits companies into them.
+                <strong>Companies whose people all hold 1-day tickets can only take a main-day
+                slot</strong> — they are not at the venue on the pre-day — so the planner puts the
+                flexible companies on the pre-day first and keeps the main day for those who have
+                nowhere else to go. <strong>A published time is never moved.</strong>
+            </p>
+
+            <p style="margin:0 0 10px;font-size:13.5px;">
+                <strong>@Model.Slots.Count</strong> slot(s) defined
+                (@Model.Slots.Count(s => s.IsPreDay) pre-day · @Model.Slots.Count(s => !s.IsPreDay) main day).
+            </p>
+
+            <form method="post" asp-page-handler="AddSlots" style="margin:0 0 10px;">
+                <label style="display:block;font-size:13px;">
+                    <strong>Paste your timeslots</strong> — one per line, <code>2027-02-09 11:30</code>
+                    <textarea asp-for="SlotText" rows="4" placeholder="2027-02-09 11:30&#10;2027-02-09 11:45&#10;2027-02-10 09:45"
+                              style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;font-family:inherit;"></textarea>
+                </label>
+                <button type="submit" style="margin-top:8px;padding:7px 14px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">Add slots</button>
+            </form>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                @* A starter set for testing — it refuses to run once real slots exist, so it can
+                   never double a live schedule. *@
+                <form method="post" asp-page-handler="StarterSlots">
+                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12.5px;">Add a starter set (25, for testing)</button>
+                </form>
+                <form method="post" asp-page-handler="Propose">
+                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12.5px;">Propose a plan</button>
+                </form>
+                <form method="post" asp-page-handler="Publish"
+                      onsubmit="return confirm('Publish the planned times? Each company then sees its time on its own page.');">
+                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12.5px;">Publish the plan</button>
+                </form>
+                @* For the partner who coordinates the photos from our side. *@
+                <a asp-page-handler="PartnerExcel" download
+                   style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:6px 12px;font-size:12.5px;text-decoration:none;">Excel for the event partner</a>
+                <a asp-page-handler="PartnerCalendar" download
+                   style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:6px 12px;font-size:12.5px;text-decoration:none;">Calendar (all slots) for the partner</a>
+            </div>
+
+            @if (Model.Plan is { } plan)
+            {
+                <div style="font-size:13px;">
+                    <strong>Proposal</strong> — @plan.Assignments.Count placed, @plan.UnusedSlots.Count slot(s) spare.
+                    <ul style="margin:6px 0 0;padding-left:20px;">
+                        @foreach (var a in plan.Assignments)
+                        {
+                            <li>
+                                @a.StartUtc.UtcDateTime.ToString("ddd d MMM HH:mm") UTC — @a.CompanyName
+                                @if (a.WasAlreadyPublished) { <em> (already published — left alone)</em> }
+                            </li>
+                        }
+                    </ul>
+                    @if (plan.Unplaced.Count > 0)
+                    {
+                        <p class="error" style="margin:8px 0 0;">
+                            No slot for: @string.Join(" · ", plan.Unplaced.Select(u => $"{u.CompanyName} — {u.Reason}"))
+                        </p>
+                    }
+                </div>
+            }
+
+            @if (Model.Slots.Count > 0)
+            {
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer;font-size:12.5px;color:#1565c0;">Show the slots</summary>
+                    <ul style="margin:8px 0 0;padding-left:20px;font-size:12.5px;">
+                        @foreach (var s in Model.Slots)
+                        {
+                            <li style="margin:2px 0;">
+                                @s.StartUtc.UtcDateTime.ToString("ddd d MMM HH:mm") UTC
+                                — @(s.IsPreDay ? "pre-day" : "main day"), @s.DurationMinutes min
+                                @if (!string.IsNullOrWhiteSpace(s.Label)) { <text> · @s.Label</text> }
+                                <form method="post" asp-page-handler="DeleteSlot" asp-route-id="@s.Id" style="display:inline;">
+                                    <button type="submit" style="border:0;background:none;color:#b00;cursor:pointer;font-size:12px;">remove</button>
+                                </form>
+                            </li>
+                        }
+                    </ul>
+                </details>
+            }
+        </div>
 
         <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
             <summary><strong>+ Register a company</strong></summary>

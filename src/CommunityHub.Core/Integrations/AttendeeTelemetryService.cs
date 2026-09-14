@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -60,7 +61,23 @@ public sealed record AttendeeTelemetry(
     // The last-successful-sync timestamp from the Sync phase (REQUIREMENTS §127/§69) —
     // what the "Updated <t> UTC" footer shows, NOT the wall-clock the page rendered.
     // Null when the mirror has never been synced for this edition.
-    DateTimeOffset? LastSyncAtUtc = null);
+    DateTimeOffset? LastSyncAtUtc = null,
+
+    /// <summary>
+    /// §1063 — how often the attendee mirror refreshes, in minutes, so the footer can say when the
+    /// next one is due. Null when the cadence cannot be determined.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"how often does the attendee telemetry refresh. we need to show
+    /// that in the footer, so people can see next refresh time - it shows only Updated 11 Aug 2026
+    /// 06:14 UTC"</i>.</para>
+    ///
+    /// <para>🔴 <b>READ from the job's configuration, never typed into the view.</b> The interval is
+    /// an operator setting on <c>/Organizer/Jobs</c> — a "10 minutes" hard-coded in the footer becomes
+    /// a lie the first time he changes it, and it is the kind of lie nobody notices (§1056's stale
+    /// "25 timer jobs" in the architecture diagram).</para>
+    /// </remarks>
+    int? RefreshEveryMinutes = null);
 
 public sealed class AttendeeTelemetryService
 {
@@ -69,6 +86,9 @@ public sealed class AttendeeTelemetryService
     // immediately — the panel always reflects the latest mirror state (REQUIREMENTS §127).
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(5);
     private const int MaxDistinctForBreakdown = 30;
+
+    /// <summary>§1063 — the job whose cadence the footer quotes. The join key to JobCatalog.</summary>
+    private const string AttendeeSyncJobName = "AttendeeBackstageSyncJob";
 
     /// <summary>The 10 sponsor-relevant analysis segments shown in the dropdown.</summary>
     public static readonly IReadOnlyList<TelemetrySegment> Segments = new[]
@@ -96,12 +116,144 @@ public sealed class AttendeeTelemetryService
     private readonly IMemoryCache _cache;
     private readonly ILogger<AttendeeTelemetryService> _log;
 
+    /// <summary>
+    /// §1147 — the ERP, used ONLY to name the country behind a coupon. Optional and fail-soft.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-28: <i>"here we need to lookup against the coupon module, where you
+    /// can fetch the customer details incl. country"</i>.</para>
+    ///
+    /// <para>🔒 Null-tolerant on purpose: a host without the ERP wired, or an ERP that is down,
+    /// must render the page with "Not given" rather than fail. This is a label on a chart — it may
+    /// never cost anyone the page.</para>
+    /// </remarks>
+    private readonly Erp.IEconomicInvoiceClient? _erp;
+
     public AttendeeTelemetryService(
-        CommunityHubDbContext db, IMemoryCache cache, ILogger<AttendeeTelemetryService> log)
+        CommunityHubDbContext db, IMemoryCache cache, ILogger<AttendeeTelemetryService> log,
+        Erp.IEconomicInvoiceClient? erp = null)
     {
         _db = db;
         _cache = cache;
         _log = log;
+        _erp = erp;
+    }
+
+    /// <summary>
+    /// §1147 — the label for one attendee's country: their own, else the coupon customer's, else
+    /// "Not given".
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Order matters and is not negotiable:</b> a country the attendee actually gave us
+    /// always wins. The coupon customer's country is a stand-in for a value we do not have, so it
+    /// must never override one we do.</para>
+    ///
+    /// <para>⚠️ <b>"Not given", never "free/coupon order".</b> Every blank measured on 2026-08-28
+    /// came from a coupon order — but that is an observation about this week's data, not a rule. A
+    /// paid order with an incomplete address lands here too, and the label would then be a
+    /// confident lie. The honest word is the one that survives the next case.</para>
+    ///
+    /// <para>Pure and public so the sweep and its tests answer the same question.</para>
+    /// </remarks>
+    public static string ResolveCountryLabel(string? own, string? viaCoupon)
+    {
+        if (!string.IsNullOrWhiteSpace(own)) return own.Trim();
+        if (!string.IsNullOrWhiteSpace(viaCoupon)) return viaCoupon.Trim();
+        return "Not given";
+    }
+
+    /// <summary>
+    /// §1147 — for attendees with no billing country, the country of the COUPON's ERP customer.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why a blank happens at all, traced end to end.</b> An attendee's country is
+    /// inherited from the ORDER's billing address, and Zoho collects no billing address on a FREE
+    /// order — there is nothing to invoice, so it never asks. Verified on order 14880000004455013:
+    /// total 0, 100% discount, promo <c>ELDK27-CBS</c>, every billing field null, three tickets.
+    /// Nothing was lost in our mapping; the data does not exist upstream.</para>
+    ///
+    /// <para>🔒 <b>DISPLAY ONLY — his decision, 2026-08-28.</b> The resolved value is the COUPON
+    /// CUSTOMER's country, not the attendee's own, so it is never written to
+    /// <c>Attendee.Country</c>: exports and on-site lists keep the honest blank, and only this
+    /// chart shows the derived value. A derivation stored in a data column stops looking like a
+    /// derivation the moment somebody exports it.</para>
+    ///
+    /// <para>🔒 Reuses <see cref="Erp.CouponClaimExtractor"/> rather than re-reading promo codes out
+    /// of the order JSON — §759, one definition of "which coupon is this ticket on".</para>
+    ///
+    /// <para>⚠️ Cached for an hour and only consulted when a blank actually exists, so a normal
+    /// event does ZERO ERP calls: every paid order already carries its country.</para>
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>> CouponCountryByTicketAsync(
+        int eventId, IReadOnlyCollection<string> ticketIds, CancellationToken ct)
+    {
+        if (ticketIds.Count == 0 || _erp is null) return new Dictionary<string, string>();
+
+        var cacheKey = $"attendee-telemetry-couponcountry|{eventId}";
+        if (_cache.TryGetValue(cacheKey, out Dictionary<string, string>? hit) && hit is not null)
+            return hit;
+
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            // The coupon settings carry the ERP customer; the order JSON carries which coupon a
+            // ticket was bought on.
+            var coupons = await _db.CouponInvoicingSettings
+                .AsNoTracking()
+                .Where(c => c.EventId == eventId && c.ErpCustomerNumber != null)
+                .Select(c => new { c.CouponName, c.ErpCustomerNumber })
+                .ToListAsync(ct);
+            if (coupons.Count == 0) return map;
+
+            var erpByCoupon = coupons
+                .GroupBy(c => c.CouponName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().ErpCustomerNumber!.Value,
+                              StringComparer.OrdinalIgnoreCase);
+
+            var wanted = ticketIds.ToHashSet(StringComparer.Ordinal);
+            var orders = await _db.Orders
+                .AsNoTracking()
+                .Where(o => o.EventId == eventId && o.RawJson != null)
+                .Select(o => o.RawJson)
+                .ToListAsync(ct);
+
+            // ticket -> coupon, for the tickets we still need a country for.
+            var couponByTicket = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var raw in orders)
+            {
+                foreach (var claim in Erp.CouponClaimExtractor.FromOrderJson(raw))
+                {
+                    if (wanted.Contains(claim.TicketId) && !couponByTicket.ContainsKey(claim.TicketId))
+                        couponByTicket[claim.TicketId] = claim.CouponName;
+                }
+            }
+            if (couponByTicket.Count == 0) return map;
+
+            // One ERP read per DISTINCT customer, not per ticket.
+            var countryByCustomer = new Dictionary<int, string?>();
+            foreach (var ticket in couponByTicket)
+            {
+                if (!erpByCoupon.TryGetValue(ticket.Value, out var customerNumber)) continue;
+
+                if (!countryByCustomer.TryGetValue(customerNumber, out var country))
+                {
+                    var detail = await _erp.GetCustomerAsync(customerNumber, ct);
+                    country = detail?.Country;
+                    countryByCustomer[customerNumber] = country;
+                }
+
+                if (!string.IsNullOrWhiteSpace(country)) map[ticket.Key] = country!.Trim();
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 🔒 A chart label is never worth a failed page render.
+            _log.LogWarning(ex, "§1147: could not resolve coupon countries; showing 'Not given'.");
+            return new Dictionary<string, string>();
+        }
+
+        _cache.Set(cacheKey, map, TimeSpan.FromHours(1));
+        return map;
     }
 
     public async Task<AttendeeTelemetry?> GetAsync(
@@ -119,6 +271,20 @@ public sealed class AttendeeTelemetryService
             .Where(s => s.EventId == ev && s.Key == SyncRun.AttendeeBackstageKey)
             .Select(s => (DateTimeOffset?)s.LastSuccessAt)
             .FirstOrDefaultAsync(ct);
+
+        // §1063 — the cadence the footer quotes: the operator's own interval for the sync job if he
+        // has set one, else the catalog's default. 🔒 Never a literal in the view.
+        // ⚠️ `MinIntervalMinutes` is 0 when untouched, which means "no limit, the cron decides" — NOT
+        // "every 0 minutes". Falling back to the catalog default is what makes the footer truthful on
+        // a system nobody has reconfigured.
+        var configured = await _db.JobRunStates
+            .Where(j => j.FunctionName == AttendeeSyncJobName)
+            .Select(j => (int?)j.MinIntervalMinutes)
+            .FirstOrDefaultAsync(ct);
+
+        var refreshMinutes = configured is > 0
+            ? configured
+            : JobCatalog.All.FirstOrDefault(j => j.FunctionName == AttendeeSyncJobName)?.DefaultIntervalMinutes;
 
         var all = await GetRawAsync(ev, lastSync, ct);
 
@@ -167,6 +333,14 @@ public sealed class AttendeeTelemetryService
                 || v.StartsWith("no", StringComparison.OrdinalIgnoreCase);
         });
 
+        // §1147 — only for the attendees that actually have no country. On a normal event this list
+        // is empty and no ERP call is made at all.
+        var countryless = segData
+            .Where(a => string.IsNullOrWhiteSpace(a.Country) && string.IsNullOrWhiteSpace(a.CountryCode))
+            .Select(a => a.TicketId)
+            .ToList();
+        var couponCountry = await CouponCountryByTicketAsync(ev, countryless, ct);
+
         return new AttendeeTelemetry(
             SegmentKey: seg.Key,
             SegmentLabel: seg.Label,
@@ -182,13 +356,39 @@ public sealed class AttendeeTelemetryService
             FirstTimerCount: firstTimers,
             FirstTimerPct: total > 0 ? (int)Math.Round(100.0 * firstTimers / total) : 0,
             Daily: BuildDaily(segData),
-            Tables: BuildTables(segData, isOrganizer),
+            Tables: BuildTables(segData, isOrganizer, couponCountry),
             GeneratedAtUtc: DateTimeOffset.UtcNow,
             FilterKey: activeFilterKey,
             FilterValue: activeFilterValue,
             FilterDimensions: dimensions,
-            LastSyncAtUtc: lastSync);
+            LastSyncAtUtc: lastSync,
+            RefreshEveryMinutes: refreshMinutes);
     }
+
+    /// <summary>
+    /// §1064 — the heading for the FREE-TEXT job title, which is NOT the curated "Job role" question.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>Two different cards carried the identical heading "Job role of attendees".</b>
+    /// Operator 2026-08-11, looking at one of them: <i>"where are these data coming from - i dont
+    /// recognize them … i bet it is the title"</i>. He was right.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>The curated question</b> — custom field <c>single_choice_2</c>, a fixed dropdown
+    /// (Modern Workplace Specialist · Security Specialist · Management …), headed "Job role of
+    /// attendees". ⚠️ §1217: this said <c>single_choice_1</c>, which actually holds the interest /
+    /// primary track (Security · Intune · Azure) — the labels were rotated.</item>
+    /// <item><b>This one</b> — Zoho's <c>contact.designation</c>, FREE TEXT the attendee types
+    /// themselves, which is why it reads CEO · IT-sikkerhedskonsulent · M365 consultant · Systems
+    /// Programmer, in two languages and no fixed vocabulary.</item>
+    /// </list>
+    ///
+    /// <para>🔑 <b>Nothing was wrong with the data — the label was claiming to be a different
+    /// question.</b> Same defect shape as §1052, where a caption made a correctly-gated table look
+    /// like a leak: the figures were right and the sentence above them was not. ⚠️ Two panels may
+    /// never share a heading; that is the thing to keep, not this particular wording.</para>
+    /// </remarks>
+    public const string JobTitleLabel = "Job title (typed by the attendee)";
 
     /// <summary>The value of a filterable dimension for one attendee (null = no value).</summary>
     private static string? DimensionValue(BackstageAttendee a, string key)
@@ -201,7 +401,8 @@ public sealed class AttendeeTelemetryService
             try
             {
                 var fields = JsonSerializer.Deserialize<Dictionary<string, string>>(a.CustomFieldsJson!);
-                if (fields is not null && fields.TryGetValue(key[3..], out var v)) return v;
+                if (fields is not null && fields.TryGetValue(key[3..], out var v))
+                    return MultiSelectAnswer.Collapse(v);   // §1062 — most-recent edition wins
             }
             catch { /* ignore malformed */ }
         }
@@ -239,7 +440,7 @@ public sealed class AttendeeTelemetryService
         // Friendly headers matching the old telemetry system.
         AddFixed("ticket", "Ticket type", a => a.TicketClassName);
         AddFixed("country", "Resident of Attendee", a => string.IsNullOrWhiteSpace(a.Country) ? a.CountryCode : a.Country);
-        AddFixed("role", "Job role of attendees", a => a.JobTitle);
+        AddFixed("role", JobTitleLabel, a => a.JobTitle);
 
         // Custom fields (single/multiple choice) become filters too.
         var byField = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
@@ -253,7 +454,11 @@ public sealed class AttendeeTelemetryService
             {
                 if (string.IsNullOrWhiteSpace(val)) continue;
                 if (!byField.TryGetValue(k, out var counts)) byField[k] = counts = new(StringComparer.OrdinalIgnoreCase);
-                counts[val.Trim()] = counts.TryGetValue(val.Trim(), out var n) ? n + 1 : 1;
+                // §1062 — a multi-select answer counts as ONE option (the most recent edition), so
+                // the filter dropdown offers real options rather than every ticked combination.
+                var one = MultiSelectAnswer.Collapse(val);
+                if (one.Length == 0) continue;
+                counts[one] = counts.TryGetValue(one, out var n) ? n + 1 : 1;
             }
         }
         foreach (var (field, counts) in byField)
@@ -374,7 +579,9 @@ public sealed class AttendeeTelemetryService
     /// CONSTRUCTED for a non-organizer caller (public / sponsor), so the sensitive table
     /// can't leak off-surface. The render-time gate in the panel partial stays too.
     /// </summary>
-    private static List<TelemetryTable> BuildTables(IReadOnlyList<BackstageAttendee> data, bool isOrganizer)
+    private static List<TelemetryTable> BuildTables(
+        IReadOnlyList<BackstageAttendee> data, bool isOrganizer,
+        IReadOnlyDictionary<string, string>? couponCountry = null)
     {
         static string Norm(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s.Trim();
         List<TelemetrySlice> Slices(Func<BackstageAttendee, string> sel, int top = 0, bool dropBlank = false)
@@ -387,9 +594,20 @@ public sealed class AttendeeTelemetryService
 
         var tables = new List<TelemetryTable> { new("Ticket type", Slices(a => Norm(a.TicketClassName))) };
         foreach (var t in CustomFieldTables(data)) tables.Add(t);
-        tables.Add(new("Resident of Attendee", Slices(a => Norm(a.Country ?? a.CountryCode))));
+
+        // 🔑 §1066 — ORDER IS LAYOUT. Operator 2026-08-11: *"reorder them so top companies (for
+        // organizers only) are shown next to the job titles, as they will be long in length. and then
+        // resident move down"*.
+        //
+        // The page renders these two-up, so a table's NEIGHBOUR is decided by its position in this
+        // list. Job title and Top companies are both free-text and both long (16 and 12 rows on a
+        // 31-attendee event); "Resident of Attendee" is usually ONE row. Pairing a 16-row card with a
+        // 1-row card leaves a column of whitespace as tall as the long one — which is exactly what he
+        // was looking at.
+        // ⇒ The two long ones sit together and the short one drops below, where being alone costs
+        // nothing.
         var roles = Slices(a => Norm(a.JobTitle), dropBlank: true);
-        if (roles.Count > 0) tables.Add(new("Job role of attendees", roles));
+        if (roles.Count > 0) tables.Add(new(JobTitleLabel, roles));
         // 🛑 §1052 — "Top companies" IS ORGANIZER-ONLY, AND THAT IS SETTLED. DO NOT REMOVE IT.
         //
         // Operator 2026-08-10, in one exchange: *"we cannot expose company names due to gdpr - this
@@ -415,6 +633,38 @@ public sealed class AttendeeTelemetryService
             var companies = Slices(a => Norm(a.CompanyName), top: 15, dropBlank: true);
             if (companies.Count > 0) tables.Add(new("Top companies", companies, OrganizerOnly: true));
         }
+
+        // §1066 — LAST, so the two long free-text cards above pair with each other. ⚠️ For a
+        // NON-organizer there is no Top companies card, so this pairs with Job title instead — still
+        // correct, because the page then has one long card rather than two.
+        // 🔑 §1147 — a blank COUNTRY says something specific, so it says it.
+        //
+        // Operator 2026-08-28, on an em-dash slice of 3: *"how can country be blank"*. Traced end to
+        // end: the country is inherited from the ORDER's billing address, and Backstage collects no
+        // billing address on a FREE order — there is nothing to invoice, so it never asks. Confirmed
+        // in the mirror (order 14880000004455013: total 0, discount 100%, every billing field null,
+        // 3 tickets) and in his own Backstage screenshot. Nothing was lost in our mapping; the data
+        // does not exist upstream.
+        //
+        // ⚠️ Labelled "Not given" and NOT "free/coupon order". Every blank measured today came from
+        // a coupon order, but that is an observation about this week's data, not a rule — a paid
+        // order with an incomplete address would land here too, and the label would then be a
+        // confident lie. The honest word is the one that survives the next case.
+        //
+        // 🔒 And deliberately NOT inferred from the purchaser's phone prefix or e-mail domain. Both
+        // would be right for this order (+45 / cbs.dk) and wrong the moment somebody abroad buys for
+        // a Danish attendee. A guess printed as data is worse than a blank, because it stops
+        // looking like a question.
+        //
+        // 🔒 The row is KEPT, never dropped: these are three real attendees, and a country breakdown
+        // that quietly sums to fewer people than the event has is the more expensive error.
+        // 🔒 The coupon customer's country is used ONLY when the attendee has none of their own,
+        // and only here — never written to the mirror (his decision, see the resolver's remarks).
+        string CountryOf(BackstageAttendee a) => ResolveCountryLabel(
+            a.Country ?? a.CountryCode,
+            couponCountry is not null && couponCountry.TryGetValue(a.TicketId, out var c) ? c : null);
+        tables.Add(new("Resident of Attendee", Slices(CountryOf)));
+
         return tables;
     }
 
@@ -431,7 +681,15 @@ public sealed class AttendeeTelemetryService
             {
                 if (string.IsNullOrWhiteSpace(v)) continue;
                 if (!byField.TryGetValue(k, out var counts)) byField[k] = counts = new(StringComparer.OrdinalIgnoreCase);
-                counts[v.Trim()] = counts.TryGetValue(v.Trim(), out var n) ? n + 1 : 1;
+                // 🔴 §1062 — ONE COUNT PER RESPONDENT, in the most recent edition they ticked.
+                // Operator 2026-08-11: *"if he ticked eldk26 and others like eldk25 or eldk24, then
+                // add count to eldk26 … if he ticked only eldk24, then add it to eldk24"*.
+                // 🔑 Counting every ticked option instead would make the panel's total exceed the
+                // attendee count and its percentages exceed 100% — arithmetically defensible, and an
+                // unreadable card with no obvious denominator.
+                var one = MultiSelectAnswer.Collapse(v);
+                if (one.Length == 0) continue;
+                counts[one] = counts.TryGetValue(one, out var n) ? n + 1 : 1;
             }
         }
         var tables = new List<(int Answered, TelemetryTable Table)>();
@@ -459,9 +717,16 @@ public sealed class AttendeeTelemetryService
     /// </summary>
     private static readonly Dictionary<string, string> FriendlyFieldLabels = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["single_choice"]   = "Attendee interest / primary track",
-        ["single_choice_1"] = "Job role of attendees",
-        ["single_choice_2"] = "Type of attendee",
+        // 🔴 §1217 — these three were ROTATED one step. Operator 2026-09-12, on the PROD page: *"these
+        // 3 are wrong … modern workplace specialist = job role of attendee. security, intune, azure,
+        // etc = attendee interest / primary track, type of attendee = internal it dept, microsoft
+        // partner, etc"*. Mapped by the ANSWERS each key actually holds in PROD, not by key order:
+        //   single_choice   → Internal IT department · Microsoft Partner · Vendor / Exhibitor / Sponsor
+        //   single_choice_1 → Security · Intune · Azure · Microsoft 365 …
+        //   single_choice_2 → Modern Workplace Specialist · Security Specialist · Management …
+        ["single_choice"]   = "Type of attendee",
+        ["single_choice_1"] = "Attendee interest / primary track",
+        ["single_choice_2"] = "Job role of attendees",
         // Swapped 2026-06-28: single_choice_3 actually holds the "how did you hear" answer
         // (e.g. "Word of mouth"), and multiple_choice holds the "first time?" answer — the
         // labels were on the wrong keys, so the two cards showed each other's data.

@@ -16,6 +16,47 @@ public enum TicketStatus
 }
 
 /// <summary>
+/// §1077 (operator 2026-08-11: "/Organizer/Attendees shows 1-day tickets as 'other'" and
+/// "prints the raw enum names") — the organizer-facing label for a <see cref="TicketStatus"/>.
+///
+/// The enum member is named <c>Other</c> because the SYNC only knows "an active ticket that is
+/// not the 2-day class" (<c>AttendeeTicketSyncService</c>); for this event that class IS the
+/// 1-day ticket, which is why the summary tile has counted <c>Other</c> under "1-day tickets"
+/// since §707.36. The tile and the table disagreed only in wording, and the developer spelling
+/// won in the two places a reader looks first.
+///
+/// 🔑 The label is presentation only — the enum name stays the route/filter value, so saved
+/// links and the <c>Ticket=</c> query key keep working.
+/// </summary>
+public static class TicketStatusDisplay
+{
+    /// <summary>Organizer-facing label: "2-day", "1-day", "No ticket".</summary>
+    public static string Label(this TicketStatus status) => status switch
+    {
+        TicketStatus.TwoDay => "2-day",
+        TicketStatus.Other  => "1-day",
+        _                   => "No ticket",
+    };
+
+    /// <summary>
+    /// §1077 — the same treatment for the column NEXT TO IT. <c>NotBooked</c> and
+    /// <c>MultipleBookings</c> are developer spellings that were being shown to organizers on the
+    /// very same rows as the ticket type; fixing one word and leaving its neighbour would have been
+    /// a half-finished sentence.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 "Double-booked" rather than "Multiple bookings": it is the word an organizer uses for the
+    /// problem, and the row exists because somebody has to fix it.
+    /// </remarks>
+    public static string Label(this MasterClassBookingStatus status) => status switch
+    {
+        MasterClassBookingStatus.Booked           => "Booked",
+        MasterClassBookingStatus.MultipleBookings => "Double-booked",
+        _                                         => "Not booked",
+    };
+}
+
+/// <summary>
 /// Whether the attendee has reserved a Master Class seat in Zoho Bookings.
 /// </summary>
 public enum MasterClassBookingStatus

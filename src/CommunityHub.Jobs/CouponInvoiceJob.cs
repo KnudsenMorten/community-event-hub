@@ -41,6 +41,10 @@ public sealed class CouponInvoiceJob
     private readonly FeatureGateService _gate;
     private readonly ILogger<CouponInvoiceJob> _log;
     private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+    private readonly CouponCustomerMonitorProvisioner? _monitors;
+    private readonly CouponUsageReportService? _usageReports;
+    private readonly Microsoft.Extensions.Configuration.IConfiguration? _config;
+    private readonly CommunityHub.Core.Integrations.TestModeOptions? _testMode;
 
     public CouponInvoiceJob(
         CommunityHubDbContext db,
@@ -53,8 +57,16 @@ public sealed class CouponInvoiceJob
         InvoiceProblemNotifier problems,
         FeatureGateService gate,
         ILogger<CouponInvoiceJob> log,
-        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null,
+        CouponCustomerMonitorProvisioner? monitors = null,
+        CouponUsageReportService? usageReports = null,
+        Microsoft.Extensions.Configuration.IConfiguration? config = null,
+        // 🔴 §1119 — the host's own answer to "can I create an invoice at all?".
+        CommunityHub.Core.Integrations.TestModeOptions? testMode = null)
     {
+        _testMode = testMode;
+        _usageReports = usageReports;
+        _config = config;
         _db = db;
         _invoicing = invoicing;
         _alerts = alerts;
@@ -66,6 +78,7 @@ public sealed class CouponInvoiceJob
         _gate = gate;
         _log = log;
         _activity = activity;
+        _monitors = monitors;
     }
 
     [Function("CouponInvoiceJob")]
@@ -112,6 +125,92 @@ public sealed class CouponInvoiceJob
         // the promo code working and the next claimant takes a ticket nobody paid for. A warning
         // held behind an invoicing switch would arrive after the money was already gone.
         await _lowBalance.AlertAsync(eventId.Value, ct);
+
+        // 🔴 §1093 — EVERY BILLING CUSTOMER GETS ITS MONITOR LINK, AND THIS RUNS BEFORE THE GATE TOO.
+        //
+        // Same reasoning as the three above: `coupon-erp-invoicing` governs whether CEH WRITES
+        // invoices to e-conomic. Giving a partner a read-only view of their own usage is not that,
+        // and it is most useful precisely while invoicing is still switched off — that is the window
+        // where nobody has any other way to see what a code is doing.
+        //
+        // 🔒 Idempotent and it never resurrects a revoked link, so running it every tick is free and
+        // cannot undo an organizer's decision.
+        //
+        // ⚠️ No customer-name resolver here on purpose: naming would mean an e-conomic call per new
+        // customer inside a 5-minute timer, and a monitor named "customer 1234" that EXISTS beats a
+        // prettier one that does not. The page can rename it.
+        if (_monitors is not null)
+        {
+            try
+            {
+                await _monitors.EnsureAsync(eventId.Value, nameFor: null, ct);
+            }
+            catch (Exception ex)
+            {
+                // Fail-soft: a missing link must never stop the invoicing sweep behind it.
+                _log.LogWarning(ex, "§1093: coupon-customer monitor provisioning threw.");
+            }
+        }
+
+        // §1094 — the partner's fortnightly status mail. Also before the gate: telling a customer
+        // what they have used is not writing an invoice, and it is most wanted precisely while
+        // invoicing is off. Its own 14-day stamp is the cadence; this tick just asks "anything due?".
+        if (_usageReports is not null)
+        {
+            try
+            {
+                // 🔑 The SAME base-URL resolution AttendeeBackstageSyncJob uses. A second convention
+                // for "what is our public address" is how one mail ends up linking to a host that
+                // does not answer — and this mail is nothing but a link.
+                var domain = _config?["Hub:CustomDomain"];
+                var baseUrl = string.IsNullOrWhiteSpace(domain)
+                    ? "https://eldk27.eventhub.expertslive.dk"
+                    : $"https://{domain}";
+
+                var sent = await _usageReports.SendDueAsync(eventId.Value, baseUrl, ct);
+                if (sent > 0)
+                    _log.LogInformation("§1094: sent {Count} partner usage report(s).", sent);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "§1094: partner usage reports threw.");
+            }
+        }
+
+        // 🔴 §1119 — A HOST THAT CANNOT CREATE AN INVOICE MUST NOT RUN THE SWEEP, AND MUST NOT MAIL.
+        //
+        // Operator 2026-08-21, having said it EIGHT TIMES: *"i still keep seeing this from dev env.
+        // as I told 8 times, no erp create of invoice from dev. this can only happend on prod"*.
+        //
+        // ⚠️ <b>My previous answer was true and useless.</b> I explained that TestMode swaps in
+        // `TestModeEconomicInvoiceClient` and dry run is on, so nothing reached e-conomic — which is
+        // correct, and is not what he asked for. He is not receiving an invoice; he is receiving a
+        // MAIL from DEV about production billing, every time the list changes, and that is the thing
+        // he told me to stop. Explaining the mechanism again is not a fix.
+        //
+        // 🔑 §1059 already settled the shape for exactly this, one job over: *"THIS JOB IS the
+        // ERP→webshop sync: every effect it has is a webshop write. If those are forbidden it has no
+        // work to do, so the honest thing is not to start."* The invoicing sweep is the same — its
+        // every effect is an e-conomic draft or a mail about one — and it deserved the same rule.
+        //
+        // 🔒 TestMode is the right signal, not a new setting: it is ALREADY what decides that this
+        // host gets `TestModeEconomicInvoiceClient` instead of the live one. A host that has been
+        // handed a fake invoice client has, by definition, no invoices to create and nothing to
+        // report about them.
+        //
+        // ⚠️ Deliberately AFTER the four pre-gate steps above. §795.2/§796/§1093/§1094 each argue at
+        // length that they are not invoicing — a prepaid chase, a low-balance warning, a read-only
+        // monitor link, a usage report — and their mails redirect to the operator in DEV anyway.
+        // This stops the invoicing, not the whole job.
+        if (_testMode?.Enabled == true)
+        {
+            _activity?.ReportInactive(
+                "TestMode is on, so this host cannot create e-conomic invoices — the coupon "
+                + "invoicing sweep does not run and reports nothing. Invoicing happens on PROD only.");
+            _log.LogInformation(
+                "§1119 CouponInvoiceJob: TestMode is on — invoicing sweep skipped, no problem mail.");
+            return;
+        }
 
         if (!await _gate.IsFeatureEnabledAsync(FeatureKey, eventId.Value, ct))
         {

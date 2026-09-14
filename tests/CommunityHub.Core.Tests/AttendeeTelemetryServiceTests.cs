@@ -282,6 +282,36 @@ public sealed class AttendeeTelemetryServiceTests
         Assert.Equal(0, t.Pct2DayAll);
     }
 
+    /// <summary>
+    /// §1217 — each heading sits over the answers it names. The three were rotated one step on PROD:
+    /// "Job role" showed Security/Intune/Azure, "Type of attendee" showed Modern Workplace Specialist,
+    /// and "Attendee interest" showed Internal IT department. Asserted by ANSWER, which is how he
+    /// reads the page.
+    /// </summary>
+    [Fact]
+    public async Task Custom_field_headings_sit_over_the_answers_they_name()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        var a = Att("q1", "q1@x.dk", "1-day Main Event");
+        a.CustomFieldsJson = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["single_choice"]   = "Internal IT department",
+            ["single_choice_1"] = "Intune",
+            ["single_choice_2"] = "Modern Workplace Specialist (Intune, AVD, W365, etc.)",
+        });
+        db.Attendees.Add(a);
+        await db.SaveChangesAsync();
+
+        var t = await NewService(db).GetAsync("all");
+
+        string TitleOver(string answer) =>
+            t!.Tables.Single(x => x.Slices.Any(s => s.Label == answer)).Title;
+        Assert.Equal("Type of attendee", TitleOver("Internal IT department"));
+        Assert.Equal("Attendee interest / primary track", TitleOver("Intune"));
+        Assert.Equal("Job role of attendees", TitleOver("Modern Workplace Specialist (Intune, AVD, W365, etc.)"));
+    }
+
     private static Attendee WithCustom(string ticketId, string email, string hear, string firstTime)
     {
         var a = Att(ticketId, email, "1-day Main Event");

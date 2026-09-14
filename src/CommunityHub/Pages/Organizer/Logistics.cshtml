@@ -18,12 +18,40 @@
     }
 </div>
 
+@* §1079 (operator 2026-08-11: *"reorder so boxes comes at the top and generated files below"*).
+   🔑 The hub tiles are the REASON people open this page — Hotels, Swag, Lunch, Group photos are
+   destinations somebody is navigating to. The generated-files table is a STATUS board: read when
+   something looks wrong, not on the way somewhere. Putting the status first meant scrolling past a
+   report to reach the thing you came for, every time. *@
+@if (!Model.AccessDenied)
+{
+    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+    {
+        new("/Organizer/Hotels", Localizer["Nav.OrgHotels"].Value, Localizer["OrgLogistics.Hotels"].Value),
+        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.Hotels"].Value, "hotel-assignment"),
+        new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.Hotels"].Value),
+        new("/Organizer/Swag", Localizer["Nav.OrgSwag"].Value, Localizer["OrgLogistics.Swag"].Value),
+        new("/Organizer/TravelReimbursements", Localizer["Nav.OrgTravel"].Value, Localizer["OrgLogistics.Travel"].Value, "travel-reimbursement-email"),
+        new("/Organizer/Lunch", Localizer["Nav.OrgLunch"].Value, Localizer["OrgLogistics.Lunch"].Value),
+        new("/Organizer/GroupPhotos", Localizer["Nav.OrgGroupPhotos"].Value, Localizer["OrgLogistics.GroupPhotos"].Value, "group-photo-invites"),
+        new("/Organizer/SpeakerReview", "Speaker & order review", "After a Sessionize import: classify each speaker (funding, days, same-person dedup, per-item overrides) and verify the deduped 'what to order' counts."),
+        new("/Organizer/Schedule", Localizer["Nav.OrgSchedule"].Value, "The event schedule (move-in, setup, pre-day, party, dinner, main day, …) — role-tagged, shown on each participant's Key dates panel and synced to their calendar."),
+        new("/Organizer/SessionEvalsQr", "Session-evaluation QR codes", "Upload / replace the per-room QR codes attendees scan to rate sessions. Speakers download their session's room QR from their Session Evaluation page."),
+        new("/Organizer/PartyRsvps", "Party RSVPs & headcount", "Anonymous Party sign-ups from the public /Party form — the attending headcount for the Bella Center food order, plus a CSV export."),
+        new("/Organizer/Exports", Localizer["Nav.OrgExports"].Value, Localizer["OrgArea.Exports"].Value),
+        new("/Organizer/DataFreshness", Localizer["Fresh.Title"].Value, Localizer["Fresh.Intro"].Value),
+        new("/Organizer/SyncHealth", Localizer["Sh.Title"].Value, Localizer["Sh.Intro"].Value),
+    };
+    <partial name="_HubGrid" model="@tiles" />
+}
+
 @* ============================================================================
    §6.3 — THE GENERATED §3.5 FILES.
    The work order: "The page exists but links elsewhere. Repoint it to the §3.5
    generated files" — per artifact a filename, a link, a last-generated stamp and
    a headline figure, a per-artifact "Generate now", and the last automatic run's
    status and any error.
+   ⚠️ §1079 — moved BELOW the tiles. Nothing about the card changed; only where it sits.
    ============================================================================ *@
 @if (!Model.AccessDenied && Model.Files is not null)
 {
@@ -88,8 +116,24 @@
         }
         else
         {
+            @* §1069 — BREATHING ROOM. Operator 2026-08-11: *"make the columns wider (more spacing) -
+               it is very cramped"*.
+               🔑 The cramping was not the column WIDTHS, it was two things touching: "Last generated"
+               ran straight into "Last mailed", and the recipient address under a mail date had no gap
+               of its own, so a date and an e-mail read as one run-on string. Padding fixes what
+               widths could not — the columns were already wide enough for their content, they simply
+               had no space between them.
+               ⚠️ `white-space:nowrap` on the two date columns so a timestamp never wraps mid-value,
+               which is what made the pair look interleaved. The wrapper already scrolls on a narrow
+               screen, so nowrap costs nothing on mobile. *@
+            <style>
+                .logi-grid td, .logi-grid th { padding: 10px 18px; vertical-align: top; }
+                .logi-grid th { white-space: nowrap; }
+                .logi-grid td.logi-when { white-space: nowrap; }
+                .logi-grid .logi-sub { display: block; margin-top: 4px; font-size: 12px; color: #6b7280; }
+            </style>
             <div style="overflow-x:auto;">
-                <table class="grid">
+                <table class="grid logi-grid">
                     <thead>
                         <tr>
                             <th scope="col">File</th>
@@ -114,17 +158,15 @@
                                     {
                                         <span>@a.FileName</span>
                                     }
-                                    <br />
-                                    <span style="font-size:12px;color:#6b7280;">@a.Folder</span>
+                                    <span class="logi-sub">@a.Folder</span>
                                 </td>
                                 <td>@(a.Headline ?? "—")</td>
-                                <td>@a.PublishedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
-                                <td>
+                                <td class="logi-when">@a.PublishedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td class="logi-when">
                                     @if (a.LastMailedAt is { } mailedAt)
                                     {
                                         @mailedAt.UtcDateTime.ToString("yyyy-MM-dd")
-                                        <br />
-                                        <span style="font-size:12px;color:#6b7280;">@a.LastMailedTo</span>
+                                        <span class="logi-sub">@a.LastMailedTo</span>
                                     }
                                     else
                                     {
@@ -169,26 +211,4 @@
             </form>
         </div>
     </div>
-}
-
-@if (!Model.AccessDenied)
-{
-    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
-    {
-        new("/Organizer/Hotels", Localizer["Nav.OrgHotels"].Value, Localizer["OrgLogistics.Hotels"].Value),
-        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.Hotels"].Value, "hotel-assignment"),
-        new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.Hotels"].Value),
-        new("/Organizer/Swag", Localizer["Nav.OrgSwag"].Value, Localizer["OrgLogistics.Swag"].Value),
-        new("/Organizer/TravelReimbursements", Localizer["Nav.OrgTravel"].Value, Localizer["OrgLogistics.Travel"].Value, "travel-reimbursement-email"),
-        new("/Organizer/Lunch", Localizer["Nav.OrgLunch"].Value, Localizer["OrgLogistics.Lunch"].Value),
-        new("/Organizer/GroupPhotos", Localizer["Nav.OrgGroupPhotos"].Value, Localizer["OrgLogistics.GroupPhotos"].Value, "group-photo-invites"),
-        new("/Organizer/SpeakerReview", "Speaker & order review", "After a Sessionize import: classify each speaker (funding, days, same-person dedup, per-item overrides) and verify the deduped 'what to order' counts."),
-        new("/Organizer/Schedule", Localizer["Nav.OrgSchedule"].Value, "The event schedule (move-in, setup, pre-day, party, dinner, main day, …) — role-tagged, shown on each participant's Key dates panel and synced to their calendar."),
-        new("/Organizer/SessionEvalsQr", "Session-evaluation QR codes", "Upload / replace the per-room QR codes attendees scan to rate sessions. Speakers download their session's room QR from their Session Evaluation page."),
-        new("/Organizer/PartyRsvps", "Party RSVPs & headcount", "Anonymous Party sign-ups from the public /Party form — the attending headcount for the Bella Center food order, plus a CSV export."),
-        new("/Organizer/Exports", Localizer["Nav.OrgExports"].Value, Localizer["OrgArea.Exports"].Value),
-        new("/Organizer/DataFreshness", Localizer["Fresh.Title"].Value, Localizer["Fresh.Intro"].Value),
-        new("/Organizer/SyncHealth", Localizer["Sh.Title"].Value, Localizer["Sh.Intro"].Value),
-    };
-    <partial name="_HubGrid" model="@tiles" />
 }

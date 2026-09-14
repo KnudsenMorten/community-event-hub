@@ -64,6 +64,8 @@ public sealed class SpeakerBioBackstageSyncService
     // (the operator must publish/delete manually in Backstage). Optional so tests/legacy
     // constructions keep compiling; null ⇒ no notification.
     private readonly ZohoChangeNotifier? _zohoChanges;
+    private readonly EmailOptions? _emailOptions;
+    private readonly IEmailContextAccessor? _emailContext;
 
     public SpeakerBioBackstageSyncService(
         CommunityHubDbContext db,
@@ -72,7 +74,11 @@ public sealed class SpeakerBioBackstageSyncService
         IEmailSender email,
         FeatureGateService gate,
         RingResolver rings,
-        ZohoChangeNotifier? zohoChanges = null)
+        ZohoChangeNotifier? zohoChanges = null,
+        // §1124 — the shared speaker/session audience.
+        IOptions<EmailOptions>? emailOptions = null,
+        // 🔴 §1124 — needed to mark the manual-update alert RING-EXEMPT. See AlertManualUpdateAsync.
+        IEmailContextAccessor? emailContext = null)
     {
         _db = db;
         _backstage = backstage;
@@ -81,6 +87,8 @@ public sealed class SpeakerBioBackstageSyncService
         _gate = gate;
         _rings = rings;
         _zohoChanges = zohoChanges;
+        _emailOptions = emailOptions?.Value;
+        _emailContext = emailContext;
     }
 
     public bool IsEnabled => _options.Enabled;
@@ -231,7 +239,20 @@ public sealed class SpeakerBioBackstageSyncService
                 + "details in the hub, but Zoho Backstage's speakers API is <strong>create-only</strong> — it has no "
                 + "update endpoint, so the change could not be synced automatically.</p>"
                 + "<p>Please update this speaker manually in the Backstage UI so the two stay in sync.</p>";
-            await _email.SendAsync(AlertEmail, $"Speaker needs a manual Backstage update — {participant.FullName} [ELDK27]", html, ct);
+
+            // 🔴 §1124 — RING-EXEMPT, and this is a FIX, not a formality.
+            //
+            // ⚠️ This send had NO EmailContext at all, so the per-recipient ring gate
+            // (`BrevoEmailSender.ShouldRingDropAsync`) fails closed on `info@` — an ORGANIZER
+            // mailbox, not a participant row — and drops it. That is the identical trap measured in
+            // PROD for the §1060 SoMe notice, where all 19 mails vanished with a healthy-looking log
+            // and an empty inbox. A mail to an ops mailbox must SAY it is ops mail.
+            using var _ = _emailContext?.Set(new EmailContext("speaker-manual-backstage", RingExempt: true));
+
+            // §1124 — the shared speaker/session audience: this is textbook pending speaker work.
+            var to = _emailOptions?.SpeakerSessionRecipients() ?? new[] { AlertEmail };
+            await _email.SendToManyAsync(
+                to, $"Speaker needs a manual Backstage update — {participant.FullName} [ELDK27]", html, ct);
         }
         catch { /* alert is best-effort; the sync result already records the blocked state */ }
     }

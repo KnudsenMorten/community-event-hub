@@ -60,6 +60,22 @@ public sealed class FormTaskReconciler
         // party RSVP. No-op when the task doesn't exist (not a 2-day attendee).
         await ReconcileMasterClassAsync(eventId, participantId, ct);
 
+        // 🔴 §1082 — A SYSTEM-CLOSED TASK IS NEVER REOPENED BY A DATA SIGNAL.
+        //
+        // The three two-way syncs below reopen a Done task when its underlying data is absent
+        // ("they un-answered ⇒ nag again"). That is right for work a PERSON completed, and wrong for
+        // a row the SYSTEM closed: a task retired from the catalog, or abandoned when its assignee
+        // was deactivated, has no data by definition — so the reconciler would resurrect it on the
+        // very next page load.
+        //
+        // ⚠️ Caught by RoleChange_volunteer_to_speaker_prunes_availability_but_keeps_party_task the
+        // moment prunes started retiring instead of deleting: the reconciler retired `availability:`,
+        // and this method reopened it a few lines later. A "retirement" that undoes itself is worse
+        // than none — it is the §1081 shape (the onboarding reset key) all over again.
+        //
+        // 🔑 The guard is `ClosedReason == null`, i.e. "a person did this", which is exactly what that
+        // column means (it labels only the closures the hub made on someone's behalf).
+
         // --- §173e Wizard-step tasks — the OTHER two-way signals --------------
         // Calendar email / Speaker details / Profile / Code-of-Conduct each gained a
         // task (WizardStepTaskSeeder) so My-Tasks mirrors the Get-Started journey. Like
@@ -235,7 +251,7 @@ public sealed class FormTaskReconciler
             task.CompletedAt ??= _clock.GetUtcNow();
             changed = true;
         }
-        else if (!answered && task.State == TaskState.Done)
+        else if (!answered && task.State == TaskState.Done && task.ClosedReason == null)
         {
             task.State = TaskState.Open;
             task.CompletedAt = null;
@@ -307,7 +323,7 @@ public sealed class FormTaskReconciler
             task.CompletedAt ??= _clock.GetUtcNow();
             changed = true;
         }
-        else if (!selected && task.State == TaskState.Done)
+        else if (!selected && task.State == TaskState.Done && task.ClosedReason == null)
         {
             task.State = TaskState.Open;
             task.CompletedAt = null;
@@ -399,7 +415,7 @@ public sealed class FormTaskReconciler
                 task.CompletedAt ??= now;
                 changed = true;
             }
-            else if (!answered && task.State == TaskState.Done)
+            else if (!answered && task.State == TaskState.Done && task.ClosedReason == null)
             {
                 task.State = TaskState.Open;
                 task.CompletedAt = null;

@@ -37,19 +37,34 @@ public static class CouponInvoiceLineComposer
     /// are fields about one ticket, not separate sections, and the retired script rendered them the
     /// same way.
     /// </summary>
-    public static string ComposeTicketDescription(CouponClaim claim, string? conversionNote)
+    public static string ComposeTicketDescription(
+        CouponClaim claim, string? conversionNote, string? shareNote = null)
     {
         var attendee = $"{claim.FirstName} {claim.LastName}".Trim();
 
-        var parts = new List<string>
+        var parts = new List<string>();
+
+        // §1116 — see ComposePrepaidDescription: a class id is not a ticket class, and this line is
+        // read by the customer being billed. Dropped rather than printed as a number; the attendee
+        // and the coupon below already say what was bought and under which agreement.
+        if (!IsMachineId(claim.TicketClassName)) parts.Add($"Ticket Class: {claim.TicketClassName}");
+
+        parts.Add($"Attendee: {attendee}");
+        parts.Add($"Email: {claim.Email}");
+        parts.Add($"Coupon: {claim.CouponName}");
+        // ⚠️ The Zoho ids STAY: they are the reconciliation handle a finance person matches against
+        // Backstage when a line is queried, and they are labelled as system ids rather than offered
+        // as the name of anything.
+        parts.Add($"Zoho OrderId: {claim.OrderId}");
+        parts.Add($"Zoho TicketId: {claim.TicketId}");
+
+        // §1091 — say WHY this is not the ticket price, before the currency note. A partner reading
+        // "1,500.00" against a 3,000 ticket writes an e-mail; "50% of 3,000.00 (agreed price)" does
+        // not. Absent at a plain 100% of the ticket price, where there is nothing to explain.
+        if (!string.IsNullOrEmpty(shareNote))
         {
-            $"Ticket Class: {claim.TicketClassName}",
-            $"Attendee: {attendee}",
-            $"Email: {claim.Email}",
-            $"Coupon: {claim.CouponName}",
-            $"Zoho OrderId: {claim.OrderId}",
-            $"Zoho TicketId: {claim.TicketId}",
-        };
+            parts.Add(shareNote);
+        }
 
         if (!string.IsNullOrEmpty(conversionNote))
         {
@@ -64,10 +79,20 @@ public static class CouponInvoiceLineComposer
     /// <paramref name="convert"/> maps a DKK unit price into the invoice currency and returns the
     /// note to print (null when the customer already invoices in DKK).
     /// </summary>
+    /// <param name="agreedUnitPriceDkk">
+    /// §1091 — the coupon's agreed price per ticket, or null to bill what the ticket actually cost.
+    /// Operator 2026-08-19: *"prio 1: custom (agreed) price and prio 2 if prio 1 is not filled out:
+    /// use zoho price"*.
+    /// </param>
+    /// <param name="invoicedSharePercent">
+    /// §1091 — the percentage of that price the LINKED COMPANY is invoiced, or null for 100.
+    /// </param>
     public static IReadOnlyList<ComposedInvoiceLine> Compose(
         IEnumerable<CouponClaim> claims,
         int vatZoneNumber,
-        Func<decimal, (decimal Converted, string? Note)> convert)
+        Func<decimal, (decimal Converted, string? Note)> convert,
+        decimal? agreedUnitPriceDkk = null,
+        int? invoicedSharePercent = null)
     {
         ArgumentNullException.ThrowIfNull(claims);
         ArgumentNullException.ThrowIfNull(convert);
@@ -82,11 +107,20 @@ public static class CouponInvoiceLineComposer
         foreach (var claim in claims)
         {
             lineNumber++;
-            var (converted, note) = convert(claim.UnitPriceDkk);
+
+            // 🔑 §1091 — the share is taken in DKK, BEFORE conversion. The agreed price is agreed in
+            // DKK, so a percentage of an already-converted figure would fold the FX rounding into
+            // the share. Convert what the partner owes, never the other way round.
+            var billableDkk = CouponBillableShare.Dkk(
+                claim.UnitPriceDkk, agreedUnitPriceDkk, invoicedSharePercent);
+            var shareNote = CouponBillableShare.ComposeShareNote(
+                claim.UnitPriceDkk, agreedUnitPriceDkk, invoicedSharePercent);
+
+            var (converted, note) = convert(billableDkk);
 
             lines.Add(new ComposedInvoiceLine(
                 lineNumber,
-                ComposeTicketDescription(claim, note),
+                ComposeTicketDescription(claim, note, shareNote),
                 Quantity: 1m,
                 // 2 decimals, as the retired script did — NOT the webshop's Ceiling.
                 UnitNetPrice: Math.Round(converted, 2, MidpointRounding.AwayFromZero),
@@ -180,12 +214,31 @@ public static class CouponInvoiceLineComposer
         var parts = new List<string>
         {
             string.Create(CultureInfo.InvariantCulture, $"Prepaid tickets: {quantity}"),
-            $"Ticket Class: {ticketClassLabel}",
-            $"Coupon: {couponName}",
         };
+
+        // 🔴 §1116 — NEVER PRINT A MACHINE ID ON A CUSTOMER'S INVOICE. Operator 2026-08-21:
+        // *"stop using numbers like this - people dont understand a ticket class number - use the
+        // displayname"* — after a real Arrow invoice printed
+        // `Ticket Class: 14880000003485482`.
+        //
+        // 🔑 Enforced HERE, at the last place before the customer reads it, rather than by fixing
+        // the caller. Every caller resolves this label with a fallback chain that ENDS IN THE ID
+        // (§1013b), so a class nobody has claimed yet, or a pool created before its class had a
+        // name, produces the id — and then a page shows it harmlessly while an invoice shows it to
+        // a paying customer. Two callers today; a guard in one of them is a guard in neither.
+        //
+        // 🔒 A line is DROPPED, never faked. The coupon name below already identifies the agreement,
+        // so an invoice without this line is complete and readable; an invoice with an 17-digit
+        // number in it is neither.
+        if (!IsMachineId(ticketClassLabel)) parts.Add($"Ticket Class: {ticketClassLabel}");
+
+        parts.Add($"Coupon: {couponName}");
 
         if (!string.IsNullOrEmpty(conversionNote)) parts.Add(conversionNote);
 
         return string.Join(WebshopInvoiceLineComposer.NewLine, parts);
     }
+
+    /// <summary>§1116 — see <see cref="HumanLabel.IsMachineId"/>, which every renderer shares.</summary>
+    private static bool IsMachineId(string? value) => HumanLabel.IsMachineId(value);
 }

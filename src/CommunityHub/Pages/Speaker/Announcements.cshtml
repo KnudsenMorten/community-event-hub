@@ -21,6 +21,11 @@
         see <a asp-page="/Speaker/Graphics">your speaker graphics</a>.
     </p>
 
+    @* §1060(e)/(f) — shown ABOVE the list, and to everyone including a speaker with no posts yet:
+       following is what makes tagging possible LATER, so the invitation is most useful before there
+       is anything to tag. *@
+    <partial name="_LinkedInFollowCard" model="Model.LinkedInStatus" />
+
     @if (Model.AccessDenied)
     {
         <p class="error">This page is for speakers.</p>

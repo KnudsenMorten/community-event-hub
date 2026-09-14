@@ -9,6 +9,12 @@
         // §187 (operator 2026-06-29): the "Find a person" card is removed — the nav item
         // was already dropped (§167) and the Participants grid's own search covers it.
         new HubTile("/Organizer/Participants", Localizer["Nav.OrgParticipants"].Value, Localizer["OrgPeople.Participants"].Value),
+        @* §1085 — FIRST after the participants grid, because it answers the question that used to
+           need seven pages: "who still owes me something?" for every role at once. The operator on
+           the two sponsor boards he could not trust: "in general we should consider one page for all
+           roles with filter … instead of having 7 individual page … it makes no sense". *@
+        new HubTile("/Organizer/ParticipantStatus", "Participant status",
+            "One board for every role: Get Started completion, what each person still has open, and overdue tasks. Filter by role and status; sponsors are listed per company."),
         // 🔒 §707.39 (operator 2026-07-30: "move the attendees next to the particpants") — these two
         // are the pair that has to be read TOGETHER: Participants = people who can sign in;
         // Attendees = everyone holding a ticket, including the 1-day holders who deliberately have
@@ -31,6 +37,11 @@
            A page nobody can find is worth what a page that does not exist is worth. *@
         new HubTile("/Organizer/AttendeeMonitors", "Volume package monitors",
             "Share a live list of who has bought a ticket — by e-mail domain or coupon code — with the company that bought the block. A secure link, no login, revocable, with an Excel export."),
+        @* §1077 — beside the monitors on purpose: both are "the company that bought a block", one
+           shares the list outward and this one decides whether the block earns the benefits. Two
+           clicks apart would be two features nobody connects. *@
+        new HubTile("/Organizer/VolumePackage", "Volume package benefits",
+            "Who has 10 or more attendees — counted across orders, coupons and e-mail domains, with each person counted once — and therefore earns the keynote mention, the announcement and the group photo."),
         // §501 (operator 2026-07-28: "i cannot find the 2 buttons… move them under People category,
         // as it make sense to have them there"). Both manage PEOPLE — sponsor contacts and their
         // roles — but sat on the Sponsor Admin hub, filed by which COMPANY they belong to rather

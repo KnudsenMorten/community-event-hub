@@ -293,6 +293,33 @@
             </p>
         }
 
+        @* §1218 — the override for a master class / panel that really has ONE speaker. Offered only
+           when the gate says the rule applies (exactly one linked speaker), and reversible. *@
+        @if (Model.SingleSpeaker is { } solo && post.Status != CommunityHub.Core.Domain.SoMePostStatus.Published)
+        {
+            var soloFormat = solo.Type == CommunityHub.Core.Domain.SessionType.MasterClass ? "master class" : "panel discussion";
+            <div class="post-actions">
+            <form method="post" asp-page-handler="ConfirmSingleSpeaker">
+                <input type="hidden" name="id" value="@post.Id" />
+                @if (solo.Confirmed)
+                {
+                    <input type="hidden" name="confirm" value="false" />
+                    <span class="hdr-tag" title="An organizer confirmed this @soloFormat has one speaker.">✔ one speaker confirmed</span>
+                    <button type="submit" class="btn">Undo one-speaker override</button>
+                }
+                else
+                {
+                    <input type="hidden" name="confirm" value="true" />
+                    <button type="submit" class="btn primary">Override: this @soloFormat has only one speaker</button>
+                    <span class="muted">
+                        Lifts the co-presented block for “@solo.Title”. It does not approve the post —
+                        other checks still apply.
+                    </span>
+                }
+            </form>
+            </div>
+        }
+
         @* §1048 — the three actions share ONE spacing rule (.post-actions), instead of each form
            carrying its own margin-top and one of them silently losing it to display:inline. *@
         <div class="post-actions">
@@ -596,6 +623,74 @@
             <label for="when">Posting date &amp; time (Danish time)</label>
             <input id="when" name="ScheduledAt" type="datetime-local"
                    value="@(Model.ScheduledAt?.ToString("yyyy-MM-ddTHH:mm"))" />
+
+            @* 🔴 §1182 — WHAT ELSE IS ON THAT DAY. Operator 2026-09-12: *"when i reschedule
+               something, it would be great to see in the date picker if other things have been
+               planned for a date, so i dont overlap"*.
+
+               ⚠️ The native picker is browser chrome and cannot be annotated — there is no API to
+               paint a count onto a day cell. So the answer is rendered BESIDE the field and updates
+               as he picks, which is the same information in the only place the platform allows.
+
+               🔒 Data comes from the rows the page already loaded (no query), as JSON in a
+               non-executable script tag rather than interpolated into JS — a subject label is
+               operator-entered text and must never be able to close a string literal. *@
+            <script type="application/json" id="dayload">
+                @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.DayLoad))
+            </script>
+            <div id="dayinfo" class="muted" role="status" aria-live="polite"
+                 style="margin:6px 0 2px;font-size:13.5px;line-height:1.5;"></div>
+            <script>
+                (function () {
+                    var when = document.getElementById('when');
+                    var out = document.getElementById('dayinfo');
+                    if (!when || !out) return;
+                    var load = {};
+                    try { load = JSON.parse(document.getElementById('dayload').textContent) || {}; }
+                    catch (e) { return; }   // no panel beats a broken page
+                    var cap = @Model.MaxPostsPerDay;
+
+                    function render() {
+                        var v = when.value || '';
+                        var day = v.slice(0, 10);
+                        if (!day) { out.textContent = ''; return; }
+                        var posts = load[day] || [];
+                        out.innerHTML = '';
+
+                        var head = document.createElement('div');
+                        if (posts.length === 0) {
+                            head.textContent = 'Nothing else is scheduled that day.';
+                        } else {
+                            head.textContent = posts.length === 1
+                                ? '1 other post that day'
+                                : posts.length + ' other posts that day';
+                            // The ceiling is the everyday rhythm (§843.3), not a hard stop — so this
+                            // says the day is full, it does not refuse the date.
+                            if (posts.length >= cap) {
+                                head.textContent += ' — at your ' + cap + '-a-day limit';
+                                head.style.color = '#92400e';
+                                head.style.fontWeight = '600';
+                            }
+                        }
+                        out.appendChild(head);
+
+                        if (posts.length) {
+                            var ul = document.createElement('ul');
+                            ul.style.margin = '4px 0 0 18px';
+                            posts.forEach(function (p) {
+                                var li = document.createElement('li');
+                                li.textContent = p;   // textContent, never innerHTML
+                                ul.appendChild(li);
+                            });
+                            out.appendChild(ul);
+                        }
+                    }
+
+                    when.addEventListener('input', render);
+                    when.addEventListener('change', render);
+                    render();   // and at rest, so the current date is described without touching it
+                })();
+            </script>
 
             @* 🔒 §887 — SAVE SITS WITH THE DATE, for the same reason §863.4 put one beside the text.
                This field is ~170 lines below the "Save post text" button and shares its form, so a

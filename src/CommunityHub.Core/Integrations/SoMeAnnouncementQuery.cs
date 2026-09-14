@@ -138,7 +138,36 @@ public sealed class SoMeAnnouncementQuery
         int eventId, bool approvedOnly = false, CancellationToken ct = default)
     {
         var posts = await BaseQuery(eventId, approvedOnly).ToListAsync(ct);
-        return Project(posts);
+        return Project(posts, await GraphicsAsync(eventId, ct));
+    }
+
+    /// <summary>
+    /// 🔴 §1206 — the edition calendar, with the reason a HELD post is not ready.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"show then as not ready, like some graphics missing"</i>.</para>
+    ///
+    /// <para>⚠️ <b>"held — not approved" described two different situations with one badge.</b> A post
+    /// nobody has got to yet and a post nobody CAN approve read identically on the calendar, which is
+    /// §335 exactly: the symptom of the second is that nothing happens.</para>
+    ///
+    /// <para>🔒 <b>Separate from <see cref="ForEventAsync"/> rather than a flag on it.</b> The gate is
+    /// a query per post, so the cost is opt-in and every existing caller keeps the cheap path —
+    /// including the sponsor and speaker lists, which already have their own blocker projection.
+    /// Only HELD posts are asked about (<see cref="SoMeReadiness"/>), which is a few dozen rows.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<SoMeAnnouncement>> ForEventWithReadinessAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var posts = await BaseQuery(eventId, approvedOnly: false).ToListAsync(ct);
+        var projected = Project(posts, await GraphicsAsync(eventId, ct));
+
+        var reasons = await new SoMeReadiness(_db).HeldReasonsAsync(posts, ct);
+        if (reasons.Count == 0) return projected;
+
+        return projected
+            .Select(a => reasons.TryGetValue(a.PostId, out var why) ? a with { Blocker = why } : a)
+            .ToList();
     }
 
     /// <summary>§836 — the announcements for ONE session, by the planner's <c>session:{id}</c> key.</summary>
@@ -149,8 +178,19 @@ public sealed class SoMeAnnouncementQuery
         var posts = await BaseQuery(eventId, approvedOnly)
             .Where(p => p.SubjectKey == key)
             .ToListAsync(ct);
-        return Project(posts);
+        return Project(posts, await GraphicsAsync(eventId, ct));
     }
+
+    /// <summary>
+    /// §1178 — the subject-graphic map for this edition, resolved ONCE per call.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Every announcement this class hands out must report the picture that will PUBLISH, not the
+    /// one stamped when the post was planned — see <see cref="SoMeSubjectGraphic.Effective"/>. One
+    /// lookup for the whole list, never one per row.
+    /// </remarks>
+    private Task<Dictionary<string, string>> GraphicsAsync(int eventId, CancellationToken ct) =>
+        new SoMeSubjectGraphic(_db).FileNamesAsync(eventId, ct);
 
     /// <summary>
     /// §836 — announcement dates for MANY sessions at once, so the sessions grid is one query rather
@@ -171,7 +211,7 @@ public sealed class SoMeAnnouncementQuery
             .Where(p => p.SubjectKey != null && keys.Contains(p.SubjectKey))
             .ToListAsync(ct);
 
-        return Project(posts)
+        return Project(posts, await GraphicsAsync(eventId, ct))
             .GroupBy(a => int.Parse(a.SubjectKey![SessionPrefix.Length..]))
             .ToDictionary(g => g.Key, g => (IReadOnlyList<SoMeAnnouncement>)g.ToList());
     }
@@ -224,7 +264,12 @@ public sealed class SoMeAnnouncementQuery
         // resolving empty. So a post the sponsor has not fed yet is not shown to them as though it
         // were ready — which is the promise-you-then-edit problem §834.1 was about, in its second
         // form.
-        var posts = await BaseQuery(eventId, approvedOnly: true)
+        // 🔴 §1060(d) — PLANNED **AND** SCHEDULED, ELIGIBLE ONLY (operator 2026-08-11). The
+        // `approvedOnly: true` above was §1028's, and its reason has expired the same way §916's did:
+        // it existed because nothing was auto-approved, and §1060 now auto-approves everything
+        // eligible. The eligible filter below is unchanged and is what keeps this safe — a sponsor
+        // still never sees a post that is waiting on something they owe.
+        var posts = await BaseQuery(eventId, approvedOnly: false)
             .Where(p => p.SubjectKey != null
                         && (p.SubjectKey == sponsorKey
                             || (tierKey != null && p.SubjectKey == tierKey)
@@ -265,12 +310,28 @@ public sealed class SoMeAnnouncementQuery
         //
         // 🔒 The state badge is what makes this safe now: a "planned" post SAYS it is planned, and
         // the blocker line says what it is still waiting for.
+        // 🔴 §1060(d) — PLANNED **AND** SCHEDULED, BUT ELIGIBLE ONLY. Operator 2026-08-11:
+        // *"i chg my mind so the page for some announcements managed by eldk must show also both
+        // planned and scheduled, but only when eligible as mentioned and then they receive an
+        // email"*.
+        //
+        // 🔑 §916's half (show planned) is kept; what changes is that a BLOCKED post is no longer
+        // shown with an explanation — it is not shown at all. That is the durable half of this
+        // line's three previous reversals (§834.1 approved-only → §916 planned too → §1028
+        // approved-only → here): **eligible-only** is what survived every one of them.
+        //
+        // ⚠️ The trade is deliberate and worth knowing: a speaker no longer sees "we are waiting for
+        // your abstract" here. That chase belongs to the Get-Started tasks and the deadline mails,
+        // which are built for it — this page now answers one question only, "what is ELDK saying
+        // about me", and every row on it is real.
         var posts = await BaseQuery(eventId, approvedOnly: false)
             .Where(p => p.SubjectKey != null
                         && (sessionKeys.Contains(p.SubjectKey) || trackKeys.Contains(p.SubjectKey)))
             .ToListAsync(ct);
 
-        var all = await ProjectWithBlockersAsync(posts, ct);
+        var all = (await ProjectWithBlockersAsync(posts, ct))
+            .Where(a => a.Blocker is null)
+            .ToList();
 
         return new SpeakerAnnouncements(
             Sessions: all.Where(a => a.SubjectKey != null && sessionKeys.Contains(a.SubjectKey)).ToList(),
@@ -430,6 +491,11 @@ public sealed class SoMeAnnouncementQuery
         var composer = new SoMePostComposer(_db, new SoMeVariableResolver(_db));
         var result = new List<SoMeAnnouncement>(posts.Count);
 
+        // §1178 — one graphic lookup for the whole list. An empty list has no edition to ask about.
+        var graphics = posts.Count > 0
+            ? await GraphicsAsync(posts[0].EventId, ct)
+            : new Dictionary<string, string>();
+
         foreach (var p in posts)
         {
             // A post already approved or published has nothing left to wait for — asking the gate
@@ -451,13 +517,14 @@ public sealed class SoMeAnnouncementQuery
                 resolved = p.EffectiveText;
             }
 
-            result.Add(Project([p])[0] with { Blocker = blocker, PreviewText = resolved });
+            result.Add(Project([p], graphics)[0] with { Blocker = blocker, PreviewText = resolved });
         }
 
         return result;
     }
 
-    private static IReadOnlyList<SoMeAnnouncement> Project(IReadOnlyList<SoMePost> posts) =>
+    private static IReadOnlyList<SoMeAnnouncement> Project(
+        IReadOnlyList<SoMePost> posts, IReadOnlyDictionary<string, string> graphics) =>
         posts.Select(p => new SoMeAnnouncement(
             p.Id,
             p.TemplateKind,
@@ -467,7 +534,12 @@ public sealed class SoMeAnnouncementQuery
             p.Status,
             p.IsActive,
             p.EffectiveText,
-            p.ImageRef,
+            // 🔴 §1178 — the picture that will PUBLISH, not the one stamped at plan time. Operator
+            // 2026-09-12: *"linkedin planner is wrong or the linkedin post calender when it comes to
+            // some graphics readiness"*. The queue badge already resolved late (§1168); this is the
+            // Post calendar and the sponsor/speaker preview, which did not — so a graphic released
+            // after planning showed as no picture at all on one page and a picture on another.
+            SoMeSubjectGraphic.Effective(graphics, p),
             MentionLineFor(p),
             Blocker: null,
             PlanState: p.PlanState,

@@ -420,7 +420,7 @@ public sealed class SessionizeImportService
             {
                 try
                 {
-                    var storedPath = await FetchAndStorePictureAsync(p.Id, s.ProfilePictureUrl!, ct);
+                    var storedPath = await FetchAndStorePictureAsync(p.Id, p.FullName, s.ProfilePictureUrl!, ct);
                     if (!string.IsNullOrWhiteSpace(storedPath)) prof.PhotoSharePointPath = storedPath;
                 }
                 catch { /* best-effort: a picture failure must not fail the import */ }
@@ -575,7 +575,8 @@ public sealed class SessionizeImportService
     /// <see cref="SpeakerPhotoFileName.Build"/>. With no resolver or no resolvable folder it stores
     /// NOTHING — a skipped best-effort copy is a non-event; a file in the wrong place is not.</para>
     /// </remarks>
-    private async Task<string?> FetchAndStorePictureAsync(int participantId, string url, CancellationToken ct)
+    private async Task<string?> FetchAndStorePictureAsync(
+        int participantId, string? fullName, string url, CancellationToken ct)
     {
         if (_pictureStore is null) return null;
         if (_paths is null
@@ -594,8 +595,21 @@ public sealed class SessionizeImportService
                 : contentType.Contains("gif") ? ".gif"
                 : contentType.Contains("webp") ? ".webp" : ".jpg";
         var fileName = SpeakerPhotoFileName.Build(participantId, ext);
-        await _pictureStore.UploadToFolderAsync(
-            folder.Trim().Trim('/'), fileName, bytes, contentType, ct);
+        var cleanFolder = folder.Trim().Trim('/');
+        await _pictureStore.UploadToFolderAsync(cleanFolder, fileName, bytes, contentType, ct);
+
+        // §1132 — the NAME ALIAS beside it, so the folder can be searched by person.
+        // 🔒 Best-effort and after the real file: this whole method is already best-effort (the
+        // caller swallows), and the returned leaf must stay the ID file, which is what §665 serves.
+        var aliasName = SpeakerPhotoFileName.BuildAlias(participantId, fullName, ext);
+        if (aliasName is not null)
+        {
+            try
+            {
+                await _pictureStore.UploadToFolderAsync(cleanFolder, aliasName, bytes, contentType, ct);
+            }
+            catch { /* the id-named photo is stored; the alias is a browsing convenience */ }
+        }
 
         // 🔒 The LEAF, not the full path: the §665 proxy resolves a leaf inside the photo folder, and
         // storing a folder-qualified path here is what made the old copy unservable.

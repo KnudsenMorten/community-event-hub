@@ -54,7 +54,20 @@ public sealed record SoMeSubject(
     int Occurrences,
     DateTimeOffset? EarliestUtc = null,
     DateTimeOffset? PromptFromUtc = null,
-    IReadOnlyDictionary<int, DateTimeOffset>? EarliestByOccurrence = null);
+    IReadOnlyDictionary<int, DateTimeOffset>? EarliestByOccurrence = null,
+    /// <summary>
+    /// §1194 — the LAST moment this subject may be announced. Null = the event start.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>The planner has never had a ceiling other than the event.</b> Every "not later
+    /// than" rule in the engine was therefore a hope: the sponsor-speaker-session window carried a
+    /// comment promising the last round lands "14 days before the event", and the search it relied on
+    /// ran all the way to the event start, so nothing enforced it.</para>
+    /// <para>⚠️ Applied as a CEILING on the search, never as a reason to drop a post: a subject whose
+    /// window has closed still falls back to the event-start ceiling rather than going unannounced,
+    /// and the run reports it. A missing sponsor post is contractual (§842.5).</para>
+    /// </remarks>
+    DateTimeOffset? LatestUtc = null);
 
 /// <summary>
 /// §824.2E — decides WHEN each post goes out. Pure: no database, no clock of its own, no randomness
@@ -304,12 +317,28 @@ public static class SoMeSchedulePlanner
                 ? earliest
                 : (target > earliest ? target : earliest);
 
-            var slot = FindSlot(subject.SubjectKey, occurrence, searchFrom, eventStartUtc, used, taken, normalPerDay);
+            // 🔴 §1194 — THE CATEGORY'S OWN CEILING, where it has one. Clamped to the event: a
+            // window that closes after the event is not a window, because nothing may publish once
+            // it has started.
+            var ceiling = subject.LatestUtc is { } latest && latest < eventStartUtc
+                ? latest
+                : eventStartUtc;
+
+            var slot = FindSlot(subject.SubjectKey, occurrence, searchFrom, ceiling, used, taken, normalPerDay);
 
             // ⚠️ If nothing is free from the target onwards, fall back to searching from the
             // subject's own earliest date. Spreading is a PREFERENCE; placing the post at all is the
             // requirement, and a sponsor is contractual (§842.5).
-            slot ??= FindSlot(subject.SubjectKey, occurrence, earliest, eventStartUtc, used, taken, normalPerDay);
+            slot ??= FindSlot(subject.SubjectKey, occurrence, earliest, ceiling, used, taken, normalPerDay);
+
+            // 🔒 §1194 — AND THE CEILING IS NOT A REASON TO DROP A POST. If the category's window is
+            // full or already past, the post still goes out before the EVENT rather than silently
+            // vanishing — §842.5 makes a missing sponsor announcement contractual, and §854's lesson
+            // is that an absence is the one failure nobody notices. It lands late and is reported.
+            if (slot is null && ceiling < eventStartUtc)
+            {
+                slot = FindSlot(subject.SubjectKey, occurrence, earliest, eventStartUtc, used, taken, normalPerDay);
+            }
 
             if (slot is null)
             {
@@ -485,6 +514,9 @@ public static class SoMeSchedulePlanner
             for (var day = firstDay; day < lastDay && slot is null; day = day.AddDays(1))
             {
                 if (IsWeekend(day)) continue;
+                // 🔴 §1179 — and not over the holidays. This loop knew about weekends and nothing
+                // else, which is how a re-time could land a post on 30 December.
+                if (SoMeBlackout.IsBlackedOut(day)) continue;
                 if (used.GetValueOrDefault(day) >= maxPerDay) continue;
 
                 for (var i = 0; i < PreferredTimes.Length; i++)
@@ -543,6 +575,9 @@ public static class SoMeSchedulePlanner
             }
 
             if (IsWeekend(day)) continue;
+            // 🔴 §1179 — the holiday blackout, beside the weekend rule and for the same reason: a day
+            // nobody is reading is not a slot. This is the site that places every NEW post.
+            if (SoMeBlackout.IsBlackedOut(day)) continue;
             if (used.GetValueOrDefault(day) >= maxPerDay) continue;
 
             // Prefer this subject's own time, then the other one — never a third time, and never

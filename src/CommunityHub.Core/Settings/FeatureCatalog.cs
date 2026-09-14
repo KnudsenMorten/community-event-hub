@@ -534,6 +534,15 @@ public static class FeatureCatalog
         // ENGINE (operator 2026-06-24): after the order pull, create/link the Zoho
         // Backstage sponsor + exhibitor records from webshop data (replaces the legacy
         // PowerShell sync). Off by default — enable to let CEH own the create flow.
+        // §1165 — the sponsor swag catalogue page. OFF by default: operator 2026-09-01, *"page must
+        // be hidden in menu for now until i have approved it"*. While off there is no nav entry and a
+        // sponsor who reaches the URL is told it is not available; an organizer still sees it, with a
+        // preview banner, because he cannot approve what he cannot open.
+        new("sponsor-swag-catalog", "Settings.Feat.SponsorSwagCatalog.Name",
+            "Settings.Feat.SponsorSwagCatalog.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
         new("sponsor-zoho-provision", "Settings.Feat.SponsorZohoProvision.Name",
             "Settings.Feat.SponsorZohoProvision.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
@@ -576,11 +585,55 @@ public static class FeatureCatalog
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
-        // GA (operator 2026-06-22): tested backend job — released to Broad, unscoped.
-        new("sponsor-upload-watch", "Settings.Feat.SponsorUploadWatch.Name",
-            "Settings.Feat.SponsorUploadWatch.Desc",
-            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+        // §1077 stage 2 ENGINE (operator 2026-08-11): when a company reaches ten attendees, ask the
+        // organizer mailbox who approves its volume-package benefits. 🔒 OFF by default — outbound
+        // mail is the part he said he wants to approve before it runs, and the COUNTING is not gated
+        // by this, so switching it off stops the asking and never stops the answer.
+        // ⚠️ It never writes to the company: it names the suggested purchaser in a mail to info@.
+        new("volume-package-approval-mail", "Settings.Feat.VolumePackageApprovalMail.Name",
+            "Settings.Feat.VolumePackageApprovalMail.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // §1077 stage 3 (operator 2026-08-11) — the invitation that carries the wizard link to the
+        // COMPANY's approver. 🔴 OFF by default, and the reason is sharper than for the stage-2
+        // switch above: that one mails info@, this one mails a customer. It is the exact line the
+        // operator's "critical adjustment … tested very detailed … approved before going into PROD"
+        // was drawn around, and there is no job behind it — only a deliberate organizer click.
+        new("volume-package-invite-mail", "Settings.Feat.VolumePackageInviteMail.Name",
+            "Settings.Feat.VolumePackageInviteMail.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // §1077 stage 4 — the WEEKLY reminder to a company that was invited and has not answered.
+        // 🔴 OFF by default, and of the three volume-package switches this is the one to be most
+        // careful with: the other two send when a human decides, this one sends on a schedule.
+        // 🔒 DependsOn the invitation: a reminder without a first mail is not a reminder, and a
+        // company can only be chased about something it was actually asked.
+        // §1080 — MASS MAIL. 🔴 The single most dangerous switch in the hub: campaigns are the only
+        // thing that can write to thousands at once, and one audience reaches people who are not
+        // participants at all — whom the transport's ring gate exists to refuse.
+        // 🔒 OFF by default, and the switch is only the FIRST of three guards: a send also needs an
+        // ACKNOWLEDGED dry-run (a person has seen the count and a sample) and a per-recipient
+        // suppression check at send time. His decision, 2026-08-12.
+        new("mail-campaigns", "Settings.Feat.MailCampaigns.Name",
+            "Settings.Feat.MailCampaigns.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // §1077.9 — the post-event thank-you with the picture link and the LinkedIn tagging ask.
+        // 🔒 OFF by default and sent by a PERSON: "the event is over" is not a date the hub should
+        // infer, because the gallery has to exist first and nothing here can check that.
+        new("volume-package-post-event-mail", "Settings.Feat.VolumePackagePostEvent.Name",
+            "Settings.Feat.VolumePackagePostEvent.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        new("volume-package-reminders", "Settings.Feat.VolumePackageReminders.Name",
+            "Settings.Feat.VolumePackageReminders.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { "volume-package-invite-mail" }, DefaultReleasedToRing: Ring.Broad),
+
 
         // --- Social media (category 2: ENGINE-QUEUED dispatch — GA/Broad, never
         // ring-scoped, but inert until the SoMe queue commits scoped posts) -------

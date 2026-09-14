@@ -130,6 +130,14 @@ public sealed class SponsorOnboardingResetServiceTests
     /// The DEEPER bug: re-opening "initial onboarding" while the company description is still saved
     /// is undone by the next webshop pull, which auto-closes from that data. The overview switch must
     /// clear the description itself.
+    ///
+    /// <para>🔒 <b>§1081 — the assertion about the TASK is gone, and its absence is the point.</b>
+    /// `initial-onboarding-of-sponsor` is retired (superseded by the Get Started "company" step), so
+    /// the reset no longer re-opens it — re-opening a row the retirement sweep closes on the next
+    /// pull would be a reset that silently undoes itself. What the reset now restores is the thing
+    /// the sponsor actually sees: clearing the description puts the WIZARD STEP back to open,
+    /// because that step reads <c>SponsorInfo</c> directly. The task assertion is replaced by one
+    /// that the retired row is NOT resurrected.</para>
     /// </summary>
     [Fact]
     public async Task Overview_reset_clears_the_description_so_the_pull_cannot_reclose_it()
@@ -144,7 +152,9 @@ public sealed class SponsorOnboardingResetServiceTests
             Assert.True(r.OverviewCleared);
             var info = await db.SponsorInfos.FirstAsync(s => s.SponsorCompanyId == CompanyId);
             Assert.True(string.IsNullOrEmpty(info.CompanyDescription));
-            Assert.Equal(TaskState.Open, (await TaskBySlugAsync(db, "initial-onboarding-of-sponsor")).State);
+            // §1081 — retired: the reset must NOT resurrect it. The obligation lives on the Get
+            // Started company step, which the cleared description above has just re-opened.
+            Assert.Equal(TaskState.Done, (await TaskBySlugAsync(db, "initial-onboarding-of-sponsor")).State);
             // Scoped: the booth task was NOT selected, so it stays as it was.
             Assert.Equal(TaskState.Done, (await TaskBySlugAsync(db, "register-booth-members")).State);
         }

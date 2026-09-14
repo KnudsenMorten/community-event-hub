@@ -1,0 +1,136 @@
+@model CommunityHub.Pages.Media.MediaLibraryPageModel
+@*
+    §1078 — the shared body of both media libraries. Mobile-first (~360px): the file list is a
+    stack of cards rather than a table, because a phone is what a photographer has on them at the
+    venue, and a wide table on a phone is a horizontal scrollbar over the one control that matters.
+*@
+<div class="card">
+    <h1>@Model.Heading</h1>
+    <p class="muted">@Model.WhatBelongsHere</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for the media crew and organizers.</p>
+        return;
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Message)) { <p class="ok">@Model.Message</p> }
+    @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+    @* 🔑 The files live in the event's document library and the HUB does the work with its own
+       credentials — you are not signed in to SharePoint and never need to be. Said on the page
+       because "where did my upload actually go?" is the first question a new crew member asks. *@
+    <p class="muted" style="font-size:13px;">
+        Files are stored in the event's document library. The hub uploads and deletes them on your
+        behalf — you do not need a SharePoint account, and nothing here opens SharePoint.
+    </p>
+
+    @* §1078b (operator 2026-08-11: "sharepoint goes to diff urls depending on env") — WHICH library
+       this is. DEV and PROD resolve the same key against different roots, and two empty folders are
+       the same picture on screen; naming the folder is how a reader can tell which one they are
+       looking at before they upload 400 photographs into it. *@
+    @if (!string.IsNullOrEmpty(Model.ResolvedFolder))
+    {
+        <p class="muted" style="font-size:12.5px;">
+            This environment's folder: <code>@Model.ResolvedFolder</code>
+        </p>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ConfigurationProblem))
+    {
+        @* 🔴 The path is computed from one configuration section and the file is written using
+           another. If they disagree, an upload SUCCEEDS somewhere nobody is looking — so the
+           library refuses rather than doing that quietly. *@
+        <p class="error">
+            <strong>This library is misconfigured, so nothing can be uploaded or deleted.</strong><br />
+            @Model.ConfigurationProblem
+        </p>
+    }
+
+    @if (Model.FolderMissing)
+    {
+        @* ⚠️ A missing folder and an empty one look identical. On the day this shipped, PROD's
+           Event/Media did not exist — the folders were staged in the other environment's tree — so
+           a reader would have seen "Nothing here yet" and believed it. *@
+        <p class="muted" style="background:#fef9c3;color:#854d0e;border-radius:8px;padding:10px 12px;font-size:13px;">
+            This folder does not exist in this environment yet — that is why the list is empty rather
+            than because nothing has been uploaded. <strong>The first upload creates it.</strong> If
+            the files you expect are somewhere else, an organizer can point this key at the right
+            folder on <a asp-page="/Organizer/DocLibraryPaths">Document library paths</a>.
+        </p>
+    }
+
+    @if (Model.NotConfigured)
+    {
+        @* 🔒 An unwired integration and an empty folder look identical to a reader. Only one of
+           them means "upload your pictures here", so the page distinguishes them. *@
+        <p class="error">
+            This library is not connected yet, so nothing can be listed or uploaded. An organizer
+            sets its folder on <a asp-page="/Organizer/DocLibraryPaths">Document library paths</a>.
+        </p>
+        return;
+    }
+</div>
+
+@if (Model.CanManage)
+{
+    <div class="card">
+        <h2>Add a file</h2>
+        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data">
+            <input type="file" asp-for="Upload" style="display:block;margin:8px 0 12px;max-width:100%;" />
+            <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Upload
+            </button>
+            <p class="muted" style="font-size:12.5px;margin:10px 0 0;">
+                A file with the same name replaces the one already there. Large video is uploaded in
+                chunks, so it does not have to fit in one go.
+            </p>
+        </form>
+    </div>
+}
+
+<div class="card">
+    <h2>Files (@Model.Files.Count)</h2>
+
+    @if (Model.Files.Count == 0)
+    {
+        <p class="muted">Nothing here yet.</p>
+    }
+    else
+    {
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            @foreach (var f in Model.Files)
+            {
+                <div style="border:1px solid #e6eaf2;border-radius:8px;padding:10px 12px;">
+                    <div style="font-weight:600;word-break:break-all;">@f.FileName</div>
+                    <div style="font-size:12.5px;color:#6b7280;margin-top:2px;">
+                        @if (f.SizeBytes is { } size)
+                        {
+                            <span>@CommunityHub.Pages.Media.MediaFormat.Size(size)</span>
+                        }
+                        @if (f.LastModified is { } when)
+                        {
+                            <span> · @when.UtcDateTime.ToString("d MMM yyyy HH:mm") UTC</span>
+                        }
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <a asp-page-handler="Download" asp-route-fileName="@f.FileName" download
+                           style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;font-size:12.5px;text-decoration:none;">
+                            Download
+                        </a>
+                        @if (Model.CanManage)
+                        {
+                            @* ⚠️ A real, irreversible delete in the event's library — so it asks. *@
+                            <form method="post" asp-page-handler="Delete" asp-route-fileName="@f.FileName"
+                                  onsubmit="return confirm('Delete @f.FileName? This removes it from the event library and cannot be undone from here.');">
+                                <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                    Delete
+                                </button>
+                            </form>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>

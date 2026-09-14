@@ -193,30 +193,4 @@ public sealed class JobFeatureGateTests
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
     }
 
-    // ---- SponsorUploadWatchJob ('sponsor-upload-watch') --------------------
-
-    [Fact]
-    public async Task SponsorUploadWatchJob_skips_when_feature_disabled_for_all_editions()
-    {
-        using var db = NewDb();
-        await SeedActiveEventAsync(db);
-
-        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db), Audit(db),
-            NullLogger<SponsorUploadWatchJob>.Instance);
-
-        await job.Run(Timer(), default); // no throw == gate short-circuited
-    }
-
-    [Fact]
-    public async Task SponsorUploadWatchJob_runs_past_the_gate_when_any_edition_enabled()
-    {
-        using var db = NewDb();
-        var eventId = await SeedActiveEventAsync(db);
-        await EnableAsync(db, eventId, "sponsor-upload-watch");
-
-        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db), Audit(db),
-            NullLogger<SponsorUploadWatchJob>.Instance);
-
-        await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
-    }
 }

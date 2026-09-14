@@ -22,6 +22,10 @@
         page — what they say and when they run. These are written and scheduled by the organizers.
     </p>
 
+    @* §1060(e)/(f) — the same partial the speaker page uses, so the two cannot drift. Rendered
+       before the access checks would hide it? No: deliberately AFTER them, below, only for a
+       sponsor who actually has a company — an invitation to be tagged means nothing to someone the
+       page has just refused. *@
     @if (Model.AccessDenied)
     {
         <p class="error">This page is for sponsors.</p>
@@ -32,6 +36,8 @@
     }
     else if (Model.Announcements is { } a)
     {
+        <partial name="_LinkedInFollowCard" model="Model.LinkedInStatus" />
+
         @if (a.Total == 0)
         {
             @* 🔒 §834.1 — approved-only. "Nothing approved YET" is the honest phrasing: posts may

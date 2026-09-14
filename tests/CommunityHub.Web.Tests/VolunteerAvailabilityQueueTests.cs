@@ -32,6 +32,19 @@ namespace CommunityHub.Web.Tests;
 public sealed class VolunteerAvailabilityQueueTests
 {
     private const int EventId = 31;
+
+    /// <summary>
+    /// The PRE-DAY (config `crewDays`). ⚠️ §1134 gave it a 07:00 check-in, so its morning slot is
+    /// <c>"Morning 7–12"</c> — these tests posted <c>"Morning 9–12"</c>, which no longer exists on
+    /// this day and made the post save nothing.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The literal was UPDATED, not the assertion loosened: these tests are about the QUEUE
+    /// mechanics (persist exclusively, re-select on load, queue a later edit), and they need a slot
+    /// that really exists on this day to exercise any of it. Matching on "any Half option" instead
+    /// would have kept them green while no longer proving Morning and Afternoon stay distinguishable
+    /// — which is the one thing the slot tag exists for.
+    /// </remarks>
     private static readonly DateOnly Day1 = new(2027, 2, 9);
 
     private static CommunityHubDbContext NewDb() =>
@@ -165,14 +178,14 @@ public sealed class VolunteerAvailabilityQueueTests
         var vol = await SeedVolunteerAsync(db);
         var http = new DefaultHttpContext { User = Session(vol) };
 
-        await WithInputs(NewModel(db, http), "Morning 9–12", "need 13:00 free").OnPostAsync(default);
+        await WithInputs(NewModel(db, http), "Morning 7–12", "need 13:00 free").OnPostAsync(default);
 
         var row = Assert.Single(db.VolunteerDayAvailabilities);   // exactly one row for the day
         Assert.Equal(VolunteerAvailabilityLevel.Half, row.Level); // Morning = Half
-        Assert.Contains("[Morning 9–12]", row.Note);
+        Assert.Contains("[Morning 7–12]", row.Note);
         // The stored (Level, Note) re-selects the SAME single option (radio re-check on load).
         var reselected = CommunityHub.Core.Volunteers.VolunteerDayOptions.Resolve(Day1, row.Level, row.Note);
-        Assert.Equal("Morning 9–12", reselected.Slot);
+        Assert.Equal("Morning 7–12", reselected.Slot);
     }
 
     [Fact]
@@ -186,7 +199,7 @@ public sealed class VolunteerAvailabilityQueueTests
         await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
 
         // Later EDIT (Full → Morning) is QUEUED, not applied.
-        var editResult = await WithInputs(NewModel(db, http), "Morning 9–12", "need 13:00 free").OnPostAsync(default);
+        var editResult = await WithInputs(NewModel(db, http), "Morning 7–12", "need 13:00 free").OnPostAsync(default);
 
         Assert.IsType<RedirectToPageResult>(editResult);
         // The stored availability is UNCHANGED (still Full) while the change is pending.
@@ -209,7 +222,7 @@ public sealed class VolunteerAvailabilityQueueTests
         var http = new DefaultHttpContext { User = Session(vol) };
 
         await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
-        await WithInputs(NewModel(db, http), "Morning 9–12", "need 13:00 free").OnPostAsync(default);
+        await WithInputs(NewModel(db, http), "Morning 7–12", "need 13:00 free").OnPostAsync(default);
 
         var delta = db.SyncDeltas.Single();
         var queue = new SyncDeltaQueueService(db);
@@ -218,7 +231,7 @@ public sealed class VolunteerAvailabilityQueueTests
         Assert.True(result.Applied);
         var row = db.VolunteerDayAvailabilities.Single();
         Assert.Equal(VolunteerAvailabilityLevel.Half, row.Level); // Morning = Half
-        Assert.Contains("Morning 9–12", row.Note);
+        Assert.Contains("Morning 7–12", row.Note);
         Assert.Contains("need 13:00 free", row.Note);
         // Volunteer was not deleted.
         Assert.NotNull(await db.Participants.FindAsync(vol.Id));

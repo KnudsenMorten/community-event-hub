@@ -59,6 +59,24 @@ public sealed class EmailTransportHealth
         // Newest first: the streak we care about is the one at the HEAD of the log.
         var recent = await _db.EmailLogs.AsNoTracking()
             .Where(l => l.SentAt >= since)
+            // 🔴 §1061 — A RING-HELD MAIL IS NOT A TRANSPORT SIGNAL. IGNORE IT ENTIRELY.
+            //
+            // ⚠️ MEASURED IN PROD 2026-08-11: this banner declared **"Outbound e-mail is DOWN — the
+            // last 16 sends all failed"** while the relay was perfectly healthy. Its own quoted
+            // error said so: *"Ring-dropped (recipient outside the released ring) — not sent."*
+            // A ring drop writes an Error string, and every non-empty Error counted toward the
+            // failure streak.
+            //
+            // 🔴 This is the WORST place for that defect. The alarm that exists to tell him mail is
+            // broken was firing because mail was working exactly as configured — during a ticket
+            // sale, on a page he was watching. An alarm that cries wolf is worse than no alarm,
+            // because the next one is the one he ignores.
+            //
+            // 🔑 EXCLUDED, not counted as a success: nothing was sent, so a hold is evidence of
+            // neither health nor breakage. Letting it END a failure streak would be the opposite
+            // error — a genuinely dead relay would look recovered the moment one ring drop landed
+            // in between.
+            .Where(l => !l.Dropped)
             .OrderByDescending(l => l.SentAt)
             .Select(l => new { l.Error })
             .Take(50)

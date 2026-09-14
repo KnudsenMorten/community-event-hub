@@ -179,6 +179,38 @@ public sealed class SpeakerPhotoArchiveServiceTests
         Assert.DoesNotContain(stored, s => s.PhotoSharePointPath!.Contains("Nikki"));
     }
 
+    /// <summary>
+    /// §1132 — the archive writes TWO files: the authoritative id-named photo and a name alias.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25: <i>"i would love to have 1 extra file per speaker on sharepoint
+    /// with their name in … same folder, just 2 files"</i>.</para>
+    ///
+    /// <para>🔒 The STORED path must stay the ID file — that is what <c>PhotoSharePointPath</c>
+    /// records and what the §665 proxy serves. If the alias ever became the stored value, every
+    /// reader would follow a file that a rename can orphan.</para>
+    /// </remarks>
+    [Fact]
+    public async Task The_archive_writes_the_id_file_AND_a_name_alias()
+    {
+        using var db = NewDb();
+        await AddSpeakerAsync(db, "Nikki Chapple", SpeakerCategory.Community, "https://cdn.test/nikki.png");
+
+        var (svc, handler) = NewService(db);
+        await svc.RunAsync(EventId);
+
+        var stored = await db.SpeakerProfiles.AsNoTracking().SingleAsync();
+        var idFile = SpeakerPhotoFileName.Build(stored.ParticipantId, ".png");
+        var alias = SpeakerPhotoFileName.BuildAlias(stored.ParticipantId, "Nikki Chapple", ".png");
+
+        Assert.Equal("speaker-photo-Nikki-Chapple-" + stored.ParticipantId + ".png", alias);
+        Assert.Contains(idFile, handler.UploadedTo);
+        Assert.Contains(alias, handler.UploadedTo);
+
+        // 🔒 The id file remains the one recorded on the profile.
+        Assert.Equal(idFile, stored.PhotoSharePointPath);
+    }
+
     [Fact]
     public async Task A_LEGACY_named_photo_is_re_archived_ONCE_under_the_id_only_name()
     {

@@ -93,6 +93,9 @@ public class AttendeesModel : PageModel
         IOrderedQueryable<Core.Domain.Attendee> ordered = Sort switch
         {
             "email"   => Desc ? q.OrderByDescending(a => a.Email)         : q.OrderBy(a => a.Email),
+            // §1065 — sortable, so "show me everyone from one company" is one click. Without this the
+            // header would render a sort link that silently did nothing.
+            "company" => Desc ? q.OrderByDescending(a => a.CompanyName)   : q.OrderBy(a => a.CompanyName),
             "ticket"  => Desc ? q.OrderByDescending(a => a.TicketStatus)  : q.OrderBy(a => a.TicketStatus),
             "booking" => Desc ? q.OrderByDescending(a => a.BookingStatus) : q.OrderBy(a => a.BookingStatus),
             _         => Desc ? q.OrderByDescending(a => a.LastName)      : q.OrderBy(a => a.LastName),
@@ -148,7 +151,9 @@ public class AttendeesModel : PageModel
 
         var sb = new StringBuilder();
         sb.AppendLine(string.Join(delimiter,
-            "FirstName", "LastName", "Email", "TicketStatus", "TicketClass",
+            // §1065 — Company travels into the EXPORT too. The grid and the file must answer the
+            // same questions, or he filters on screen and then cannot reproduce it in Excel.
+            "FirstName", "LastName", "Email", "Company", "TicketStatus", "TicketClass",
             // §326bp: the column said "Mismatch" and meant "has not chosen a Master Class yet".
             // Renamed in the EXPORT too — the operator reads this file, and a header he has to
             // decode is the same defect as a label he has to decode.
@@ -157,8 +162,14 @@ public class AttendeesModel : PageModel
         {
             sb.AppendLine(string.Join(delimiter,
                 Csv(a.FirstName, delimiter), Csv(a.LastName, delimiter), Csv(a.Email, delimiter),
-                a.TicketStatus, Csv(a.TicketClassName, delimiter),
-                a.BookingStatus, Csv(a.MasterClassName, delimiter),
+                Csv(a.CompanyName, delimiter),
+                // §1077: the LABEL, for the §326bp reason — the operator reads this file, and a
+                // value he has to decode ("Other" = 1-day) is the same defect as a header he has
+                // to decode. The grid and the file say the same word.
+                a.TicketStatus.Label(), Csv(a.TicketClassName, delimiter),
+                // §1077 — the label here too: the export and the grid must say the same words, or
+                // he filters on screen and cannot reproduce it in Excel (the §1065 rule).
+                a.BookingStatus.Label(), Csv(a.MasterClassName, delimiter),
                 a.HasReconciliationMismatch ? "YES" : "",
                 a.LastSyncedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")));
         }
@@ -183,6 +194,11 @@ public class AttendeesModel : PageModel
             q = q.Where(a => a.Email.Contains(s)
                              || a.FirstName.Contains(s)
                              || a.LastName.Contains(s)
+                             // §1065 — COMPANY is searchable. Operator 2026-08-11: *"search must
+                             // support ability to search in company as well"*. It is the field an
+                             // organizer actually has in hand ("who came from 2linkIT?") and the one
+                             // a sponsor asks about, and the grid showed it nowhere.
+                             || (a.CompanyName != null && a.CompanyName.Contains(s))
                              || (a.MasterClassName != null && a.MasterClassName.Contains(s)));
         }
         return q;

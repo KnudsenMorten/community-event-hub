@@ -28,6 +28,19 @@ public sealed class EventEditionConfig
     public Dictionary<string, string> Placeholders { get; set; } = new();
 
     /// <summary>
+    /// §1077.9 — what the post-event volume-package mail needs: where the pictures are, and whose
+    /// LinkedIn profiles a company is invited to tag.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Config, not code.</b> The operator's sample named five people and an edition-specific
+    /// picture host; both change every year and neither belongs in a compiled string. A community
+    /// that leaves this empty simply gets a mail without those paragraphs — the same rule the
+    /// placeholder block above already follows.
+    /// </remarks>
+    [JsonPropertyName("postEvent")]
+    public PostEventConfig? PostEvent { get; set; }
+
+    /// <summary>
     /// §270 — on/off switch for the attendee "fun IT games" quizzes (operator 2026-07-10).
     /// Default <b>false</b>: the <c>/Games</c> nav entry and surface are HIDDEN for attendees
     /// unless an edition explicitly opts in via <c>event.&lt;edition&gt;.json -&gt; attendeeGamesEnabled: true</c>.
@@ -224,6 +237,38 @@ public sealed class SessionRoomOption
 /// into what the topbar renders; the timezone for "before/after open" is the
 /// edition's own (<c>dates.timezone</c>), reusing <see cref="EventLocalTime"/>.
 /// </summary>
+/// <summary>§1077.9 — one profile a company is invited to tag when it posts about the event.</summary>
+public sealed class LinkedInProfile
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// §1077.9 — the post-event volume-package mail's edition-specific content.
+/// </summary>
+public sealed class PostEventConfig
+{
+    /// <summary>Where the event photographs live, e.g. the edition's picture site.</summary>
+    [JsonPropertyName("picturesUrl")]
+    public string PicturesUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The profiles a company gains exposure by tagging. ⚠️ Order is preserved — the operator's
+    /// sample listed people first and the company page last.
+    /// </summary>
+    [JsonPropertyName("linkedIn")]
+    public List<LinkedInProfile> LinkedIn { get; set; } = new();
+
+    /// <summary>The reach claim in the mail ("approximately 30K followers"). Blank ⇒ the sentence
+    /// is left out rather than printed with a number nobody has checked.</summary>
+    [JsonPropertyName("linkedInFollowers")]
+    public string LinkedInFollowers { get; set; } = string.Empty;
+}
+
 public sealed class TicketSaleConfig
 {
     /// <summary>
@@ -328,6 +373,31 @@ public sealed class EditionDates
     [JsonPropertyName("lockDate")]  public string LockDate { get; set; } = string.Empty;
 
     /// <summary>
+    /// §1135 — the FIRST and LAST night the hotel picker will accept, stated outright.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25: <i>"we have people checking in on 5th feb, 6th, 7th, 8th, 9th feb
+    /// and checkout 10th, 11th or 12 th feb"</i> · <i>"but hotel is wrong then"</i>.</para>
+    ///
+    /// <para>🔴 <b>These replace arithmetic that was quietly wrong.</b> The window used to be DERIVED
+    /// as <c>preDay − 2 … day2 + 2</c>, which yielded 06–12 Feb: it cut off the 5th, so somebody
+    /// arriving that night could not book it at all. Nothing failed — the picker simply refused a
+    /// date, which reads as "not allowed" rather than "misconfigured".</para>
+    ///
+    /// <para>🔑 <b>Why config and not a bigger offset.</b> The arrival spread is an operational fact
+    /// — who travels when, and what the room block covers — not something derivable from the event
+    /// days. <c>−2</c> was a guess that happened to fit once; <c>−3</c> would be the same guess with
+    /// a different number, wrong again the next time somebody arrives earlier.</para>
+    ///
+    /// <para>🔒 BOTH are optional. When either is blank/unparseable the old derivation still runs, so
+    /// every other edition and every test is unchanged.</para>
+    /// </remarks>
+    [JsonPropertyName("hotelStayFrom")]  public string HotelStayFrom  { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="HotelStayFrom"/>
+    [JsonPropertyName("hotelStayUntil")] public string HotelStayUntil { get; set; } = string.Empty;
+
+    /// <summary>
     /// §1003 — the time on <see cref="Day1"/> the event actually opens, as Danish wall time
     /// ("09:00"). Drives the topbar "<c>&lt;code&gt; starts in …</c>" countdown.
     /// </summary>
@@ -411,6 +481,24 @@ public sealed class SharePointEditionConfig
     /// <summary>Recipients notified when a sponsor uploads a web / print / wall file.</summary>
     [JsonPropertyName("sponsorUploadNotify")]
     public List<string> SponsorUploadNotify { get; set; } = new();
+
+    /// <summary>
+    /// §1072 — who is told when a sponsor uploads their EXHIBITOR WALL artwork. Falls back to
+    /// <see cref="SponsorUploadNotify"/> when empty, so an edition that does not set it behaves
+    /// exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: logo uploads go to the organizer mailbox; the wall additionally
+    /// goes to the person who actually produces the wall. Different artefacts, different readers —
+    /// a shared list meant the wall designer was copied on every logo, and the organizer on every
+    /// wall revision, which is how a notification becomes something people filter away.</para>
+    ///
+    /// <para>🔒 <b>CONFIG, never a constant in source.</b> These are named individuals at
+    /// third-party domains, and this repository publishes to a PUBLIC mirror — a personal address
+    /// hard-coded here would ship with it. Real values live in <c>config/</c>, which the publish
+    /// denylist strips.</para>
+    /// </remarks>
+    public List<string> SponsorWallUploadNotify { get; set; } = new();
 }
 
 /// <summary>Volunteer section of event.&lt;edition&gt;.json (sibling of <c>edition</c>).</summary>
@@ -670,6 +758,18 @@ public sealed class EventEditionConfigLoader
                             && !string.IsNullOrWhiteSpace(x.Label)
                             && x.Code > 0)
                 .ToList();
+        }
+
+        // §1077.9 — the SIBLING "postEvent" block (pictures link + the LinkedIn profiles a company
+        // is invited to tag). ⚠️ Pulled explicitly like every other sibling: EventEditionConfig
+        // binds from the "edition" object, so a root-level block that is merely declared as a
+        // property would silently stay null and the mail would quietly lose its paragraphs.
+        // 🔒 A malformed block degrades to "not configured" rather than throwing at config load.
+        if (doc.RootElement.TryGetProperty("postEvent", out var postEvent)
+            && postEvent.ValueKind == JsonValueKind.Object)
+        {
+            try { cfg.PostEvent = postEvent.Deserialize<PostEventConfig>(Options); }
+            catch { cfg.PostEvent = null; }
         }
 
         // §299.6/b5: the SIBLING "sessionRooms" registry. Only the NAME is

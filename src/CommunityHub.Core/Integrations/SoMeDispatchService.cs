@@ -84,8 +84,12 @@ public sealed class SoMeDispatchService
         // §864 — resolves {tokens} in the body AT PUBLISH TIME, so a sponsor's late text edit or a
         // newly-linked speaker reaches a post planned months ago. Optional so existing test
         // constructions keep working; absent ⇒ the body publishes as stored, exactly as before.
-        SoMePostComposer? composer = null)
+        SoMePostComposer? composer = null,
+        // §1216 — one audit row PER POST. Optional so existing test constructions keep working;
+        // absent ⇒ no per-post rows, exactly as before (the job's run-summary row is unaffected).
+        Audit.IAuditTrail? audit = null)
     {
+        _audit = audit;
         _composer = composer;
         _approvalGate = approvalGate;
         _mediaLibrary = mediaLibrary;
@@ -128,6 +132,53 @@ public sealed class SoMeDispatchService
 
     /// <summary>§864 — token resolution at publish time. Null in tests ⇒ body publishes as stored.</summary>
     private readonly SoMePostComposer? _composer;
+
+    private readonly Audit.IAuditTrail? _audit;
+
+    /// <summary>
+    /// 🔴 §1216 — A PUBLISHED POST IS NAMED IN THE AUDIT TRAIL. Operator 2026-09-12: *"we need to have
+    /// some posts go into the audit log as well (published)"*.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 The job already wrote ONE row per run — <c>"SoMe dispatch: 2 published, 0 failed"</c>
+    /// — which answers "did the dispatcher do anything?" and not "WHAT went out on the company page,
+    /// and when?". A LinkedIn post can be deleted but never unsent, so that is the question the
+    /// trail has to answer.</para>
+    /// <para>The text is public once published, so its opening words are safe in the summary; the
+    /// §24 PII stance (no mail bodies, no payloads) is about private content, not a public post.</para>
+    /// </remarks>
+    private async Task AuditPostAsync(
+        int eventId, SoMePost post, string text, bool success, string? error, CancellationToken ct)
+    {
+        if (_audit is null) return;
+
+        var kind = post.TemplateKind?.ToString() ?? post.Type.ToString();
+        var opening = OpeningWords(text, 100);
+        await _audit.RecordAsync(new AuditEntry
+        {
+            EventId = eventId,
+            Category = AuditCategory.Engine,
+            Action = success ? Audit.AuditActions.SoMePostPublished : Audit.AuditActions.SoMePostFailed,
+            ActorEmail = "system",
+            Source = AuditSource.Job,
+            TargetType = "SoMePost",
+            TargetId = post.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Outcome = success ? AuditOutcome.Success : AuditOutcome.Failure,
+            Summary = success
+                ? $"LinkedIn post #{post.Id} published ({kind}): “{opening}”"
+                : $"LinkedIn post #{post.Id} failed to publish ({kind}): “{opening}”",
+            Detail = success
+                ? $"Scheduled {post.ScheduledAtUtc:yyyy-MM-dd HH:mm} UTC · LinkedIn id {post.ExternalPostId ?? "(none returned)"}"
+                : $"Scheduled {post.ScheduledAtUtc:yyyy-MM-dd HH:mm} UTC · {error}",
+        }, ct);
+    }
+
+    private static string OpeningWords(string? text, int max)
+    {
+        var flat = string.Join(' ', (text ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return flat.Length <= max ? flat : flat[..max].TrimEnd() + "…";
+    }
 
     /// <summary>
     /// §324: resolve a post's ImageRef (the graphic's SharePoint URL/path) to raw
@@ -430,6 +481,7 @@ public sealed class SoMeDispatchService
                     post.LastError = null;
                     published++;
                     await _db.SaveChangesAsync(ct);
+                    await AuditPostAsync(eventId, post, textToPublish, success: true, error: null, ct);
                     // §865.3 — the COMPOSED text is passed in, not re-read from the post. The mail
                     // must show what actually went to LinkedIn (body + resolved tokens + credit),
                     // and post.EffectiveText is only the stored body (§861).
@@ -449,6 +501,7 @@ public sealed class SoMeDispatchService
                 failed++;
                 await _db.SaveChangesAsync(ct);
                 _log?.LogWarning(ex, "SoMeDispatch: post {PostId} failed to publish.", post.Id);
+                await AuditPostAsync(eventId, post, post.EffectiveText, success: false, error: post.LastError, ct);
             }
         }
 
@@ -531,6 +584,22 @@ public sealed class SoMeDispatchService
             _emailOptions?.Value.FromAddress);
         if (string.IsNullOrWhiteSpace(organizer)) return 0;  // nothing configured at all => no pre-alert
 
+        // §1124 — the shared speaker/session audience, on the To: line.
+        //
+        // 🔒 The per-edition override still WINS as the primary: an edition that deliberately routes
+        // its pre-alert to one person keeps that, and the named organizers are added after it. The
+        // extras are appended rather than replacing the resolved address, so this cannot silently
+        // undo the §707.27 C1 fallback chain above.
+        //
+        // ⚠️ ~5 MINUTE WINDOW. This is the one on the list where being second to read it is useless,
+        // which is the strongest case for more than one recipient rather than the weakest.
+        var preAlertTo = new List<string> { organizer! };
+        foreach (var extra in _emailOptions?.Value.SpeakerSessionAlsoToList() ?? Array.Empty<string>())
+        {
+            if (preAlertTo.Any(a => string.Equals(a, extra, StringComparison.OrdinalIgnoreCase))) continue;
+            preAlertTo.Add(extra);
+        }
+
         var eventName = await EventDisplayNameAsync(eventId, ct);
 
         var window = now.Add(PreAlertLeadTime);
@@ -568,7 +637,7 @@ public sealed class SoMeDispatchService
                 using (_emailContext?.Set(new EmailContext(
                     PreAlertCategory, eventId, RingExempt: true)))
                 {
-                    await _email.SendAsync(organizer!, subject, body, ct);
+                    await _email.SendToManyAsync(preAlertTo, subject, body, ct);
                 }
                 post.SpeakerPreAlertSent = true;
                 await _db.SaveChangesAsync(ct);

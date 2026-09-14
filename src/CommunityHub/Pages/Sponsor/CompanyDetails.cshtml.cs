@@ -56,6 +56,7 @@ public class CompanyDetailsModel : PageModel
     private readonly EventConfigOptions _cfgOptions;
     private readonly SharePointUploadClient _sp;
     private readonly IEmailSender _email;
+    private readonly IEmailContextAccessor? _emailCtx;
     private readonly SponsorZohoSyncService _zohoSync;
     private readonly CommunityHub.Core.Integrations.Erp.EconomicContactAdminService _erpContacts;
     private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
@@ -79,7 +80,9 @@ public class CompanyDetailsModel : PageModel
         CommunityHub.Core.Integrations.Erp.EconomicContactAdminService erpContacts,
         CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<CompanyDetailsModel> log,
-        CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null)
+        CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null,
+        // §1072 — the designer notice must declare itself ops mail or the ring gate eats it.
+        IEmailContextAccessor? emailCtx = null)
     {
         _paths = paths;
         _contactSync = contactSync;
@@ -91,7 +94,7 @@ public class CompanyDetailsModel : PageModel
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _sp = sp;
-        _email = email;
+        _email = email; _emailCtx = emailCtx;
         _zohoSync = zohoSync;
         _erpContacts = erpContacts;
         _log = log;
@@ -215,9 +218,20 @@ public class CompanyDetailsModel : PageModel
         }
 
         var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
-        info.WebsiteUrl              = NormaliseOrNull(WebsiteUrl);
-        info.LinkedInUrl             = NormaliseOrNull(LinkedInUrl);
-        info.TwitterUrl             = NormaliseOrNull(TwitterUrl);
+        // 🔒 §1081 — WebsiteUrl is NOT written here. The WEBSHOP owns it (operator 2026-08-13:
+        // *"website url comes from webshop … that one is authoritative for that field"*), and
+        // SponsorZohoSyncService.ReconcileWithWebshopAsync (§41b) fills it into CEH automatically.
+        // The field is rendered read-only with a "Change on the webshop" hand-off; dropping the write
+        // is what makes that real rather than cosmetic, since a readonly input still POSTs its value.
+        // ✅ §1126 — LinkedIn and Twitter JOINED IT (operator 2026-08-25: *"linkedin + twitter is
+        // also coming from webshop"* · *"it must also overwrite as webshop is authoritative"* ·
+        // *"add ability to change those fields similar to the web url with a button"*). The note
+        // that used to sit here — "he asked only about the website" — recorded the limit of the
+        // question at the time, and he has now answered the wider one.
+        //
+        // 🔴 Dropping these two writes is NOT optional once the sync overwrites them: an editable
+        // field that a later sync silently reverts is worse than a read-only one, because nothing
+        // tells the sponsor it happened and they cannot fix it from either side.
         info.CompanyDescription      = NormaliseOrNull(CompanyOverview);
         info.SocialMediaIntro        = NormaliseOrNull(SocialMediaBrandingText);
         if (info.HasBooth)
@@ -308,9 +322,20 @@ public class CompanyDetailsModel : PageModel
             return new JsonResult(new { ok = false, error }) { StatusCode = 400 };
 
         var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
-        info.WebsiteUrl              = NormaliseOrNull(WebsiteUrl);
-        info.LinkedInUrl             = NormaliseOrNull(LinkedInUrl);
-        info.TwitterUrl              = NormaliseOrNull(TwitterUrl);
+        // 🔒 §1081 — WebsiteUrl is NOT written here. The WEBSHOP owns it (operator 2026-08-13:
+        // *"website url comes from webshop … that one is authoritative for that field"*), and
+        // SponsorZohoSyncService.ReconcileWithWebshopAsync (§41b) fills it into CEH automatically.
+        // The field is rendered read-only with a "Change on the webshop" hand-off; dropping the write
+        // is what makes that real rather than cosmetic, since a readonly input still POSTs its value.
+        // ✅ §1126 — LinkedIn and Twitter JOINED IT (operator 2026-08-25: *"linkedin + twitter is
+        // also coming from webshop"* · *"it must also overwrite as webshop is authoritative"* ·
+        // *"add ability to change those fields similar to the web url with a button"*). The note
+        // that used to sit here — "he asked only about the website" — recorded the limit of the
+        // question at the time, and he has now answered the wider one.
+        //
+        // 🔴 Dropping these two writes is NOT optional once the sync overwrites them: an editable
+        // field that a later sync silently reverts is worse than a read-only one, because nothing
+        // tells the sponsor it happened and they cannot fix it from either side.
         info.CompanyDescription      = NormaliseOrNull(CompanyOverview);
         info.SocialMediaIntro        = NormaliseOrNull(SocialMediaBrandingText);
         if (info.HasBooth)
@@ -333,6 +358,11 @@ public class CompanyDetailsModel : PageModel
     {
         if (!r.Enabled)
             return "Company details saved. (Zoho Backstage sync is not enabled for this environment.)";
+        // §1088 — the skip reason moved out of `Error`. Without this branch a test/withdrawn company
+        // would fall through to the success wording and tell the sponsor their details reached
+        // Backstage when nothing was sent. Saved is true; synced is not.
+        if (r.Skipped)
+            return $"Company details saved. {r.SkipReason}";
         if (r.Error is not null)
             return $"Company details saved. {r.Error}";
         if (r.IsExhibitor)
@@ -510,7 +540,7 @@ public class CompanyDetailsModel : PageModel
         CommunityHub.Uploads.SponsorUploadSpec spec, string sponsorName, string fileName, string? webUrl,
         string byEmail, CancellationToken ct) =>
         CommunityHub.Uploads.SponsorUploadKinds.NotifyAsync(
-            _email, spec, sponsorName, fileName, webUrl, byEmail, _log, ct);
+            _email, spec, sponsorName, fileName, webUrl, byEmail, _log, ct, _emailCtx);
 
     // ---- Sponsor self-service e-conomic contacts (ERP master) ----------------
 

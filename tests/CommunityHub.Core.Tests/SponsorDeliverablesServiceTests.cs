@@ -39,15 +39,27 @@ public sealed class SponsorDeliverablesServiceTests
         return ev.Id;
     }
 
+    /// <summary>
+    /// §1081 — the "onboarding" stage now asks <see cref="SponsorCompanyContent"/> rather than
+    /// <c>CompanyDescription</c> alone, so a fixture that supplies a description means
+    /// <b>company content is on file</b> and gets the SoMe branding text with it. These tests are
+    /// about DELIVERABLE STAGES; the content rule itself is pinned in
+    /// <c>SponsorCompanyContentAndDigestTests</c>, and duplicating it here would leave two places to
+    /// update when it changes. Pass <paramref name="social"/> explicitly to test partial content.
+    /// <para>⚠️ <c>package</c> defaults to Silver (no booth), so the exhibitor-only short
+    /// description is correctly not required by these fixtures.</para>
+    /// </summary>
     private static async Task AddInfoAsync(
         CommunityHubDbContext db, int eventId, string companyId,
         SponsorPackage package = SponsorPackage.Silver,
-        string? description = null, string? logoRaster = null, string? logoVector = null)
+        string? description = null, string? logoRaster = null, string? logoVector = null,
+        string? social = null)
     {
         db.SponsorInfos.Add(new SponsorInfo
         {
             EventId = eventId, SponsorCompanyId = companyId, SponsorPackage = package,
             CompanyDescription = description, LogoRasterPath = logoRaster, LogoVectorPath = logoVector,
+            SocialMediaIntro = social ?? (description is null ? null : "SoMe branding text on file."),
         });
         await db.SaveChangesAsync();
     }

@@ -116,7 +116,7 @@
             <span class="sd-tag">@(s.LengthMinutes is int lm ? $"{lm} min" : CommunityHub.Pages.Sessions.DetailModel.Display(s.Length))</span>
             @if (!string.IsNullOrWhiteSpace(s.Room))
             {
-                <span class="sd-tag">@Localizer["SessionDetail.Room", s.Room]</span>
+                <span class="sd-tag">@Localizer["SessionDetail.Room", CommunityHub.Core.Sessions.SessionRoomLabel.ForDisplay(s.Room)]</span>
             }
             @if (!string.IsNullOrWhiteSpace(s.Track))
             {

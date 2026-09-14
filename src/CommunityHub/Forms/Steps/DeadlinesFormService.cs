@@ -1,6 +1,7 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Participants;
+using CommunityHub.Core.Tasks;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 
@@ -182,12 +183,11 @@ public sealed class DeadlinesFormService : IWizardFormService
     /// because a sponsor sees company tasks on the step, and an ownership-only check would have
     /// listed them and then refused to send the invitation.
     /// </summary>
+    // §1081 — VisibleTo is the shared "assigned to them OR their sponsor company" predicate.
     private IQueryable<ParticipantTask> Visible(int eventId, int participantId, string? sponsorCompanyId) =>
-        _db.Tasks.Where(t => t.EventId == eventId
-                             && (t.AssignedParticipantId == participantId
-                                 || (sponsorCompanyId != null && t.SponsorCompanyId == sponsorCompanyId))
-                             && t.State != TaskState.Done
-                             && t.DueDate != null);
+        _db.Tasks.Where(t => t.EventId == eventId)
+                 .VisibleTo(participantId, sponsorCompanyId)
+                 .Where(t => t.State != TaskState.Done && t.DueDate != null);
 
     /// <summary>
     /// §410 — the ids of this participant's tasks that live OUTSIDE the wizard. Evaluated in memory
@@ -198,9 +198,8 @@ public sealed class DeadlinesFormService : IWizardFormService
     {
         var sponsorCompanyId = await SponsorCompanyIdAsync(participantId, ct);
         var rows = await _db.Tasks.AsNoTracking()
-            .Where(t => t.EventId == eventId
-                        && (t.AssignedParticipantId == participantId
-                            || (sponsorCompanyId != null && t.SponsorCompanyId == sponsorCompanyId)))
+            .Where(t => t.EventId == eventId)
+            .VisibleTo(participantId, sponsorCompanyId)
             .Select(t => new { t.Id, t.SourceKey })
             .ToListAsync(ct);
 

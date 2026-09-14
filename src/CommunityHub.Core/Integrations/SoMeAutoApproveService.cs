@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,8 +24,17 @@ public sealed record SoMeAutoApproveResult(
 /// auto-approve them, concerns?"</i> — a fair question with 79 posts held and 1 approved. The
 /// concerns were about HOW, and each became a guard below.</para>
 ///
+/// <para>🛑 <b>READ THIS FIRST — §1060/§1068 RETIRED THE WHOLE DATE RULE (2026-08-11).</b>
+/// <b>ELIGIBILITY IS NOW THE ONLY CONDITION.</b> There is no lead-time window and no overdue guard:
+/// a post that passes <see cref="SoMeApprovalGate"/> is approved however far out its date is, and a
+/// backdated post that never published is approved TOO, so it goes out on the next dispatch tick
+/// (operator: <i>"if a post has NOT been published yet and points to the past, then it must approve
+/// and publish it"</i>).
+/// ⚠️ <b>Item 1 below is HISTORY, kept because it explains why the guards existed and what it cost to
+/// remove them — not because it describes the code.</b> Items 2 and 3 are still live.</para>
+///
 /// <list type="number">
-/// <item>🔴 <b>§1030 — APPROVE ONLY AS IT COMES DUE: inside the window, and never past-dated.</b>
+/// <item>🕰️ <b>HISTORY (§1030, RETIRED) — approve only as it comes due: inside the window, and never past-dated.</b>
 /// Operator 2026-08-10: <i>"they must follow principles about first become eligble (deliver things
 /// like some text) + become auto-approved when it reaches the time"</i>.
 ///
@@ -64,16 +74,59 @@ public sealed class SoMeAutoApproveService
     private readonly TimeProvider _clock;
     private readonly ILogger<SoMeAutoApproveService>? _log;
 
+    /// <summary>
+    /// §1060(i) — where the auto-approval notice goes. Operator 2026-08-11: <i>"this is a simple
+    /// email to info@expertslive.dk whenever a some post is auto approved"</i>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 A CONSTANT, not a setting. He was asked and answered <i>"you do not chk for any some
+    /// settings"</i> — so there is deliberately nothing to misconfigure and nothing that can silently
+    /// switch this off. ⚠️ I twice proposed a settings surface for this (first the wrong recipient
+    /// array, then a toggle to govern it); a requirement stated without configuration does not want
+    /// configuration.
+    /// </remarks>
+    public const string NoticeEmail = "info@expertslive.dk";
+
+    private readonly IEmailSender? _email;
+    private readonly IEmailContextAccessor? _ctx;
+
+    // §1122 — what the notice needs to be READABLE: the human subject (not the join key) and a base
+    // URL to build a real link from. Both optional ⇒ the mail degrades to its old shape rather than
+    // failing to send; a notice that arrives slightly plainer beats no notice at all.
+    private readonly SoMeSubjectLabeller? _labeller;
+    private readonly string _hubUrl;
+    private readonly Email.EmailOptions? _emailOptions;
+    private readonly SoMePostComposer? _composer;
+
     public SoMeAutoApproveService(
         CommunityHubDbContext db,
         SoMeApprovalGate gate,
         TimeProvider clock,
-        ILogger<SoMeAutoApproveService>? log = null)
+        ILogger<SoMeAutoApproveService>? log = null,
+        // Optional so every existing caller and test still constructs this service unchanged; a
+        // null sender simply means no notice, which is what the pre-§1060 behaviour was.
+        IEmailSender? email = null,
+        // 🔴 Needed to mark the notice RING-EXEMPT — without it the mail is dropped. See NotifyAsync.
+        IEmailContextAccessor? ctx = null,
+        SoMeSubjectLabeller? labeller = null,
+        Microsoft.Extensions.Options.IOptions<Email.EmailTemplateOptions>? branding = null,
+        // §1124 — the shared speaker/session audience.
+        Microsoft.Extensions.Options.IOptions<Email.EmailOptions>? emailOptions = null,
+        // 🔴 §1170 — so the notice can show the post AS IT WILL READ. Optional like the rest, but a
+        // null composer means the mail falls back to the raw template, which is what he called
+        // useless — so it is registered in both hosts.
+        SoMePostComposer? composer = null)
     {
+        _composer = composer;
         _db = db;
         _gate = gate;
         _clock = clock;
         _log = log;
+        _email = email;
+        _ctx = ctx;
+        _labeller = labeller;
+        _hubUrl = (branding?.Value.HubUrl ?? string.Empty).TrimEnd('/');
+        _emailOptions = emailOptions?.Value;
     }
 
     /// <summary>The kinds a template builds. Type 5 is HIS copy and is deliberately absent.</summary>
@@ -98,12 +151,7 @@ public sealed class SoMeAutoApproveService
             return new SoMeAutoApproveResult(0, 0, 0, "Auto-approval is off — every post waits for you.");
         }
 
-        // 🔒 A zero or negative lead is floored: a misconfigured field must never widen the window
-        // to "everything", in either direction.
-        var leadDays = Math.Max(1, settings.AutoApproveLeadDays);
         var now = _clock.GetUtcNow();
-        // §1030 — the WINDOW: due within `leadDays`, and not already overdue.
-        var dueBy = now.AddDays(leadDays);
 
         var candidates = await _db.SoMePosts
             .Where(p => p.EventId == eventId
@@ -116,33 +164,37 @@ public sealed class SoMeAutoApproveService
                         && p.ManualTextOverride == null)                 // his words keep his approval
             .ToListAsync(ct);
 
+        var withdrawn = await WithdrawExcludedAsync(eventId, ct);
+
         var approved = 0;
         var notYet = 0;
         var blocked = 0;
+        var justApproved = new List<SoMePost>();
 
         foreach (var post in candidates)
         {
-            // Guard 1 (§1030) — the WINDOW.
+            // 🔴 §1068 — A BACKDATED POST THAT NEVER PUBLISHED MUST GO OUT. THIS IS THE POINT.
             //
-            // 🔴 OVERDUE STAYS WITH A HUMAN. §889.1: approving a post whose slot has passed
-            // publishes it on the next dispatch tick — thirty seconds, in the incident. That is
-            // indistinguishable from pressing publish, so a rule may never do it.
-            if (post.ScheduledAtUtc <= now)
-            {
-                notYet++;
-                continue;
-            }
+            // Operator 2026-08-11, reversing the guard I had kept: *"if a post has NOT been
+            // published yet and points to the past, then it must approve and publish it, very
+            // important that the guard picks that up"*.
+            //
+            // 🔑 I had held these back on §889.1's reasoning — approving one publishes it on the
+            // next dispatch tick, which is indistinguishable from pressing publish. That reasoning
+            // was about an ACCIDENT (a rule publishing something nobody had reviewed). It does not
+            // apply once eligibility IS the review: a post that passes every gate has been checked
+            // by more rules than a human click applies.
+            //
+            // ⚠️ And the cost of holding them was the real risk: a post blocked on a missing
+            // abstract or graphic while its date slid past would sit PLANNED for ever — never
+            // published, never chased, invisible. The campaign would quietly lose posts, and the
+            // only symptom would be that nothing happened (§335). Its slot has passed, so the next
+            // tick is exactly when it should go.
+            //
+            // ⇒ There is no date condition here any more. Eligibility is the whole rule.
 
-            // Not due yet — it stays PLANNED and the plan stays movable. This is the half that was
-            // inverted: it used to be the condition for approving, and is now the condition for
-            // waiting.
-            if (post.ScheduledAtUtc > dueBy)
-            {
-                notYet++;
-                continue;
-            }
-
-            // Guard 2 — the same question a human answers before clicking approve.
+            // ELIGIBILITY — and since §1060/§1068 it is the ONLY condition.
+            // The same question a human answers before clicking approve.
             if (await _gate.BlockedReasonAsync(post, ct) is { Length: > 0 })
             {
                 blocked++;
@@ -152,21 +204,237 @@ public sealed class SoMeAutoApproveService
             post.IsActive = true;
             post.LastUpdatedByEmail = "auto-approved";
             approved++;
+            justApproved.Add(post);
         }
 
         if (approved > 0) await _db.SaveChangesAsync(ct);
 
-        // §1030 — the sentence describes the WINDOW, or it teaches the old rule to whoever reads it.
+        // §1122 — resolve the human subjects ONCE for the whole batch, not once per mail.
+        // SoMeSubjectLabeller is batched by design (§889: "two queries for a whole page, never one
+        // per row"), and the first sweep of the day approves the entire eligible backlog — calling it
+        // per post would turn that into one pair of queries per notice.
+        IReadOnlyDictionary<int, string>? labels = null;
+        if (_labeller is not null && justApproved.Count > 0)
+        {
+            try { labels = await _labeller.LabelsForAsync(eventId, justApproved, ct); }
+            catch (Exception ex)
+            {
+                // A label is a nicety; the notice is the requirement. Never let it cost the mail.
+                _log?.LogWarning(ex, "§1122: subject labels could not be resolved; notices will "
+                    + "fall back to the raw subject key.");
+            }
+        }
+
+        // 🔒 Mailed AFTER the save, so a notice can never describe an approval that was rolled back.
+        foreach (var post in justApproved)
+        {
+            var label = labels is not null && labels.TryGetValue(post.Id, out var l) ? l : null;
+            await NotifyAsync(post, eventId, label, ct);
+        }
+
+        // §1060 — the sentence describes ELIGIBILITY, or it teaches the retired window rule to
+        // whoever reads it next.
+        // §1068 — `notYet` is now always 0: nothing defers on a date any more, in either direction.
+        // 🔒 The field stays on the result record because pages and the Jobs view read it; reporting
+        // it as 0 is honest, whereas removing it would break callers to delete a zero.
         var message =
-            $"Auto-approved {approved} post(s) due within {leadDays} day(s). "
-            + $"{notYet} not yet due (or already overdue — those stay with you), "
+            (withdrawn > 0 ? $"Withdrew {withdrawn} post(s) whose session is now excluded. " : "")
+            + $"Auto-approved {approved} eligible post(s) — including any whose date has already "
+            + $"passed, which publish on the next dispatch tick. "
             + $"{blocked} waiting on a missing dependency.";
 
         _log?.LogInformation(
-            "§1030 auto-approve: {Approved} approved, {NotYet} not yet due, {Blocked} blocked "
-            + "(lead {LeadDays}d, event {EventId}).",
-            approved, notYet, blocked, leadDays, eventId);
+            "§1068 auto-approve: {Approved} approved (eligibility is the only condition; backdated "
+            + "posts included), {Blocked} blocked (event {EventId}).",
+            approved, blocked, eventId);
 
         return new SoMeAutoApproveResult(approved, notYet, blocked, message);
+    }
+
+    /// <summary>
+    /// §1060(h) — UN-APPROVE posts whose session has since been marked "exclude from social-media
+    /// announcements". Returns how many were withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"we need 1 more option where a session gets a ExcludeFromSome
+    /// announcements flag. <b>then it is removed</b>"</i> — and *removed* is the half a filter cannot
+    /// do. The planner stops PROPOSING an excluded session, and the gate stops it being APPROVED, but
+    /// a post approved BEFORE the flag was set is already switched on and already queued. Nothing
+    /// would have taken it back, and §1068 now publishes anything queued whose date has passed.</para>
+    ///
+    /// <para>🔒 <b>Un-approved, not deleted.</b> `IsActive = false` returns it to the planned state,
+    /// so un-ticking the flag restores it and no history is destroyed — the §1042 lesson, where a
+    /// capability that merely LOOKED gone caused an afternoon of hunting.</para>
+    ///
+    /// <para>⚠️ <b>Scoped to the FLAG alone, deliberately.</b> Withdrawing on any gate blocker would
+    /// churn: a sponsor who briefly blanks their social text would have their approved posts pulled
+    /// and re-approved on the next tick. The flag is a human decision that does not flicker.</para>
+    ///
+    /// <para>🛑 <b>Published posts are never touched.</b> They are out; the record must keep saying
+    /// so.</para>
+    /// </remarks>
+    private async Task<int> WithdrawExcludedAsync(int eventId, CancellationToken ct)
+    {
+        var excludedSessionKeys = await _db.Sessions
+            .Where(s => s.EventId == eventId && s.ExcludeFromSoMeAnnouncements)
+            .Select(s => "session:" + s.Id)
+            .ToListAsync(ct);
+
+        var excludedSponsorSessionKeys = await _db.SponsorSessions
+            .Where(s => s.EventId == eventId && s.ExcludeFromSoMeAnnouncements)
+            .Select(s => SoMeSponsorSessionKey.Prefix + s.Id)
+            .ToListAsync(ct);
+
+        var keys = excludedSessionKeys.Concat(excludedSponsorSessionKeys).ToList();
+        if (keys.Count == 0) return 0;
+
+        var doomed = await _db.SoMePosts
+            .Where(p => p.EventId == eventId
+                        && p.IsActive
+                        && p.Status == SoMePostStatus.Queued      // never a published one
+                        && p.SubjectKey != null
+                        && keys.Contains(p.SubjectKey))
+            .ToListAsync(ct);
+
+        if (doomed.Count == 0) return 0;
+
+        foreach (var p in doomed)
+        {
+            p.IsActive = false;
+            p.LastUpdatedByEmail = "withdrawn (session excluded from announcements)";
+        }
+
+        await _db.SaveChangesAsync(ct);
+        _log?.LogInformation(
+            "§1060(h) auto-approve: withdrew {Count} approved post(s) whose session is excluded from "
+            + "social-media announcements.", doomed.Count);
+
+        return doomed.Count;
+    }
+
+    /// <summary>
+    /// §1060(i) — one plain mail to <see cref="NoticeEmail"/> per auto-approved post, so the date can
+    /// be overruled before it publishes.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"organizers info mail must get email when approved auto so we can
+    /// overrule the date"</i> — and, when I offered a digest and a toggle, <i>"this is a simple email
+    /// to info@expertslive.dk whenever a some post is auto approved"</i>.</para>
+    ///
+    /// <para>⚠️ <b>One mail per post is his explicit choice, and the first sweep will be loud</b> —
+    /// it approves the whole eligible backlog at once. That was raised before building and is not
+    /// re-litigated here; batching is a small change afterwards if he wants it.</para>
+    ///
+    /// <para>🔒 <b>Never throws.</b> A mail that fails must not roll back an approval that already
+    /// happened, nor stop the remaining posts being notified — the approval is the fact, the notice
+    /// is a report of it.</para>
+    /// </remarks>
+    private async Task NotifyAsync(SoMePost post, int eventId, string? subjectLabel, CancellationToken ct)
+    {
+        if (_email is null) return;
+
+        try
+        {
+            var when = SoMeDisplayTime.ToDanish(post.ScheduledAtUtc);
+
+            // §1122 — the human subject, in the SUBJECT LINE too. "a Speaker post" told him only
+            // which of five templates fired; which speaker is the part that decides whether he needs
+            // to open it at all.
+            var label = string.IsNullOrWhiteSpace(subjectLabel) ? post.SubjectKey : subjectLabel;
+            var subject = string.IsNullOrWhiteSpace(label)
+                ? $"SoMe: a {post.Type} post was auto-approved for {when:ddd dd MMM HH:mm}"
+                : $"SoMe: \"{label}\" ({post.Type}) was auto-approved for {when:ddd dd MMM HH:mm}";
+
+            // 🔴 §1170 — RESOLVE THE TOKENS. Operator 2026-09-03: *"these mail are useless — no
+            // real context"*, over a notice whose body read "{SessionTitle}", "{IntroText}",
+            // "{EventDates}" and six more.
+            //
+            // ⚠️ §1122 already added "the whole text" for exactly this complaint, and inserted
+            // EffectiveText — which §901 defines as the TEMPLATE, "resolved at preview and at
+            // publish, never here". So that fix put the right field in the mail UNRESOLVED, and the
+            // notice showed placeholders instead of the post. The same shape as §1168: the right
+            // thing, asked at the wrong stage.
+            //
+            // 🔑 Resolved with the SAME composer the editor preview uses, so the mail and the
+            // editor cannot disagree about what the post says.
+            var bodyText = post.EffectiveText;
+            if (_composer is not null && !string.IsNullOrWhiteSpace(bodyText))
+            {
+                try
+                {
+                    var values = await _composer.ValuesForAsync(post, ct);
+                    bodyText = _composer.Resolve(bodyText, values);
+                }
+                catch (Exception ex)
+                {
+                    // 🔒 An unresolved template still beats no notice: a resolver that throws must
+                    // not cost him the warning that a post is about to publish.
+                    _log?.LogWarning(ex, "§1170: could not resolve tokens for post {PostId}; the "
+                        + "notice falls back to the raw template.", post.Id);
+                }
+            }
+
+            var editUrl = $"/Organizer/SoMePostEditor?id={post.Id}";
+            var absoluteEditUrl = string.IsNullOrEmpty(_hubUrl) ? editUrl : _hubUrl + editUrl;
+
+            var body =
+                "<p>A social-media post met every eligibility check and was <strong>approved "
+                + "automatically</strong>. It will publish at the time below unless you change it.</p>"
+                + $"<p><strong>Type:</strong> {post.Type}<br>"
+                + $"<strong>Subject:</strong> {System.Net.WebUtility.HtmlEncode(label ?? "—")}<br>"
+                + $"<strong>Publishes:</strong> {when:dddd dd MMM yyyy HH:mm} (Danish time)</p>"
+                // §1122 — THE POST ITSELF. Operator 2026-08-25: *"i need more context here like the
+                // whole text … as this is useless"*. The mail asked him to decide whether to overrule
+                // a publication while showing him nothing that would publish — so the only way to
+                // answer it was to open the editor, which is exactly the click the notice exists to
+                // save. The text is the context.
+                //
+                // 🔒 HtmlEncode THEN newline→<br>, never the other way round: encoding after would
+                // turn the tags we just inserted back into visible markup.
+                + "<p><strong>The post:</strong></p>"
+                + "<div style=\"white-space:pre-wrap;border-left:3px solid #d0d5dd;padding:8px 12px;"
+                + "margin:0 0 12px;color:#1f2937;\">"
+                + System.Net.WebUtility.HtmlEncode(
+                      string.IsNullOrWhiteSpace(bodyText) ? "(no text)" : bodyText)
+                      .Replace("\r\n", "\n").Replace("\n", "<br>")
+                + "</div>"
+                // §1122 — a COMPLETE, CLICKABLE url. The old line printed a bare path in bold, which
+                // no mail client can open: he had to retype it against the right host. The absolute
+                // form is built from the configured hub URL, and falls back to the bare path only
+                // when no base is configured (a test host) — plain, but never a broken link.
+                + $"<p><a href=\"{System.Net.WebUtility.HtmlEncode(absoluteEditUrl)}\">"
+                + "Change the date or hold this post &rarr;</a></p>";
+
+            // 🔴 RING-EXEMPT, AND THIS LINE IS THE WHOLE FEATURE.
+            //
+            // ⚠️ MEASURED IN PROD 2026-08-11, minutes after this shipped without it: all 19 notices
+            // were dropped — `Email RING-DROP (unknown recipient): info@expertslive.dk`, nineteen
+            // times, while the approvals themselves succeeded. `info@` is an ORGANIZER MAILBOX, not a
+            // participant row, and the per-recipient ring gate fails closed on an address it cannot
+            // find (correctly — that is what stops a typo'd or external address being mailed).
+            //
+            // 🔑 So a mail to an ops mailbox must SAY it is ops mail. The same pattern is already in
+            // FeedbackIntakeService (its info@ send), CalendarInviteEmailService and PinLoginService.
+            // 🔒 The §335 shape at its purest: the approvals worked, the log looked healthy, and the
+            // only symptom was an inbox that stayed empty.
+            using var _ = _ctx?.Set(new EmailContext("some-auto-approved", RingExempt: true));
+
+            // §1124 — the shared speaker/session audience. The post is about a speaker or a session,
+            // and the whole point of the notice is that the date can be overruled BEFORE it
+            // publishes — which is only true for someone who actually receives it.
+            //
+            // ⚠️ The §1060 note above ("a CONSTANT, not a setting … nothing to misconfigure") stands
+            // for the ADDRESS he named; it was about not inventing a settings surface nobody asked
+            // for. This is not that: it is the same audience every other speaker/session pending-task
+            // mail now uses, and NoticeEmail remains the fallback when no options are wired.
+            var to = _emailOptions?.SpeakerSessionRecipients() ?? new[] { NoticeEmail };
+            await _email.SendToManyAsync(to, subject, body, ct);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "§1060 auto-approve: post {PostId} WAS approved, but its notice to {To} could not be "
+                + "sent. The approval stands.", post.Id, NoticeEmail);
+        }
     }
 }

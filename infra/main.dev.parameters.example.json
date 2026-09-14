@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "_comment": "EXAMPLE dev parameters for main.bicep. Copy to infra/main.dev.parameters.json (the name scripts/deploy.sh and scripts/set-secrets.sh read) and replace every <...> value with your own. No SQL password lives here: the SQL server is Entra-only and the web + Functions apps authenticate with their managed identities.",
+  "_comment_baseName": "Lowercase letters and digits only, at most 12 characters (it is embedded in storage-account and Key Vault names, which cap at 24). Drives every resource name: rg-<baseName>-dev, <baseName>-web-<suffix>, <baseName>-db, and so on.",
+  "_comment_customDomain": "Informational: the hostname you will bind AFTER the deploy, once its DNS CNAME exists (see README 'Getting started'). Leave empty if you will use the default *.azurewebsites.net host.",
+  "_comment_testMode": "Dev runs in TestMode: integrations read but never write to shared upstream systems, and coordinator notifications go to the test address only.",
+  "_comment_sqlAadAdmin": "An Entra (Azure AD) GROUP that administers the SQL server. Create or pick a group you are a member of, then put its display name and object id here.",
+  "parameters": {
+    "environmentName": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "baseName": {
+      "value": "communityhub"
+    },
+    "customDomain": {
+      "value": "dev.hub.your-event.example"
+    },
+    "backstageEmbedOrigin": {
+      "value": ""
+    },
+    "testModeEnabled": {
+      "value": true
+    },
+    "sqlAadAdminLogin": {
+      "value": "<your-entra-sql-admin-group-name>"
+    },
+    "sqlAadAdminObjectId": {
+      "value": "<object-id-of-that-group>"
+    }
+  }
+}

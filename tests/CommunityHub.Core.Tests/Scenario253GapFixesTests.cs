@@ -245,8 +245,14 @@ public sealed class Scenario253GapFixesTests
         {
             await NewSeeder(db, config).SeedAsync(eventId);
 
+            // §1082 — the projection is over LIVE tasks only. A pruned row is now RETIRED rather
+            // than deleted (closed, labelled, kept for audit), so "the speaker does not have this
+            // task" means it is not OPEN to them — which is the property §299 6.2 is about and the
+            // one that stops the reminder firing. Filtering here rather than asserting absence keeps
+            // the test about entitlement instead of about deletion mechanics.
             var keys = await db.Tasks
                 .Where(t => t.EventId == eventId && t.AssignedParticipantId == speaker.Id)
+                .Where(CommunityHub.Core.Tasks.TaskClosure.NotSystemClosed)
                 .Select(t => t.SourceKey!)
                 .ToListAsync();
             // §299 6.2: a SPONSOR-category speaker gets no travel task (pruned, never re-seeded).
@@ -408,10 +414,18 @@ public sealed class Scenario253GapFixesTests
         {
             await NewSeeder(db, config).SeedAsync(eventId);
 
-            // The ex-speaker's dated speakerdl task is deleted → its due-day reminder
-            // can never fire again; the current speaker's task survives.
-            Assert.False(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == ex.Id
-                && t.SourceKey!.StartsWith("speakerdl:")));
+            // §1082 — the ex-speaker's dated speakerdl task is RETIRED, not deleted (operator
+            // 2026-08-13: *"you dont delete, but close them (as they were inactive)"*). The property
+            // that matters is unchanged and asserted below: its due-day reminder can never fire
+            // again. What changed is that the row survives for audit — an ex-speaker has often
+            // already DONE some of these, and deleting erased that they did.
+            var exRows = await db.Tasks
+                .Where(t => t.AssignedParticipantId == ex.Id && t.SourceKey!.StartsWith("speakerdl:"))
+                .ToListAsync();
+            Assert.NotEmpty(exRows);                                   // kept, not erased
+            Assert.All(exRows, t => Assert.Equal(TaskState.Done, t.State));
+            Assert.All(exRows, t => Assert.Equal(
+                TaskClosedReason.RetiredFromCatalog, t.ClosedReason));  // system-closed, not "they did it"
             Assert.True(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == still.Id
                 && t.SourceKey == $"speakerdl:{still.Id}:upload-final-presentation"));
 

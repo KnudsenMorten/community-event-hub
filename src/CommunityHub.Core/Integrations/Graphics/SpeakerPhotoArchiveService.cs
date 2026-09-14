@@ -65,6 +65,11 @@ public sealed class SpeakerPhotoArchiveService
 
     private readonly DocLibrary.IDocLibraryPathResolver? _paths;
 
+    // §1132 — READ seam, used only to ask whether a speaker's name alias already exists. Optional:
+    // with no store wired the alias check answers "missing", which costs a re-fetch and can never
+    // lose anybody a photo. Deliberately NOT the write path — uploads still go through _sp.
+    private readonly ISharePointFileStore? _store;
+
     public SpeakerPhotoArchiveService(
         CommunityHubDbContext db, SharePointUploadClient sp,
         EventEditionConfigLoader cfg, EventConfigOptions cfgOptions,
@@ -72,8 +77,10 @@ public sealed class SpeakerPhotoArchiveService
         EngineAlertSender? alerts = null, ILogger<SpeakerPhotoArchiveService>? log = null,
         HttpClient? http = null,
         Func<string, byte[], string, CancellationToken, Task>? uploadOverride = null,
-        DocLibrary.IDocLibraryPathResolver? paths = null)
+        DocLibrary.IDocLibraryPathResolver? paths = null,
+        ISharePointFileStore? store = null)
     {
+        _store = store;
         _paths = paths;
         _db = db; _sp = sp; _cfg = cfg; _cfgOptions = cfgOptions;
         _writes = writes ?? new AllowAllExternalWrites();
@@ -175,6 +182,12 @@ public sealed class SpeakerPhotoArchiveService
         int archived = 0, skipped = 0, failed = 0, noPhoto = 0, uncategorized = 0, alreadyStored = 0;
         var failures = new List<string>();
 
+        // §1132 — ONE listing per run, so the alias check below costs nothing per speaker.
+        // 🔒 NULL when the folder could not be read, which makes HasAlias answer "present" and keeps
+        // the pre-§1132 skip rule. See ListFolderNamesAsync for why guessing "missing" would be far
+        // worse than a delayed alias.
+        var existingFiles = await ListFolderNamesAsync(folder, ct);
+
         foreach (var c in candidates)
         {
             var p = c.Profile;
@@ -198,8 +211,15 @@ public sealed class SpeakerPhotoArchiveService
             // file again and every legacy `speaker-photo-{Name}-{id}` name would be frozen for ever.
             // Asking whether the STORED file is on the current convention re-fetches each one exactly
             // once, then returns to the cheap steady state.
+            // §1132 — AND its name alias is present. Same reasoning as the clause above, one step
+            // on: a speaker archived before §1132 has a perfectly current id file and NO alias, so
+            // "same URL + current convention" would skip them for ever and the folder would only
+            // grow aliases for speakers who happen to change their photo. Asking whether the alias
+            // exists re-fetches each speaker exactly ONCE — the §768.16 backfill pattern — and then
+            // returns to the cheap steady state.
             if (string.Equals(p.PhotoArchivedFromUrl, source, StringComparison.Ordinal)
-                && SpeakerPhotoFileName.IsCurrentConvention(p.PhotoSharePointPath))
+                && SpeakerPhotoFileName.IsCurrentConvention(p.PhotoSharePointPath)
+                && HasAlias(existingFiles, p.ParticipantId, c.FullName))
             {
                 skipped++;
                 continue;
@@ -207,7 +227,7 @@ public sealed class SpeakerPhotoArchiveService
 
             try
             {
-                var stored = await FetchAndUploadAsync(sp, folder!, p, source!, ct);
+                var stored = await FetchAndUploadAsync(sp, folder!, p, c.FullName, source!, ct);
                 if (stored is null) { failed++; failures.Add($"{c.FullName}: the photo could not be downloaded"); continue; }
 
                 p.PhotoSharePointPath = stored;
@@ -237,9 +257,96 @@ public sealed class SpeakerPhotoArchiveService
         return new Result(true, null, archived, skipped, failed, noPhoto, uncategorized, alreadyStored);
     }
 
+    /// <summary>
+    /// §1132 — every file name currently in the speaker-photo folder. Empty when it cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Returns <c>null</c> when the folder COULD NOT BE READ — which is not the same as "the
+    /// folder is empty", and the difference decides whether a speaker is re-fetched.
+    ///
+    /// <para>⚠️ Treating an unreadable folder as empty would mark every alias missing and re-pull
+    /// the ENTIRE roster from the Sessionize CDN on EVERY run — precisely what this service's
+    /// idempotence exists to prevent (<i>"wasteful and rude to someone else's server"</i>). A
+    /// delayed alias is a cosmetic wait; a hammered third-party CDN is not. ⇒ On failure the caller
+    /// keeps the pre-§1132 skip rule, and the alias is written whenever the photo next changes.</para>
+    /// </remarks>
+    private async Task<HashSet<string>?> ListFolderNamesAsync(string? folder, CancellationToken ct)
+    {
+        if (_store is null || string.IsNullOrWhiteSpace(folder)) return null;
+
+        try
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in await _store.ListAsync(folder!, ct)) names.Add(f.Name);
+            return names;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "§1132: the speaker-photo folder could not be listed, so alias backfill is skipped "
+                + "this run. Photos are unaffected.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// §1132 — does this speaker already have their name alias? True also when the name sanitises to
+    /// nothing, because then there is no alias to write and the speaker must not be re-fetched for ever.
+    /// </summary>
+    private static bool HasAlias(HashSet<string>? existing, int participantId, string? fullName)
+    {
+        // 🔴 Could not read the folder ⇒ answer "present", i.e. keep the pre-§1132 skip rule. See
+        // ListFolderNamesAsync: guessing "missing" here re-pulls the whole roster every run.
+        if (existing is null) return true;
+
+        if (SpeakerPhotoFileName.SanitiseName(fullName).Length == 0) return true;
+
+        // 🔑 Matched WITHOUT the extension: the alias carries whatever the source served (.jpg/.png),
+        // and comparing on a guessed extension would report every alias missing and re-fetch the
+        // whole roster on every run.
+        var stem = SpeakerPhotoFileName.BuildAlias(participantId, fullName, ".x");
+        if (stem is null) return true;
+        stem = stem[..^2];
+
+        return existing.Any(n =>
+            n.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// §1132 — write the name alias. Best-effort: never throws, never changes the archive's result.
+    /// </summary>
+    private async Task TryWriteAliasAsync(
+        SharePointEditionConfig sp, string folder, int participantId, string? fullName,
+        string ext, byte[] bytes, string contentType, CancellationToken ct)
+    {
+        var alias = SpeakerPhotoFileName.BuildAlias(participantId, fullName, ext);
+        if (alias is null) return;
+
+        try
+        {
+            if (_uploadOverride is not null)
+            {
+                await _uploadOverride(alias, bytes, contentType, ct);
+            }
+            else
+            {
+                using var upload = new MemoryStream(bytes);
+                await _sp.UploadFileStreamAsync(
+                    sp.SiteUrl, sp.DriveName, folder, alias, upload, bytes.Length, contentType, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "§1132: the name alias '{Alias}' could not be written for participant "
+                + "{ParticipantId}. The id-named photo is stored and everything that reads it is "
+                + "unaffected.", alias, participantId);
+        }
+    }
+
     private async Task<string?> FetchAndUploadAsync(
         SharePointEditionConfig sp, string folder,
-        SpeakerProfile profile, string source, CancellationToken ct)
+        SpeakerProfile profile, string? fullName, string source, CancellationToken ct)
     {
         using var resp = await _http.GetAsync(source, ct);
         if (!resp.IsSuccessStatusCode) return null;
@@ -266,6 +373,14 @@ public sealed class SpeakerPhotoArchiveService
             await _sp.UploadFileStreamAsync(
                 sp.SiteUrl, sp.DriveName, folder, fileName, upload, bytes.Length, contentType, ct);
         }
+
+        // §1132 — the NAME ALIAS, so the folder can be searched by person rather than by id.
+        //
+        // 🔒 BEST-EFFORT, AND AFTER the real file. The id file is the one every reader resolves and
+        // the one this method's return value names; the alias is a convenience for a human browsing
+        // SharePoint. A failure writing it must never fail the archive or change what is returned —
+        // otherwise a convenience feature could cost a speaker their photo.
+        await TryWriteAliasAsync(sp, folder, profile.ParticipantId, fullName, ext, bytes, contentType, ct);
 
         return fileName;
     }

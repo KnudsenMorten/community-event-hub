@@ -240,6 +240,8 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Forms.RoleWizardService>();
         services.AddScoped<CommunityHub.Forms.AttendeeWizardService>();
         services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
+        // §1085 — the one role→wizard map, shared by the completion sweep and the status board.
+        services.AddScoped<CommunityHub.Forms.WizardProgressReader>();
         services.AddScoped<CommunityHub.Core.Reminders.GetStartedDigestBuilder>();
         // §994 — runs immediately before the digest, so an organizer added since the last pass is
         // chaseable on this one (they get no welcome mail, so nothing else would ever anchor them).
@@ -263,6 +265,8 @@ public static class JobsServiceRegistration
         // §326bs: hotel release-deadline warning (needs the allotment board for its numbers).
         services.AddScoped<CommunityHub.Core.Organizer.HotelAllotmentService>();
         services.AddScoped<CommunityHub.Core.Reminders.HotelCutoffReminderBuilder>();
+        // §1127 — chases sponsors whose WEBSHOP website or LinkedIn is blank (weekly until fixed).
+        services.AddScoped<CommunityHub.Core.Reminders.SponsorWebshopLinksReminderBuilder>();
 
         // §164: party sign-up task seeding — ensures the staff-role "party sign-up"
         // tasks exist so the reminder run below nags anyone who hasn't answered Yes/No.
@@ -388,7 +392,6 @@ public static class JobsServiceRegistration
             // §598 is why this one matters most: the client secret was DEAD in BOTH environments
             // and nothing said so — uploads simply stopped landing.
             .AddCredentialFailureAlert("SharePoint");
-        services.AddScoped<SponsorUploadWatchService>();
         // §598 — verifies stored artefacts still exist in SharePoint (SponsorArtefactVerifyJob).
         services.AddScoped<CommunityHub.Uploads.SponsorArtefactVerifier>();
         // §623 — the CEH↔Zoho speaker gap report (SpeakerGapReportJob).
@@ -440,6 +443,8 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.SwagLogisticsProducer>();
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.FoodLogisticsProducer>();
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LunchLogisticsProducer>();
+        // §1086 — the ONE lunch calculation, shared with the organizer pages in the web host.
+        services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LunchHeadcountService>();
         // 🔒 The expo files ask the SAME purchase service the sponsor's own task and the organizer's
         // logistics panel use (§687/§666), so the number a sponsor sees and the number he orders
         // cannot drift. BOTH hosts need it, or activation fails at RUNTIME — which a build cannot
@@ -533,7 +538,25 @@ public static class JobsServiceRegistration
         // §525 — SINGLETON: this host is where the burst came from. ~21 timer jobs each minted
         // their own access token instead of sharing one, tripping Zoho's refresh-grant rate limit
         // so every sync failed with "token refresh failed" against a perfectly valid credential.
-        services.AddSingleton<ZohoAccessTokenCache>();
+        // §1142 — THE SINGLETON WAS NECESSARY AND NOT SUFFICIENT, and this host is why.
+        //
+        // 🔴 Measured 2026-08-27: this app ran **5,520 distinct instances in 24 hours** (~150–250
+        // per hour). A singleton lives as long as its process, so every cold instance that touched
+        // Zoho minted its OWN access token. Zoho keeps at most 10 active access tokens per refresh
+        // token and evicts the oldest — so tokens were retired out from under instances still
+        // holding them, producing sporadic mid-life 401s (§1141).
+        //
+        // 🔑 The shared store makes "one token" true across the fleet instead of within one
+        // process, which is what §525 always intended.
+        services.AddSingleton<IZohoTokenStore>(sp =>
+            new SqlZohoTokenStore(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<SqlZohoTokenStore>>()));
+        services.AddSingleton(sp => new ZohoAccessTokenCache(
+            clock: sp.GetService<TimeProvider>(),
+            store: sp.GetRequiredService<IZohoTokenStore>(),
+            credentialKey: ZohoAccessTokenCache.CredentialKeyFor(
+                zohoOptions.ClientId, zohoOptions.RefreshToken)));
         services.AddHttpClient<ZohoClient>();
 
         // §59: delta-approval queue — sync engines ENQUEUE detected changes here for the
@@ -561,6 +584,11 @@ public static class JobsServiceRegistration
         // folder, alongside the sponsor-uploaded ones. Idempotent by SOURCE URL; the §340-H write
         // guard is what keeps DEV from writing at all. Run by SpeakerPhotoArchiveJob (daily).
         services.AddScoped<CommunityHub.Core.Integrations.Graphics.SpeakerPhotoArchiveService>();
+
+        // §1145 — the volunteer half of the same idea. The speaker archive back-fills its name
+        // aliases on every sweep; volunteers had the alias written only at signup, so anyone who
+        // uploaded before §1132 stayed id-only for ever. Run by VolunteerPhotoAliasBackfillJob.
+        services.AddScoped<CommunityHub.Core.Integrations.Graphics.VolunteerPhotoAliasBackfillService>();
 
         // §754: the SIGNAGE agenda mirror — pulls the COMPLETE Backstage agenda (talks, master
         // classes, breaks, registration, lunch, party) into AgendaActivities every 5 minutes for
@@ -614,6 +642,10 @@ public static class JobsServiceRegistration
         // after the order pull (replaces the legacy PowerShell sync). Run by
         // WooCommercePullJob, gated by 'sponsor-zoho-provision'.
         services.AddScoped<SponsorZohoProvisionService>();
+        // §1165 — the swag catalogue: holds (and their expiry sweep) and credits.
+        services.AddScoped<SwagCatalogHoldService>();
+        services.AddScoped<SwagCatalogCreditService>();
+        services.AddScoped<SponsorSwagCatalogService>();
         // ProvisionAsync delegates the §41b blank-only Zoho←CEH social/web reconcile for
         // ALREADY-LINKED companies to SyncAsync (same code the sponsor save uses), so the
         // sync service must be resolvable here too.
@@ -687,6 +719,24 @@ public static class JobsServiceRegistration
             CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>()
             .AddCredentialFailureAlert("e-conomic");
         services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
+        // 🔴 §1114 — THE DEACTIVATION CASCADE, WITHOUT WHICH TWO FEATURES SILENTLY DO NOTHING.
+        //
+        // `ErpWebshopContactSyncService` takes `ParticipantDeactivationService` as an OPTIONAL
+        // parameter, and only the WEB host registered it. So in this host it arrived null on every
+        // run and both branches that depend on it returned at their first line:
+        //   • §502 orphan pruning — while the mail it sends said *"Already done automatically: the
+        //     matching hub participant was deactivated"*. It was not. The mail asserted an action
+        //     that never happened, which is worse than the missing action.
+        //   • §1112's de-sponsored sweep — which is how it was caught: it was deployed, the job ran
+        //     for 92 s against real data, and it changed nothing.
+        //
+        // 🔑 Third time this session (§1110, §1113, this): **an optional dependency turns a missing
+        // registration into a null instead of a startup error.** Nothing throws, nothing logs, and
+        // the feature is simply absent. `JobDependenciesResolveTests` (§784.15) activates every
+        // [Function] against this registration and passed throughout — an optional parameter is
+        // satisfied by null, so resolution was never in doubt. Optionality has to be paid for with a
+        // test that asserts the dependency IS there where it matters.
+        services.AddScoped<CommunityHub.Core.Organizer.ParticipantDeactivationService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
 
         // Read-only e-conomic ROLE source (REQUIREMENTS §7c): resolves the
@@ -780,6 +830,15 @@ public static class JobsServiceRegistration
         // §795.2/§795.3 — the prepaid billing chase and the "drafts were created" notice, resolved
         // by CouponInvoiceJob and WebshopInvoiceJob, which run in THIS host.
         services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponDiscoveryService>();
+        // §1093 — one monitor link per billing customer, created by the coupon sweep.
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponCustomerMonitorProvisioner>();
+        // §1094 — the partner's fortnightly usage report and the balances behind it.
+        // ⚠️ AttendeeMonitorQuery was registered ONLY in the web host: the report service needs it
+        // here too, and without this the job would resolve nothing and the mail would never send —
+        // silently, because the whole block is fail-soft.
+        services.AddScoped<CommunityHub.Core.Integrations.AttendeeMonitorQuery>();
+        services.AddScoped<CommunityHub.Core.Integrations.MonitorPrepaidBalanceQuery>();
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponUsageReportService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidBillingReminderService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidLowBalanceAlertService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.DraftInvoiceCreatedNotifier>();
@@ -842,6 +901,10 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.SoMeVariableResolver>();
         // §864 — token resolution at publish time. Registered in BOTH hosts (see web Program.cs).
         services.AddScoped<CommunityHub.Core.Integrations.SoMePostComposer>();
+        // §1170 — the human subject label for the auto-approval notice and the 24h digest. It was
+        // registered in the WEB host only, so the mails the JOBS host sends fell back to raw subject
+        // keys ("session:1") — the optional dependency was silently null exactly where it mattered.
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeSubjectLabeller>();
         services.AddScoped<CommunityHub.Core.Integrations.SoMeScheduleService>();
         // §824.2D — the AI intro writer, on the SAME Azure OpenAI configuration the AiHelper uses:
         // one endpoint, one key, one place to switch off. The web host binds these already; the JOBS
@@ -857,6 +920,31 @@ public static class JobsServiceRegistration
         // unwell, and a post composed without its intro is the correct outcome (§824.2D).
         services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>(
             c => c.Timeout = TimeSpan.FromSeconds(15));
+        // §1060(l) — the eligibility judge, on the same options and bounded for the same reason.
+        // 🔒 Its budget is per SESSION, not per post, and the sweep skips anything already eligible
+        // with unchanged text — so a slow endpoint costs the sweep, never the dispatcher.
+        services.AddHttpClient<CommunityHub.Core.Integrations.SoMeTextEligibilityJudge>(
+            c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeTextEligibilitySweep>();
+        // §1060(b) — the announcement notices to speakers and sponsors.
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeAnnouncementNotifier>();
+        // §1060(j) — the daily "what publishes in the next 24 hours" digest to info@.
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeNext24HoursDigest>();
+        // §1077 — volume-package qualification (the sweep computes only; the SEND is the job's, and
+        // sits behind VolumePackageApprovalMailService.FeatureKey).
+        services.AddScoped<CommunityHub.Core.Integrations.VolumePackageQualificationService>();
+        services.AddScoped<CommunityHub.Core.Integrations.VolumePackageSweep>();
+        services.AddScoped<CommunityHub.Core.Email.VolumePackageApprovalMailService>();
+        // §1077 stage 4 — the weekly chase (behind its own switch, default OFF).
+        services.AddScoped<CommunityHub.Core.Email.VolumePackageReminderService>();
+        // §1080 — the campaign batch sender. 🔒 The unsubscribe secret is required here too: no
+        // signed link, no send (MailCampaignService.Gate refuses).
+        services.AddScoped<CommunityHub.Core.Email.MailAudienceResolver>();
+        services.AddScoped(sp => new CommunityHub.Core.Email.MailSuppressionService(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+            config["Email:UnsubscribeSecret"],
+            sp.GetRequiredService<TimeProvider>()));
+        services.AddScoped<CommunityHub.Core.Email.MailCampaignService>();
         // §304: pending-speaker approval — the import job mails info@ immediately
         // when new speakers arrive held from the Zoho flow.
         services.AddScoped<CommunityHub.Core.Organizer.SpeakerApprovalService>();

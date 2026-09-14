@@ -170,15 +170,36 @@ test.describe('@gui §9/§10/§11 Organizer hub', () => {
         await expect(page.locator('h1', { hasText: 'Speaker reminders' })).toBeVisible();
     });
 
-    test('§11 sponsor admin: task catalog + status dashboard (overdue-first)', async ({ page }) => {
+    test('§11 sponsor admin: task catalog + maintenance page', async ({ page }) => {
         await page.goto(`${BASE}/Organizer/SponsorAdmin/Tasks`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h1', { hasText: 'Sponsor tasks' }).first()).toBeVisible();
         // Create-a-task form targets all sponsor companies.
         await expect(page.locator('input#title[name="title"]')).toBeVisible();
         await assertNoHorizontalScroll(page);
 
+        // §1085 — this page is MAINTENANCE now; its per-company status table was retired in favour
+        // of the one all-roles board, and it must forward the reader there rather than dead-end.
         await page.goto(`${BASE}/Organizer/SponsorAdmin/Dashboard`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h1', { hasText: 'Sponsor status dashboard' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Sponsor maintenance' })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Participant status' })).toBeVisible();
+        // The four maintenance buttons stay — the operator asked for exactly that.
+        await expect(page.getByRole('button', { name: /Sync contacts webshop/i })).toBeVisible();
+        await assertNoHorizontalScroll(page);
+    });
+
+    test('§1085 participant status: one board for all roles, with filters', async ({ page }) => {
+        await page.goto(`${BASE}/Organizer/ParticipantStatus`, { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('h1', { hasText: 'Participant status' })).toBeVisible();
+        // Both filters are present and the board survives a role selection round-trip.
+        await expect(page.locator('select#role')).toBeVisible();
+        await expect(page.locator('select#state')).toBeVisible();
+        await assertNoHorizontalScroll(page);
+
+        await page.goto(`${BASE}/Organizer/ParticipantStatus?role=Sponsor&state=Overdue`,
+            { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('h1', { hasText: 'Participant status' })).toBeVisible();
+        await expect(page.locator('select#role')).toHaveValue('Sponsor');
+        await expect(page.locator('select#state')).toHaveValue('Overdue');
         await assertNoHorizontalScroll(page);
     });
 
@@ -206,6 +227,8 @@ test.describe('@gui §9/§10/§11 Organizer hub', () => {
             '/Organizer/SpeakerReminders', '/Organizer/SessionizeImport',
             '/Organizer/SponsorAdmin/Index', '/Organizer/SponsorAdmin/Dashboard',
             '/Organizer/SponsorAdmin/Tasks', '/Organizer/SponsorAdmin/Leads',
+            // §1085 — the one all-roles status board, unfiltered and role-filtered.
+            '/Organizer/ParticipantStatus', '/Organizer/ParticipantStatus?role=Sponsor',
         ]);
     });
 });

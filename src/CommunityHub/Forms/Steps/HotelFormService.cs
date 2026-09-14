@@ -185,6 +185,26 @@ public sealed class HotelFormService : IWizardFormService
     {
         if (dates is null) return (null, null);
 
+        // 🔴 §1135 — STATED WINS OVER DERIVED. Operator 2026-08-25: *"we have people checking in on
+        // 5th feb, 6th, 7th, 8th, 9th feb and checkout 10th, 11th or 12 th feb"* · *"but hotel is
+        // wrong then"*.
+        //
+        // The derivation below produced 06–12 Feb, so the 5th was OUTSIDE the picker and somebody
+        // arriving that night could not book it. Nothing failed: the input just refused the date,
+        // which reads as "not allowed" rather than "misconfigured" — and the person quietly books
+        // nothing, or mails an organizer instead.
+        //
+        // 🔑 The arrival spread is an operational fact (who travels when, what the room block
+        // covers), not a function of the event days. `-2` was a guess that fitted once; `-3` would
+        // be the same guess with a different number.
+        if (DateOnly.TryParse(dates.HotelStayFrom, out var statedFrom)
+            && DateOnly.TryParse(dates.HotelStayUntil, out var statedUntil)
+            && statedUntil > statedFrom)
+        {
+            return (statedFrom, statedUntil);
+        }
+
+        // 🔒 The pre-§1135 derivation, kept for every edition that has not stated a window.
         // preDay is the earliest event day; day2 falls back to day1 for a one-day edition.
         if (!DateOnly.TryParse(dates.PreDay, out var first)) return (null, null);
         if (!DateOnly.TryParse(dates.Day2, out var last)

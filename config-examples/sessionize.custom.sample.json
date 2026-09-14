@@ -1,0 +1,11 @@
+{
+  "_schema": "eldk-hub/sessionize-custom@1",
+  "_doc": "SAMPLE Sessionize settings. The hub binds these from the 'Sessionize' configuration section, so they are app settings, not a file the app reads: for local development paste the Sessionize block below into src/CommunityHub/appsettings.Development.json (git-ignored); in Azure set Sessionize__Enabled, Sessionize__View and Sessionize__EndpointId as app settings on BOTH the web app and the Functions app (the scheduled import runs in the Functions host). The endpoint id is ordinary operator configuration, not a secret.",
+  "_howToGetTheCode": "Sessionize -> open the event -> API/Embed -> create a new API endpoint -> choose JSON -> include all built-in fields -> ENABLE the 'speaker emails' advanced field (required: email is the import match key, so without it every speaker is skipped) -> use the ACCEPTED-speakers view -> save -> copy the endpoint id from https://sessionize.com/api/v2/<endpoint-id>/view/Speakers.",
+  "Sessionize": {
+    "Enabled": true,
+    "BaseUrl": "https://sessionize.com",
+    "View": "Speakers",
+    "EndpointId": "REPLACE_WITH_YOUR_SESSIONIZE_API_ID"
+  }
+}

@@ -43,7 +43,6 @@ public sealed class FeatureGateServiceTests
     [Theory]
     [InlineData("sponsor-order-pull")]
     [InlineData("sponsor-leads")]
-    [InlineData("sponsor-upload-watch")]
     [InlineData("attendee-reconcile")]
     public async Task New_residual_sync_jobs_default_off_and_honour_the_persisted_switch(string key)
     {

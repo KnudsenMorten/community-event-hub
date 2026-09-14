@@ -153,9 +153,28 @@ public sealed class WriteFromScratchIsFindableTests
         return org;
     }
 
+
+    /// <summary>
+    /// 🔒 §1169 — a FIXED clock, set before every seeded date.
+    /// </summary>
+    /// <remarks>
+    /// The queue now orders “next first”, which is relative to NOW. With the real clock these
+    /// tests would have quietly changed meaning as the seeded dates slid into the past — they are
+    /// about FILTERING, not ordering, and §1169 has its own tests. Pinning the clock keeps each
+    /// test about one thing.
+    /// </remarks>
+    private sealed class FixedClock : TimeProvider
+    {
+        private readonly DateTimeOffset _now;
+        public FixedClock(DateTimeOffset now) => _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    private static readonly TimeProvider BeforeEverything =
+        new FixedClock(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
     private static SoMeQueueModel NewModel(CommunityHubDbContext db, Participant org) =>
         new(new FakeAccessor(Session(org)), new SoMeQueueService(db, TimeProvider.System),
-            new SoMeSubjectLabeller(db))
+            new SoMeSubjectLabeller(db), BeforeEverything, new SoMeReadiness(db))
         {
             PageContext = new PageContext(),
         };

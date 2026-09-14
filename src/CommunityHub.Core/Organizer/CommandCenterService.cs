@@ -1,3 +1,4 @@
+using CommunityHub.Core.Attendees;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -226,7 +227,10 @@ public sealed class CommandCenterService
             .ToListAsync(ct);
         s.TotalParticipants = people.Count;
         s.ActiveParticipants = people.Count(active => active);
-        s.TotalAttendees = await _db.Attendees.CountAsync(a => a.EventId == eventId, ct);
+        // §1086 — live tickets only, the same rule as the dashboard total and the attendees page.
+        // ⚠️ Two lines below, ExpectedAttendees ALREADY filtered on MirrorState (§128), so this one
+        // page showed a "total" bigger than the "expected" for no reason a reader could work out.
+        s.TotalAttendees = await _db.Attendees.LiveIn(eventId).CountAsync(ct);
     }
 
     private async Task PopulateCheckInAsync(
@@ -438,8 +442,10 @@ public sealed class CommandCenterService
             .CountAsync(p => p.EventId == eventId
                              && p.Role == ParticipantRole.Volunteer && !p.IsActive, ct);
 
-        var reconMismatches = await _db.Attendees
-            .CountAsync(a => a.EventId == eventId && a.HasReconciliationMismatch, ct);
+        // §1086 — LIVE tickets only. This is an ATTENTION tile: a mismatch on a cancelled ticket is
+        // work nobody can ever complete, so counting it produced a red number that never went down.
+        var reconMismatches = await _db.Attendees.LiveIn(eventId)
+            .CountAsync(a => a.HasReconciliationMismatch, ct);
 
         var openActions = await _db.OrganizerActionItems
             .CountAsync(a => a.EventId == eventId && a.ResolvedAt == null, ct);

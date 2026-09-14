@@ -140,10 +140,22 @@ public sealed class SessionizeImportPictureCopyTests
             p => p.EventId == seed.EventId && p.FullName == "Community Speaker");
         var expected = SpeakerPhotoFileName.Build(participant.Id, ".png");
 
-        var upload = Assert.Single(store.Uploads);
+        // §1132 — TWO files now: the authoritative id-named one and its name alias beside it.
+        // ⚠️ This assertion was `Assert.Single`. It was right until §1132 deliberately added the
+        // second file (operator: *"same folder, just 2 files"*), so it is UPDATED, not deleted —
+        // the id file's folder and name are still pinned exactly as before.
+        Assert.Equal(2, store.Uploads.Count);
+
+        var upload = Assert.Single(store.Uploads, u => u.FileName == expected);
         // The SAME folder every other writer and the read proxy resolve (§764: "in 1 place only").
         Assert.Equal("General/Test/EventHub/Speakers/Photos", upload.Folder);
-        Assert.Equal(expected, upload.FileName);
+
+        // The alias sits in that same folder and carries the speaker's name AND their id.
+        var alias = Assert.Single(store.Uploads, u => u.FileName != expected);
+        Assert.Equal("General/Test/EventHub/Speakers/Photos", alias.Folder);
+        Assert.Equal(
+            SpeakerPhotoFileName.BuildAlias(participant.Id, "Community Speaker", ".png"),
+            alias.FileName);
         // 🔒 And NOT through the root-relative route, which is the retired graphics root.
         Assert.Empty(store.RootRelativeWrites);
 

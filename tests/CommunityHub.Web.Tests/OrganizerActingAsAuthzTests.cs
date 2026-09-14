@@ -339,7 +339,7 @@ public sealed class OrganizerActingAsAuthzTests
 
     private static PreselectionQueueModel NewPreselection(
         CommunityHubDbContext db, HttpContext http, ParticipantDeletionService? deletion) =>
-        new(Accessor(http), queue: null!, activation: null!, deletion: deletion!)
+        new(Accessor(http), queue: null!, activation: null!, deletion: deletion!, availability: null!)
         {
             PageContext = new PageContext { HttpContext = http },
         };

@@ -57,13 +57,18 @@ public sealed class SponsorLogosFormService : IWizardFormService
     private readonly CompanyManagerOptions _cmOptions;
     private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorLogosFormService> _log;
+    private readonly CommunityHub.Core.Email.IEmailSender? _notifyEmail;
+    private readonly CommunityHub.Core.Email.IEmailContextAccessor? _emailCtx;
 
     public SponsorLogosFormService(
         CommunityHubDbContext db, TimeProvider clock, EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions, SharePointUploadClient sp, CompanyManagerClient cm,
         CompanyManagerOptions cmOptions,
         CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
-        ILogger<SponsorLogosFormService> log)
+        ILogger<SponsorLogosFormService> log,
+        // §1074 — the wizard logo step never notified anyone. See TryUploadAsync.
+        CommunityHub.Core.Email.IEmailSender? email = null,
+        CommunityHub.Core.Email.IEmailContextAccessor? emailCtx = null)
     {
         _paths = paths;
         _db = db;
@@ -74,6 +79,8 @@ public sealed class SponsorLogosFormService : IWizardFormService
         _cm = cm;
         _cmOptions = cmOptions;
         _log = log;
+        _notifyEmail = email;
+        _emailCtx = emailCtx;
     }
 
     private Task<string?> CompanyIdAsync(int participantId, CancellationToken ct) =>
@@ -186,6 +193,30 @@ public sealed class SponsorLogosFormService : IWizardFormService
                 UploadedAt = _clock.GetUtcNow(),
             });
             await _db.SaveChangesAsync(ct);
+
+            // 🔴 §1074 — NOTIFY. THIS CALL WAS SIMPLY ABSENT, AND THAT IS THE WHOLE BUG.
+            //
+            // ⚠️ Operator 2026-08-11, after a real upload with the fix from §1072 already live:
+            // *"i have uploaded - and restart both the watchers - but no mail"*. Correct — because
+            // this is a FOURTH upload path and it never called the notifier at all. Not a ring gate,
+            // not a Get-Started gate, not a missing folder: no call.
+            //
+            // 🔑 THE WIZARD IS THE PATH A SPONSOR ACTUALLY USES. The three paths that DID notify
+            // (Company Details, direct-to-storage, the artefact uploader) are organizer- or
+            // API-side; onboarding goes through here. So the one path that mattered for
+            // "a sponsor delivered something, go update Zoho" was the one that stayed silent.
+            //
+            // ⚠️ This is §494d word for word — *"the direct-to-storage path silently sent NO
+            // designer notification because it was written separately, so artwork arrived and
+            // nobody was told"* — recurring in a path added later. A shared helper only prevents
+            // drift in the callers that CALL it.
+            if (_notifyEmail is not null)
+            {
+                await CommunityHub.Uploads.SponsorUploadKinds.NotifyAsync(
+                    _notifyEmail, spec, sponsorName ?? companyId, fileName, webUrl, email,
+                    _log, ct, _emailCtx);
+            }
+
             return 1;
         }
         catch (Exception ex)

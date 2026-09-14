@@ -174,6 +174,160 @@ public class SoMeSettings
     public DateOnly? MasterClassAnnouncementFrom { get; set; }
 
     /// <summary>
+    /// §1179 — the date SPONSOR announcements start. Null = no floor; sponsor posts are spread across
+    /// the whole campaign like everything else.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"i wants sponsors to start from oct 15"</i>, after
+    /// <i>"lets keep the current design"</i>.</para>
+    ///
+    /// <para>🔒 <b>A FLOOR, not a window — and that follows directly from "keep the current
+    /// design".</b> <see cref="MasterClassAnnouncementFrom"/> is a window: it packs its posts forward
+    /// from the date and overrules the spread. He kept §848.1's whole-period spread, so this says
+    /// only <i>"not before this"</i> and lets the spread go on choosing the day — the same shape as
+    /// <see cref="SpeakerAnnouncementFrom"/>. Making it a window would have quietly bunched every
+    /// sponsor into one week, which is the front-loading §848.1 exists to prevent.</para>
+    ///
+    /// <para>⚠️ <b>Covers TIER posts as well as single-sponsor ones</b> (types 3 and 4). "Sponsors
+    /// start from 15 October" reading as "…but the Gold tier post goes out in September" would be a
+    /// distinction nobody asked for, and the tier post announces the same companies.</para>
+    ///
+    /// <para>🔑 <b>It cannot make a sponsor announceable EARLIER.</b> §854/§846 already hold a sponsor
+    /// back until their logo and graphic exist; this combines with that readiness as the LATER of the
+    /// two, so it can only ever delay. ⚠️ §842.5's contractual "every sponsor twice" still has to fit
+    /// between this date and the event — the run reports any sponsor post it cannot place.</para>
+    /// </remarks>
+    public DateOnly? SponsorAnnouncementFrom { get; set; }
+
+    /// <summary>
+    /// §1181 — the date the FIRST round of sponsor-TIER posts runs from. Null = fall back to
+    /// <see cref="SponsorAnnouncementFrom"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"i would like to run sponsor category some posts, so round 1
+    /// runs from dec 15 and round 2 runs from jan 15"</i>.</para>
+    ///
+    /// <para>🔑 <b>A ROUND, not a floor — so these are §908's explicit windows.</b> A floor says "not
+    /// before" and lets the spread choose the day, which is right for a category that trickles in as
+    /// sponsors sign. A tier post is different: there are only a handful of tiers and he is naming
+    /// when each ROUND happens, so an occurrence listed here is placed from its own window and is
+    /// deliberately NOT spread. The four tier posts land together from the date.</para>
+    ///
+    /// <para>⚠️ <b>This SPLITS tiers off from <see cref="SponsorAnnouncementFrom"/></b>, which §1179
+    /// had cover both types on the reasoning that "sponsors from 15 October" should not leave the Gold
+    /// tier post going out in September. That reasoning held until he gave tiers their own dates;
+    /// now the more specific instruction wins. 🔒 The fallback keeps that promise intact: with these
+    /// blank, tiers still obey the sponsor floor exactly as they did.</para>
+    /// </remarks>
+    public DateOnly? SponsorCategoryRound1From { get; set; }
+
+    /// <summary>
+    /// §1181 — the date the SECOND round of sponsor-TIER posts runs from. Null = the ordinary spread
+    /// for round 2.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Round 2 is the reminder in the run-up, so it has no fallback to the round-1 date: pointing
+    /// both rounds at one window would publish the same tier twice in the same week, which is the
+    /// opposite of a reminder.
+    /// </remarks>
+    public DateOnly? SponsorCategoryRound2From { get; set; }
+
+    /// <summary>
+    /// §1181 — the date the SECOND round of TRACK posts runs from. Null = one month before the event.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"make sure that values here wins, so we dont have static values
+    /// in the code"</i>.</para>
+    ///
+    /// <para>🔑 §908 derived round 2 as <c>eventStart.AddMonths(-1)</c> — evergreen, but a rule he
+    /// could not change without a deploy. The derivation stays as the FALLBACK, so an edition that
+    /// sets nothing behaves exactly as before; setting a date here overrules it.</para>
+    /// </remarks>
+    public DateOnly? SpeakerTracksRound2From { get; set; }
+
+    /// <summary>
+    /// §1184 — the date the SECOND round of SPONSOR posts runs from. Null = the same floor as round 1.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"make sure that you include round 1 and 2 where needed in the
+    /// some settings"</i>.</para>
+    ///
+    /// <para>🔴 <b>Type 4 was the gap.</b> Tracks (§1181) and tiers (§1181) each had two round dates;
+    /// a sponsor is announced TWICE as well (§842.5 makes it contractual), and both rounds were
+    /// sharing <see cref="SponsorAnnouncementFrom"/> — so the reminder round could be placed the same
+    /// week as the announcement and there was no way to say otherwise.</para>
+    ///
+    /// <para>⚠️ Sessions are NOT given a round 2: they run once by default, and §928 already records
+    /// that a repeat is an ordinary spread post. A field for a round that does not exist would be one
+    /// more thing to wonder about.</para>
+    ///
+    /// <para>🔒 Null falls back to round 1's floor, so an edition that sets nothing behaves exactly as
+    /// it did — the spread still separates the two rounds, this just lets him say where.</para>
+    /// </remarks>
+    public DateOnly? SponsorRound2From { get; set; }
+
+    /// <summary>
+    /// §1185 — the date the THIRD round of TRACK posts runs from. Null = the ordinary spread.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"speaker tracks must have 3 rounds in the some post, where the
+    /// first runs in sept as now. second runs in early dec and third runs from mid jan 27"</i>.</para>
+    ///
+    /// <para>⚠️ <b>A date alone is not enough — the track cadence must also allow three.</b>
+    /// <c>SoMeCadenceService.DefaultOccurrences(SpeakerTracks)</c> is raised to 3 to match, but an
+    /// edition that has SAVED a cadence row keeps whatever number is in it: <c>Times()</c> reads the
+    /// row first and only falls back to the default. ⇒ If the posting-frequency page says 2, round 3
+    /// is never planned and this date has nothing to govern.</para>
+    ///
+    /// <para>🔒 Round 3 can never precede round 2, the same guard §908 put on round 2 vs round 1 for
+    /// a track that settles late.</para>
+    /// </remarks>
+    public DateOnly? SpeakerTracksRound3From { get; set; }
+
+    /// <summary>
+    /// §1186 — the date ordinary SESSION posts start. Null = no floor; they spread from today.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"technical sessions (incl. master class) have 2 dates with start
+    /// from … master class start date is a category of technical sessions. they runs fist starting
+    /// from 14. sept. and other technical sessions (excluding ask the experts) runs from 28. sept."</i></para>
+    ///
+    /// <para>🔴 <b>Type 2 was being treated as one thing and it is two.</b> The settings page said
+    /// "other sessions have no date by design" — true since §920 un-gated sessions, and wrong as a
+    /// campaign decision: master classes had a window and everything else had nothing, so there was
+    /// no way to say "the rest start a fortnight later".</para>
+    ///
+    /// <para>🔑 Covers keynotes, technical sessions and panels — every session type the planner
+    /// announces EXCEPT master classes, which keep their own earlier window. ⚠️ Ask-the-Experts
+    /// sessions are not announced at all (they are excluded by type), so this does not reach them.</para>
+    ///
+    /// <para>⚠️ A floor, not a window: after the date they spread across the run-up like the rest of
+    /// the campaign. And it only ever delays — a session still waits for its abstract and its graphic.</para>
+    /// </remarks>
+    public DateOnly? SessionAnnouncementFrom { get; set; }
+
+    /// <summary>
+    /// §1181 — the last day a TYPE 5 event post may be scheduled. Null = eight days before the event.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>This replaces a LITERAL 1 FEBRUARY in the code.</b> §847 recorded <i>"event post
+    /// must run fom aug-feb 1"</i> and it was encoded as
+    /// <c>new DateTimeOffset(eventStartUtc.Year, 2, 1, …)</c> — his instruction for ELDK27 frozen as
+    /// a month and a day.</para>
+    ///
+    /// <para>⚠️ <b>For any edition not held in February that is not merely wrong, it is silently
+    /// destructive:</b> a June event would compute 1 February of the same year — months BEFORE the
+    /// event — and every event post in the deck would be dropped with no message, because the check
+    /// is a <c>continue</c>. CEH is evergreen by rule (a new edition is a new Event row and a JSON
+    /// config), so a date pinned to one edition's calendar is a trap set for the next one.</para>
+    ///
+    /// <para>🔒 The fallback is <b>eight days before the event</b>, which reproduces 1 February
+    /// exactly for ELDK27's 9 February start — so today's behaviour is unchanged — and means
+    /// something sensible for every other edition.</para>
+    /// </remarks>
+    public DateOnly? EventPostWindowEndsOn { get; set; }
+
+    /// <summary>
     /// §925.2 — the day the Call for Speakers CLOSES. Null = the intake is not modelled and track
     /// readiness falls back to §925's session-arrival signal alone.
     /// </summary>

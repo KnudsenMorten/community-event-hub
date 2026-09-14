@@ -93,4 +93,106 @@ public sealed class CouponPoolZohoActionNotifierTests
         Assert.False(await notifier.NotifyAsync("  ", "2-day", 20, 20, false, null));
         Assert.Empty(mail.Messages);
     }
+
+    // =====================================================================
+    //  §1091 — the AD-HOC instruction (operator 2026-08-19: "rgr 2, create that")
+    // =====================================================================
+
+    /// <summary>
+    /// With <b>no agreed price</b> both shares are percentages of the same ticket price, so the
+    /// attendee's discount is exactly <c>100 − share</c> and the mail states it outright — that
+    /// number is the entire point of the instruction.
+    /// </summary>
+    [Fact]
+    public async Task A_fifty_fifty_split_tells_him_the_exact_discount_to_set()
+    {
+        var (notifier, mail) = New();
+
+        Assert.True(await notifier.NotifyAdHocAsync(
+            couponName: "ARROW-2027", agreedUnitPriceDkk: null,
+            invoicedSharePercent: 50, erpCustomerNumber: 1234, isNew: true));
+
+        var sent = Assert.Single(mail.Messages);
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, sent.To);
+        Assert.Contains("create promo code", sent.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ARROW-2027", sent.Subject);
+
+        Assert.Contains("50% discount", sent.Html);          // what to type into Backstage
+        Assert.Contains("1234", sent.Html);                  // who gets the invoice
+        Assert.Contains("no coupon API", sent.Html);         // why it is a manual step
+    }
+
+    /// <summary>
+    /// 🔴 <b>THE CASE THAT MUST NOT GUESS.</b> With an agreed price the company pays
+    /// <c>agreed × share</c>, which has no fixed relationship to the ticket's list price — so
+    /// "100 − share" would be a plausible number that is simply wrong, printed on an instruction he
+    /// would follow into Backstage.
+    /// <para>🔑 Asserting an ABSENCE as well as a presence: the mail must state the DKK the company
+    /// is billed and must NOT state a discount percentage.</para>
+    /// </summary>
+    [Fact]
+    public async Task An_agreed_price_makes_the_discount_underivable_and_the_mail_refuses_to_invent_one()
+    {
+        var (notifier, mail) = New();
+
+        Assert.True(await notifier.NotifyAdHocAsync(
+            couponName: "ARROW-2027", agreedUnitPriceDkk: 3000m,
+            invoicedSharePercent: 50, erpCustomerNumber: 1234, isNew: true));
+
+        var sent = Assert.Single(mail.Messages);
+
+        Assert.Contains("1500.00 DKK", sent.Html);       // what the company is actually billed
+        Assert.Contains("3000.00 DKK", sent.Html);       // the agreed price it came from
+        Assert.Contains("yourself", sent.Html);          // explicitly his call
+        // 🔒 The wrong-but-plausible number must be absent.
+        Assert.DoesNotContain("50% discount", sent.Html);
+    }
+
+    /// <summary>At 100% the attendee pays nothing, so the code is a 100% discount — said plainly.</summary>
+    [Fact]
+    public async Task A_hundred_percent_share_means_a_hundred_percent_discount()
+    {
+        var (notifier, mail) = New();
+
+        Assert.True(await notifier.NotifyAdHocAsync("ARROW-2027", null, null, 1234, isNew: true));
+
+        Assert.Contains("100% discount", Assert.Single(mail.Messages).Html);
+    }
+
+    /// <summary>
+    /// A coupon with no e-conomic customer cannot be invoiced at all, so the mail says so rather
+    /// than printing a blank row that reads like a rendering fault.
+    /// </summary>
+    [Fact]
+    public async Task A_coupon_with_no_customer_says_it_cannot_be_invoiced_yet()
+    {
+        var (notifier, mail) = New();
+
+        Assert.True(await notifier.NotifyAdHocAsync("ARROW-2027", null, 50, null, isNew: true));
+
+        Assert.Contains("cannot be invoiced yet", Assert.Single(mail.Messages).Html);
+    }
+
+    /// <summary>An edit to an existing coupon asks him to CHECK the code, not to create it again.</summary>
+    [Fact]
+    public async Task A_changed_split_asks_him_to_check_the_existing_code()
+    {
+        var (notifier, mail) = New();
+
+        Assert.True(await notifier.NotifyAdHocAsync("ARROW-2027", null, 30, 1234, isNew: false));
+
+        var sent = Assert.Single(mail.Messages);
+        Assert.Contains("split changed", sent.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create promo code", sent.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("70% discount", sent.Html);
+    }
+
+    [Fact]
+    public async Task A_blank_coupon_name_sends_no_ad_hoc_instruction()
+    {
+        var (notifier, mail) = New();
+
+        Assert.False(await notifier.NotifyAdHocAsync("  ", null, 50, 1234, isNew: true));
+        Assert.Empty(mail.Messages);
+    }
 }

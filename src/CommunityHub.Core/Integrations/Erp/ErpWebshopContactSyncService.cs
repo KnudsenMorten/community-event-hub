@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using CommunityHub.Core.Email;
 using Microsoft.Extensions.Logging;
@@ -14,8 +15,10 @@ namespace CommunityHub.Core.Integrations.Erp;
 ///     so a curated value is never overwritten);
 ///   - INVARIANT: a sponsor must always have a default signer AND a default event
 ///     coordinator. When the ERP contacts can't supply one (no Role:1 / Role:2),
-///     it emails an alert to the organizer so they fix it in e-conomic.
-/// e-conomic is the master; this only writes to the webshop. Idempotent.
+///     it emails an alert to the organizer so they fix it in e-conomic;
+///   - §1112: detects a webshop company whose e-conomic customer has LEFT group 1
+///     and withdraws it in CEH, because leaving a list is otherwise a silent event.
+/// e-conomic is the master; this only writes to the webshop and to CEH. Idempotent.
 /// </summary>
 public sealed class ErpWebshopContactSyncService
 {
@@ -25,8 +28,29 @@ public sealed class ErpWebshopContactSyncService
     private readonly IEmailSender _email;
     private readonly ILogger<ErpWebshopContactSyncService> _log;
 
-    /// <summary>Where the "fix this in e-conomic" alerts go.</summary>
-    public const string AlertEmail = "mok@expertslive.dk";
+    /// <summary>
+    /// Where the "fix this in e-conomic" alerts go — the **event-actions mailbox** (§1075).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>§1081 stage 2c (operator 2026-08-13).</b> It used to be
+    /// <c>mok@expertslive.dk</c>. His decision on a sponsor with no event coordinator was
+    /// <i>"better notify info@expertslive.dk if missing, but the sync jobs should take care of
+    /// it"</i> — and this job is already exactly that: it detects a company with no <c>Role:2</c>
+    /// contact <b>as the data arrives</b> and names the company and the fix. Stage 2c was therefore
+    /// already built; what did not match his rule was the ADDRESS.</para>
+    ///
+    /// <para>⚠️ <b>The whole mail moved, not just the coordinator line</b>, and that was his call
+    /// when the trade-off was put to him: the mail also carries orphaned webshop users and
+    /// company-failure notices, which are ops-flavoured. Splitting one note out would have made this
+    /// job send two mails whenever both kinds occur. Operator: <i>"you are ok to move ops mail to
+    /// info@expertslive.dk as well"</i>.</para>
+    ///
+    /// <para>🔒 <b>Why a mailbox and not a person:</b> §1075's reasoning is that an event action is
+    /// read by several people, so it survives one of them being on holiday — which is precisely the
+    /// failure mode a "no coordinator" notice must not have, since nothing else will chase that
+    /// company.</para>
+    /// </remarks>
+    public const string AlertEmail = "info@expertslive.dk";
     private const int SponsorGroup = 1;
 
     /// <summary>§502 — OPTIONAL. Present only where orphan pruning is wanted; without it the
@@ -35,6 +59,7 @@ public sealed class ErpWebshopContactSyncService
     /// §1041b — optional; null means "assume writes are allowed", which is the pre-guard behaviour.
     /// </summary>
     private readonly IExternalWriteGuard? _writes;
+    private readonly IEmailContextAccessor? _emailCtx;
 
     private readonly Data.CommunityHubDbContext? _db;
     private readonly Organizer.ParticipantDeactivationService? _deactivate;
@@ -53,9 +78,12 @@ public sealed class ErpWebshopContactSyncService
         Diagnostics.JobFailureTracker? failures = null,
         // 🔴 §1041b — needed to tell "WordPress refused the value" apart from "this host is not
         // allowed to write at all". See the billing block for why that distinction is not cosmetic.
-        IExternalWriteGuard? writes = null)
+        IExternalWriteGuard? writes = null,
+        // §1072 — so the alert declares itself ops mail; see the send site.
+        IEmailContextAccessor? emailCtx = null)
     {
         _writes = writes;
+        _emailCtx = emailCtx;
         _erp = erp;
         _cm = cm;
         _cmOptions = cmOptions;
@@ -112,6 +140,22 @@ public sealed class ErpWebshopContactSyncService
         "email" => c.Email,
         "name" => c.Name,
         "company_name_public" => c.PublicName,
+
+        // 🔴 §1140b — EVERY KEY THE SYNC WRITES MUST BE READABLE BACK HERE.
+        //
+        // ⚠️ These four were added with §1140 and NOT added here, so the §897 read-back found
+        // `null` for each one and reported it as *"Company Manager did NOT store … set it by hand"*
+        // — for 52 companies, including fields that had landed perfectly. VirtualMetric's CVR was
+        // in the webshop, correct, while the mail said it was refused.
+        //
+        // 🔑 The default arm below is the trap: an unmapped key is indistinguishable from a refused
+        // write, and it fails LOUDLY and WRONGLY. Adding a Follow() without adding it here turns a
+        // working sync into 52 pieces of false hand-entry work.
+        "corporate_identification_number" => c.CorporateIdentificationNumber,
+        "phone" => c.Phone,
+        "currency" => c.Currency,
+        "vat_zone_number" => c.VatZone,
+
         _ => null,
     };
 
@@ -130,7 +174,9 @@ public sealed class ErpWebshopContactSyncService
     public sealed record SyncResult(
         bool Enabled, int Customers, int UsersCreated, int DefaultsSet, int Alerts, List<string> AlertNotes,
         /// <summary>§502 — how many orphaned hub participants were DEACTIVATED this run.</summary>
-        int OrphansDeactivated = 0);
+        int OrphansDeactivated = 0,
+        /// <summary>§1112 — how many companies were WITHDRAWN for having left the sponsor group.</summary>
+        int DeSponsoredWithdrawn = 0);
 
     /// <param name="onlyCustomerNumber">
     /// §482b — when set, reconcile ONLY that e-conomic customer instead of sweeping every sponsor.
@@ -147,7 +193,52 @@ public sealed class ErpWebshopContactSyncService
         var webshopWritesBlocked = 0;
         if (!CanRun) return new(false, 0, 0, 0, 0, notes);
 
+        // 🔴 §1059 — A HOST THAT MAY NOT WRITE TO THE WEBSHOP MUST NOT RUN THIS JOB AT ALL.
+        //
+        // Operator 2026-08-11, for the SECOND time: *"DEV can NOT make changes in webshop !!!!"* —
+        // *"this process will fail as it tries syncing from erp to webshop which is must not do"*.
+        //
+        // ⚠️ Nothing was ever written to the live webshop: `CreateUserAsync` returns 0 at its own
+        // §1041 guard, before the HTTP request exists. What reached him was the REPORT. The caller
+        // below cannot tell "the guard refused" from "WordPress rejected the address", so a refusal
+        // rendered as *"could not be added to the webshop … delete or re-link the old user in
+        // WordPress"* — an instruction to hand-fix a webshop that is perfectly correct.
+        //
+        // 🔑 §1041b fixed exactly this, in the BILLING branch ~150 lines below, and stopped there.
+        // The user-create branch is the same defect and produced the same e-mail a second time.
+        // ⇒ Patching that one message would have left the third caller to be found by a third
+        // e-mail. THIS JOB IS the ERP→webshop sync: every effect it has — users created, defaults
+        // set, billing followed, orphans pruned — is a webshop write. If those are forbidden it has
+        // no work to do, so the honest thing is not to start.
+        //
+        // 🔒 PROD IS PROVABLY UNAFFECTED. This reads the ENVIRONMENT ceiling only (never the
+        // per-edition override, which would let one Settings click stop a PROD job). Verified in
+        // Azure 2026-08-11: PROD sets `Integrations__AllowExternalWrites = true` with NO per-system
+        // override, so the ceiling is TRUE and this branch cannot be taken there; DEV sets
+        // `Integrations__ExternalWrites__Webshop = false` on both hosts.
+        // ⚠️ DEV keeps `Erp = true` — writing to e-conomic from DEV is accepted (§1044, reconfirmed
+        // 2026-08-11: *"i accept it can write to ERP in dev"*). This gate is about the WEBSHOP only.
+        if (_writes is not null && !_writes.IsPermittedInThisEnvironment(ExternalSystems.Webshop))
+        {
+            _log.LogInformation(
+                "ERP→webshop reconcile SKIPPED: this host may not write to the webshop "
+                + "(Integrations:ExternalWrites:Webshop=false). Expected on DEV. No e-conomic read, "
+                + "no webshop call and no alert e-mail — the job's every effect is a webshop write.");
+
+            // 🔒 Returns Enabled:FALSE with zero notes. `notes` is empty, so the caller's
+            // `if (notes.Count > 0)` send is never reached — the silence is the point. A "skipped"
+            // e-mail would be the same defect one octave down: mail he did not ask for, from a job
+            // that must not run.
+            return new(false, 0, 0, 0, 0, notes);
+        }
+
         var customers = await _erp.ListCustomersAsync(null, SponsorGroup, ct);
+
+        // §1112 — the UNFILTERED group-1 set, captured before the single-company narrowing below.
+        // The de-sponsored sweep asks "which webshop companies are NOT in this set", and a set of one
+        // would answer "all of them".
+        var sponsorNumbers = customers.Select(c => c.CustomerNumber).ToHashSet();
+
         if (onlyCustomerNumber is int onlyNo)
         {
             customers = customers.Where(c => c.CustomerNumber == onlyNo).ToList();
@@ -201,6 +292,75 @@ public sealed class ErpWebshopContactSyncService
                 && !string.IsNullOrWhiteSpace(cu.Name)
                 && !string.Equals(cmCompany.Name, cu.Name, StringComparison.Ordinal);
 
+            // 🔴 §1158 — THE PUBLIC NAME MUST NOT CARRY THE LEGAL FORM.
+            //
+            // Operator 2026-08-31: "the publicname in the webshop has wrong format for some
+            // sponsors … it should not include legal terms like AG, Aps, A/S, LLC, K/S, Gmbh" ·
+            // "billing name includes fx A/S, Aps etc" · "public name is for linkedin".
+            //
+            // 🔑 TWO NAMES, TWO RULES. The legal/billing name KEEPS its form — an invoice without
+            // it is wrong — and nothing here touches it. The public name is what an audience reads
+            // (sponsor wall, event platform, LinkedIn) and must not carry it.
+            //
+            // 🔒 WARN, DO NOT FIX — unless the field is EMPTY. Operator, same conversation:
+            // "i am worried to automate this, except if the field is empty" · "as a sponsor can
+            // change the field at any time". A sponsor editing their own public name must never be
+            // fighting this job on a ten-minute timer, so a name they have typed is only reported.
+            //
+            // ⚠️ This NARROWS §891.3 ("otherwise company PUBLIC name must be owned by CM") by one
+            // case, on his instruction above: an EMPTY field is not something CM owns — nothing is
+            // taken from anyone by filling it — and leaving it empty is not neutral, because every
+            // consumer then falls back to the LEGAL name and publishes the form anyway. That
+            // fallback is why the event platform shows the suffixes he screenshotted.
+            if (cmCompany is not null)
+            {
+                var publicNameEmpty = string.IsNullOrWhiteSpace(cmCompany.PublicName);
+                var shownPublicly = publicNameEmpty ? cmCompany.Name : cmCompany.PublicName;
+                var legalForm = CompanyLegalForm.Detect(shownPublicly);
+
+                if (legalForm is not null && !publicNameEmpty)
+                {
+                    notes.Add($"⚠️ {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the webshop PUBLIC "
+                        + $"name <b>{E(cmCompany.PublicName)}</b> ends in the legal form "
+                        + $"<i>{E(legalForm)}</i>. The public name is the audience-facing one (sponsor "
+                        + $"wall, event platform, LinkedIn) — suggested: "
+                        + $"<b>{E(CompanyLegalForm.Strip(cmCompany.PublicName))}</b>. Not changed: a "
+                        + "public name someone has typed is theirs to edit. The billing name keeps "
+                        + "its legal form and is untouched.");
+                }
+                else if (legalForm is not null)
+                {
+                    // EMPTY public name + a legal form on the legal name: every consumer falls back
+                    // to the legal name, so this company IS publishing the form today.
+                    var suggested = CompanyLegalForm.Strip(cmCompany.Name);
+                    var filled = false;
+                    try
+                    {
+                        filled = await _cm.UpdateCompanyAsync(
+                            company.Id,
+                            new Dictionary<string, object?> { ["company_name_public"] = suggested },
+                            ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex, "§1158: public-name fill failed for company {Co}.", company.Id);
+                    }
+
+                    // 🔑 §1219 — a successful fill is a RECEIPT, not a to-do. It opened with the company
+                    // name like the genuine problems do, so the subject counted it as "needs your
+                    // attention" (operator 2026-09-14: "it should be in the logic already and did fix
+                    // it, so mail is wrong"). The fixed prefix is what SendAlertAsync keys on.
+                    notes.Add(filled
+                        ? $"PUBLIC NAME set automatically — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
+                          + $"the webshop public name was empty, so it is now <b>{E(suggested)}</b> "
+                          + $"(legal form <i>{E(legalForm)}</i> removed). Nothing to do."
+                        : $"⚠️ {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the webshop public name "
+                          + $"is EMPTY, so the legal name <i>{E(cmCompany.Name)}</i> is published with "
+                          + $"its legal form <i>{E(legalForm)}</i>. Setting it to "
+                          + $"<b>{E(suggested)}</b> FAILED — set it by hand in Company Manager.");
+                }
+            }
+
             if (legalRenamed)
             {
                 var push = new Dictionary<string, object?> { ["name"] = cu.Name };
@@ -248,6 +408,30 @@ public sealed class ErpWebshopContactSyncService
                     if (string.IsNullOrWhiteSpace(erpValue)) return;          // ERP blank ⇒ leave CM alone
                     if (string.Equals(erpValue.Trim(), cmValue?.Trim(), StringComparison.OrdinalIgnoreCase)) return;
                     billing[key] = erpValue.Trim();
+                }
+
+                // 🔴 §1140c — A NUMERIC FIELD MUST BE WRITTEN AS A JSON NUMBER.
+                //
+                // ⚠️ `Follow` puts a STRING in the payload, which is right for every other field in
+                // this block — `currency`, `phone` and `corporate_identification_number` are all
+                // strings in Company Manager, measured. `vat_zone_number` is NOT: the live API
+                // returns it as a JSON number (verified across all 52 companies, 2026-08-26), and
+                // the retired PowerShell sync wrote it as one — casting the CVR to string on the
+                // line above it and deliberately leaving the zone an int
+                // (`Sync-ERP-Customers-to-Webshop.ps1:332-334`).
+                //
+                // 🔑 THIS IS §1140b ONE LAYER OVER. That fix corrected the READ to cope with a
+                // number and left the WRITE stringifying it — the key was verified against the live
+                // payload and the TYPE was assumed, which is the same mistake twice in one field.
+                //
+                // 🔒 The COMPARISON stays textual on purpose: the read side renders the number as
+                // text (`GetScalarString`), so "2" vs 2 has to be settled somewhere, and text is the
+                // one form both sides can express.
+                void FollowNumber(string key, int erpValue, string? cmValue)
+                {
+                    if (string.Equals(erpValue.ToString(CultureInfo.InvariantCulture), cmValue?.Trim(),
+                                      StringComparison.OrdinalIgnoreCase)) return;
+                    billing[key] = erpValue;   // boxed int ⇒ serialized as a JSON number
                 }
 
                 // 🔴 §897 — `email` IS NOT WRITABLE, PROVEN. Company Manager answers 200 with the
@@ -301,6 +485,53 @@ public sealed class ErpWebshopContactSyncService
                     // fix for names we recognise, not a licence to guess (§582).
                     var iso = CountryCodeMapper.ToIso2(detail.Country);
                     if (iso is not null) Follow("billing_country", iso, cmCompany.BillingCountry);
+
+                    // 🔴 §1140 — THE "DATA OWNER: ERP" BLOCK, WHICH WAS NEVER ACTUALLY FOLLOWED.
+                    //
+                    // Operator 2026-08-26, after setting a VAT number in e-conomic and watching the
+                    // webshop stay blank for hours: *"the sync from erp to webshop is broken"* ·
+                    // *"you can also see the screenshot dataowne: erp"* · *"remember erp is master
+                    // for this field, newer webshop"*.
+                    //
+                    // 🔑 THIS IS A CAPABILITY LOST IN A MIGRATION, not a missing feature. The
+                    // retired PowerShell job (`tools/legacy-automation/scripts/
+                    // Sync-ERP-Customers-to-Webshop.ps1`) pushed TWELVE fields; when CEH took the
+                    // sync over it picked up the billing block and the rename, and quietly left
+                    // these four behind. The webshop page kept its "DATA OWNER: ERP" badge, so the
+                    // product went on PROMISING a sync nothing performed — the §1125 shape exactly.
+                    //
+                    // 🔒 ONE-WAY, ERP → webshop. CEH never writes these from any other source:
+                    // /Organizer/SponsorWebshopCompany posts only public name, website, socials,
+                    // notes and the two default contacts. Verified 2026-08-26.
+                    //
+                    // ⚠️ NOT `web_address`. The legacy script synced it, but §1125/§1126 made the
+                    // WEBSHOP authoritative for the website (it is not in the ERP-owned block on
+                    // that page). Re-adding it here would put the two systems in a fight over one
+                    // field, which is the bug those sections just removed.
+                    Follow("corporate_identification_number",
+                           detail.CorporateIdentificationNumber, cmCompany.CorporateIdentificationNumber);
+                    Follow("phone", detail.Phone, cmCompany.Phone);
+                    Follow("currency", detail.Currency, cmCompany.Currency);
+
+                    // 🔴 §1140 — VAT ZONE. The operator: *"this is vital for my business"* — it
+                    // decides whether an invoice carries Danish VAT, so a wrong zone is a wrong
+                    // invoice.
+                    //
+                    // ⚠️ The KEY was verified against the LIVE Company Manager API before this was
+                    // written, not inferred: company 32 returns `vat_zone_number = "2"` and has no
+                    // `vat_zone` field at all. `CompanyManagerClient` had been reading the
+                    // non-existent name, so the comparison value was ALWAYS empty — writing this
+                    // without fixing that read would have rewritten the row on every single run.
+                    //
+                    // 🔑 e-conomic's zone number is not the webshop's: 1 stays 1 (domestic with
+                    // VAT), 2/3/4 all collapse to 2 (no Danish VAT), anything else is unknown.
+                    // 🔒 The same table the retired script used (`Convert-VatZoneNumber`), so every
+                    // company it already set keeps the value it has instead of flipping on first run.
+                    // 🔒 Unknown (0) writes NOTHING — guessing a tax zone is worse than leaving the
+                    // one a human chose.
+                    var zone = detail.VatZoneNumber switch { 1 => 1, 2 or 3 or 4 => 2, _ => 0 };
+                    // §1140c — FollowNumber, not Follow: this one is a JSON number on the wire.
+                    if (zone > 0) FollowNumber("vat_zone_number", zone, cmCompany.VatZone);
                 }
 
                 // 🔴 §1041b — IF THIS HOST MAY NOT WRITE, SAY THAT, AND SAY IT ONCE.
@@ -345,10 +576,44 @@ public sealed class ErpWebshopContactSyncService
 
                     foreach (var kv in billing)
                     {
-                        var want = kv.Value as string;
-                        var now = after is null ? null : ReadField(after, kv.Key);
+                        // 🔴 §1140c — `as string` RETURNS NULL FOR A BOXED INT, and a null `want`
+                        // never equals the read-back, so the field scores itself REFUSED and mails
+                        // him hand-entry work for a write that landed perfectly. That is the §1140b
+                        // failure exactly, and introducing the first non-string value into this
+                        // dictionary is what would have re-armed it.
+                        //
+                        // 🔒 Rendered invariantly, to match `GetScalarString` on the read side.
+                        var want = kv.Value switch
+                        {
+                            null => null,
+                            string text => text,
+                            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+                            var v => v.ToString(),
+                        };
                         if (after is null) { refused.Add(kv.Key); continue; }
-                        if (string.Equals(now?.Trim(), want?.Trim(), StringComparison.OrdinalIgnoreCase))
+
+                        var now = ReadField(after, kv.Key);
+
+                        // 🔴 §1140b — "I CANNOT VERIFY THIS" IS NOT "THE WEBSHOP REFUSED IT".
+                        //
+                        // Every mapped property on CompanyManagerCompany is a non-nullable string
+                        // defaulting to "", so ReadField returns null for EXACTLY ONE reason: the
+                        // key has no read-back mapping. An empty stored value comes back as "".
+                        // That makes null unambiguous, and worth branching on.
+                        //
+                        // ⚠️ Treating it as refused is what produced 52 "set it by hand" warnings
+                        // for fields that were written correctly. A verification gap must be quiet
+                        // in the operator's mail and loud in the log — never the other way round,
+                        // because he acts on the mail.
+                        if (now is null)
+                        {
+                            _log.LogWarning(
+                                "ERP sync: no read-back mapping for '{Key}' (company {Co}) — write not verified. "
+                                + "Add it to ReadField.", kv.Key, company.Id);
+                            continue;
+                        }
+
+                        if (string.Equals(now.Trim(), want?.Trim(), StringComparison.OrdinalIgnoreCase))
                             applied.Add(kv.Key);
                         else
                             refused.Add(kv.Key);
@@ -638,6 +903,12 @@ public sealed class ErpWebshopContactSyncService
           }
         }
 
+        // 🔴 §1112 — COMPANIES THAT LEFT THE SPONSOR GROUP. Runs only on a full sweep: a
+        // single-company re-run must stay single-company.
+        var deSponsored = onlyCustomerNumber is null
+            ? await SweepDeSponsoredAsync(sponsorNumbers, byErp, notes, ct)
+            : 0;
+
         // 🔴 §1041b — LOGGED, NOT MAILED. Operator 2026-08-10: *"it was refused because it was the
         // dev env so it was positive"* … *"but this report is not relevant to see in dev, can we
         // turn it off"*.
@@ -660,11 +931,187 @@ public sealed class ErpWebshopContactSyncService
                 webshopWritesBlocked);
         }
 
-        if (notes.Count > 0)
-            await SendAlertAsync(notes, ct);
+        if (notes.Count > 0) await SendAlertAsync(notes, ct);
+        // §1115 — a clean run RE-ARMS the fingerprint, so a problem that comes back is news again
+        // rather than a suppressed repeat of the last time it happened.
+        else await ClearNoteFingerprintAsync(ct);
 
-        return new SyncResult(true, customers.Count, usersCreated, defaultsSet, notes.Count, notes, orphansDeactivated);
+        return new SyncResult(
+            true, customers.Count, usersCreated, defaultsSet, notes.Count, notes, orphansDeactivated,
+            deSponsored);
     }
+
+    /// <summary>
+    /// 🔴 §1112 — a webshop company whose e-conomic customer is NO LONGER in the sponsor group.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-21: *"this is a erp customer that changed from customer group 1
+    /// (sponsor) to 2 (customer), so it must be removed or deactivated from ceh. it came in because
+    /// it was created as a sponsor but it is a attendee company"*.</para>
+    ///
+    /// <para>🔑 <b>The gap was that leaving is INVISIBLE.</b> The reconcile enumerates group 1, so a
+    /// customer moved to group 2 simply stops appearing — no note, no change, nothing to notice. Its
+    /// webshop company, its sponsor logins and its tasks stay exactly as they were, and CEH goes on
+    /// treating an attendee company as a sponsor for ever. <b>Absence from a list is not an event</b>,
+    /// and it has to be turned into one deliberately.</para>
+    ///
+    /// <para>🔒 <b>ABSENCE ALONE IS NEVER THE EVIDENCE</b> — §503's lesson, one level up. There, an
+    /// empty CONTACT list would have made every webshop user look like an orphan; here, a short or
+    /// failed CUSTOMER read would make every sponsor look de-sponsored, and the action is a whole
+    /// company's withdrawal. So this acts only on a POSITIVE finding: the customer is read back from
+    /// the full e-conomic list and is present there, just not in group 1. A number that is in neither
+    /// list is reported and nothing is touched — deleted, renumbered and unreadable all look the same
+    /// from here, and only one of them means "stop being a sponsor".</para>
+    ///
+    /// <para>⚠️ <b>An established sponsor is reported, not withdrawn.</b> Withdrawal deactivates every
+    /// contact and cancels their party seats; on a company that has a Zoho sponsor record or a booth
+    /// that is a bad thing to do from a single ERP field, and the likeliest cause is a mis-click in
+    /// e-conomic rather than a real exit. His case — a company created as a sponsor that turned out to
+    /// be an attendee — has neither, so it is withdrawn automatically as he asked.</para>
+    /// </remarks>
+    private async Task<int> SweepDeSponsoredAsync(
+        HashSet<int> sponsorNumbers,
+        IReadOnlyDictionary<string, CompanyManagerCompanyRef> byErp,
+        List<string> notes,
+        CancellationToken ct)
+    {
+        if (_db is null || _deactivate is null) return 0;
+
+        var candidates = byErp
+            .Select(kv => (Ok: int.TryParse(kv.Key, out var n), Number: n, Company: kv.Value))
+            .Where(x => x.Ok && !sponsorNumbers.Contains(x.Number))
+            .ToList();
+        if (candidates.Count == 0) return 0;
+
+        // Only now is the full customer read worth paying for — on the ordinary run where every
+        // webshop company is still a sponsor, this method costs one dictionary pass.
+        IReadOnlyList<EconomicCustomerRow> all;
+        try { all = await _erp.ListCustomersAsync(null, null, ct); }
+        catch (Exception ex)
+        {
+            // 🔒 We cannot prove anything, so we do nothing and say nothing. A note here would fire on
+            // every e-conomic blip and describe a departure that may not have happened.
+            _log.LogWarning(ex, "§1112: could not read the full e-conomic customer list — "
+                                + "de-sponsored sweep skipped this run.");
+            return 0;
+        }
+
+        // 🔒 The full list must be a superset of the sponsor list. If it is not, the read was
+        // truncated or filtered and every "missing" company would be a false positive.
+        if (all.Count < sponsorNumbers.Count)
+        {
+            _log.LogWarning(
+                "§1112: the full customer list ({All}) is smaller than the sponsor group ({Sponsors}) "
+                + "— that cannot be right, so the de-sponsored sweep was skipped.",
+                all.Count, sponsorNumbers.Count);
+            return 0;
+        }
+
+        var byNumber = all.ToDictionary(c => c.CustomerNumber, c => c.Name);
+        var eventId = await _db.Events.Where(e => e.IsActive)
+            .Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
+        var withdrawn = 0;
+
+        foreach (var (_, number, company) in candidates)
+        {
+            var label = string.IsNullOrWhiteSpace(company.Name) ? $"company #{company.Id}" : company.Name;
+
+            if (!byNumber.TryGetValue(number, out var erpName))
+            {
+                // Present in the webshop, absent from e-conomic entirely. Report — do not act.
+                notes.Add(
+                    $"<b>NOT IN ERP — {E(label)}</b> (webshop company #{company.Id}, "
+                    + $"erp_customer_number <b>{number}</b>): this number is not in e-conomic at all, "
+                    + "in any customer group. <b>Nothing was changed.</b> Either the customer was "
+                    + "deleted/renumbered, or the number in Company Manager is wrong. "
+                    + "<i>Why nothing happened:</i> a customer we cannot read is not the same as a "
+                    + "customer who stopped being a sponsor, and only the second one should withdraw "
+                    + "a company.");
+                continue;
+            }
+
+            if (eventId is not int ev)
+            {
+                notes.Add($"<b>NO LONGER A SPONSOR — {E(erpName)}</b> (e-conomic #{number}): it has "
+                          + "left the sponsor customer group, but there is no active edition to "
+                          + "withdraw it from. Nothing was changed.");
+                continue;
+            }
+
+            var sponsorCompanyId = company.Id.ToString();
+
+            // ⚠️ An ESTABLISHED sponsor is reported, never auto-withdrawn — see the remarks.
+            var established = await _db.SponsorInfos
+                .Where(s => s.EventId == ev && s.SponsorCompanyId == sponsorCompanyId)
+                .Select(s => new { s.Status, s.ZohoSponsorId, s.Tier, s.IsExhibitor })
+                .FirstOrDefaultAsync(ct);
+
+            if (established is { Status: Domain.SponsorStatus.Withdrawn })
+            {
+                continue;   // already done; idempotent and silent
+            }
+
+            if (established is not null
+                && (!string.IsNullOrWhiteSpace(established.ZohoSponsorId)
+                    || established.Tier != BoothTier.None
+                    || established.IsExhibitor))
+            {
+                notes.Add(
+                    $"<b>NO LONGER A SPONSOR (needs your decision) — {E(erpName)}</b> "
+                    + $"(e-conomic #{number}, webshop company #{company.Id}): it has left the sponsor "
+                    + "customer group in e-conomic, but CEH has it as an <b>established sponsor</b> "
+                    + "(a Zoho sponsor record and/or a booth). <b>Nothing was changed.</b> "
+                    + "<b>Your action:</b> if this is right, withdraw it on "
+                    + "<i>Organizer → Sponsors → Withdraw</i>; if the group was changed by mistake, "
+                    + "put it back in group 1 in e-conomic. "
+                    + "<i>Why it stopped:</i> withdrawing deactivates every contact and cancels their "
+                    + "party seats, which is too much to do to a booked sponsor on the strength of one "
+                    + "ERP field.");
+                continue;
+            }
+
+            var result = await _deactivate.WithdrawSponsorCompanyAsync(
+                ev, sponsorCompanyId,
+                actorEmail: "system (ERP reconcile §1112)", ct);
+
+            if (!result.Found)
+            {
+                // Nothing of it in CEH — the webshop company is the only footprint. Say so, because
+                // the manual webshop steps below are then the whole job.
+                notes.Add(
+                    $"<b>NO LONGER A SPONSOR — {E(erpName)}</b> (e-conomic #{number}): it has left the "
+                    + "sponsor customer group. <b>Nothing to withdraw in CEH</b> — it has no sponsor "
+                    + "record, contacts or tasks in this edition. "
+                    + WebshopCleanupSteps(label, company.Id, number));
+                continue;
+            }
+
+            withdrawn++;
+            notes.Add(
+                $"<b>WITHDRAWN — {E(erpName)}</b> (e-conomic #{number}) is no longer in the sponsor "
+                + "customer group, so CEH has stopped treating it as a sponsor: the company is marked "
+                + $"<b>withdrawn</b> for this edition, <b>{result.ContactsDeactivated}</b> contact(s) "
+                + $"were deactivated and <b>{result.GroupRsvpsCancelled}</b> party seat(s) released. "
+                + "It is off the public sponsors page and out of the sponsor counts. "
+                + "<i>Reversible:</i> reactivate on <i>Organizer → Sponsors</i> if this was wrong. "
+                + "e-conomic and Zoho were not touched. "
+                + WebshopCleanupSteps(label, company.Id, number));
+        }
+
+        return withdrawn;
+    }
+
+    /// <summary>
+    /// §1112 — the webshop half, which CEH cannot do: the Company Manager REST API has no unlink
+    /// route (§505, confirmed with the plugin developer), so the mail has to carry the work.
+    /// </summary>
+    private static string WebshopCleanupSteps(string label, int companyId, int erpNumber) =>
+        "<br><b>Still to do in the webshop (the API cannot do these):</b>"
+        + $"<br>&nbsp;&nbsp;<b>1. Company Manager</b> → Companies → <i>{E(label)}</i> (#{companyId}) "
+        + "→ decide whether the company itself should stay. If it should, clear "
+        + $"<b>erp_customer_number</b> (<i>{erpNumber}</i>) so this reconcile stops claiming it."
+        + "<br>&nbsp;&nbsp;<b>2. WordPress</b> → Users → its linked users keep their accounts and "
+        + "order history; change roles there only if they should no longer shop as this company.";
 
     /// <summary>
     /// §518 — HTML-encode a VALUE being interpolated into a note. Notes are HTML fragments
@@ -674,8 +1121,82 @@ public sealed class ErpWebshopContactSyncService
     /// </summary>
     private static string E(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
 
+    /// <summary>
+    /// 🔴 §1115 — the reconcile mail repeats only when the LIST CHANGES.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠️ <b>§1112 turned a latent problem into a live one, within ten minutes of deploying.</b>
+    /// Every note this job had ever produced was episodic — a rename, a billing update, a company
+    /// missing contacts that someone then fixed — so "mail whenever there is a note" never repeated
+    /// for long. The de-sponsored note is the first PERMANENT one: it stands until the operator
+    /// clears <c>erp_customer_number</c> in Company Manager, which is a webshop action CEH cannot
+    /// take. Left alone it would have mailed the same line every 10 minutes, for ever.</para>
+    ///
+    /// <para>🔑 <b>And a line that arrives every ten minutes stops being read</b> — §1088's lesson
+    /// exactly: a permanently-wrong number becomes the new zero, and the next REAL item is
+    /// indistinguishable from the noise everyone has learned to ignore.</para>
+    ///
+    /// <para>🔒 Same mechanism and same semantics as <c>SpeakersHeldJob</c>: fingerprint the note
+    /// set, mail only when it differs, and <b>stamp only AFTER the send is attempted</b> — stamping
+    /// first would let one transient Brevo failure swallow that set for ever. The fingerprint is
+    /// cleared when a run produces no notes, so a problem that returns is news again rather than a
+    /// suppressed repeat.</para>
+    /// </remarks>
+    private static string NoteFingerprint(IEnumerable<string> notes)
+    {
+        var joined = string.Join("\n", notes.OrderBy(n => n, StringComparer.Ordinal));
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(joined));
+        return Convert.ToHexString(bytes);
+    }
+
+    private const string ReconcileFunctionName = "ErpSyncCustomerContactJob";
+
+    /// <summary>Clear the fingerprint after a clean run, so the next occurrence is news.</summary>
+    private async Task ClearNoteFingerprintAsync(CancellationToken ct)
+    {
+        if (_db is null) return;
+        try
+        {
+            var state = await _db.JobRunStates
+                .FirstOrDefaultAsync(s => s.FunctionName == ReconcileFunctionName, ct);
+            if (state?.LastContentHash is null) return;
+            state.LastContentHash = null;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "§1115: could not clear the reconcile note fingerprint.");
+        }
+    }
+
     private async Task SendAlertAsync(List<string> notes, CancellationToken ct)
     {
+        // §1115 — unchanged list ⇒ no repeat mail. Best-effort: if the state cannot be read we send,
+        // because a missed alert is worse than a duplicate one.
+        Domain.JobRunState? state = null;
+        var fingerprint = NoteFingerprint(notes);
+        if (_db is not null)
+        {
+            try
+            {
+                state = await _db.JobRunStates
+                    .FirstOrDefaultAsync(s => s.FunctionName == ReconcileFunctionName, ct);
+                if (state?.LastContentHash == fingerprint)
+                {
+                    _log.LogInformation(
+                        "§1115: the same {Count} reconcile note(s) as last time — no repeat mail. "
+                        + "Last mailed {When:u}.",
+                        notes.Count, state.LastContentMailedAt);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "§1115: could not read the reconcile note fingerprint; sending.");
+            }
+        }
+
         try
         {
             // §518 — notes are HTML FRAGMENTS, not plain text. They were HtmlEncode'd here, which
@@ -714,7 +1235,11 @@ public sealed class ErpWebshopContactSyncService
                       + "(Signer) and/or <code>Role:2</code> (Event Coordinator) — the next sync then "
                       + "sets the default automatically.</p>"
                     // Everything else already carries its own action, so the mail ends there.
-                    : "<p>Each line above states its own action. Nothing here needs a role change.</p>");
+                    : "<p>Each line above states its own action. Nothing here needs a role change.</p>")
+                // §1115 — say the cadence, because silence now means "unchanged", not "fixed".
+                + "<p style=\"color:#6b7280;font-size:12px;\">This repeats only when the list "
+                + "CHANGES. An item that stays open is not re-sent every 10 minutes; a new one is "
+                + "reported on the next run.</p>";
             // 🔑 §900 — THE SUBJECT MUST MATCH THE CONTENT. It read "action needed" on every run,
             // including one whose six lines were all "BILLING updated from ERP" — work CEH had
             // already done for him. Operator 2026-08-06: *"but why subject with ACTION NEEDED"*.
@@ -725,13 +1250,43 @@ public sealed class ErpWebshopContactSyncService
             // 🔒 Actionable = something he must DO. "Updated"/"Renamed from ERP" is a receipt.
             var actionable = notes.Count(n =>
                 !n.StartsWith("BILLING updated from ERP", StringComparison.Ordinal)
-                && !n.StartsWith("RENAMED from ERP", StringComparison.Ordinal));
+                && !n.StartsWith("RENAMED from ERP", StringComparison.Ordinal)
+                && !n.StartsWith("PUBLIC NAME set automatically", StringComparison.Ordinal));
 
             var subject = actionable > 0
                 ? $"Sponsor ERP/webshop reconcile — {actionable} need(s) your attention [ELDK27]"
                 : $"Sponsor ERP/webshop reconcile — {notes.Count} updated, nothing to do [ELDK27]";
 
-            await _email.SendAsync(AlertEmail, subject, html, ct);
+            // §1072 — RING-EXEMPT, as a GUARANTEE rather than as a fix for a proven fault.
+            //
+            // 🔴 §1081 (2026-08-13) — THIS EXEMPTION IS NOW LOAD-BEARING, WHERE BEFORE IT WAS
+            // INSURANCE. The recipient moved from the operator's own organizer address to
+            // `info@expertslive.dk`, and the earlier version of this comment recorded the reason
+            // that matters: `info@` is a fixed MAILBOX, not a participant, so the transport's
+            // ring-gate FAILS CLOSED on it — §1060(i) is exactly that, an info@ mail silently
+            // dropped as an unknown recipient.
+            //
+            // ⇒ Before the move, delivery worked partly by coincidence (his address happens to
+            // resolve to a participant row with a ring). After it, the exemption is the ONLY thing
+            // keeping this mail alive. Removing it would not fail loudly — the job would run, report
+            // success, and nobody would be told about a sponsor with no event coordinator.
+            //
+            // ⚠️ The previous text said *"`AlertEmail` is the operator's OWN organizer address"*.
+            // That is no longer true, and it is corrected rather than deleted because a stale
+            // premise left in place is what makes the next reader trust the wrong half.
+            using (_emailCtx?.Set(new EmailContext("erp-webshop-reconcile", RingExempt: true)))
+            {
+                await _email.SendAsync(AlertEmail, subject, html, ct);
+            }
+
+            // 🔒 §1115 — stamped only AFTER the send is attempted. Stamping first would mean one
+            // transient Brevo failure permanently swallowed this note set.
+            if (state is not null)
+            {
+                state.LastContentHash = fingerprint;
+                state.LastContentMailedAt = DateTimeOffset.UtcNow;
+                await _db!.SaveChangesAsync(ct);
+            }
         }
         catch (Exception ex) { _log.LogWarning(ex, "ERP sync: alert email to {To} failed.", AlertEmail); }
     }

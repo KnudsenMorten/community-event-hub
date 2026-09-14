@@ -75,13 +75,15 @@ public sealed class SoMeHubMergeReachabilityTests
     /// <summary>
     /// The hub itself stays SHORT. Not a style rule: thirteen cards is how it became unreadable, and
     /// the accretion happened one well-meaning card at a time.
+    /// <para>§1215 — raised 7 → 8 at the operator's explicit request, for Posting capacity. A raise
+    /// needs his word, not a well-meaning card.</para>
     /// </summary>
     [Fact]
-    public void The_SoMe_hub_stays_under_eight_cards()
+    public void The_SoMe_hub_stays_under_nine_cards()
     {
         var hub = File.ReadAllText(Path.Combine(OrganizerPagesDir(), "SoMe.cshtml"));
         var cards = Regex.Matches(hub, @"new\(""/Organizer/").Count;
 
-        Assert.True(cards <= 7, $"the SoMe hub is back up to {cards} cards — merge before adding.");
+        Assert.True(cards <= 8, $"the SoMe hub is back up to {cards} cards — merge before adding.");
     }
 }

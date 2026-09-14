@@ -2,6 +2,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Forms.Steps;
 
@@ -52,6 +53,9 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
     private static readonly string[] CollateralExts = { ".jpg", ".jpeg", ".png", ".pdf" };
 
     private readonly CommunityHubDbContext _db;
+    private readonly Core.Email.IEmailSender? _notifyEmail;
+    private readonly Core.Email.IEmailContextAccessor? _emailCtx;
+    private readonly ILogger<SponsorBoothMaterialsFormService>? _log;
     private readonly TimeProvider _clock;
     private readonly Core.Config.EventEditionConfigLoader? _cfg;
     private readonly Core.Config.EventConfigOptions? _cfgOptions;
@@ -67,9 +71,16 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
         Core.Config.EventEditionConfigLoader? cfg = null,
         Core.Config.EventConfigOptions? cfgOptions = null,
         Core.Integrations.SharePointUploadClient? sp = null,
-        Core.Integrations.DocLibrary.IDocLibraryPathResolver? paths = null)
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver? paths = null,
+        // §1074 — booth collateral is a Get-Started upload and notified nobody either.
+        Core.Email.IEmailSender? notifyEmail = null,
+        Core.Email.IEmailContextAccessor? emailCtx = null,
+        ILogger<SponsorBoothMaterialsFormService>? log = null)
     {
         _db = db;
+        _notifyEmail = notifyEmail;
+        _emailCtx = emailCtx;
+        _log = log;
         _clock = clock;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
@@ -280,6 +291,28 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
                 Url = webUrl ?? string.Empty, FileName = file.FileName, CreatedByEmail = email,
             });
             await _db.SaveChangesAsync(ct);
+
+            // 🔴 §1074 — BOOTH COLLATERAL NOTIFIES TOO. Operator 2026-08-11: *"booth materials i must
+            // also get an alert about, it is also in the get started. maybe i get that"* — he did not,
+            // for the same reason as the logo step: no call existed.
+            //
+            // 🔑 Reuses the SHARED notifier rather than composing a fifth bespoke mail, and the
+            // shared notifier is where the ring exemption lives (§1072) — so this cannot repeat the
+            // "sent but silently dropped" failure that started this thread.
+            // ⚠️ Recipients are the edition's sponsor-upload list; booth collateral is organizer
+            // business, not the wall designer's, so it deliberately does NOT use the wall list.
+            if (_notifyEmail is not null
+                && _cfg is not null && _cfgOptions is not null
+                && CollateralFolder() is { Length: > 0 } folder)
+            {
+                var notify = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint?.SponsorUploadNotify;
+                var spec = new CommunityHub.Uploads.SponsorUploadSpec(
+                    folder, "booth", CollateralExts, 25 * Mb, notify, IsWall: false);
+
+                await CommunityHub.Uploads.SponsorUploadKinds.NotifyAsync(
+                    _notifyEmail, spec, companyId, fileName, webUrl, email, _log, ct, _emailCtx);
+            }
+
             model.CollateralFile = null;
         }
         catch (Exception)

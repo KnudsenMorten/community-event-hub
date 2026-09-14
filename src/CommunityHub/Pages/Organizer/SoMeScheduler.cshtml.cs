@@ -87,7 +87,9 @@ public class SoMeSchedulerModel : PageModel
         Message = result.Created > 0
             ? $"{result.Created} post(s) planned and held for approval. {result.Message}"
             : result.Message;
-        MessageIsError = result.Created == 0 && result.AlreadyPlanned == 0;
+        // §1178 — a run that planned nothing but REMOVED an excluded post did work, and did it
+        // correctly. Painting that red reads as a failure and sends him looking for one.
+        MessageIsError = result.Created == 0 && result.AlreadyPlanned == 0 && result.GuardRemoved == 0;
 
         await LoadAsync(me.EventId, ct);
         return Page();

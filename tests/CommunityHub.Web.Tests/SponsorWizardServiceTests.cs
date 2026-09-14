@@ -80,7 +80,14 @@ public sealed class SponsorWizardServiceTests
         var (db, ev, pid) = await SeedAsync(new SponsorInfo
         {
             SponsorPackage = SponsorPackage.Silver,   // no booth
-            WebsiteUrl = "https://2linkit.net",       // details done
+            // §1081 — the company step is now an AND over the CEH-OWNED content fields. This
+            // fixture used to set WebsiteUrl alone and expect "done"; that was the OR the operator
+            // called a bug (2026-08-13), because a sponsor with a website and no description read
+            // as finished while SoMeApprovalGate was blocking their posts for the missing text.
+            // 🔑 No short description here ON PURPOSE: it is EXHIBITOR-ONLY, and this company has
+            // no booth — demanding it would be the §732 trap (a field their form refuses to save).
+            CompanyDescription = "We do cloud things.",
+            SocialMediaIntro = "Come see us at the booth!",
             // no coordinator, no logo
         });
 
@@ -133,7 +140,12 @@ public sealed class SponsorWizardServiceTests
         var (db, ev, pid) = await SeedAsync(new SponsorInfo
         {
             SponsorPackage = SponsorPackage.Gold,     // has booth
-            WebsiteUrl = "https://2linkit.net",
+            // §1081 — details done = all three CEH-owned content fields. 🔑 This company HAS a
+            // booth, so the short description IS required here — the one difference from the
+            // non-exhibitor fixture above, and the whole point of the conditional rule.
+            CompanyDescription = "We do cloud things.",
+            CompanyDescriptionShort = "Cloud things",
+            SocialMediaIntro = "Come see us at the booth!",
             EventCoordinatorEmail = "coord@x.dk",
             LogoRasterPath = "/logo.png",
         });
@@ -232,7 +244,9 @@ public sealed class SponsorWizardServiceTests
         var (db, ev, pid) = await SeedAsync(new SponsorInfo
         {
             SponsorPackage = SponsorPackage.Silver,   // no booth → 4 steps
-            WebsiteUrl = "https://2linkit.net",       // details done
+            // §1081 — details done now needs the CEH-owned content fields, not a website.
+            CompanyDescription = "We do cloud things.",
+            SocialMediaIntro = "Come see us at the booth!",
             EventCoordinatorEmail = "coord@x.dk",     // coordinator done
             // contacts untracked (e-conomic off), logos NOT done
         });

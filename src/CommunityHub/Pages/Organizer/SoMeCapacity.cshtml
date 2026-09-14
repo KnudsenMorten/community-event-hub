@@ -1,0 +1,284 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeCapacityModel
+@using CommunityHub.Core.Integrations
+@{
+    ViewData["Title"] = "Posting capacity";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>Posting capacity</h1>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+    </div>
+    return;
+}
+
+<style>
+    .cap-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;
+                margin:14px 0 4px; max-width:900px; }
+    .cap-tile { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; background:#fff; }
+    .cap-tile .n { font-size:24px; font-weight:700; color:#111827; line-height:1.1;
+                   font-variant-numeric:tabular-nums; }
+    .cap-tile .k { font-size:12px; color:#6b7280; margin-top:2px; }
+    .cap-verdict { margin:16px 0; padding:12px 16px; border-radius:8px; font-size:14.5px; max-width:900px; }
+    .cap-ok   { background:#e6f2eb; border:1px solid #a7d3bb; color:#1d5b41; }
+    .cap-bad  { background:#fdecec; border:1px solid #f3b4b4; color:#8d2020; }
+    .cap-tbl { width:100%; border-collapse:collapse; font-size:13.5px; max-width:900px; }
+    .cap-tbl th { text-align:left; border-bottom:2px solid #ddd; padding:6px 10px; color:#374151; }
+    .cap-tbl td { border-bottom:1px solid #eee; padding:6px 10px; font-variant-numeric:tabular-nums; }
+    .cap-tbl td.num, .cap-tbl th.num { text-align:right; }
+    .cap-tight { background:#fffbeb; }
+    .cap-over  { background:#fdecec; color:#8d2020; font-weight:600; }
+    .cap-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;
+                max-width:900px; margin:10px 0; }
+    .cap-form label { display:block; font-size:12.5px; font-weight:600; color:#374151; margin-bottom:3px; }
+    .cap-form input { width:100%; box-sizing:border-box; padding:6px 8px; font-size:14px;
+                      border:1px solid #d1d5db; border-radius:6px; }
+    /* §1200 — a segmented control, so which set of figures is driving the page is unmissable. */
+    .cap-modebar { padding-bottom:14px; }
+    .cap-toggle { display:inline-flex; border:1px solid #d1d5db; border-radius:8px; overflow:hidden; }
+    .cap-toggle a { padding:7px 16px; font-size:13.5px; font-weight:600; text-decoration:none;
+                    color:#374151; background:#fff; border-right:1px solid #e5e7eb; }
+    .cap-toggle a:last-child { border-right:0; }
+    .cap-toggle a.on { background:#008BD2; color:#fff; }
+    .cap-toggle a:not(.on):hover { background:#f3f6f9; }
+    .cap-now { color:#6b7280; }
+</style>
+
+@{
+    var r = Model.Result!;
+    var actual = Model.Actual!;
+    var fc = Model.ShowingForecast;
+}
+
+@* 🔴 §1200 — THE TOGGLE. Operator 2026-09-12: *"it could be great to be able to toggle between
+   Forecast/estimate vs. Actual/Current numbers"*.
+   🔑 Actual is the DEFAULT — reality before speculation — and whichever is not driving the verdict
+   stays on screen beside it, because the question is whether the shape holds AS the numbers grow,
+   not what each looks like in isolation. *@
+<div class="card cap-modebar">
+    <div class="cap-toggle" role="group" aria-label="Figures to use">
+        <a class="@(fc ? "" : "on")" asp-page="/Organizer/SoMeCapacity"
+           aria-current="@(fc ? null : "true")">Actual / current</a>
+        <a class="@(fc ? "on" : "")" aria-current="@(fc ? "true" : null)"
+           asp-page="/Organizer/SoMeCapacity"
+           asp-route-Mode="forecast"
+           asp-route-Sponsors="@Model.Sponsors" asp-route-Tiers="@Model.Tiers"
+           asp-route-Tracks="@Model.Tracks" asp-route-MasterClasses="@Model.MasterClasses"
+           asp-route-TechnicalSessions="@Model.TechnicalSessions"
+           asp-route-SponsorSessions="@Model.SponsorSessions">Forecast / estimate</a>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">
+        @if (fc)
+        {
+            <text>
+                Showing a <strong>forecast</strong>. Today's real figures stay in the
+                <em>now</em> column so you can see what changes.
+            </text>
+        }
+        else
+        {
+            <text>
+                Showing this edition's <strong>real figures</strong>. Switch to Forecast to model
+                counts you do not have yet.
+            </text>
+        }
+    </p>
+</div>
+
+<div class="card">
+    <h1>Posting capacity</h1>
+    <p class="muted">
+        Every seat is one weekday at one of your @SoMeSchedulePlanner.PreferredTimes.Length posting
+        times. Weekends and the @SoMeBlackout.Description break are not seats, and a seat already
+        holding a post — published or not — cannot hold another.
+    </p>
+
+    <div class="cap-grid">
+        <div class="cap-tile">
+            <div class="n">@r.PostingDays</div>
+            <div class="k">posting days to @r.To.ToString("dd MMM yyyy")</div>
+        </div>
+        <div class="cap-tile">
+            <div class="n">@r.Seats</div>
+            <div class="k">seats, at @r.PostsPerDay a day</div>
+        </div>
+        <div class="cap-tile">
+            <div class="n">@r.Taken</div>
+            <div class="k">already scheduled</div>
+        </div>
+        <div class="cap-tile">
+            <div class="n">@r.Outstanding</div>
+            <div class="k">still to place</div>
+        </div>
+        <div class="cap-tile">
+            <div class="n">@r.Free</div>
+            <div class="k">seats free</div>
+        </div>
+    </div>
+
+    @* 🔑 §1200 — THE DECISION IS THE DIFFERENCE. "It fits today but not at 42 sponsors" is the one
+       sentence he is actually after, and neither figure says it alone. *@
+    @if (fc && actual.Fits && !r.Fits)
+    {
+        <p class="cap-verdict cap-bad" role="alert">
+            <strong>It fits today, but not at these numbers.</strong>
+            Today's @actual.Outstanding outstanding post(s) fit in @actual.Free free seat(s); the
+            forecast needs @r.Outstanding and leaves @r.Shortfall with nowhere to go.
+        </p>
+    }
+    else if (fc && !actual.Fits && r.Fits)
+    {
+        <p class="cap-verdict cap-ok" role="status">
+            <strong>These numbers fit — today's do not.</strong> Worth checking what changed before
+            relying on it.
+        </p>
+    }
+
+    @if (r.Fits)
+    {
+        <p class="cap-verdict cap-ok" role="status">
+            <strong>It fits.</strong> @r.Outstanding post(s) still to place and @r.Free seat(s) free
+            at @r.PostsPerDay a day.
+        </p>
+    }
+    else if (r.NeedsMoreThanSlotsAllow)
+    {
+        @* 🔴 The honest answer when no setting can fix it. §842.7 caps the day at the four posting
+           times; beyond that a post would share a minute or break the 08:00–16:00 rule. *@
+        <p class="cap-verdict cap-bad" role="alert">
+            <strong>It does not fit, and more slots per day will not fix it.</strong>
+            @(r.Taken + r.Outstanding) posts over @r.PostingDays posting days needs more than the
+            @SoMeSchedulePlanner.PreferredTimes.Length posting times a day allow. Announce fewer
+            rounds, start earlier, or accept that some subjects go unannounced.
+        </p>
+    }
+    else
+    {
+        <p class="cap-verdict cap-bad" role="alert">
+            <strong>@r.Shortfall post(s) will not fit.</strong>
+            Raising posts-per-day to <strong>@r.PostsPerDayNeeded</strong> would hold all
+            @(r.Taken + r.Outstanding) of them — change it in
+            <a asp-page="/Organizer/SoMeSettings">SoMe settings</a>.
+        </p>
+    }
+</div>
+
+<div class="card">
+    <h2>Forecast</h2>
+    <p class="muted">
+        The boxes start at what this edition holds today. Change one to model a number you do not have
+        yet — <strong>nothing is saved</strong>, so this is a what-if and the real counts keep winning.
+    </p>
+
+    <form method="get" class="cap-form">
+        @* §1200 — submitting the boxes means "show me the forecast", so the mode rides along. *@
+        <input type="hidden" name="Mode" value="forecast" />
+        <div>
+            <label for="f-sponsors">Sponsors</label>
+            <input id="f-sponsors" name="Sponsors" type="number" min="0" max="500" value="@Model.Sponsors" />
+        </div>
+        <div>
+            <label for="f-tiers">Sponsor tiers</label>
+            <input id="f-tiers" name="Tiers" type="number" min="0" max="20" value="@Model.Tiers" />
+        </div>
+        <div>
+            <label for="f-tracks">Speaker tracks</label>
+            <input id="f-tracks" name="Tracks" type="number" min="0" max="50" value="@Model.Tracks" />
+        </div>
+        <div>
+            <label for="f-mc">Master classes</label>
+            <input id="f-mc" name="MasterClasses" type="number" min="0" max="200" value="@Model.MasterClasses" />
+        </div>
+        <div>
+            <label for="f-tech">Technical sessions</label>
+            <input id="f-tech" name="TechnicalSessions" type="number" min="0" max="500" value="@Model.TechnicalSessions" />
+        </div>
+        <div>
+            <label for="f-ss">Sponsor speaker sessions</label>
+            <input id="f-ss" name="SponsorSessions" type="number" min="0" max="200" value="@Model.SponsorSessions" />
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:8px;">
+            <button type="submit" class="btn primary">Recalculate</button>
+            <a class="btn" asp-page="/Organizer/SoMeCapacity">Back to actual</a>
+        </div>
+    </form>
+
+    @if (Model.IsForecast)
+    {
+        <p class="muted"><strong>Showing a forecast</strong>, not today's counts.</p>
+    }
+</div>
+
+<div class="card">
+    <h2>What wants a seat</h2>
+    <div style="overflow-x:auto;">
+        <table class="cap-tbl">
+            <caption class="sr-only">Posts wanted per category</caption>
+            <tr>
+                <th scope="col">Category</th>
+                <th scope="col" class="num">Subjects</th>
+                @if (fc)
+                {
+                    @* §1200 — the real number stays visible, so a forecast is read as a CHANGE. *@
+                    <th scope="col" class="num">now</th>
+                }
+                <th scope="col" class="num">Rounds</th>
+                <th scope="col" class="num">Posts wanted</th>
+                <th scope="col" class="num">Already planned</th>
+                <th scope="col" class="num">Still to place</th>
+            </tr>
+            @foreach (var d in r.Demand)
+            {
+                var today = actual.Demand.FirstOrDefault(a => a.Category == d.Category);
+                <tr>
+                    <td>@d.Label</td>
+                    <td class="num">@d.Subjects</td>
+                    @if (fc)
+                    {
+                        <td class="num cap-now">
+                            @(today?.Subjects ?? 0)@(today is not null && today.Subjects != d.Subjects ? "" : " =")
+                        </td>
+                    }
+                    <td class="num">@(d.Rounds == 0 ? "off" : d.Rounds.ToString())</td>
+                    <td class="num">@d.Wanted</td>
+                    <td class="num">@d.Planned</td>
+                    <td class="num">@d.Outstanding</td>
+                </tr>
+            }
+        </table>
+    </div>
+    <p class="muted" style="margin-top:10px;">
+        A category switched off wants nothing. Readiness still applies on top — a sponsor with no
+        graphic is not planned at all, so "still to place" is an upper bound.
+    </p>
+</div>
+
+<div class="card">
+    <h2>Month by month</h2>
+    <p class="muted">Where it is tight. A month over its seats is already oversold.</p>
+    <div style="overflow-x:auto;">
+        <table class="cap-tbl">
+            <caption class="sr-only">Seats and usage per month</caption>
+            <tr>
+                <th scope="col">Month</th>
+                <th scope="col" class="num">Posting days</th>
+                <th scope="col" class="num">Seats</th>
+                <th scope="col" class="num">Scheduled</th>
+                <th scope="col" class="num">Free</th>
+            </tr>
+            @foreach (var m in r.Months)
+            {
+                var cls = m.Oversold ? "cap-over" : (m.Free <= m.Seats / 5 ? "cap-tight" : null);
+                <tr class="@cls">
+                    <td>@m.Label</td>
+                    <td class="num">@m.PostingDays</td>
+                    <td class="num">@m.Seats</td>
+                    <td class="num">@m.Taken</td>
+                    <td class="num">@(m.Oversold ? $"−{m.Taken - m.Seats}" : m.Free.ToString())</td>
+                </tr>
+            }
+        </table>
+    </div>
+</div>

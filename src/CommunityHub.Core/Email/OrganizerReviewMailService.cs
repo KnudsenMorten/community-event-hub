@@ -47,16 +47,22 @@ public sealed class OrganizerReviewMailService
     private readonly string _hubUrl;
     private readonly CommunityHub.Core.Organizer.SpeakerApprovalService? _speakerApproval;
 
+    // §1121 — optional so every existing test construction keeps compiling. Null ⇒ no extra
+    // recipients, i.e. exactly the pre-§1121 behaviour, never a crash.
+    private readonly EmailOptions? _emailOptions;
+
     public OrganizerReviewMailService(
         CommunityHubDbContext db,
         EngineAlertSender alerts,
         IOptions<EmailTemplateOptions>? branding = null,
-        CommunityHub.Core.Organizer.SpeakerApprovalService? speakerApproval = null)
+        CommunityHub.Core.Organizer.SpeakerApprovalService? speakerApproval = null,
+        IOptions<EmailOptions>? emailOptions = null)
     {
         _db = db;
         _alerts = alerts;
         _hubUrl = (branding?.Value.HubUrl ?? string.Empty).TrimEnd('/');
         _speakerApproval = speakerApproval;
+        _emailOptions = emailOptions?.Value;
     }
 
     // ---------------------------------------------------------------------
@@ -121,7 +127,9 @@ public sealed class OrganizerReviewMailService
     {
         if (!held.Any || held.Html is null) return;
 
-        await _alerts.AlertAsync(
+        // §1124 — the SHARED speaker/session audience, not a locally-assembled one.
+        await _alerts.AlertToAsync(
+            _emailOptions?.SpeakerSessionRecipients() ?? new[] { Recipient },
             $"ACTION: {held.Count} speaker(s) held from the Zoho flow [ELDK27]",
             held.Html, ct,
             // 🔒 NO throttle key. The dedup for this mail is the durable content hash the job holds;
@@ -129,10 +137,12 @@ public sealed class OrganizerReviewMailService
             // — the operator would see "every 10 minutes" on the Jobs page while something else
             // decided the real spacing.
             throttleKey: null,
-            recipient: Recipient,
             // §752.9 — DEV-silent: on DEV these are imported test speakers, so the mail asks a human
             // to do work that does not exist. In PROD it is a real queue with a real deadline.
             devSilent: true);
+        // 🔒 The VOLUNTEER half below deliberately keeps the shared inbox alone: he named speakers
+        // and sessions, and this class exists (§879) precisely because those two populations are not
+        // one audience.
     }
 
     // ---------------------------------------------------------------------

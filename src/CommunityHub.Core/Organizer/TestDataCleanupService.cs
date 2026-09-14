@@ -95,9 +95,33 @@ public sealed class TestDataCleanupService
     /// first left (the deactivated ones stay until their engagement is cleared) and
     /// re-applies the same safe outcome; once everything clean is gone it is a no-op.
     /// </summary>
+    /// <summary>
+    /// 🛑 §1082 — DISABLED. Operator 2026-08-13: <i>"we dont use that testdataclean-up service, turn
+    /// it off in code"</i>.
+    /// </summary>
+    /// <remarks>
+    /// <para>This was the LAST remaining path that could hard-delete a participant, after the
+    /// organizer grid, the pre-selection queue and the dashboard decline were all moved to
+    /// deactivate-only. Turning it off is what makes the rule absolute: <i>"we only make things
+    /// inactive by filter"</i>.</para>
+    ///
+    /// <para>🔒 <b>Disabled, not deleted</b> — the same principle the change is about. The preview
+    /// still works, so an organizer can still SEE which rows are test data; only the destructive half
+    /// refuses. Flip this one constant to restore it if a real cleanup need ever appears, rather than
+    /// reconstructing the service from git history.</para>
+    /// </remarks>
+    public const bool Enabled = false;
+
     public async Task<CleanupResult> CleanupAsync(
         int eventId, CancellationToken ct = default)
     {
+        // 🛑 §1082 — see Enabled: this is the last participant hard-delete in the product and the
+        // operator does not use it. Refuse before touching anything.
+        if (!Enabled)
+        {
+            return new CleanupResult(0, 0);
+        }
+
         // Snapshot the ids first — deleting inside an active query enumeration is
         // unsafe, and a hard-delete mutates the set we're iterating.
         var ids = await _db.Participants

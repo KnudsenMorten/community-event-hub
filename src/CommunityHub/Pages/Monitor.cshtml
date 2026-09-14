@@ -19,9 +19,16 @@
         @if (Model.Monitor is { } m)
         {
             @: —
-            @(m.Kind == AttendeeMonitorKind.EmailDomain
-                ? $"everyone registered with an @{m.Value} e-mail address"
-                : $"everyone whose ticket used the code {m.Value}")
+            @* §1093 — a third kind. Without this arm a per-customer monitor told the partner
+               "everyone whose ticket used the code 1234", naming an e-conomic customer number as
+               though it were their promo code. The sentence a partner reads has to describe what
+               they are actually looking at. *@
+            @(m.Kind switch
+            {
+                AttendeeMonitorKind.EmailDomain => $"everyone registered with an @{m.Value} e-mail address",
+                AttendeeMonitorKind.ErpCustomer => "everyone who has used any of your discount codes",
+                _ => $"everyone whose ticket used the code {m.Value}",
+            })
         }
         . Cancelled tickets are not shown. This page updates by itself as more tickets are bought.
     </p>
@@ -31,6 +38,199 @@
            style="text-decoration:none;">⬇ Export to Excel</a>
     </p>
 </div>
+
+@* 🔴 §1094 — SELF-SERVICE: status, usage, extend, order more (operator 2026-08-19). The attendee
+   list below answers "who signed up"; this answers "where do I stand" — which for a prepaid partner
+   is the number they check first, and for a capped ad-hoc one is the number that stops them. *@
+@if (Model.Billing.HasAnything)
+{
+    <div class="card">
+        <h2>Your tickets</h2>
+
+        @if (Model.Billing.Pools.Count > 0)
+        {
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e6e8ee;">
+                        <th style="padding:8px 6px;">Ticket type</th>
+                        <th style="padding:8px 6px;">Bought</th>
+                        <th style="padding:8px 6px;">Used</th>
+                        <th style="padding:8px 6px;">Left</th>
+                        <th style="padding:8px 6px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var p in Model.Billing.Pools)
+                {
+                    <tr style="border-bottom:1px solid #eef0f4;">
+                        <td style="padding:8px 6px;">
+                            @p.TicketClassLabel
+                            <span class="muted" style="display:block;font-size:11.5px;">@p.CouponName</span>
+                            @if (p.Closed) { <span class="muted">(closed)</span> }
+                        </td>
+                        <td style="padding:8px 6px;">@p.Purchased</td>
+                        <td style="padding:8px 6px;">@p.Claimed</td>
+                        @* ⚠️ A negative is SHOWN, never floored — see MonitorPrepaidBalanceQuery. *@
+                        <td style="padding:8px 6px;font-weight:600;@(p.IsOversubscribed ? "color:#b91c1c;" : "")">
+                            @p.Remaining
+                        </td>
+                        @* 🔴 §1096 — ONE BUTTON PER LINE. A customer holding both a pool and a capped
+                           coupon presses the one they mean, so nothing has to be inferred from which
+                           agreement happens to exist. *@
+                        <td style="padding:8px 6px;text-align:right;">
+                            <button type="button" class="btn"
+                                    onclick="cehAskMore('@p.CouponName', @p.Purchased)">
+                                Increase max
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+
+        @if (Model.Billing.AdHoc.Count > 0)
+        {
+            <table style="width:100%;border-collapse:collapse;@(Model.Billing.Pools.Count > 0 ? "margin-top:16px;" : "")">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e6e8ee;">
+                        <th style="padding:8px 6px;">Discount code</th>
+                        <th style="padding:8px 6px;">Used</th>
+                        <th style="padding:8px 6px;">Limit</th>
+                        <th style="padding:8px 6px;">Left</th>
+                        <th style="padding:8px 6px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var a in Model.Billing.AdHoc)
+                {
+                    <tr style="border-bottom:1px solid #eef0f4;">
+                        <td style="padding:8px 6px;">@a.CouponName</td>
+                        <td style="padding:8px 6px;">@a.Claimed</td>
+                        @* 🔑 Capped and uncapped are reported differently on purpose: printing
+                           "0 left" for an agreement that never had a ceiling invents a limit. *@
+                        <td style="padding:8px 6px;">@(a.IsCapped ? a.CapTickets!.Value.ToString() : "no limit")</td>
+                        <td style="padding:8px 6px;font-weight:600;@(a.IsOverCap ? "color:#b91c1c;" : "")">
+                            @(a.Remaining?.ToString() ?? "—")
+                        </td>
+                        <td style="padding:8px 6px;text-align:right;">
+                            @* 🔒 Only a CAPPED line offers this. An uncapped agreement has no maximum
+                               to increase, and a button implying one would invent a limit the
+                               partner never agreed to. *@
+                            @if (a.IsCapped)
+                            {
+                                <button type="button" class="btn"
+                                        onclick="cehAskMore('@a.CouponName', @a.CapTickets!.Value)">
+                                    Increase max
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+
+            <p class="muted" style="margin-top:10px;font-size:13px;">
+                @foreach (var a in Model.Billing.AdHoc)
+                {
+                    <text>
+                        <strong>@a.CouponName</strong>: you are invoiced @a.SharePercent% of
+                        @(a.AgreedUnitPriceDkk is { } ap
+                            ? $"your agreed price ({ap.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} DKK)"
+                            : "the ticket price"),
+                        @a.Cadence. So far this comes to
+                        <strong>@a.BilledSoFarDkk.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) DKK</strong>@(a.LastInvoicedAt is { } li ? $"; last invoiced {li:d MMM yyyy}" : "; nothing invoiced yet").<br />
+                    </text>
+                }
+            </p>
+        }
+    </div>
+
+    @* --- Extend / order more --------------------------------------------------------- *@
+    <div class="card" id="ask-more">
+        <h2>Need more tickets?</h2>
+
+        @if (!string.IsNullOrEmpty(Model.RequestMessage))
+        {
+            <p class="info" role="status">@Model.RequestMessage</p>
+        }
+        @if (!string.IsNullOrEmpty(Model.RequestError))
+        {
+            <p class="error" role="alert">@Model.RequestError</p>
+        }
+
+        <p class="muted">
+            Tell us the new total you need and we will confirm by email.
+            @if (Model.Billing.Pools.Count > 0)
+            {
+                <text>Extra tickets on a pre-paid agreement are invoiced when we add them.</text>
+            }
+            else
+            {
+                <text>Raising your limit does not change what you pay per ticket — you are still
+                invoiced only for the tickets that are actually claimed.</text>
+            }
+        </p>
+
+        @* §1096 — the coupon is CHOSEN, never inferred. The per-line "Increase max" buttons just
+           preselect it here and jump to this box, so the two routes cannot disagree about which
+           agreement is being extended. *@
+        <form method="post" asp-page-handler="RequestMore" asp-route-token="@Model.Monitor?.Token">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+                <div style="flex:0 1 240px;">
+                    <label for="couponName">Which code</label>
+                    <select id="couponName" name="couponName" style="width:100%;" required>
+                        @foreach (var p in Model.Billing.Pools)
+                        {
+                            <option value="@p.CouponName">@p.CouponName — @p.TicketClassLabel (pre-paid)</option>
+                        }
+                        @foreach (var a in Model.Billing.AdHoc.Where(x => x.IsCapped))
+                        {
+                            <option value="@a.CouponName">@a.CouponName (limit @a.CapTickets)</option>
+                        }
+                    </select>
+                </div>
+                <div style="flex:0 1 190px;">
+                    <label for="requestedTotal">New total needed</label>
+                    <input id="requestedTotal" name="requestedTotal" type="number" min="1" step="1"
+                           style="width:100%;" required />
+                </div>
+                @* §1104 — WHO is asking. The page is anonymous: the token identifies a COMPANY, never
+                   a person, so this is the only way the organizer learns who to reply to. Reported
+                   as self-reported, because that is what it is. *@
+                <div style="flex:0 1 200px;">
+                    <label for="requestedByName">Your name</label>
+                    <input id="requestedByName" name="requestedByName" type="text" maxlength="120"
+                           style="width:100%;" required />
+                </div>
+                <div style="flex:0 1 220px;">
+                    <label for="requestedByEmail">Your e-mail</label>
+                    <input id="requestedByEmail" name="requestedByEmail" type="email" maxlength="200"
+                           style="width:100%;" required />
+                </div>
+                <div style="flex:1 1 240px;">
+                    <label for="note">Anything we should know? (optional)</label>
+                    <input id="note" name="note" type="text" maxlength="400" style="width:100%;" />
+                </div>
+                <button type="submit" class="btn primary">Send request</button>
+            </div>
+        </form>
+    </div>
+
+    @* Preselects the line that was pressed and suggests the next sensible total. Progressive
+       enhancement only — with JavaScript off the form above still works on its own. *@
+    <script>
+        function cehAskMore(coupon, current) {
+            var sel = document.getElementById('couponName');
+            var qty = document.getElementById('requestedTotal');
+            if (sel) { sel.value = coupon; }
+            if (qty && !qty.value) { qty.value = (current || 0) + 10; }
+            var box = document.getElementById('ask-more');
+            if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+            if (qty) { qty.focus(); }
+        }
+    </script>
+}
 
 <div class="card">
     <h2>@Model.Rows.Count ticket(s)</h2>
@@ -53,6 +253,9 @@
                         <th style="padding:8px 6px;">Name</th>
                         <th style="padding:8px 6px;">Company</th>
                         <th style="padding:8px 6px;">E-mail</th>
+                        @* §1097 — on screen as well as in the export, so the two never disagree
+                           about what a row contains. *@
+                        <th style="padding:8px 6px;">Ticket</th>
                         <th style="padding:8px 6px;">Order</th>
                     </tr>
                 </thead>
@@ -61,11 +264,21 @@
                 {
                     <tr style="border-bottom:1px solid #f0f0f0;">
                         <td style="padding:8px 6px;white-space:nowrap;">
-                            @(a.BoughtAt is { } b ? b.ToString("d MMM yyyy") : "—")
+                            @* §1097 — the TIME too. Two tickets on the same day are otherwise
+                               indistinguishable, and on a busy day that is most of them. *@
+                            @(a.BoughtAt is { } b ? b.ToString("d MMM yyyy HH:mm") : "—")
                         </td>
                         <td style="padding:8px 6px;">@a.FirstName @a.LastName</td>
                         <td style="padding:8px 6px;">@(string.IsNullOrWhiteSpace(a.Company) ? "—" : a.Company)</td>
                         <td style="padding:8px 6px;"><a href="mailto:@a.Email">@a.Email</a></td>
+                        <td style="padding:8px 6px;">
+                            @(string.IsNullOrWhiteSpace(a.TicketClassName) ? "—" : a.TicketClassName)
+                            @if (!string.IsNullOrWhiteSpace(a.TicketId))
+                            {
+                                <br />
+                                <code class="muted" style="font-size:11.5px;">@a.TicketId</code>
+                            }
+                        </td>
                         <td style="padding:8px 6px;white-space:nowrap;">
                             <code style="font-size:12px;">@a.OrderId</code>
                             @if (!string.IsNullOrWhiteSpace(a.BuyerName))

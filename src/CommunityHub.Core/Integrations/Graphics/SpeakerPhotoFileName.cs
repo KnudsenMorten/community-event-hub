@@ -82,6 +82,82 @@ public static class SpeakerPhotoFileName
     }
 
     /// <summary>
+    /// §1132 — the NAME ALIAS: a SECOND file per speaker, named after the person, written ALONGSIDE
+    /// the authoritative <see cref="Build"/> file. Returns <c>null</c> when the name sanitises to
+    /// nothing, in which case only the id file exists.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25: <i>"when i need to find a photo file for a speaker and i dont know
+    /// the speaker i have to look their id first (=extra work) … i would love to have 1 extra file
+    /// per speaker on sharepoint with their name in … same folder, just 2 files"</i>, and
+    /// — asked about collisions — he chose the name-plus-id shape.</para>
+    ///
+    /// <para>🔑 <b>THE SHAPE IS DELIBERATELY THE LEGACY ONE</b>, <c>speaker-photo-{Name}-{id}</c>,
+    /// and that is what makes this safe rather than a re-run of the bug §768.16 fixed. Because
+    /// <see cref="TryParse"/> already recognises it:</para>
+    /// <list type="bullet">
+    /// <item><b>The graphics builder indexes it by ID ONLY.</b> <c>SoMeBundleBuildService</c>
+    /// <c>continue</c>s before the name-slug branch for anything this parses, and the id-only file
+    /// overwrites it in the index regardless of listing order — so an alias can NEVER beat the real
+    /// photo. Had the alias used a bare <c>{Name}.jpg</c> shape it would have registered a NAME key,
+    /// and the name pass runs FIRST, so it would have won — for precisely the speakers mid-rename.
+    /// That is the §768.16 defect exactly.</item>
+    /// <item><b>Deactivation cleanup deletes it.</b> <c>ParticipantPhotoCleanupService</c> matches on
+    /// the parsed id, so both files go. A bare-name alias would not parse and would be left behind —
+    /// a photo of a deactivated person orphaned in SharePoint.</item>
+    /// </list>
+    ///
+    /// <para>🔒 The id suffix is what makes two people with the same name safe: the alias is unique
+    /// per participant, so one person's photo can never overwrite another's.</para>
+    ///
+    /// <para>⚠️ A RENAME leaves the old alias behind — the new one is written under the new name and
+    /// nothing knows the previous one. That is accepted: the id file stays correct and authoritative,
+    /// the stale alias is only a duplicate in a folder a human browses, and cleanup still removes
+    /// every file carrying the id when the person is deactivated.</para>
+    /// </remarks>
+    public static string? BuildAlias(int participantId, string? fullName, string? extension)
+    {
+        var name = SanitiseName(fullName);
+        if (name.Length == 0) return null;
+
+        var ext = (extension ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(ext)) ext = ".jpg";
+        if (!ext.StartsWith('.')) ext = "." + ext;
+
+        return $"{Prefix}{name}-{participantId}{ext}";
+    }
+
+    /// <summary>
+    /// §1132 — a name reduced to a safe, readable file-name component: <c>Morten Knudsen</c> →
+    /// <c>Morten-Knudsen</c>. Empty when nothing usable survives.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 Danish letters are KEPT (æøå) — SharePoint accepts them and the whole point is that
+    /// he recognises the name at a glance. Only what SharePoint actually refuses is stripped, plus
+    /// the dot (which would read as an extension) and the run-together dashes that would make the
+    /// trailing-id parse ambiguous.</para>
+    ///
+    /// <para>⚠️ §768.16 deleted the previous sanitiser with the note that <i>"a spare sanitiser
+    /// sitting here is how the second convention comes back"</i>. This one is not spare — it has
+    /// exactly one caller, <see cref="BuildAlias"/>, and the alias is now a deliberate, documented
+    /// second file rather than a competing convention.</para>
+    /// </remarks>
+    public static string SanitiseName(string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return string.Empty;
+
+        const string illegal = "\"*:<>?/\\|.";
+        var cleaned = new string(fullName.Where(c => illegal.IndexOf(c) < 0).ToArray());
+
+        // Whitespace → single dashes, then collapse any run of dashes. A doubled dash would make
+        // "where does the name end and the id begin" ambiguous for TryParse.
+        var parts = cleaned.Split(
+            new[] { ' ', '\t', '\r', '\n', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+
+        return string.Join("-", parts).Trim('-');
+    }
+
+    /// <summary>
     /// Is <paramref name="fileNameOrPath"/> already on the CURRENT id-only convention? Used by the
     /// archive to decide whether a photo it has otherwise nothing to do for still needs re-writing
     /// under its new name — without that, an unchanged source URL would freeze every legacy name in

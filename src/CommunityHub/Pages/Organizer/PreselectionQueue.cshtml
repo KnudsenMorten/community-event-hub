@@ -4,7 +4,7 @@
 @inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
 @model CommunityHub.Pages.Organizer.PreselectionQueueModel
 @{
-    ViewData["Title"] = "Pre-selection queue";
+    ViewData["Title"] = "Pre-selection queue for volunteers";
 }
 
 <style>
@@ -16,21 +16,35 @@
     .psq-help { background:#f1f5f9; border:1px solid #dbe2ea; border-radius:8px; padding:10px 12px;
                 font-size:12.5px; color:#475569; margin:0 0 14px; }
     .psq-help strong { color:#1f2937; }
+    /* §1146e (operator 2026-08-28: "make id smaller in font and more space") — the row grew from
+       6 columns to 10, and with no cell padding the values ran together into one wall of text.
+       The id is a reference you glance at, not something you read, so it recedes. */
+    .psq-table th, .psq-table td { padding:8px 12px; vertical-align:middle; }
+    .psq-table th { white-space:nowrap; }
+    /* ⚠️ Right-aligning the id pushed it INTO the name ("228 Frank Christensen" read as one
+       value). It is left-aligned with a wide right gutter instead, so the two are plainly
+       separate columns — and the name keeps the left edge the eye scans down. */
+    .psq-id { font-size:11px; color:#9ca3af; width:1%; white-space:nowrap; padding-right:20px !important; }
+    .psq-name { white-space:nowrap; }
 </style>
 <div class="card">
-    <h1>Pre-selection queue</h1>
+    <h1>Pre-selection queue for volunteers</h1>
     @* §756 — VOLUNTEERS ONLY. The old copy said "prospective volunteers, speakers and media-team",
        and the old explainer documented a speakers-skip-Preselect flow. Both are gone with the rows:
        every other role is selected elsewhere and has its own onboarding. Leaving the copy behind
        would describe a flow this page no longer performs (the §730 stale-copy trap). *@
     <p class="info" style="margin-top:0;">
         Prospective <strong>volunteers</strong> land here from the interest form. Validate the data,
-        then preselect or activate. Only an <strong>Active</strong> row can sign in.
+        then preselect or onboard. Only an <strong>Onboarded</strong> row can sign in.
     </p>
     <p class="psq-help">
         <strong>Preselect</strong> = shortlist this person but keep them <em>inactive</em> — they
         <strong>cannot sign in yet</strong> (a "we intend to include them, not confirmed" state).
-        <strong>Activate</strong> = make them <em>active</em> so they <strong>can sign in</strong> and get hub access.
+        <strong>Onboard/Confirmed</strong> = confirm them so they <strong>can sign in</strong> and get hub access. This is the step that sends their welcome mail.
+        <strong>Reset</strong> = undo a shortlisting and put them back to <em>inactive</em> — the
+        sign-up, availability, photo and consent are all <strong>kept</strong>; nothing is deleted.
+        <strong>Deactivate</strong> = <em>hide</em> the sign-up: it leaves this queue and cannot sign
+        in, but <strong>no row is deleted</strong> — it is reversible.
         <br />Other roles are not reviewed here: speakers have their own
         <a asp-page="/Organizer/PendingSpeakers">Pending speakers</a> page (which also sets their
         category and ring), and attendees arrive reconciled from ticket orders.
@@ -47,20 +61,11 @@
             <p class="info" role="status">@Model.ActionMessage</p>
         }
 
-        <!-- Source filter -->
-        <form method="get" class="psq-filter" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
-            <span style="display:flex;flex-direction:column;gap:2px;">
-                <label for="SourceFilter">Source</label>
-                <select id="SourceFilter" name="SourceFilter">
-                    <option value="">All sources</option>
-                    @foreach (var src in Enum.GetValues<ParticipantQueueSource>())
-                    {
-                        <option value="@src" selected="@(Model.SourceFilter == src)">@src</option>
-                    }
-                </select>
-            </span>
-            <button type="submit">Apply</button>
-        </form>
+        @* ⚰️ §1146h — the SOURCE FILTER is gone with the Source column (operator 2026-08-28:
+           "remove the source filter too"). §756 made this queue volunteers-only, so every row has
+           the one source: the dropdown could only ever filter everything or nothing. The service
+           still supports filtering by source — that is a tested capability with other callers —
+           this page simply has nothing to filter. *@
 
         @if (Model.Queue.Count == 0)
         {
@@ -73,24 +78,36 @@
             <!-- One form wraps the grid so ticked rows post together for a bulk
                  action; per-row buttons target their own handler via formaction. -->
             <form method="post">
-                <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+
 
                 <div class="bulk-bar"
                      style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
                             padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
                     <button type="submit" asp-page-handler="BulkPreselect" class="secondary">Preselect selected</button>
-                    <button type="submit" asp-page-handler="BulkActivate">Activate selected</button>
+                    <button type="submit" asp-page-handler="BulkActivate">Onboard/Confirm selected</button>
                 </div>
 
                 <div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                <table class="psq-table" style="width:100%;border-collapse:collapse;min-width:860px;">
                     <tr style="text-align:left;border-bottom:2px solid #ddd;">
                         <th style="width:32px;">
                             <input type="checkbox" id="selectAll" aria-label="Select all rows"
                                    onclick="for(const c of document.querySelectorAll('.rowChk'))c.checked=this.checked;" />
                         </th>
-                        <th>Name</th><th>Email</th><th>Role</th>
-                        <th>Source</th><th>State</th><th></th>
+                        @* §1146b (operator 2026-08-28: "include email + phone + Some publish accept
+                           (yes/no) in this form"). Phone and the public-profile consent both come
+                           from the sign-up form itself, so the queue shows what they actually
+                           submitted rather than making him open each person to find out. *@
+                        <th class="psq-id" title="Participant id — the number their photo file is named after">ID</th>
+                        <th>Name</th><th>Email</th><th>Phone</th>
+                        <th title="Consented on the sign-up form to be featured on the public volunteer page (name, photo &amp; LinkedIn)">Public&nbsp;profile</th>
+                        <th>Photo</th>
+                        <th title="The applicant's LinkedIn profile, from the sign-up form">LinkedIn</th>
+                        <th title="Release ring — decides whether hub e-mail reaches this person">Ring</th>
+                        @* §1146e — the Source column is gone (operator 2026-08-28). §756 made the
+                           queue volunteers-only, so every row read "VolunteerInterestForm": a column
+                           whose value never varies costs width and tells him nothing. *@
+                        <th>State</th><th></th>
                     </tr>
                     @foreach (var p in Model.Queue)
                     {
@@ -99,7 +116,12 @@
                                 <input class="rowChk" type="checkbox" name="SelectedIds" value="@p.Id"
                                        aria-label="Select @p.FullName" />
                             </td>
-                            <td>@p.FullName</td>
+                            @{ var signup = Model.SignupById.GetValueOrDefault(p.Id); }
+                            @* §1146c — the id is shown because it IS the filing key: photos are
+                               stored as volunteer-photo-{id}, so "which file is this person?" is
+                               otherwise a lookup he has to do by hand. *@
+                            <td class="psq-id">@p.Id</td>
+                            <td class="psq-name">@p.FullName</td>
                             <td>
                                 @* §204: an email-less Sessionize speaker (invite not yet
                                    accepted) is parked under a placeholder address — show a
@@ -113,8 +135,99 @@
                                     @p.Email
                                 }
                             </td>
-                            <td>@p.Role</td>
-                            <td>@p.QueueSource</td>
+                            <td>
+                                @if (string.IsNullOrWhiteSpace(p.Phone))
+                                {
+                                    <span style="color:#9ca3af;">–</span>
+                                }
+                                else
+                                {
+                                    <a href="tel:@p.Phone">@p.Phone</a>
+                                }
+                            </td>
+                            <td>
+                                @* 🔒 §1146b — a MISSING consent row is NO, never blank. It defaults
+                                   false and only exists once they have been through the form, so
+                                   the two are the same answer; rendering "unknown" would invite
+                                   publishing a name and photo on the strength of an absent row. *@
+                                @if (signup?.ProfileConsent == true)
+                                {
+                                    <span style="color:#14532d;background:#dcfce7;padding:1px 7px;border-radius:4px;">Yes</span>
+                                }
+                                else
+                                {
+                                    <span style="color:#7f1d1d;background:#fee2e2;padding:1px 7px;border-radius:4px;">No</span>
+                                }
+                            </td>
+                            <td>
+                                @* §1146c — "can we also get a view picture button". Opens the file
+                                   in SharePoint rather than embedding it: the URL is a Graph web
+                                   link that needs the viewer's own sign-in, so an <img> would be a
+                                   broken icon on a page he is trying to read at a glance. *@
+                                @if (!string.IsNullOrWhiteSpace(signup?.PhotoUrl))
+                                {
+                                    <a href="@signup!.PhotoUrl" target="_blank" rel="noopener"
+                                       class="secondary" style="white-space:nowrap;">View picture</a>
+                                }
+                                else
+                                {
+                                    <span style="color:#9ca3af;">none</span>
+                                }
+                            </td>
+                            <td>
+                                @* §1149 (operator 2026-08-28: "i also want the link to their linkedin
+                                   profile on the page … so we just click LinkedIn Url if added and it
+                                   opens in new page"). It is asked for on the sign-up beside the
+                                   photo, so it belongs beside the photo here.
+
+                                   🔒 The URL is TYPED BY THE APPLICANT, so it is only rendered as a
+                                   link when it is http(s). A `javascript:` value pasted into that
+                                   field would otherwise become a one-click script on an organizer's
+                                   authenticated page — the applicant chooses the string, we choose
+                                   whether it is clickable. An unsafe value is shown as plain text
+                                   rather than dropped, so nothing is hidden from him. *@
+                                @{
+                                    var li = signup?.LinkedInUrl?.Trim();
+                                    // §1152 — "www.linkedin.com/in/…" is how people write an
+                                    // address; the helper assumes https for a scheme-less value and
+                                    // still refuses anything that carries a non-http(s) scheme.
+                                    var liHref = CommunityHub.Core.Volunteers.ExternalProfileUrl.TryNormalize(li);
+                                }
+                                @if (liHref is not null)
+                                {
+                                    <a href="@liHref" target="_blank" rel="noopener noreferrer"
+                                       style="white-space:nowrap;">LinkedIn</a>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(li))
+                                {
+                                    <span style="color:#b45309;" title="Not a valid http(s) link — shown as text">@li</span>
+                                }
+                                else
+                                {
+                                    <span style="color:#9ca3af;">none</span>
+                                }
+                            </td>
+                            <td>
+                                @* §1146c — ring picker INSIDE the existing bulk form. Keyed by
+                                   participant id so each row posts its own value; a shared field
+                                   name would make every row submit the last row's choice. *@
+                                <span style="display:flex;gap:4px;align-items:center;white-space:nowrap;">
+                                    <select name="RingByParticipant[@p.Id]" aria-label="Ring for @p.FullName"
+                                            style="padding:2px 4px;font-size:12px;">
+                                        @foreach (var r in CommunityHub.Core.Settings.Rings.All)
+                                        {
+                                            <option value="@r" selected="@(p.Ring == r)">
+                                                @CommunityHub.Core.Settings.Rings.Label(r)
+                                            </option>
+                                        }
+                                    </select>
+                                    <button type="submit" class="secondary" style="padding:2px 8px;font-size:12px;"
+                                            asp-page-handler="SetRing"
+                                            asp-route-participantId="@p.Id"
+                                           >Set</button>
+                                </span>
+                            </td>
+
                             <td>
                                 @if (p.LifecycleState == ParticipantLifecycleState.Preselected)
                                 {
@@ -136,21 +249,33 @@
                                     <button type="submit" class="secondary"
                                             asp-page-handler="PreselectOne"
                                             asp-route-participantId="@p.Id"
-                                            asp-route-SourceFilter="@Model.SourceFilter">Preselect</button>
+                                           >Preselect</button>
                                 }
                                 <button type="submit"
                                         asp-page-handler="ActivateOne"
                                         asp-route-participantId="@p.Id"
-                                        asp-route-SourceFilter="@Model.SourceFilter">@(
+                                       >@(
                                         p.Role == ParticipantRole.Speaker && p.LifecycleState == ParticipantLifecycleState.Inactive
-                                            ? "Activate (one step)" : "Activate")</button>
+                                            ? "Onboard/Confirmed (one step)" : "Onboard/Confirmed")</button>
+                                @* §1146d — undo a shortlisting WITHOUT touching the sign-up
+                                   (operator 2026-08-28: "Reset a preselection (or remove) but NOT
+                                   delete the sign-up"). Only offered on a row that HAS been
+                                   preselected — there is nothing to undo on an Inactive one. *@
+                                @if (p.LifecycleState == ParticipantLifecycleState.Preselected)
+                                {
+                                    <button type="submit" class="secondary"
+                                            asp-page-handler="Reset"
+                                            asp-route-participantId="@p.Id"
+                                           
+                                            title="Back to Inactive. The sign-up, availability, photo and consent are kept.">Reset</button>
+                                }
                                 <button type="submit"
                                         style="background:#b91c1c;"
                                         asp-page-handler="Delete"
                                         asp-route-participantId="@p.Id"
-                                        asp-route-SourceFilter="@Model.SourceFilter"
+                                       
                                         data-ceh-confirm="confirmDeleteQueueRow"
-                                        data-ceh-summary="@p.FullName">@Localizer["Queue.Delete"]</button>
+                                        data-ceh-summary="@p.FullName">@Localizer["Queue.Deactivate"]</button>
                                 </span>
                             </td>
                         </tr>
@@ -159,17 +284,37 @@
                 </div>
             </form>
 
-            @* Shared accessible confirm modal (§21) — gates removing a duplicate /
-               spam queue row. Queue rows have not engaged, so this hard-deletes a
-               clean row (or safely deactivates one with linked data). *@
+            @* Shared accessible confirm modal (§21) — gates removing a duplicate / spam queue row.
+               ⚰️ The old note here said this "hard-deletes a clean row"; §1082 retired that —
+               the button DEACTIVATES and keeps the row, which is what the body text now says.
+               §1146f — it also requires the word DELETE to be TYPED. This button sits at the end of
+               every row beside Reset and Onboard, and a plain modal in the same place each time
+               gets dismissed by reflex. Typing a word cannot be done by reflex. *@
             <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
                 Id: "confirmDeleteQueueRow",
-                Title: Localizer["Queue.DeleteConfirmTitle"].Value,
-                Body: "This removes a prospective (not-yet-active) person from the pre-selection queue. If they somehow have linked data they are deactivated instead. This cannot be undone.",
-                ConfirmLabel: Localizer["Queue.Delete"].Value,
+                Title: Localizer["Queue.DeactivateConfirmTitle"].Value,
+                Body: "This HIDES the sign-up: the person leaves the pre-selection queue and cannot sign in. Nothing is deleted — no row is removed from the database, and their answers, photo and consent are all kept. It can be reversed.",
+                ConfirmLabel: Localizer["Queue.Deactivate"].Value,
                 CancelLabel: "Cancel",
-                Danger: true)' />
+                Danger: true,
+                DefaultCount: null,
+                RequireTypedWord: "DEACTIVATE")' />
         }
     }
     <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
 </div>
+
+@* §1146 — the availability overview, UNDER the list (operator 2026-08-28: "make it under the list
+   with colos like GREEN, RED … primarely to preselect people based on their availability").
+   🔒 Same partial as /Organizer/Volunteers, fed from the rows above. *@
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2 id="availability">Availability overview</h2>
+        <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+            What the people in the queue above said they can do, per half-day. The count under each
+            column is how many are available for that shift.
+        </p>
+        <partial name="_VolunteerAvailabilityOverview" model="Model.Availability" />
+    </div>
+}

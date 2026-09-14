@@ -238,6 +238,14 @@ public sealed class WelcomeEmailService
             return false;
         }
 
+        // 🔴 §1222 — STAMP THE WELCOME, like WelcomeWithLoginEmailService does. This path only wrote
+        // the ledger row, and the Get Started digest anchors on WelcomeWithLoginSentAt (§738: never
+        // welcomed ⇒ never chased). Every sponsor/speaker welcomed by the reconcile jobs was
+        // therefore never chased — operator 2026-09-14: "sponsors are reporting that they dont get
+        // any weekly reminders when get started is not completed".
+        // 🔒 Only when empty: a forced RESEND must not push an existing cadence anchor forward.
+        participant.WelcomeWithLoginSentAt ??= _clock.GetUtcNow();
+
         // Record it (first time) so a re-import does not re-send. A forced resend
         // re-sends an already-welcomed person without adding a duplicate ledger row.
         if (!already)
@@ -250,8 +258,9 @@ public sealed class WelcomeEmailService
                 OccasionKey = occasionKey,
                 SentAt = _clock.GetUtcNow(),
             });
-            await _db.SaveChangesAsync(ct);
         }
+        // §1222 — saved on a forced resend too, which can now carry a stamp the first send never set.
+        await _db.SaveChangesAsync(ct);
         return true;
     }
 

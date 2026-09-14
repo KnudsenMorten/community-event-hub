@@ -1,0 +1,34 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteerAvailabilityModel
+@{
+    ViewData["Title"] = "Volunteer availability";
+}
+
+<div class="card">
+    <h1>Volunteer availability</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p style="margin-top:0;">
+            Every volunteer's half-day availability for this edition, newest commitment first. The
+            count under each column is how many people are available for that shift.
+        </p>
+        <p>
+            <a asp-page="/Organizer/PreselectionQueue">Pre-selection queue</a> &middot;
+            <a asp-page="/Organizer/Volunteers">Back to volunteers</a>
+        </p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        @* §1146e — the SAME partial the pre-selection queue renders, fed by the same builder.
+           Moving where the grid lives must not fork what it shows. *@
+        <partial name="_VolunteerAvailabilityOverview" model="Model.Availability" />
+    </div>
+}

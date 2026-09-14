@@ -25,6 +25,43 @@ public enum TaskClosedReason
     /// <summary>Closed by the §253 deactivation cascade because the assignee left — the work
     /// was NOT done. Excluded from completion ratios; re-opened verbatim on re-activation.</summary>
     AbandonedOnDeactivation = 1,
+
+    /// <summary>
+    /// §1081 — RETIRED: the task predates the Get Started wizard and the wizard now owns the same
+    /// obligation. The work was not abandoned and it was not necessarily done — the task simply
+    /// stopped being the place the question is asked.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-13: <i>"i think that initial onboarding is legacy before we had get
+    /// started wizard - i propose we delete that tasks for any existing + new sponsors. it is being
+    /// replaced by get started"</i> — and then, on how: <i>"auto-close the task (never delete)"</i>.</para>
+    ///
+    /// <para>🔒 <b>Closed, never deleted.</b> The row carries its own history — when it was raised,
+    /// its deadline, and for four companies the fact that somebody completed it. Deleting would
+    /// throw that away irreversibly to achieve exactly what a close achieves reversibly. It is the
+    /// §502 leaver rule applied to a task: retire it, keep the record.</para>
+    /// </remarks>
+    SupersededByGetStarted = 2,
+
+    /// <summary>
+    /// §1082 — the CATALOG stopped producing this task, so it was retired: a definition was removed,
+    /// or a title was renamed and its old slug left this row behind. <b>The work was neither done nor
+    /// abandoned — the question simply stopped being asked.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>This exists because the prunes used to DELETE.</b> On 2026-08-13 the sponsor orphan
+    /// prune destroyed 15 rows, four of them completed, the first time a definition was removed.
+    /// Operator: <i>"when you implement a guard, do we agree that you dont delete, but close them (as
+    /// they were inactive)"</i> — and he is right, because the hub already says so everywhere else:
+    /// §502 deactivates a leaver rather than deleting them, §253 tombstones, and his instruction on
+    /// the onboarding task was *"auto-close (never delete)"*.</para>
+    ///
+    /// <para>🔒 <b>A retirement is not a completion, and must never be counted as one.</b> Use
+    /// <see cref="Tasks.TaskClosure.IsSystemClosed"/> to filter these out of anything a participant
+    /// reads as "what I have done" — otherwise a sponsor is congratulated for nine things they never
+    /// saw.</para>
+    /// </remarks>
+    RetiredFromCatalog = 3,
 }
 
 /// <summary>

@@ -33,6 +33,10 @@
                 <select id="mon-kind" name="kind" style="width:100%;">
                     <option value="@((int)AttendeeMonitorKind.EmailDomain)">E-mail domain — every attendee at that domain</option>
                     <option value="@((int)AttendeeMonitorKind.CouponCode)">Coupon code — every attendee whose ticket used that code</option>
+                    @* §1093 — the per-billing-customer link. These are created AUTOMATICALLY for
+                       every customer that has a coupon, so this option is here for the rare manual
+                       case (and so the dropdown does not silently omit a kind that exists). *@
+                    <option value="@((int)AttendeeMonitorKind.ErpCustomer)">Billing customer — every attendee who used any coupon billed to that e-conomic customer</option>
                 </select>
 
                 <label for="mon-value" style="margin-top:10px;display:block;">Domain or coupon code</label>

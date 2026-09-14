@@ -476,7 +476,7 @@ public sealed class LogisticsRunServiceTests
         await svc.RunAsync(EventId);
 
         Assert.NotEmpty(mail.Sent);
-        Assert.All(mail.Sent, m => Assert.Equal("mok@expertslive.dk", m.To));
+        Assert.All(mail.Sent, m => Assert.Equal(LogisticsRecipients.DefaultReviewMailbox, m.To));
         Assert.DoesNotContain(mail.Sent, m => m.To.Contains("venue@") || m.To.Contains("hotel@"));
     }
 

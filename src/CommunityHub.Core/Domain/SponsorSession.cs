@@ -39,6 +39,14 @@ public class SponsorSession
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? LastUpdatedByEmail { get; set; }
 
+    /// <summary>
+    /// §1060(h) — this sponsor session is never announced on social media.
+    /// The sibling of <see cref="Session.ExcludeFromSoMeAnnouncements"/>; operator 2026-08-11
+    /// answered <i>"sponsor sessions too"</i> when asked whether the flag applied to both.
+    /// Default <c>false</c>.
+    /// </summary>
+    public bool ExcludeFromSoMeAnnouncements { get; set; }
+
     /// <summary>The session's speakers — each is a real Speaker participant (SponsorSelfFunded) so
     /// they get CEH access, welcome mail, dinner sign-up and the normal speaker details/photo.</summary>
     public ICollection<SponsorSessionSpeaker> Speakers { get; set; } = new List<SponsorSessionSpeaker>();

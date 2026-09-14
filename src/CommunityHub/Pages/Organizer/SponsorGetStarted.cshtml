@@ -1,0 +1,137 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorGetStartedModel
+@{
+    ViewData["Title"] = "Sponsors — Get started not finished";
+}
+
+@* 🔴 §1210 — the chase list. Operator 2026-09-12: *"i need event sponsor name + coordinator name +
+   email"*. Those three are the leftmost columns because they are the answer; progress and the open
+   steps follow so a sponsor owing one logo is not chased like one that has not started. *@
+
+<style>
+    .gs-table { width:100%; border-collapse:collapse; }
+    .gs-table th, .gs-table td { padding:8px 6px; text-align:left; vertical-align:top;
+                                 border-bottom:1px solid #eee; }
+    .gs-table th { border-bottom:2px solid #ddd; }
+    .gs-steps { color:#92400e; font-size:12px; }
+    .gs-none { background:#fee2e2; color:#991b1b; padding:1px 8px; border-radius:10px;
+               font-size:12px; display:inline-block; }
+    .gs-bar { background:#eef2f7; border-radius:6px; height:8px; width:110px; overflow:hidden; }
+    .gs-bar span { display:block; height:100%; background:#0091d5; }
+    .gs-emails { width:100%; box-sizing:border-box; font-family:monospace; font-size:12px;
+                 min-height:70px; }
+    @@media (max-width: 640px) {
+        .gs-table thead { display:none; }
+        .gs-table tr { display:block; border-bottom:2px solid #ddd; padding:8px 0; }
+        .gs-table td { display:block; border:0; padding:2px 0; }
+        .gs-table td::before { content:attr(data-label) ": "; font-weight:600; }
+    }
+</style>
+
+<div class="card">
+    <h1>Sponsors — Get started not finished</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else if (Model.Rows.Count == 0)
+    {
+        <p class="success">
+            Every sponsor has finished Get started. Nothing to chase.
+        </p>
+    }
+    else
+    {
+        <p class="muted">
+            <strong>@Model.Rows.Count</strong> sponsor(s) have not finished. "Finished" is the same
+            measure the sponsor sees on their own
+            <a asp-page="/Sponsor/GetStarted">Get started</a> page — test and withdrawn companies are
+            not listed.
+        </p>
+
+        @if (Model.NobodyToChase > 0)
+        {
+            @* 🔴 §854 — worse than an unfinished wizard, and it was invisible: no coordinator means
+               the reminder emails have no recipient either, so these companies are chased by
+               nothing at all. Sorted to the top for the same reason. *@
+            <p class="error">
+                <strong>@Model.NobodyToChase</strong> of them have <strong>no event coordinator</strong>.
+                Nobody is being reminded, because the reminders have nowhere to go — give them a
+                coordinator on the <a asp-page="/Organizer/Sponsors">sponsor</a> record first.
+            </p>
+        }
+
+        <div style="overflow-x:auto;">
+            <table class="gs-table">
+                <caption class="sr-only">Sponsors that have not finished Get started</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Sponsor</th>
+                        <th scope="col">Coordinator</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Progress</th>
+                        <th scope="col">Still open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr>
+                        <td data-label="Sponsor"><strong>@r.CompanyName</strong></td>
+                        <td data-label="Coordinator">
+                            @if (r.HasNobodyToChase)
+                            {
+                                <span class="gs-none">no coordinator</span>
+                            }
+                            else
+                            {
+                                @foreach (var c in r.Coordinators)
+                                {
+                                    <div>@c.Name</div>
+                                }
+                            }
+                        </td>
+                        <td data-label="Email">
+                            @foreach (var c in r.Coordinators)
+                            {
+                                <div><a href="mailto:@c.Email">@c.Email</a></div>
+                            }
+                        </td>
+                        <td data-label="Progress">
+                            @if (r.EvaluableSteps > 0)
+                            {
+                                <div class="gs-bar" role="img"
+                                     aria-label="@r.DoneSteps of @r.EvaluableSteps steps done">
+                                    <span style="width:@(r.PercentDone)%;"></span>
+                                </div>
+                                <span class="muted" style="font-size:12px;">
+                                    @r.DoneSteps of @r.EvaluableSteps steps
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="muted" style="font-size:12px;">not started</span>
+                            }
+                        </td>
+                        <td data-label="Still open" class="gs-steps">
+                            @string.Join(" · ", r.OpenSteps.Select(
+                                CommunityHub.Pages.Organizer.SponsorGetStartedModel.StepLabel))
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        @* 🔑 One paste into a mail client, since chasing them is the point of the page. Rendered as a
+           textarea rather than a download: the values are already on screen and a file would add a
+           step to a job that is one copy. *@
+        @if (!string.IsNullOrWhiteSpace(Model.AllEmails))
+        {
+            <h2 style="margin-top:20px;">All coordinator emails</h2>
+            <p class="muted">Semicolon-separated, de-duplicated — paste into the BCC field.</p>
+            <textarea class="gs-emails" readonly aria-label="All coordinator emails">@Model.AllEmails</textarea>
+        }
+    }
+</div>

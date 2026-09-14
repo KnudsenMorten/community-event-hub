@@ -163,9 +163,14 @@ public sealed class CouponPrepaidLowBalanceAlertTests
         Assert.Equal(1, await service.AlertAsync(EventId));
 
         var sent = Assert.Single(mail.Messages);
-        Assert.Contains("OVERSUBSCRIBED", sent.Subject);
+        // ⚰️ §1094c — the wording generalised from "OVERSUBSCRIBED" / "than they paid for" to cover
+        // capped AD-HOC coupons in the same mail (operator: *"make alerting, emails the same for any
+        // coupon no matter if adhoc or prepaid"*). An ad-hoc cap is not "paid for", so the prepaid
+        // vocabulary would have mis-described half the rows. The DISTINCTION the test exists for —
+        // "over" must never read like "running low" — is unchanged and still asserted.
+        Assert.Contains("OVER their agreed number", sent.Subject);
         Assert.DoesNotContain("running low", sent.Subject);
-        Assert.Contains("claimed more tickets than they paid for", sent.Html);
+        Assert.Contains("claimed more tickets than was agreed", sent.Html);
         Assert.Contains("2 beyond what was paid for", sent.Html);
     }
 
@@ -272,7 +277,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
         Assert.Equal(1, await service.AlertAsync(EventId));
 
         Assert.Equal(2, mail.Messages.Count);
-        Assert.Contains("OVERSUBSCRIBED", mail.Messages[1].Subject);
+        Assert.Contains("OVER their agreed number", mail.Messages[1].Subject);   // §1094c wording
         Assert.Equal(-2, (await db.CouponPrepaidAllocations.SingleAsync()).LastLowBalanceAlertRemaining);
     }
 
@@ -327,5 +332,156 @@ public sealed class CouponPrepaidLowBalanceAlertTests
 
         Assert.Equal(0, await service.AlertAsync(EventId));
         Assert.Empty(mail.Sent);
+    }
+
+    // =====================================================================
+    //  §1094c — the SAME alert for a capped AD-HOC coupon
+    // =====================================================================
+
+    /// <summary>Seed a capped ad-hoc coupon with no prepaid pool at all.</summary>
+    private static async Task<CouponInvoicingSetting> SeedCappedAdHocAsync(
+        CommunityHubDbContext db, int cap, int claimed)
+    {
+        db.Events.Add(new Event
+        {
+            Id = EventId, Code = "CL27", CommunityName = "C", DisplayName = "Coupon low",
+            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10), IsActive = true,
+        });
+        db.Orders.Add(new Order { EventId = EventId, RawJson = OrderJson(claimed) });
+
+        var rule = new CouponInvoicingSetting
+        {
+            EventId = EventId,
+            CouponName = "ARROW-DK",
+            BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
+            ErpCustomerNumber = 4242,
+            ClaimCapTickets = cap,
+        };
+        db.CouponInvoicingSettings.Add(rule);
+        await db.SaveChangesAsync();
+        return rule;
+    }
+
+    /// <summary>
+    /// 🔑 <b>ONE alert for both kinds</b> (operator 2026-08-19: *"make alerting, emails the same for
+    /// any coupon no matter if adhoc or prepaid"*). The failure is identical — CEH cannot stop a
+    /// claim — so a second alert would have been a second chance to tune one of them wrong.
+    /// </summary>
+    [Fact]
+    public async Task A_capped_ad_hoc_coupon_near_its_cap_is_warned_about()
+    {
+        using var db = NewDb();
+        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 47);
+        var (service, mail) = NewService(db, new FixedClock(Now));
+
+        Assert.Equal(1, await service.AlertAsync(EventId));
+
+        var sent = Assert.Single(mail.Messages);
+        // ⚠️ "available/remaining" in the mail, which is what he asked for by name.
+        Assert.Contains("3", sent.Html);
+        Assert.Contains("of 50", sent.Html);
+        Assert.Contains("ARROW-DK", sent.Html);
+        Assert.Contains("ad-hoc cap", sent.Html);
+        // The subject must not still say "prepaid pool" — this one is not one.
+        Assert.DoesNotContain("prepaid", sent.Subject, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(3, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
+    }
+
+    /// <summary>An UNCAPPED ad-hoc coupon has no number to be near, so it is never warned about.</summary>
+    [Fact]
+    public async Task An_uncapped_ad_hoc_coupon_is_never_warned_about()
+    {
+        using var db = NewDb();
+        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 47);
+        rule.ClaimCapTickets = null;
+        await db.SaveChangesAsync();
+        var (service, mail) = NewService(db, new FixedClock(Now));
+
+        Assert.Equal(0, await service.AlertAsync(EventId));
+        Assert.Empty(mail.Sent);
+    }
+
+    /// <summary>Over the cap reads as over, not as "0 left".</summary>
+    [Fact]
+    public async Task Claiming_past_the_cap_is_reported_as_beyond_the_agreement()
+    {
+        using var db = NewDb();
+        await SeedCappedAdHocAsync(db, cap: 5, claimed: 7);
+        var (service, mail) = NewService(db, new FixedClock(Now));
+
+        Assert.Equal(1, await service.AlertAsync(EventId));
+
+        var sent = Assert.Single(mail.Messages);
+        Assert.Contains("beyond the agreed cap", sent.Html);
+        Assert.Contains("OVER their agreed number", sent.Subject);
+    }
+
+    /// <summary>
+    /// §796.2's rule applies unchanged: quiet for 24h at the same level, but a DETERIORATION
+    /// re-alerts at once, because "3 left" and "-2" are different problems.
+    /// </summary>
+    [Fact]
+    public async Task A_capped_coupon_stays_quiet_until_it_gets_worse()
+    {
+        using var db = NewDb();
+        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 47);
+        var clock = new FixedClock(Now);
+        var (service, mail) = NewService(db, clock);
+
+        Assert.Equal(1, await service.AlertAsync(EventId));
+        Assert.Single(mail.Sent);
+
+        // Same state an hour later ⇒ silent.
+        clock.Set(Now.AddHours(1));
+        Assert.Equal(0, await service.AlertAsync(EventId));
+        Assert.Single(mail.Sent);
+
+        // Worse ⇒ immediate, inside the quiet period.
+        db.Orders.RemoveRange(db.Orders);
+        db.Orders.Add(new Order { EventId = EventId, RawJson = OrderJson(49) });
+        await db.SaveChangesAsync();
+
+        Assert.Equal(1, await service.AlertAsync(EventId));
+        Assert.Equal(2, mail.Sent.Count);
+        Assert.Equal(1, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
+    }
+
+    /// <summary>
+    /// 🔑 A prepaid pool AND a capped ad-hoc coupon in one edition produce <b>ONE</b> mail listing
+    /// both — the point of unifying them. Two mails for one problem is what he asked to avoid.
+    /// </summary>
+    [Fact]
+    public async Task A_pool_and_a_capped_coupon_share_a_single_mail()
+    {
+        using var db = NewDb();
+        await SeedAsync(db, purchased: 50, claimed: 47);
+
+        var adHoc = new CouponInvoicingSetting
+        {
+            EventId = EventId, CouponName = "GLOBE-CAP",
+            BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
+            ErpCustomerNumber = 777, ClaimCapTickets = 4,
+        };
+        db.CouponInvoicingSettings.Add(adHoc);
+        db.Orders.Add(new Order
+        {
+            EventId = EventId,
+            // ⚠️ Order is keyed on (EventId, BackstageOrderId); SeedAsync leaves it blank, so a
+            // second blank one collides. Distinct here rather than "fixing" the shared helper.
+            BackstageOrderId = "9002",
+            RawJson = "{\"id\":\"9002\",\"tickets\":[{\"id\":\"g1\",\"promo_code\":\"GLOBE-CAP\","
+                      + "\"ticket_name\":\"2-day\",\"base_price\":3500,\"status_string\":\"active\","
+                      + "\"contact\":{\"email\":\"g@example.test\",\"first_name\":\"G\",\"last_name\":\"H\"}}]}",
+        });
+        await db.SaveChangesAsync();
+
+        var (service, mail) = NewService(db, new FixedClock(Now));
+
+        Assert.Equal(2, await service.AlertAsync(EventId));
+
+        var sent = Assert.Single(mail.Messages);          // 🔒 ONE mail, both coupons
+        Assert.Contains("ARROW-DK", sent.Html);
+        Assert.Contains("GLOBE-CAP", sent.Html);
     }
 }

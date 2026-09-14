@@ -1,3 +1,4 @@
+using CommunityHub.Core.Attendees;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Participants;
@@ -306,6 +307,11 @@ public sealed class OrganizerOverviewService
     private async Task PopulateAttendeesAsync(
         OrganizerOverview o, int eventId, CancellationToken ct)
     {
-        o.AttendeeTotal = await _db.Attendees.CountAsync(a => a.EventId == eventId, ct);
+        // 🔴 §1086 (operator 2026-08-14: *"it shows 100, but we have 97"*) — LIVE TICKETS ONLY.
+        // This counted every attendee ROW, and the attendee table is deliberately a history: a
+        // cancelled or reassigned-away ticket keeps its row (§326as / §707.23). So the dashboard
+        // reported three people who are not coming, while /Organizer/Attendees — which has always
+        // filtered on MirrorState — showed the true number one click away.
+        o.AttendeeTotal = await _db.Attendees.LiveIn(eventId).CountAsync(ct);
     }
 }

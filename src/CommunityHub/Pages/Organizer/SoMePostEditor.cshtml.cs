@@ -78,6 +78,9 @@ public class SoMePostEditorModel : PageModel
     /// <summary>Why THIS post cannot be approved yet, or null. Shown on the post itself.</summary>
     public string? BlockedReason { get; private set; }
 
+    /// <summary>§1218 — offered when this post's master class / panel has exactly one linked speaker.</summary>
+    public SoMeApprovalGate.SingleSpeakerOverride? SingleSpeaker { get; private set; }
+
     /// <summary>§851.2 — show only this post type, or all when null.</summary>
     public SoMeTemplateKind? KindFilter { get; private set; }
 
@@ -113,6 +116,31 @@ public class SoMePostEditorModel : PageModel
     };
 
     /// <summary>How many posts of each type exist, so the filter says what it will show.</summary>
+    /// <summary>
+    /// §1182 — what ELSE is already booked on a given day, so a reschedule is not a guess.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"when i reschedule something, it would be great to see in the
+    /// date picker if other things have been planned for a date, so i dont overlap"</i>.</para>
+    ///
+    /// <para>⚠️ <b>The native date picker is browser chrome and cannot be annotated</b> — there is no
+    /// API to paint a count onto a day cell in <c>&lt;input type="datetime-local"&gt;</c>. So the
+    /// occupancy is shown BESIDE the field instead, updating as he picks: the same answer, in the
+    /// only place the platform allows it to be drawn.</para>
+    ///
+    /// <para>🔑 Built from the rows <c>LoadAsync</c> ALREADY reads for the walk order, so this costs
+    /// no extra query. Keyed by Danish local date, because that is the day he is choosing — a UTC
+    /// key would put an 09:00 post on the wrong side of midnight twice a year.</para>
+    ///
+    /// <para>🔒 <b>PUBLISHED posts are included and marked.</b> §1144 treats them as obstacles for
+    /// exactly this reason: their slot is spent. Hiding them would show a day as free that is not.</para>
+    /// </remarks>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> DayLoad { get; private set; } =
+        new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>§842.7/§843.3 — the everyday per-day ceiling, so "2 of 2" means something.</summary>
+    public int MaxPostsPerDay { get; private set; } = 2;
+
     public IReadOnlyDictionary<SoMeTemplateKind?, int> CountByKind { get; private set; } =
         new Dictionary<SoMeTemplateKind?, int>();
 
@@ -349,6 +377,60 @@ public class SoMePostEditorModel : PageModel
     }
 
     /// <summary>
+    /// §1218 — confirm (or un-confirm) that this post's master class / panel has ONE speaker, which
+    /// lifts the §1060(m) co-presented blocker for that session.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-13: <i>"we need a override button as we actually have one master class
+    /// … where there will be only one speaker. add the button in the planner so we can release the
+    /// some post"</i>.</para>
+    ///
+    /// <para>🔒 <b>It confirms; it does not approve.</b> The flag lives on the SESSION (so every post
+    /// for it is covered, including ones planned later), and approval stays its own click — the
+    /// other gates still get their say.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostConfirmSingleSpeakerAsync(
+        int id, bool confirm, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var post = await _db.SoMePosts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == id && p.EventId == me.EventId, ct);
+
+        // Asked through the gate, so the button can only ever act on a session the rule applies to.
+        var target = post is null ? null : await _approvalGate.SingleSpeakerOverrideAsync(post, ct);
+        var session = target is null
+            ? null
+            : await _db.Sessions.FirstOrDefaultAsync(
+                s => s.Id == target.SessionId && s.EventId == me.EventId, ct);
+
+        if (session is null)
+        {
+            Message = "That post is not about a master class or panel with exactly one linked speaker, "
+                    + "so there is nothing to confirm.";
+            MessageIsError = true;
+        }
+        else
+        {
+            session.SoMeSingleSpeakerConfirmed = confirm;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+
+            Message = confirm
+                ? $"Confirmed — \"{session.Title}\" has one speaker, so it is no longer blocked for "
+                  + "that. Approve the post when it is ready; any other blocker still applies."
+                : $"Confirmation removed — \"{session.Title}\" is blocked again until a second speaker "
+                  + "is linked. Already-approved posts for it will not publish.";
+        }
+
+        await LoadAsync(me.EventId, id, ct);
+        return Page();
+    }
+
+    /// <summary>
     /// §853 — DELETE this post (or restore it).
     /// </summary>
     /// <remarks>
@@ -544,6 +626,9 @@ public class SoMePostEditorModel : PageModel
                 // §872 — the state filter reads these two, so they come back in the same query
                 // rather than a second pass over 84 rows.
                 p.IsActive, p.Status,
+                // §1169 — needed to RE-order once the state is final: an explicit id can change
+                // StateFilter below, and §936's direction depends on it.
+                p.ScheduledAtUtc,
             })
             .ToListAsync(ct);
 
@@ -565,9 +650,60 @@ public class SoMePostEditorModel : PageModel
             return SoMeApprovalGate.IsBlockedBy(probe, blockedCompanies, blockedTiers);
         }
 
+        // 🔑 §1182 — the day map, from the rows already in hand. The post being EDITED is excluded:
+        // it is not an obstacle to itself, and counting it would tell him a day holds one more post
+        // than it does the moment he lands on it.
+        MaxPostsPerDay = await _db.SoMeSettings
+            .Where(s => s.EventId == eventId)
+            .Select(s => s.MaxPostsPerDay)
+            .FirstOrDefaultAsync(ct) is var cap && cap > 0 ? cap : 2;
+
+        DayLoad = all
+            .Where(p => p.Id != id)
+            .GroupBy(p => SoMeDisplayTime.ToDanish(p.ScheduledAtUtc).ToString("yyyy-MM-dd"))
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g
+                    .OrderBy(p => p.ScheduledAtUtc)
+                    .Select(p =>
+                    {
+                        var time = SoMeDisplayTime.ToDanish(p.ScheduledAtUtc).ToString("HH:mm");
+                        var kind = p.TemplateKind is { } k
+                            ? SoMeAnnouncementQuery.KindLabelFor(k)
+                            : "Written by hand";
+                        // The STATE matters as much as the count: a published slot is spent, a held
+                        // one may still move.
+                        var state = p.Status == SoMePostStatus.Published ? "published"
+                            : p.IsActive ? "approved"
+                            : "held";
+                        return $"{time} · #{p.Id} {kind} ({state})";
+                    })
+                    .ToList());
+
         // §851.2 — how many of each type exist, counted BEFORE any filter so the picker can say what
         // choosing it would show.
+        //
+        // 🔴 §1180 — A POST WITH NO TEMPLATE KIND TOOK THE WHOLE EDITOR DOWN.
+        //
+        // Operator 2026-09-12: *"duplicating existing publish post givs error"* — HTTP 500 on
+        // /Organizer/SoMePostEditor?id=319752, from `ArgumentNullException: Value cannot be null.
+        // (Parameter 'key')` right here.
+        //
+        // 🔑 `Dictionary<TKey,TValue>` REFUSES A NULL KEY, and a nullable-enum key type does not
+        // change that — `Dictionary<SoMeTemplateKind?, int>` compiles, accepts a declared null key
+        // type, and throws the moment one arrives. `ToDictionary` over a GroupBy that produced a
+        // null group therefore blows up, and the type system cannot warn about it.
+        //
+        // ⚠️ **The blast radius is the point.** `all` is EVERY post in the edition, so ONE post with
+        // no kind 500s the editor for EVERY post — not just its own. Two ordinary actions create
+        // one: Duplicate (§1050: *"No TemplateKind and no SubjectKey: it belongs to nothing"*) and
+        // the New-post button, whose ad-hoc row sets `Type` and leaves `TemplateKind` null. The
+        // editor has been one ad-hoc post away from total failure since both shipped.
+        //
+        // 🔒 Dropped rather than bucketed: the picker below enumerates the FIVE real kinds and never
+        // asks for null, so the null group had no reader and existed only to break the dictionary.
         CountByKind = all
+            .Where(p => p.TemplateKind is not null)
             .GroupBy(p => p.TemplateKind)
             .ToDictionary(g => g.Key, g => g.Count());
 
@@ -590,7 +726,44 @@ public class SoMePostEditorModel : PageModel
         // default i want to see only planned". DEFAULT IS PLANNED: the un-approved posts are the
         // ones he still has work to do on, and 84 posts of which most are already settled is a walk
         // through other people's finished business.
+        // 🔴 §1169 — AN EXPLICIT id BEATS THE STATE FILTER. Operator 2026-09-03, clicking Edit on a
+        // PUBLISHED post in the queue: *"it does not open the actual"*.
+        //
+        // The queue's Edit link carries only the id, and this page defaults to Planned (§872). So a
+        // published post was filtered out of the walk below, the id matched nothing, and the walk
+        // fell back to ids[0] — the first PLANNED post. He pressed Edit on one row and got another,
+        // with nothing saying why.
+        //
+        // 🔑 The escape hatch further down already covers exactly this for ELIGIBILITY ("show it
+        // rather than bouncing him somewhere else without explanation"). The STATE filter simply
+        // was not part of it, because it is applied here — before that hatch can see the post.
+        //
+        // ⇒ When he names a post, the filter follows the post rather than the post being discarded
+        // by the filter.
+        if (id is { } wantedId)
+        {
+            var wantedState = all
+                .Where(p => p.Id == wantedId)
+                .Select(p => (SoMePostState?)StateOf(p.IsActive, p.Status))
+                .FirstOrDefault();
+
+            if (wantedState is { } s && s != StateFilter) StateFilter = s;
+        }
+
         all = all.Where(p => StateOf(p.IsActive, p.Status) == StateFilter).ToList();
+
+        // 🔒 §1169 — RE-ORDER, because the direction was chosen from the state filter BEFORE the
+        // line above could change it. §936: Planned and Scheduled are about what is coming (nearest
+        // first); Published is a history (newest first). Landing on a published post while the walk
+        // still ran oldest-first would step him backwards through June.
+        var finalNewestFirst = StateFilter == SoMePostState.Published;
+        if (finalNewestFirst != newestFirst)
+        {
+            all = (finalNewestFirst
+                    ? all.OrderByDescending(p => p.ScheduledAtUtc).ThenByDescending(p => p.Id)
+                    : all.OrderBy(p => p.ScheduledAtUtc).ThenBy(p => p.Id))
+                .ToList();
+        }
 
         var eligible = all
             .Where(p => !IsBlocked(p.SponsorCompanyId, p.TemplateKind, p.SubjectKey))
@@ -659,6 +832,7 @@ public class SoMePostEditorModel : PageModel
 
             // §850 — why this one cannot be approved, shown on the post rather than only on refusal.
             BlockedReason = await _approvalGate.BlockedReasonAsync(Post, ct);
+            SingleSpeaker = await _approvalGate.SingleSpeakerOverrideAsync(Post, ct);
 
             // A requested medium wins for THIS view (so he can browse videos before committing),
             // but only when the type actually has one.

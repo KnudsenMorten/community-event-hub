@@ -83,6 +83,21 @@ public sealed class SoMeSettingsService
         // category may be announced, and clearing it by omission would quietly restore the §925.1
         // defect (every track reading as settled while the intake had not started).
         DateOnly? callForSpeakersClosesOn = null,
+        // §1179 — the sponsor floor rides the same flag for the same reason: null is a real value
+        // here (it CLEARS the floor), so it must never be cleared by a caller's omission.
+        DateOnly? sponsorAnnouncementFrom = null,
+        // §1181 — the two tier ROUNDS, on the same ownership flag as every other announcement date.
+        DateOnly? sponsorCategoryRound1From = null,
+        DateOnly? sponsorCategoryRound2From = null,
+        // §1181 — track round 2, and the Type 5 window's closing day.
+        DateOnly? speakerTracksRound2From = null,
+        DateOnly? eventPostWindowEndsOn = null,
+        // §1184 — sponsor round 2, so Type 4 has both rounds like Types 1 and 3.
+        DateOnly? sponsorRound2From = null,
+        // §1185 — the third track round.
+        DateOnly? speakerTracksRound3From = null,
+        // §1186 — the floor for non-master-class sessions.
+        DateOnly? sessionAnnouncementFrom = null,
         bool updateAnnouncementWindows = false)
     {
         var now = _clock.GetUtcNow();
@@ -124,6 +139,14 @@ public sealed class SoMeSettingsService
             row.SpeakerAnnouncementFrom = speakerAnnouncementFrom;
             row.MasterClassAnnouncementFrom = masterClassAnnouncementFrom;
             row.CallForSpeakersClosesOn = callForSpeakersClosesOn;
+            row.SponsorAnnouncementFrom = sponsorAnnouncementFrom;   // §1179
+            row.SponsorCategoryRound1From = sponsorCategoryRound1From;   // §1181
+            row.SponsorCategoryRound2From = sponsorCategoryRound2From;   // §1181
+            row.SpeakerTracksRound2From = speakerTracksRound2From;
+            row.EventPostWindowEndsOn = eventPostWindowEndsOn;
+            row.SponsorRound2From = sponsorRound2From;   // §1184
+            row.SpeakerTracksRound3From = speakerTracksRound3From;   // §1185
+            row.SessionAnnouncementFrom = sessionAnnouncementFrom;   // §1186
         }
 
         // §918 — only when the caller says so (see the parameter note).

@@ -68,6 +68,12 @@ public static class SoMeTemplateCatalog
         // 75 of 76 unpublished posts carried the long spelling purely because this line emitted it.
         + "\n{Organizers}";
 
+    /// <summary>
+    /// §1224 — the line that tags a session's speakers. One constant, because the migration that
+    /// retro-fitted the stored session wordings and posts inserts exactly this text.
+    /// </summary>
+    public const string SessionSpeakersLine = "🎤 With {Speakers}";
+
     /// <summary>The shipped default body for one post type.</summary>
     public static string DefaultBody(SoMeTemplateKind kind) => kind switch
     {
@@ -78,7 +84,10 @@ public static class SoMeTemplateCatalog
             + Break
             + "🔗 Jump on board: {EventSystemUrl}"
             + Break
-            + "🤘 Meet our tech legends: {SpeakerNames}"
+            // §1224 — {Speakers} (tagged), not {SpeakerNames} (plain). Operator 2026-09-14: "yes, tag
+            // speakers in track posts too". His imported track wordings already did; this default —
+            // what a new edition starts from — was the last untagged one.
+            + "🤘 Meet our tech legends: {Speakers}"
             + Break
             + Footer,
 
@@ -87,6 +96,14 @@ public static class SoMeTemplateCatalog
             "✨ Session Announcement: {SessionTitle} ✨"
             + Break
             + "{IntroText}"
+            + Break
+            // 🔴 §1224 — THE SPEAKERS ARE TAGGED. Operator 2026-09-14: *"the {speakers} were not
+            // included, so none of the speakers were tagged"* — two master class posts went out that
+            // day naming nobody. This body had no speaker token at all, and nor did any of the 38
+            // imported session wordings. {Speakers} mentions whoever LinkedIn allows and names the
+            // rest; it is REQUIRED (SoMeEmptyVariableGate), so a session with no resolvable speaker
+            // is held rather than published with a bare "With" line.
+            + SessionSpeakersLine
             + Break
             + "Don't miss out on all the fun - secure your FOMO-free seat NOW! 🚀👉 {EventSystemUrl}"
             + Break

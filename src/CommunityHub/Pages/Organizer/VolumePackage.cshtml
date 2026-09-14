@@ -1,0 +1,343 @@
+@page
+@model CommunityHub.Pages.Organizer.VolumePackageModel
+@{
+    ViewData["Title"] = "Volume package benefits";
+}
+
+<div class="card">
+    <h1>Volume package benefits</h1>
+    <p class="muted">
+        A company with <strong>@Model.Threshold or more</strong> active attendees qualifies for the
+        volume package — keynote mention, social-media announcement and a group photo.
+    </p>
+    <p><a asp-page="/Organizer/People">← Back to People</a></p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        return;
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Message)) { <p class="ok">@Model.Message</p> }
+    @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+    @* 🔑 §1077 — SAY THAT THE THREE COLUMNS DO NOT ADD UP, on the page, before anyone does the
+       arithmetic and reports a bug. A person found by two checks is counted ONCE in the total; the
+       per-check figures are there to answer "where did this come from", not to be summed. *@
+    <div style="background:#f6f8fc;border:1px solid #e6eaf2;border-radius:10px;padding:12px 16px;margin:14px 0;">
+        <p style="margin:0 0 6px;font-size:14px;">
+            <strong>How the count works.</strong> Three checks contribute people:
+            <em>orders</em> bought by the company, <em>coupons</em> it paid for, and attendees using
+            its <em>e-mail domains</em> (plus any e-mails linked by hand).
+        </p>
+        <p style="margin:0;font-size:13.5px;color:#4a5160;">
+            ⚠️ <strong>The three numbers will not add up to the total, and that is correct.</strong>
+            Somebody found by two checks — a colleague on a company order who also uses the company
+            domain — is counted <strong>once</strong>. The total is the number of distinct people.
+        </p>
+    </div>
+
+    @* 🔑 §1077 stage 2 — the switch's POSITION is stated here, where the work is. §1018c is the
+       standing lesson: a feature defaulted off and mentioned only in a settings list is a feature
+       that never runs and nobody notices it never ran. *@
+    @if (Model.ApprovalMailEnabled)
+    {
+        <p style="margin:0;font-size:13.5px;color:#4a5160;">
+            📧 When a company first reaches @Model.Threshold, <strong>@Model.ApprovalMailRecipient</strong>
+            is asked who approves its benefits — once per company. <strong>Nobody at the company is
+            contacted</strong>; the mail asks the organizers.
+        </p>
+    }
+    else
+    {
+        <p style="margin:0;font-size:13.5px;color:#854d0e;background:#fef9c3;border-radius:8px;padding:10px 12px;">
+            📭 <strong>The approval-request mail is switched off.</strong> Companies are still counted
+            every day and this page still shows who qualifies — but nobody is asked to approve
+            anything. Turn on “Volume package: ask who approves” under
+            <a asp-page="/Organizer/Settings">Settings → Features</a> to start asking.
+        </p>
+    }
+</div>
+
+<div class="card">
+    <h2>Companies</h2>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="muted">
+            No companies defined yet. Add one below — a company is identified by its
+            <strong>e-mail domain(s)</strong>, and the name you give it is what appears in the keynote.
+        </p>
+    }
+    else
+    {
+        <div style="overflow-x:auto;">
+            <table class="grid" style="width:100%;border-collapse:collapse;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th style="padding:8px 14px;">Company</th>
+                    <th style="padding:8px 14px;text-align:right;">Attendees</th>
+                    <th style="padding:8px 14px;">Where from</th>
+                    <th style="padding:8px 14px;">Approver</th>
+                    <th style="padding:8px 14px;"></th>
+                </tr>
+                @foreach (var row in Model.Rows)
+                {
+                    var c = row.Company;
+                    <tr style="border-bottom:1px solid #eee;@(row.Qualifies ? "" : "background:#fcfcfd;")">
+                        <td style="padding:10px 14px;vertical-align:top;">
+                            <strong>@c.CustomName</strong>
+                            @if (row.Qualifies)
+                            {
+                                <span style="margin-left:8px;background:#dcfce7;color:#166534;border-radius:8px;padding:1px 8px;font-size:11.5px;font-weight:600;">QUALIFIES</span>
+                            }
+                            else if (c.FirstQualifiedAt is not null)
+                            {
+                                @* 🔴 Its own state, not merely "not qualified": a company that HAS
+                                   qualified and dropped is the case an organizer must act on, and it
+                                   is invisible if it looks the same as one that never qualified. *@
+                                <span style="margin-left:8px;background:#fef9c3;color:#854d0e;border-radius:8px;padding:1px 8px;font-size:11.5px;font-weight:600;">DROPPED OUT</span>
+                            }
+                            <div style="font-size:12.5px;color:#6b7280;margin-top:4px;">
+                                @foreach (var d in c.DomainList) { <span>@d</span> <text> </text> }
+                                @if (c.LinkedEmailList.Count > 0)
+                                {
+                                    <span>· @c.LinkedEmailList.Count linked e-mail(s)</span>
+                                }
+                            </div>
+                            @if (c.BenefitsApprovedAt is not null)
+                            {
+                                <div style="font-size:12px;color:#166534;margin-top:4px;">
+                                    Benefits approved @c.BenefitsApprovedAt.Value.UtcDateTime.ToString("d MMM yyyy")
+                                    @if (!row.Qualifies)
+                                    {
+                                        <strong> — but they are below @Model.Threshold today.</strong>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td style="padding:10px 14px;text-align:right;vertical-align:top;font-size:20px;font-weight:700;color:@(row.Qualifies ? "#166534" : "#4a5160");">
+                            @row.Count
+                        </td>
+                        <td style="padding:10px 14px;vertical-align:top;font-size:13px;color:#4a5160;">
+                            orders @row.FromOrders · coupons @row.FromCoupons · domains @row.FromDomains
+                        </td>
+                        <td style="padding:10px 14px;vertical-align:top;font-size:13px;">
+                            @if (!string.IsNullOrWhiteSpace(c.ApproverEmail))
+                            {
+                                <div>@c.ApproverName</div>
+                                <div style="color:#6b7280;">@c.ApproverEmail</div>
+                            }
+                            else if (row.SuggestedApprover is { } s)
+                            {
+                                <div style="color:#6b7280;">Suggested:</div>
+                                <div>@s.Name</div>
+                                <div style="color:#6b7280;">@s.Email — bought @s.Tickets</div>
+                            }
+                            else
+                            {
+                                @* ⚠️ Honest blank: a company that qualified purely on shared domains
+                                   has no purchaser to suggest, and saying so beats an empty cell. *@
+                                <span style="color:#6b7280;">no purchaser — pick one by hand</span>
+                            }
+                        </td>
+                        <td style="padding:10px 14px;vertical-align:top;">
+                            @* §1077 stage 2 — approve, or overrule the suggestion. A <details>
+                               disclosure (the §334 shape): no JavaScript, so it behaves identically
+                               with scripting off, and opening it IS the deliberate act. *@
+                            @if (c.BenefitsApprovedAt is null)
+                            {
+                                <details>
+                                    <summary style="cursor:pointer;font-size:12.5px;color:#1565c0;">Approve benefits&hellip;</summary>
+                                    <form method="post" asp-page-handler="Approve" style="margin:8px 0 2px;padding:10px;background:#f6f8fc;border:1px solid #e6eaf2;border-radius:8px;">
+                                        <input type="hidden" name="ApproveId" value="@c.Id" />
+                                        <p style="margin:0 0 8px;font-size:12.5px;color:#4a5160;">
+                                            Records <strong>who we deal with</strong> at @c.CustomName.
+                                            Nobody is contacted by approving.
+                                        </p>
+                                        @* Pre-filled from the suggestion — it is a suggestion, and
+                                           every field stays editable ("organizer may overrule"). *@
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            Name
+                                            <input type="text" name="ApproverName" value="@(c.ApproverName ?? row.SuggestedApprover?.Name)"
+                                                   style="display:block;width:100%;max-width:280px;box-sizing:border-box;padding:6px 8px;border:1px solid #c4c8d4;border-radius:6px;" />
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            E-mail
+                                            <input type="email" name="ApproverEmail" value="@(c.ApproverEmail ?? row.SuggestedApprover?.Email)"
+                                                   style="display:block;width:100%;max-width:280px;box-sizing:border-box;padding:6px 8px;border:1px solid #c4c8d4;border-radius:6px;" />
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0 8px;">
+                                            Mobile
+                                            <input type="text" name="ApproverMobile" value="@c.ApproverMobile"
+                                                   style="display:block;width:100%;max-width:280px;box-sizing:border-box;padding:6px 8px;border:1px solid #c4c8d4;border-radius:6px;" />
+                                        </label>
+                                        <button type="submit" style="padding:6px 12px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;font-size:12.5px;">Approve</button>
+                                    </form>
+                                </details>
+
+                                @if (row.Qualifies && Model.ApprovalMailEnabled)
+                                {
+                                    <form method="post" asp-page-handler="Ask" asp-route-id="@c.Id" style="margin-top:6px;">
+                                        <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                            @(c.ApprovalRequestedAt is null ? "Ask now" : "Ask again")
+                                        </button>
+                                    </form>
+                                }
+                                @if (c.ApprovalRequestedAt is not null)
+                                {
+                                    <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+                                        Asked @c.ApprovalRequestedAt.Value.UtcDateTime.ToString("d MMM yyyy") — awaiting a decision
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <form method="post" asp-page-handler="Withdraw" asp-route-id="@c.Id"
+                                      onsubmit="return confirm('Withdraw the approval for @c.CustomName? The contact is kept.');">
+                                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">Withdraw approval</button>
+                                </form>
+
+                                @* §1077 stage 3 — the company's own page. Only offered once there IS
+                                   an approved contact: a link is worth nothing until somebody has
+                                   decided who receives it. *@
+                                <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e6eaf2;">
+                                    @if (c.WizardCompletedAt is not null)
+                                    {
+                                        <div style="font-size:12px;color:#166534;">
+                                            @(c.DeclinedAt is not null
+                                                ? "Declined — they do not want to take part"
+                                                : $"Wizard completed {c.WizardCompletedAt.Value.UtcDateTime:d MMM yyyy}")
+                                        </div>
+
+                                        @* §1077.9 — the post-event thank-you. Only after they took
+                                           part, and only once: a thank-you that arrives twice reads
+                                           as a mailing list. *@
+                                        @if (c.DeclinedAt is null && Model.PostEventMailEnabled)
+                                        {
+                                            @if (c.PostEventMailSentAt is { } thanked)
+                                            {
+                                                <div style="font-size:12px;color:#6b7280;">
+                                                    Thank-you sent @thanked.UtcDateTime.ToString("d MMM yyyy")
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <form method="post" asp-page-handler="PostEvent" asp-route-id="@c.Id" style="margin-top:6px;"
+                                                      onsubmit="return confirm('Send the post-event thank-you to @c.ApproverEmail? Check the picture gallery is live first.');">
+                                                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">Send post-event thank-you</button>
+                                                </form>
+                                            }
+                                        }
+                                    }
+                                    else if (c.WizardInvitedAt is not null)
+                                    {
+                                        <div style="font-size:12px;color:#6b7280;">
+                                            Invited @c.WizardInvitedAt.Value.UtcDateTime.ToString("d MMM yyyy")
+                                            @if (c.WizardOpenCount > 0)
+                                            {
+                                                <text> · opened @c.WizardOpenCount time(s)</text>
+                                            }
+                                            else
+                                            {
+                                                <text> · not opened yet</text>
+                                            }
+                                        </div>
+                                    }
+
+                                    @if (c.WizardTokenIsActive(DateTimeOffset.UtcNow))
+                                    {
+                                        @* 🔑 The link is shown so an organizer can paste it into
+                                           their own mail — the invitation mail is one way to deliver
+                                           it, not the only way. *@
+                                        <div style="font-size:11.5px;color:#6b7280;word-break:break-all;margin:4px 0;">
+                                            @Model.LinkFor(c)
+                                        </div>
+                                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                            @if (Model.InviteMailEnabled)
+                                            {
+                                                <form method="post" asp-page-handler="Invite" asp-route-id="@c.Id"
+                                                      onsubmit="return confirm('E-mail @c.ApproverEmail their volume package page? This reaches the company itself.');">
+                                                    <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                                        @(c.WizardInvitedAt is null ? "Send invitation" : "Send again")
+                                                    </button>
+                                                </form>
+                                            }
+                                            <form method="post" asp-page-handler="RevokeLink" asp-route-id="@c.Id"
+                                                  onsubmit="return confirm('Withdraw the link for @c.CustomName? It stops working immediately.');">
+                                                <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">Withdraw link</button>
+                                            </form>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <form method="post" asp-page-handler="IssueLink" asp-route-id="@c.Id"
+                                              onsubmit="return confirm('Create a link for @c.CustomName? Any previous link stops working.');">
+                                            <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                                @(string.IsNullOrWhiteSpace(c.WizardToken) ? "Create their page link" : "Create a new link")
+                                            </button>
+                                        </form>
+                                    }
+                                </div>
+                            }
+
+                            <form method="post" asp-page-handler="Delete" asp-route-id="@c.Id" style="margin-top:6px;"
+                                  onsubmit="return confirm('Remove @c.CustomName from the volume package list? Attendees and orders are not touched.');">
+                                <button type="submit" style="border:1px solid #c4c8d4;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </table>
+        </div>
+
+        <form method="post" asp-page-handler="Recompute" style="margin-top:14px;">
+            <button type="submit" style="padding:8px 14px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">
+                Recompute now
+            </button>
+            <span class="muted" style="margin-left:8px;font-size:12.5px;">
+                Runs the same check the nightly job runs.
+            </span>
+        </form>
+    }
+</div>
+
+<div class="card">
+    <h2>Add or update a company</h2>
+    <form method="post" asp-page-handler="Save">
+        <input type="hidden" asp-for="EditId" />
+
+        <label style="display:block;margin-bottom:10px;">
+            <strong>Name</strong>
+            <span class="muted" style="font-size:12.5px;"> — what appears in the keynote and the announcement</span>
+            <input asp-for="CustomName" placeholder="ARROW" style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+        </label>
+
+        @* 🔑 The two linking cases the operator asked for are BOTH just this box: several ARROW
+           companies sharing one domain need one line; a mother with several domains needs several. *@
+        <label style="display:block;margin-bottom:10px;">
+            <strong>E-mail domains</strong>
+            <span class="muted" style="font-size:12.5px;"> — one per line. Several domains = one company (arrow.dk + arrow.no → “ARROW”)</span>
+            <textarea asp-for="Domains" rows="3" placeholder="arrow.dk&#10;arrow.no" style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;font-family:inherit;"></textarea>
+        </label>
+
+        <label style="display:block;margin-bottom:10px;">
+            <strong>Linked e-mails</strong>
+            <span class="muted" style="font-size:12.5px;"> — freelancers who use a private address but belong to this company</span>
+            <textarea asp-for="LinkedEmails" rows="2" style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;font-family:inherit;"></textarea>
+        </label>
+
+        <label style="display:block;margin-bottom:10px;">
+            <strong>ERP customer number(s)</strong>
+            <span class="muted" style="font-size:12.5px;"> — their coupons are found automatically from the coupon-invoicing mapping</span>
+            <input asp-for="ErpCustomerNumbers" style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+        </label>
+
+        <label style="display:block;margin-bottom:14px;">
+            <strong>Coupon codes</strong>
+            <span class="muted" style="font-size:12.5px;"> — only needed for a coupon with no ERP customer behind it</span>
+            <input asp-for="CouponCodes" style="display:block;width:100%;max-width:520px;box-sizing:border-box;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;margin-top:4px;" />
+        </label>
+
+        <button type="submit" style="padding:9px 16px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">Save company</button>
+    </form>
+</div>

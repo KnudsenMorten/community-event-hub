@@ -249,6 +249,80 @@ public class Session
     public bool IsTestData { get; set; }
 
     /// <summary>
+    /// §1060(h) — this REAL session is never announced on social media.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"we need 1 more option where a session gets a ExcludeFromSome
+    /// announcements flag. then it is removed. like eldk27 welcome and eldk27 closing session"</i>.</para>
+    ///
+    /// <para>🔴 <b>Why not one of the three exclusions that already existed.</b>
+    /// <see cref="IsServiceSession"/> is Sessionize's own break/lunch marker, not ours to set.
+    /// <see cref="IsTestData"/> would be a LIE — Welcome and Closing are real sessions, and that flag
+    /// is read by other code, so borrowing it for one side-effect corrupts every other reader.
+    /// <c>SoMeSettings.ExcludedSessionTitlePatterns</c> (§927) could match <c>ELDK27 Welcome*</c>, but
+    /// binds the rule to a TITLE STRING — rename the session and it silently re-enters the campaign.</para>
+    ///
+    /// <para>🔒 <b>Enforced in three places, and the middle one is the load-bearing one.</b> The
+    /// planner does not propose it; <c>SoMeApprovalGate</c> returns it as a BLOCKER; queued posts are
+    /// withdrawn. A planner filter alone governs only what is CREATED — a post that already existed
+    /// would still be picked up by the windowless auto-approver (§1060) and published by §889.1, so
+    /// the flag would have looked applied while the session went out anyway.</para>
+    ///
+    /// <para>Default <c>false</c>: every existing session stays announceable until it is marked.</para>
+    /// </remarks>
+    public bool ExcludeFromSoMeAnnouncements { get; set; }
+
+    /// <summary>
+    /// §1218 — an organizer has confirmed that this master class / panel really has ONE speaker, so
+    /// the §1060(m) co-presented gate stands down for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-13: <i>"we need a override button as we actually have one master class
+    /// … where there will be only one speaker"</i>.</para>
+    ///
+    /// <para>🔑 <b>A confirmation, not a speaker count.</b> The gate exists because one linked speaker
+    /// usually means the session owner forgot to link the others; this flag is a human saying "no,
+    /// one is correct here". It lifts ONLY that rule — description, AI verdict, exclude flag and
+    /// graphic still apply — and it never lifts ZERO speakers, which has nobody to announce.</para>
+    ///
+    /// <para>Default <c>false</c>: every co-presented session stays gated until someone confirms it.</para>
+    /// </remarks>
+    public bool SoMeSingleSpeakerConfirmed { get; set; }
+
+    /// <summary>
+    /// §1060(l) — the AI's verdict on whether this session's description is a REAL description.
+    /// <c>null</c> = never judged · <c>false</c> = 0, not eligible · <c>true</c> = 1, eligible.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"you just have to do a daily rerun against ai when you check the
+    /// active sessions for this requirements. save it as an record on the session row. each time they
+    /// will be 0 until the text is eligible."</i></para>
+    ///
+    /// <para>🔑 <b>Storing the verdict is what makes an AI usable as a GATE at all.</b> A live call
+    /// per check would be non-deterministic — the same abstract could answer 1 now and 0 in ten
+    /// minutes — and §1060 dropped the lead-time window, so the tick that says 1 auto-approves and
+    /// §889.1 publishes. There is no second look. A stored verdict is asked once, settles, and
+    /// re-opens only when the TEXT changes. (§824.2E refused randomness for dates and §908 for
+    /// wordings, both so the queue could settle; this is that rule a third time.)</para>
+    /// </remarks>
+    public bool? SoMeTextEligible { get; set; }
+
+    /// <summary>
+    /// §1060(l) — a hash of the exact text the verdict was formed on, so the daily run re-judges
+    /// only what has actually CHANGED and an edited abstract cannot keep an old verdict.
+    /// </summary>
+    public string? SoMeTextEligibleHash { get; set; }
+
+    /// <summary>§1060(l) — when the verdict was last formed (also proves the sweep is running).</summary>
+    public DateTimeOffset? SoMeTextEligibleCheckedAt { get; set; }
+
+    /// <summary>
+    /// §1060(l) — the model's short reason for a 0, shown in the blocker so the person is told what
+    /// to fix rather than that something is merely "not eligible" (§854).
+    /// </summary>
+    public string? SoMeTextEligibleReason { get; set; }
+
+    /// <summary>
     /// True when this session was added directly in the hub (not from Sessionize),
     /// e.g. a sponsor session. Hub-added sessions carry a synthetic
     /// <see cref="SessionizeId"/> (<c>hub-&lt;guid&gt;</c>) so the Sessionize import

@@ -1,6 +1,8 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Attendees;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations.DocLibrary;
 using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reporting;
 using Microsoft.AspNetCore.Authorization;
@@ -18,16 +20,21 @@ public class DashboardModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
 
+    /// <summary>§1086 — the ONE lunch calculation, shared with /Organizer/Lunch and the venue Excel.</summary>
+    private readonly LunchHeadcountService _lunch;
+
     public DashboardModel(
         ICurrentParticipantAccessor participant,
         ReportingService reporting,
         CommunityHubDbContext db,
-        TimeProvider clock)
+        TimeProvider clock,
+        LunchHeadcountService lunch)
     {
         _participant = participant;
         _reporting = reporting;
         _db = db;
         _clock = clock;
+        _lunch = lunch;
     }
 
     public bool AccessDenied { get; private set; }
@@ -61,9 +68,13 @@ public class DashboardModel : PageModel
     public int LunchEarlySetupDayCount { get; private set; }
     public int LunchSetupDayCount { get; private set; }
     public int LunchPreDayCount { get; private set; }
+    /// <summary>§1086 — the main-day number, the one the biggest order is placed against. It was
+    /// on /Organizer/Lunch and missing from the tile an organizer actually opens.</summary>
+    public int LunchMainDayCount { get; private set; }
     public string LunchEarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
     public string LunchSetupDayLabel { get; private set; } = "Setup day (Mon)";
     public string LunchPreDayLabel { get; private set; } = "Pre-day";
+    public string LunchMainDayLabel { get; private set; } = "Main day";
 
     // --- Surveys (ELDK27 Topics) ----------------------------------------
     // Aggregate counts only -- the full breakdown lives at the public
@@ -191,18 +202,23 @@ public class DashboardModel : PageModel
         // wrap in a guard so a remaining FK can never 500 — it reports cleanly instead.
         try
         {
-            var assignedTasks = await _db.Tasks
-                .Where(t => t.AssignedParticipantId == applicant.Id).ToListAsync(ct);
-            foreach (var t in assignedTasks) t.AssignedParticipantId = null;
-
+            // 🔴 §1082 — DECLINING DEACTIVATES; IT DOES NOT REMOVE THE ROW.
+            //
+            // Operator 2026-08-13: *"we only make things inactive by filter"*. This path used to
+            // unassign the applicant's tasks and then physically delete the person, taking their
+            // PINs, availability and shift assignments with them — so a declined volunteer left no
+            // trace, and a decline made in error could not be undone.
+            //
+            // 🔒 Only the CREDENTIALS are still removed: a PIN belonging to somebody who may not
+            // sign in is a live key, not history. Everything that records what they DID stays.
             _db.LoginPins.RemoveRange(_db.LoginPins.Where(x => x.ParticipantId == applicant.Id));
-            _db.VolunteerAvailabilities.RemoveRange(_db.VolunteerAvailabilities.Where(x => x.ParticipantId == applicant.Id));
-            _db.VolunteerDayAvailabilities.RemoveRange(_db.VolunteerDayAvailabilities.Where(x => x.ParticipantId == applicant.Id));
-            _db.VolunteerTaskAssignments.RemoveRange(_db.VolunteerTaskAssignments.Where(x => x.ParticipantId == applicant.Id));
 
-            _db.Participants.Remove(applicant);
+            applicant.IsActive = false;
+            applicant.LifecycleState = ParticipantLifecycleState.Inactive;
+            applicant.DeactivatedByOrganizerAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
-            PendingActionMessage = $"Declined {applicant.FullName} ({applicant.Email}). Row removed.";
+            PendingActionMessage =
+                $"Declined {applicant.FullName} ({applicant.Email}). Deactivated — their rows are kept.";
         }
         catch (DbUpdateException)
         {
@@ -257,15 +273,22 @@ public class DashboardModel : PageModel
             LunchEarlySetupDayLabel = $"Setup day ({evt.StartDate.AddDays(-2):dddd, MMM d})";
             LunchSetupDayLabel      = $"Setup day ({evt.StartDate.AddDays(-1):dddd, MMM d})";
             LunchPreDayLabel        = $"Pre-day ({evt.StartDate:dddd, MMM d})";
+            LunchMainDayLabel       = $"Main day ({evt.StartDate.AddDays(1):dddd, MMM d})";
         }
-        // ACTIVE people only (§253 G4): dashboard lunch tiles match /Organizer/Lunch.
-        var lunch = await _db.LunchSignups
-            .Where(l => l.EventId == eventId && l.Participant.IsActive)
-            .Select(l => new { l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay })
-            .ToListAsync(ct);
-        LunchEarlySetupDayCount = lunch.Count(l => l.LunchEarlySetupDay);
-        LunchSetupDayCount      = lunch.Count(l => l.LunchSetupDay);
-        LunchPreDayCount        = lunch.Count(l => l.LunchPreDay);
+        // 🔴 §1086 — THE SAME ENGINE AS /Organizer/Lunch AND THE VENUE'S EXCEL.
+        // Operator 2026-08-14: *"lunch count here must use same calculation engine"*.
+        //
+        // ⚠️ What was here counted raw LunchSignups ticks, and the comment claimed the tiles
+        // "match /Organizer/Lunch". They did not, and had not for a long time: this number left out
+        // the auto-counted crew (§294), the sponsors' booth members (§298) and the 2-day attendees
+        // (§326bv) — and it filtered on IsActive WITHOUT excluding test users (§946), so seeded
+        // test accounts were in the tile the operator reads first. A comment asserting agreement is
+        // not agreement; a shared call is.
+        var lunch = await _lunch.ComputeAsync(eventId, ct);
+        LunchEarlySetupDayCount = lunch.EarlySetupDay;
+        LunchSetupDayCount      = lunch.SetupDay;
+        LunchPreDayCount        = lunch.PreDay;
+        LunchMainDayCount       = lunch.MainDay;
     }
 
     private async Task LoadSpeakerDeadlineGraphicsAsync(int eventId, CancellationToken ct)

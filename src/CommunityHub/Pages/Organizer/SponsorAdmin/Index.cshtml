@@ -26,15 +26,35 @@
     {
         new("/Organizer/SponsorAdmin/Tasks", "Sponsor tasks", "Catalog of tasks every sponsor company has to complete; create, delete, or shift deadlines.", "sponsor-tasks"),
         new("/Organizer/SponsorAdmin/Leads", "Sponsor leads", "Leads, inquiries, and booth-meeting requests pulled daily from Zoho CRM; view per sponsor and download as CSV.", "sponsor-leads"),
-        new("/Organizer/SponsorAdmin/Dashboard", "Sponsor status dashboard", "Per-sponsor view of tasks done vs open, overdue items, lead volume, and last Zoho sync."),
-        new("/Organizer/SponsorDeliverables", "Sponsor deliverables", "Lifecycle-completion board per company — onboarding, logo, booth materials, booth members, tasks — with done % and at-risk (overdue) highlighting."),
+        @* §1085 — status FIRST, and it is the same board every other role uses (deep-linked to the
+           sponsor filter). The operator had two sponsor status boards and trusted neither; there is
+           now one, and it reads the sponsor's own wizard instead of re-counting tasks. *@
+        new("/Organizer/ParticipantStatus?role=Sponsor", "Sponsor status", "Completion per sponsor company, what each still has open (named down to the blank content fields) and overdue tasks — the all-roles status board, filtered to sponsors."),
+        new("/Organizer/SponsorDeliverables", "Sponsor deliverables", "Stage-by-stage detail per company — onboarding, logo, booth materials, booth members, tasks — with done % and at-risk (overdue) highlighting. The drill-down behind sponsor status."),
+        new("/Organizer/SponsorAdmin/Dashboard", "Sponsor maintenance", "Contact sync, coordinator migration, Zoho provisioning and the ERP → webshop reconcile. (The status table that used to live here moved to Sponsor status.)"),
         new("/Organizer/Sponsors", "Sponsor directory", "The full list of sponsor companies for this edition: contacts, tiers and onboarding status."),
+        @* 🔴 §1210 — the CHASE list, carded here because this is the sponsor menu. Operator
+           2026-09-12: *"where is it in the menu"* — it was reachable only from a link on the
+           directory page, which is not somewhere you look for it, it is somewhere you happen to be.
+           🔑 Distinct from "Sponsor status" above: that board is per-company completion for reading;
+           this is the who-to-email list for acting, with the coordinator's address on every row. *@
+        new("/Organizer/SponsorGetStarted", "Get started — not finished",
+            "Sponsors that have not completed Get started, with the event coordinator's name and email for chasing. Companies with no coordinator are listed first."),
         new("/Organizer/SponsorAdmin/Welcome", "Sponsor welcome", "Resend the sponsor welcome / intro email per company or to all sponsors, and reset the welcome flag.", "sponsor-welcome"),
         new("/Organizer/AppGame", "App game", "Track which sponsors take part in the attendee app game, the gift they committed, and send reminders.", "sponsor-reminders"),
-        // §501 — "Sponsor contacts (finance system)" and "Sponsor webshop company & defaults" MOVED
-        // to the People hub at the operator's request: they manage people and their roles, and he
-        // could not find them here because they were filed by which company they belong to rather
-        // than by what they are. Both pages stay routable, so bookmarks and deep links still work.
+        // ⚰️ §501 said these two were MOVED to the People hub — "they manage people and their
+        // roles". §1155 (operator 2026-08-31: *"copy these two items also into the overview here …
+        // as they also belong here"*) makes that a COPY rather than a move: they are reachable from
+        // both, because both readings are true. A sponsor contact IS a person, and it is also part
+        // of running a sponsor — which is why it kept being looked for in two places.
+        //
+        // 🔒 PEOPLE stays the OWNING hub (their breadcrumb points there and
+        // `BreadcrumbHubCardCoverageTests.PrimaryHubOverrides` records it). These are the shortcut,
+        // exactly like the pre-selection queue on the Volunteers hub (§1146b).
+        new("/Organizer/EconomicContacts", "Sponsor contacts (finance system)",
+            "Create, edit and remove a sponsor's contacts and their Signer / Event Coordinator roles. The finance system is the master — changes flow from here to the webshop and the hub."),
+        new("/Organizer/SponsorWebshopCompany", "Sponsor webshop company & defaults",
+            "Edit a sponsor's Company Manager record — default signer, default event coordinator, internal notes. A coordinator change cascades to the hub and Zoho."),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

@@ -287,6 +287,121 @@ public class SponsorZohoProvisionLinkedReconcileTests
                 .ZohoSponsorProfilePushedHash);
     }
 
+    /// <summary>
+    /// ✅ §1087 — <b>a company whose only gap is social pages now generates NO hand-entry line.</b>
+    /// Operator 2026-08-17: *"the email which is sent saying we need to manually add this can now be
+    /// disabled"*.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 This is the test that expresses what he actually asked for, and it is deliberately
+    /// separate from the push test above. "CEH sends the LinkedIn" and "CEH stops mailing him about
+    /// the LinkedIn" are two different behaviours, and the second is the one he notices: an empty
+    /// <c>ManualLines</c> means <c>ZohoChangeNotifier</c> is never called, so no mail goes out at
+    /// all. A change that pushed the value but kept reporting it would look fixed in the logs and
+    /// identical in his inbox.</para>
+    ///
+    /// <para>⚠️ The mail itself is NOT switched off, and must not be: booth videos and collateral
+    /// (§792.7 — Backstage has no API for either) and contact changes (§791.5) still belong in it.
+    /// What is gone is the API-limitation residue, which was every line for every company.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_social_only_gap_no_longer_produces_a_hand_entry_line()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+
+        // A linked booth company whose ONLY difference from Zoho is its social pages: the stub GET
+        // returns blank website/overview/social, and CEH holds no website or description either, so
+        // social is the single reportable gap.
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId,
+            SponsorCompanyId = "10",
+            SponsorPackage = SponsorPackage.Gold,     // booth → also a Zoho exhibitor
+            ZohoSponsorId = "ZSP-10",
+            ZohoExhibitorId = "ZEX-10",
+            LinkedInUrl = "https://linkedin.com/company/ten",
+            TwitterUrl = "https://x.com/ten",
+            EventCoordinatorEmail = "coord@example.com",
+            ZohoContactEmail = "coord@example.com",   // unchanged → no contact line either
+        });
+        await db.SaveChangesAsync();
+
+        var sync = NewSyncService(db);
+        var result = await sync.SyncAsync(eventId, "10", "Company Ten", notifyZohoChange: false);
+
+        Assert.True(result.Enabled);
+
+        // The values reached Backstage as a PUSH...
+        Assert.True(result.ExhibitorSynced);
+        Assert.Contains("Social Pages (LinkedIn)", result.ExhibitorFields!);
+        Assert.Contains("Social Pages (X/Twitter)", result.ExhibitorFields!);
+
+        // ...and NOT as a line asking him to type them in. Empty ⇒ the notifier is never invoked.
+        Assert.DoesNotContain(
+            result.ManualLines ?? Array.Empty<string>(),
+            line => line.Contains("Social Pages", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(result.ManualLines ?? Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// 🔴 §1088 — <b>a company skipped ON PURPOSE is not a failure.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>The §1035 gate returned its reason in <c>SyncResult.Error</c>, and every counter
+    /// downstream reads a non-null <c>Error</c> as a failure. So the reconcile job's summary logged
+    /// <i>"failed 1"</i> on <b>every single pass</b> for as long as one company has been marked test
+    /// data, and the SponsorAdmin button reported <i>"1 need attention"</i> for something needing
+    /// none.</para>
+    ///
+    /// <para>🔑 <b>A permanently-wrong 1 is worse than a wrong number — it is the new zero.</b> It
+    /// sets the floor a real failure has to climb above before anyone notices, and a count that
+    /// never changes stops being read at all. This is the same shape as §791.2's *"say pushed, not
+    /// updated"*: report the thing that actually happened, not the nearest available word.</para>
+    ///
+    /// <para>🔒 Pinned as a SEPARATE OUTCOME rather than a smarter counter. "Refused on purpose" and
+    /// "tried and failed" are different facts; anything that collapses them — including a string
+    /// match on the message — is the same bug wearing a disguise.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_test_data_company_is_skipped_not_failed()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+
+        db.SponsorInfos.AddRange(
+            new SponsorInfo
+            {
+                EventId = eventId, SponsorCompanyId = "100", CompanyName = "Test-Silver",
+                IsTestData = true, ZohoSponsorId = "ZSP-100",
+            },
+            new SponsorInfo
+            {
+                EventId = eventId, SponsorCompanyId = "101", CompanyName = "Withdrawn Co",
+                Status = SponsorStatus.Withdrawn, ZohoSponsorId = "ZSP-101",
+            });
+        await db.SaveChangesAsync();
+
+        var sync = NewSyncService(db);
+
+        // --- the per-company contract -----------------------------------------
+        var one = await sync.SyncAsync(eventId, "100", "Test-Silver", notifyZohoChange: false);
+
+        Assert.True(one.Skipped);
+        Assert.Null(one.Error);                                  // 🔑 the whole defect, in one line
+        Assert.Contains("test data", one.SkipReason!, StringComparison.OrdinalIgnoreCase);
+        Assert.False(one.SponsorSynced);
+        Assert.False(one.ExhibitorSynced);
+
+        // --- and the counters the operator actually reads ----------------------
+        var bulk = await sync.MigrateCoordinatorsAndResyncAsync(eventId);
+
+        Assert.Equal(0, bulk.Failed);        // ← was 2 before §1088, on every pass, for ever
+        Assert.Equal(2, bulk.Skipped);
+        Assert.Empty(bulk.Notes);            // `Notes` is logged at WARNING — a skip must not be in it
+        Assert.Equal(2, (bulk.SkipNotes ?? new List<string>()).Count);
+    }
+
     private static async Task<int> SeedEventAsync(CommunityHubDbContext db)
     {
         var ev = new Event
@@ -302,22 +417,31 @@ public class SponsorZohoProvisionLinkedReconcileTests
     }
 
     /// <summary>
-    /// 🔴 §791.3 — <b>THE REVERSAL.</b> This test asserted the OPPOSITE until 2026-08-04: that a
-    /// blank-in-Zoho LinkedIn was PUSHED into <c>company_social_pages.linkedin</c>.
+    /// ✅ §1087 — <b>THE REVERSAL, REVERSED.</b> A blank-in-Zoho LinkedIn is PUSHED again.
     /// </summary>
     /// <remarks>
-    /// <para>Four controlled PUTs against the live PROD API proved the field is <b>accepted, echoed
-    /// in the response body, and silently discarded</b> — with any platform key, with or without
-    /// companion fields, and even on a record whose social pages are already populated. It behaves
-    /// read-only over v3.</para>
+    /// <para>This assertion has now flipped twice, and the reason is worth keeping because it is the
+    /// same reason both times — <b>the endpoint changed under us, the code never did</b>:</para>
+    /// <list type="bullet">
+    ///   <item>Until 2026-08-04 it asserted the LinkedIn WAS pushed.</item>
+    ///   <item>§791.3 measured the v3 PUT accepting, echoing and silently discarding the field, so
+    ///   the push was switched off and this test asserted the ABSENCE of the call.</item>
+    ///   <item>✅ §1087 (2026-08-17): Zoho repaired the endpoint over the weekend of 2026-08-16.
+    ///   Re-measured on the same live record — a write into a cleared social object AND an overwrite
+    ///   of an existing one both read back. So it is pushed again.</item>
+    /// </list>
     ///
-    /// <para>⚠️ <b>The test passing was never evidence the value arrived.</b> It asserted the
-    /// REQUEST BODY, which was correct all along — that is exactly why this defect survived three
-    /// sessions and a green suite. What it can honestly pin is that we no longer send a field Zoho
-    /// throws away, and that the operator is told to set it by hand instead.</para>
+    /// <para>⚠️ <b>Neither version of this test could ever have caught the endpoint changing.</b>
+    /// It asserts the REQUEST — what CEH sends — and CEH's payload was correct throughout all three
+    /// phases. That is exactly why the original defect survived three sessions and a green suite.
+    /// The truth about whether a value ARRIVES lives only in a live read-back (§1087's probe), never
+    /// in this file. Pin the intent here; measure the arrival against Zoho.</para>
+    ///
+    /// <para>🔒 The half that has NOT changed, and must not: no <c>contact</c> block on any update
+    /// (§791.5 — Zoho hard-caps contact e-mail updates at three and a no-op resend burns one).</para>
     /// </remarks>
     [Fact]
-    public async Task Blank_linkedin_is_NOT_pushed_and_is_reported_as_a_manual_Backstage_action()
+    public async Task Blank_linkedin_is_pushed_again_now_that_zoho_accepts_it()
     {
         using var db = ScenarioFixture.NewDb();
         var eventId = await SeedEventAsync(db);
@@ -346,29 +470,34 @@ public class SponsorZohoProvisionLinkedReconcileTests
 
         Assert.True(result.Enabled);
 
-        // 🔴 §792 PLAN B — NO UPDATE IS SENT TO ZOHO AT ALL, for either object.
-        //
-        // Operator 2026-08-04: *"Any api UPDATES related to sponsors and exhibitors must be sent to
-        // info@expertslive.dk as mail"* … *"we will not spend more time on api UPDATES in zoho
-        // anymore until they fix it"*. This asserts the ABSENCE of the call, which is the whole
-        // change — asserting the request body would keep passing if a PUT crept back in.
-        Assert.DoesNotContain(
+        // ✅ §1087 — the exhibitor PUT fires again, and it carries the LinkedIn.
+        var exhibitorPut = Assert.Single(
             handler.Calls,
             c => c.Method == HttpMethod.Put
                  && c.Path.EndsWith("/exhibitors/ZEX-10", StringComparison.Ordinal));
 
+        using (var doc = JsonDocument.Parse(exhibitorPut.Body!))
+        {
+            Assert.Equal(
+                "https://linkedin.com/company/ten",
+                doc.RootElement.GetProperty("company_social_pages").GetProperty("linkedin").GetString());
+        }
+
+        // 🔒 The SPONSOR record has no social fields and this company's description/website are
+        // blank in CEH, so there is nothing to send — NeedsManualEntry refuses a CEH-blank rather
+        // than pushing one. A sponsor PUT here would mean the hub had started writing emptiness
+        // into Backstage, which is the one way this reconcile could destroy data.
         Assert.DoesNotContain(
             handler.Calls,
             c => c.Method == HttpMethod.Put
                  && c.Path.EndsWith("/sponsors/ZSP-10", StringComparison.Ordinal));
 
-        // 🔒 And nothing anywhere may carry company_social_pages or a contact block on an UPDATE —
-        // §791.3 (Zoho discards social) and §791.5 (his instruction: no contact details on update,
-        // because Zoho hard-caps contact e-mail updates at 3 and a no-op resend burns one).
+        // 🔒 §791.5 — UNCHANGED BY §1087 AND DELIBERATELY SO: no update may carry a contact block.
+        // Zoho hard-caps contact e-mail updates at three and a no-op resend burns one. That is a
+        // different Zoho limit, and their social-pages fix says nothing about it.
         foreach (var put in handler.Calls.Where(c => c.Method == HttpMethod.Put && c.Body is not null))
         {
             using var doc = JsonDocument.Parse(put.Body!);
-            Assert.False(doc.RootElement.TryGetProperty("company_social_pages", out _));
             Assert.False(doc.RootElement.TryGetProperty("contact", out _));
         }
     }

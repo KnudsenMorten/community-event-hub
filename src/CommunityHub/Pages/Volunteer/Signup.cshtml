@@ -190,12 +190,15 @@
                     </label>
                     <div class="vol-grid">
                         <div class="full">
-                            <label for="LinkedInUrl">LinkedIn URL</label>
+                            @* §1151 — the requirement is stated ON the fields, not only in the hint
+                               under the button: somebody who ticks the box should see what it now
+                               asks of them without first pressing Next and being refused. *@
+                            <label for="LinkedInUrl">LinkedIn URL <span style="font-weight:400;color:#6e7681;">(required if you opt in above)</span></label>
                             <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="300"
                                    placeholder="https://www.linkedin.com/in/you" autocomplete="url" />
                         </div>
                         <div class="full">
-                            <label for="Photo">Photo</label>
+                            <label for="Photo">Photo <span style="font-weight:400;color:#6e7681;">(required if you opt in above)</span></label>
                             <input type="file" id="Photo" name="Photo" accept="image/*" />
                             <p class="vol-fineprint" style="margin:4px 0 0;">A friendly headshot (JPG/PNG, max 8&nbsp;MB) — used on the volunteer wall &amp; recognition.</p>
                         </div>
@@ -285,6 +288,19 @@
             var step = 1;
             var total = sections.length;
 
+            // §1151 — what step 3 still needs when the volunteer has opted in. Returns the MISSING
+            // field names so the hint can say which, rather than "something is missing" on a step
+            // with two fields. Opting out requires nothing, exactly as before.
+            function step3Missing() {
+                var wantsPublic = form.querySelector('#ProfileConsent');
+                if (!wantsPublic || !wantsPublic.checked) { return []; }
+                var missing = [];
+                var photo = form.querySelector('#Photo');
+                if (photo && photo.files.length === 0) { missing.push('a photo'); }
+                var li = form.querySelector('#LinkedInUrl');
+                if (li && li.value.trim().length === 0) { missing.push('your LinkedIn URL'); }
+                return missing;
+            }
             function valid(n) {
                 if (n === 1) {
                     var name = form.querySelector('#FullName').value.trim();
@@ -292,6 +308,11 @@
                     var phone = form.querySelector('#Phone').value.trim();
                     return name.length >= 2 && /^[^@@\s]+@@[^@@\s]+\.[^@@\s]+$/.test(email) && phone.length >= 4;
                 }
+                // §1148 — step 3: ticking "feature me on the public volunteer page" promises a
+                // photo, so the photo becomes required. Someone who does NOT opt in is never
+                // blocked. The server enforces the same rule; this is the courtesy that says so
+                // before they press Next rather than after they submit.
+                if (n === 3) { return step3Missing().length === 0; }
                 if (n === total) { return form.querySelector('#AgreementAccepted').checked; }
                 return true;
             }
@@ -306,6 +327,12 @@
                 next.style.display = step < total ? '' : 'none';
                 submit.style.display = step < total ? 'none' : '';
                 if (step === 1 && !valid(1)) { help.textContent = 'Enter your name, a valid email and your mobile to continue.'; }
+                // §1148 — a disabled Next must say WHY. Without this the button simply stops
+                // working and the reason is three fields further up the page.
+                else if (step === 3 && !valid(3)) {
+                    help.textContent = 'You chose to be featured on the public volunteer page, which shows your name, photo and LinkedIn — please add '
+                        + step3Missing().join(' and ') + ', or untick that box.';
+                }
                 else if (step === total && !valid(total)) { help.textContent = 'Accept the agreement to submit.'; }
                 else { help.textContent = ''; }
                 next.disabled = !valid(step);

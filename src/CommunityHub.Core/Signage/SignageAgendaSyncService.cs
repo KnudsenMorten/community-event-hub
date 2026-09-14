@@ -52,16 +52,25 @@ public sealed class SignageAgendaSyncService
     // the upsert/removal/fail-safe logic without HTTP.
     private readonly Func<CancellationToken, Task<IReadOnlyList<ZohoClient.BackstageAgendaActivity>>>? _pullOverride;
 
+    /// <summary>
+    /// §1141 — the wait between agenda-read attempts, as a function of the attempt number.
+    /// Injectable purely so tests do not sleep: what is under test is WHETHER it tries again, not
+    /// how long it waits, and three real backoffs added ~18s to the suite.
+    /// </summary>
+    private readonly Func<int, TimeSpan> _retryDelay;
+
     public SignageAgendaSyncService(
         CommunityHubDbContext db, ZohoClient zoho, ZohoOptions options,
         EngineAlertSender? alerts = null, TimeProvider? clock = null,
         ILogger<SignageAgendaSyncService>? log = null,
-        Func<CancellationToken, Task<IReadOnlyList<ZohoClient.BackstageAgendaActivity>>>? pullOverride = null)
+        Func<CancellationToken, Task<IReadOnlyList<ZohoClient.BackstageAgendaActivity>>>? pullOverride = null,
+        Func<int, TimeSpan>? retryDelay = null)
     {
         _db = db; _zoho = zoho; _options = options; _alerts = alerts;
         _clock = clock ?? TimeProvider.System;
         _log = log;
         _pullOverride = pullOverride;
+        _retryDelay = retryDelay ?? (attempt => TimeSpan.FromSeconds(2 * attempt));
     }
 
     /// <summary>The outcome of one sync pass — for the job log, the admin sync-health panel and tests.</summary>
@@ -99,27 +108,69 @@ public sealed class SignageAgendaSyncService
         if (!_options.Enabled)
             return Result.Failed("Zoho is switched off, so the agenda was not pulled.");
 
-        IReadOnlyList<ZohoClient.BackstageAgendaActivity> pulled;
-        try
-        {
-            if (_pullOverride is not null)
-            {
-                pulled = await _pullOverride(ct);
-            }
-            else
-            {
-                var token = await _zoho.GetAccessTokenAsync(ct);
-                if (string.IsNullOrWhiteSpace(token))
-                    return await FailAsync(eventId, "No Zoho access token could be obtained.", ct);
+        // 🔴 §1141 — RETRY BEFORE MAILING HIM. Operator 2026-08-27, after three "[PROD] Signage
+        // agenda sync failed" mails in one day: *"make retries before throwing errors in my face"*.
+        //
+        // ⚠️ Every one of those was a single transient 401 on the FIRST call of the pass — `halls`
+        // twice, `sessions?day=2` once — with successful passes on either side. One rejected read
+        // became one alert, because the pass had no second attempt at all.
+        //
+        // 🔑 The retry is only half of it, and the smaller half: `ZohoClient` now re-authenticates
+        // on a 401 (§1141), so these attempts get a FRESH token rather than re-presenting the
+        // rejected one. Retrying without that is what `SessionBackstagePushService` was already
+        // doing — three identical failures, reported as three attempts.
+        //
+        // 🔒 The screens are never at risk while this loops: they hold the last good agenda
+        // throughout, so a slower failure costs nothing and a recovered one costs him no mail.
+        const int attempts = 3;
 
-                pulled = await _zoho.GetBackstageAgendaAsync(token!, ct);
+        IReadOnlyList<ZohoClient.BackstageAgendaActivity>? pulled = null;
+        string? lastFailure = null;
+
+        for (var attempt = 1; attempt <= attempts && pulled is null; attempt++)
+        {
+            try
+            {
+                if (_pullOverride is not null)
+                {
+                    pulled = await _pullOverride(ct);
+                }
+                else
+                {
+                    var token = await _zoho.GetAccessTokenAsync(ct);
+                    if (string.IsNullOrWhiteSpace(token))
+                    {
+                        // No token at all is NOT worth re-asking for: the cache holds a §783.12
+                        // cooldown precisely so a spent token budget is not spent again.
+                        return await FailAsync(eventId, "No Zoho access token could be obtained.", ct);
+                    }
+
+                    pulled = await _zoho.GetBackstageAgendaAsync(token!, ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 🔒 The strict pager throwing is the DESIGNED path for a partial read, not an
+                // unexpected error — catching it is what keeps the screens on the last-good agenda.
+                lastFailure = ex.Message;
+
+                if (attempt < attempts)
+                {
+                    _log?.LogWarning(
+                        "SignageAgendaSync: agenda read attempt {Attempt}/{Attempts} failed ({Failure}); "
+                        + "retrying.", attempt, attempts, ex.Message);
+                    await Task.Delay(_retryDelay(attempt), ct);
+                }
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        if (pulled is null)
         {
-            // 🔒 The strict pager throwing is the DESIGNED path for a partial read, not an
-            // unexpected error — catching it here is what keeps the screens on the last-good agenda.
-            return await FailAsync(eventId, $"The Zoho agenda could not be read: {ex.Message}", ct);
+            // 🔑 Only NOW is it his problem. The message says how many times we tried, so a mail
+            // that does arrive is evidence of a real outage rather than of one unlucky call.
+            return await FailAsync(
+                eventId,
+                $"The Zoho agenda could not be read after {attempts} attempts: {lastFailure}", ct);
         }
 
         var now = _clock.GetUtcNow();

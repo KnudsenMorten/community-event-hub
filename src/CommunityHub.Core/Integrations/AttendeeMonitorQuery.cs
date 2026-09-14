@@ -25,7 +25,18 @@ public sealed record MonitoredAttendee(
     string? Company = null,
     /// <summary>Who placed the order — the volume buyer, not the attendee.</summary>
     string? BuyerName = null,
-    string? BuyerEmail = null);
+    string? BuyerEmail = null,
+    /// <summary>
+    /// §1097 — the Backstage ticket id, so a row can be matched to a specific ticket rather than
+    /// only to its order. Operator 2026-08-20 asked for it by name in the export.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ An ORDER can hold several tickets, so the order id alone cannot identify a line — which is
+    /// exactly the case a volume buyer produces.
+    /// </remarks>
+    string? TicketId = null,
+    /// <summary>§1097 — which ticket type this person holds (1-day / 2-day / …).</summary>
+    string? TicketClassName = null);
 
 /// <summary>
 /// §1040 — WHO HAS BOUGHT A TICKET UNDER THIS MONITOR. The one place that answers it, for both the
@@ -61,8 +72,60 @@ public sealed class AttendeeMonitorQuery
         {
             AttendeeMonitorKind.EmailDomain => await ByDomainAsync(monitor, ct),
             AttendeeMonitorKind.CouponCode => await ByCouponAsync(monitor, ct),
+            AttendeeMonitorKind.ErpCustomer => await ByErpCustomerAsync(monitor, ct),
             _ => Array.Empty<MonitoredAttendee>(),
         };
+    }
+
+    /// <summary>
+    /// §1093 — every attendee who used ANY coupon billed to this e-conomic customer.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>The coupon set is resolved at READ time, not stored on the monitor.</b> A partner
+    /// who is given a new promo code next month must see it through the link they already have —
+    /// freezing the list into the row would mean every new coupon silently missing from the page
+    /// the partner is using to check their invoice.</para>
+    ///
+    /// <para>🔒 Reuses the SAME matcher as <see cref="ByCouponAsync"/>. Two coupon matchers is how
+    /// the shared link and the per-coupon link end up disagreeing about who counts, and the copy
+    /// that drifts is always the one an outsider is reading.</para>
+    ///
+    /// <para>⚠️ No coupons for the customer ⇒ NO ROWS, never "everything". A monitor whose scope
+    /// resolves to nothing must show nothing; an empty filter that falls through to an unfiltered
+    /// query is the classic way a scoped page turns into a full attendee list.</para>
+    /// </remarks>
+    private async Task<IReadOnlyList<MonitoredAttendee>> ByErpCustomerAsync(
+        AttendeeMonitor monitor, CancellationToken ct)
+    {
+        if (!int.TryParse(
+                AttendeeMonitor.NormaliseValue(AttendeeMonitorKind.ErpCustomer, monitor.Value),
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var customerNumber)
+            || customerNumber <= 0)
+        {
+            return Array.Empty<MonitoredAttendee>();
+        }
+
+        // 🔴 §1098 — only coupons TICKED for a usage link are in scope. An unticked one (the one-off
+        // invoice sale) is simply not part of any monitor, rather than the link being suppressed —
+        // which would punish the partner's other agreements for the presence of a one-off.
+        var codes = await _db.CouponInvoicingSettings
+            .AsNoTracking()
+            .Where(c => c.EventId == monitor.EventId
+                        && c.ErpCustomerNumber == customerNumber
+                        && c.IssueUsageLink)
+            .Select(c => c.CouponName)
+            .ToListAsync(ct);
+
+        var wanted = codes
+            .Select(c => AttendeeMonitor.NormaliseValue(AttendeeMonitorKind.CouponCode, c))
+            .Where(c => c.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return wanted.Count == 0
+            ? Array.Empty<MonitoredAttendee>()
+            : await ByCouponCodesAsync(monitor.EventId, wanted, ct);
     }
 
     /// <summary>
@@ -88,6 +151,7 @@ public sealed class AttendeeMonitorQuery
             .Select(a => new
             {
                 a.FirstName, a.LastName, a.Email, a.OrderId, a.CompanyName,
+                a.BackstageTicketId, a.TicketClassName,
                 // The BUY date and the BUYER come from the ORDER, and only from one still active.
                 Order = _db.Orders
                     .Where(o => o.EventId == a.EventId
@@ -103,7 +167,8 @@ public sealed class AttendeeMonitorQuery
                 r.Order == null ? null : r.Order.SourceCreatedAt,
                 r.FirstName, r.LastName, r.Email, r.OrderId ?? string.Empty,
                 r.CompanyName,
-                r.Order?.BuyerName, r.Order?.BuyerEmail))
+                r.Order?.BuyerName, r.Order?.BuyerEmail,
+                r.BackstageTicketId, r.TicketClassName))
             .OrderByDescending(r => r.BoughtAt ?? DateTimeOffset.MinValue)
             .ThenBy(r => r.LastName)
             .ToList();
@@ -130,28 +195,53 @@ public sealed class AttendeeMonitorQuery
         AttendeeMonitor monitor, CancellationToken ct)
     {
         var wanted = AttendeeMonitor.NormaliseValue(AttendeeMonitorKind.CouponCode, monitor.Value);
-        if (wanted.Length == 0) return Array.Empty<MonitoredAttendee>();
+        return wanted.Length == 0
+            ? Array.Empty<MonitoredAttendee>()
+            : await ByCouponCodesAsync(
+                monitor.EventId,
+                new HashSet<string>(new[] { wanted }, StringComparer.OrdinalIgnoreCase),
+                ct);
+    }
+
+    /// <summary>
+    /// §1093 — the ONE coupon matcher, over a SET of codes. A single-code monitor passes a set of
+    /// one; a per-customer monitor passes every code billed to that customer.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Extracted rather than copied. Today's §1088 and §1089 were both a duplicated thing rotting
+    /// on one side only — a second copy of "which attendees used this coupon" would be the same
+    /// mistake in the one place where the reader is an outsider.
+    /// </remarks>
+    private async Task<IReadOnlyList<MonitoredAttendee>> ByCouponCodesAsync(
+        int eventId, HashSet<string> wantedCodes, CancellationToken ct)
+    {
+        if (wantedCodes.Count == 0) return Array.Empty<MonitoredAttendee>();
 
         var orders = await _db.Orders
             .AsNoTracking()
-            .Where(o => o.EventId == monitor.EventId
+            .Where(o => o.EventId == eventId
                         && o.MirrorState == MirrorState.Active
                         && o.RawJson != null)
             .Select(o => new { o.BackstageOrderId, o.RawJson, o.SourceCreatedAt, o.BuyerName, o.BuyerEmail })
             .ToListAsync(ct);
 
-        // Which (order, e-mail) pairs used this coupon, and the order facts to show beside them.
+        // Which (order, e-mail) pairs used one of these coupons, and the order facts to show beside
+        // them. §1097 — the CLAIM also carries the ticket id and class, which the attendee mirror
+        // may not have for a coupon ticket, so they are captured here rather than looked up later.
         var matched = new Dictionary<(string Order, string Email),
-            (DateTimeOffset? Bought, string? BuyerName, string? BuyerEmail)>();
+            (DateTimeOffset? Bought, string? BuyerName, string? BuyerEmail,
+             string? TicketId, string? TicketClass)>();
         foreach (var o in orders)
         {
             foreach (var claim in CouponClaimExtractor.FromOrderJson(o.RawJson))
             {
-                if (!string.Equals(claim.CouponName, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!wantedCodes.Contains((claim.CouponName ?? string.Empty).Trim())) continue;
                 if (claim.IsCancelled) continue;
                 var email = (claim.Email ?? string.Empty).Trim().ToLowerInvariant();
                 if (email.Length == 0) continue;
-                matched[(o.BackstageOrderId, email)] = (o.SourceCreatedAt, o.BuyerName, o.BuyerEmail);
+                matched[(o.BackstageOrderId, email)] =
+                    (o.SourceCreatedAt, o.BuyerName, o.BuyerEmail,
+                     claim.TicketId, claim.TicketClassName);
             }
         }
 
@@ -160,7 +250,7 @@ public sealed class AttendeeMonitorQuery
         var emails = matched.Keys.Select(k => k.Email).Distinct().ToList();
         var attendees = await _db.Attendees
             .AsNoTracking()
-            .Where(a => a.EventId == monitor.EventId
+            .Where(a => a.EventId == eventId
                         && a.MirrorState == MirrorState.Active
                         && emails.Contains(a.Email))
             .Select(a => new { a.FirstName, a.LastName, a.Email, a.OrderId, a.CompanyName })
@@ -173,7 +263,8 @@ public sealed class AttendeeMonitorQuery
                 var m = matched[(a.OrderId ?? string.Empty, a.Email)];
                 return new MonitoredAttendee(
                     m.Bought, a.FirstName, a.LastName, a.Email, a.OrderId ?? string.Empty,
-                    a.CompanyName, m.BuyerName, m.BuyerEmail);
+                    a.CompanyName, m.BuyerName, m.BuyerEmail,
+                    m.TicketId, m.TicketClass);
             })
             .OrderByDescending(r => r.BoughtAt ?? DateTimeOffset.MinValue)
             .ThenBy(r => r.LastName)

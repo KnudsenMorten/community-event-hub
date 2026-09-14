@@ -197,10 +197,15 @@ public sealed class NavBuilderTests
         // 2026-06-21 principle is NOT weakened: it bars per-FEATURE pages, and these two are OPS
         // pages — the ones he opens to ask "is anything broken?", which §637 showed the hub answered
         // worst of all.
+        // §1120 — raised 16 → 17 for Coupon Invoicing, on his explicit request (operator 2026-08-21:
+        // "add coupon invoicing to the main menu of the organizer"). The 2026-06-21 principle holds
+        // for the same reason §646 did: the bar is on per-FEATURE pages, and this is a page that is
+        // WORKED, not configured — opened every time a partner buys, extends, asks for a cap or
+        // queries an invoice. It sat under Setup, which is where things go that you set once.
         // 🔒 The limit still exists and is still tight. If it needs raising again, that is a
         // conversation about what the menu is FOR, not a number to nudge.
-        Assert.True(mgmt.Items.Count <= 16,
-            $"Lean organizer menu should stay ~13-16 hub-level entries; got {mgmt.Items.Count}.");
+        Assert.True(mgmt.Items.Count <= 17,
+            $"Lean organizer menu should stay ~13-17 hub-level entries; got {mgmt.Items.Count}.");
         Assert.All(mgmt.Items, i => Assert.Null(i.SectionKey));   // flat — no sub-folds
 
         foreach (var hub in new[]

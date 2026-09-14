@@ -38,6 +38,14 @@ public class SoMeCalendarModel : PageModel
 
     public int Total { get; private set; }
     public int Held { get; private set; }
+
+    /// <summary>
+    /// §1206 — of the held posts, how many could not be approved even if he clicked.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 A subset of <see cref="Held"/>, not an addition to it: the rest are simply waiting for him.
+    /// </remarks>
+    public int NotReady { get; private set; }
     public int Approved { get; private set; }
     public int Published { get; private set; }
 
@@ -47,10 +55,13 @@ public class SoMeCalendarModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        var all = await _query.ForEventAsync(me.EventId, approvedOnly: false, ct);
+        // 🔴 §1206 — with the readiness reason, so a held post says whether it is waiting for HIM or
+        // waiting for someone else. Those are different jobs and looked identical.
+        var all = await _query.ForEventWithReadinessAsync(me.EventId, ct);
 
         Total = all.Count;
         Held = all.Count(a => a.IsHeld);
+        NotReady = all.Count(a => !string.IsNullOrWhiteSpace(a.Blocker));
         Approved = all.Count(a => a.IsApproved && !a.IsPublished);
         Published = all.Count(a => a.IsPublished);
 

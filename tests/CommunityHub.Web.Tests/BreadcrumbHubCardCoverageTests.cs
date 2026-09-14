@@ -47,6 +47,17 @@ public sealed class BreadcrumbHubCardCoverageTests
             // §833 — carded on SoMe + Comms. Primary = SoMe: "where is the post editor?" is a SoMe
             // question, and being filed only under Comms is exactly why he could not find it.
             ["/Organizer/SoMeTemplates"] = "/Organizer/SoMe",
+            // §1146b — carded on People + Volunteers. Primary stays PEOPLE, where it has always
+            // lived and where its breadcrumb points; the Volunteers card is the shortcut, added
+            // because §756 made the queue volunteers-only, so the one page you preselect
+            // volunteers from was unreachable from the volunteer hub.
+            ["/Organizer/PreselectionQueue"] = "/Organizer/People",
+            // §1155 — carded on People + SponsorAdmin. Primary stays PEOPLE, where §501 filed them
+            // and where their breadcrumb points; the SponsorAdmin cards are the shortcut. Both
+            // readings are true — a sponsor contact is a person AND part of running a sponsor —
+            // which is why they kept being looked for in two places.
+            ["/Organizer/EconomicContacts"] = "/Organizer/People",
+            ["/Organizer/SponsorWebshopCompany"] = "/Organizer/People",
         };
 
     private static string PagesDir()

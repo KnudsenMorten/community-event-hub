@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "_comment": "EXAMPLE prod parameters for main.bicep. Copy to infra/main.prod.parameters.json (the name scripts/deploy.sh and scripts/set-secrets.sh read) and replace every <...> value with your own. No SQL password lives here: the SQL server is Entra-only and the web + Functions apps authenticate with their managed identities.",
+  "_comment_baseName": "Use the SAME baseName as dev so the two environments read rg-<baseName>-dev / rg-<baseName>-prod. Lowercase letters and digits only, at most 12 characters.",
+  "_comment_customDomain": "Informational: the hostname you will bind AFTER the deploy, once its DNS CNAME exists (see README 'Getting started').",
+  "_comment_backstageEmbedOrigin": "The origin allowed to embed the hub in an iframe (e.g. https://your-event-portal.example). Empty = the hub cannot be framed.",
+  "_comment_sqlAadAdmin": "An Entra (Azure AD) GROUP that administers the SQL server. Put its display name and object id here.",
+  "parameters": {
+    "environmentName": {
+      "value": "prod"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "baseName": {
+      "value": "communityhub"
+    },
+    "customDomain": {
+      "value": "hub.your-event.example"
+    },
+    "backstageEmbedOrigin": {
+      "value": ""
+    },
+    "testModeEnabled": {
+      "value": false
+    },
+    "sqlAadAdminLogin": {
+      "value": "<your-entra-sql-admin-group-name>"
+    },
+    "sqlAadAdminObjectId": {
+      "value": "<object-id-of-that-group>"
+    }
+  }
+}

@@ -158,11 +158,15 @@ public sealed class SponsorTasksDeliverablesPageTests
         using var db = NewDb();
         var eventId = await NewEventAsync(db);
         var sponsor = await NewSponsorAsync(db, eventId, companyId: "9001");
-        // A description on file marks the "onboarding" stage done, so the rollup has progress.
+        // Company content on file marks the "onboarding" stage done, so the rollup has progress.
+        // §1081 — that stage now asks SponsorCompanyContent (description AND SoMe branding text, plus
+        // the short description for exhibitors) rather than the description alone, so a fixture that
+        // wants the stage DONE has to deliver it. Silver = no booth, so no short description here.
         db.SponsorInfos.Add(new SponsorInfo
         {
             EventId = eventId, SponsorCompanyId = "9001",
             SponsorPackage = SponsorPackage.Silver, CompanyDescription = "We build clouds.",
+            SocialMediaIntro = "SoMe branding text on file.",
         });
         await db.SaveChangesAsync();
 

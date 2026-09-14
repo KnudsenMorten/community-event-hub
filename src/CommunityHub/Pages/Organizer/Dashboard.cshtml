@@ -497,7 +497,21 @@
                 <div class="num">@Model.LunchPreDayCount</div>
                 <div class="lbl">@Model.LunchPreDayLabel</div>
             </div>
+            @* §1086 — the main-day number belongs here too: it is the biggest order of the event,
+               and it lived only on the detail page. *@
+            <div class="stat">
+                <div class="num">@Model.LunchMainDayCount</div>
+                <div class="lbl">@Model.LunchMainDayLabel</div>
+            </div>
         </div>
+        @* 🔑 §1086 — say what the numbers INCLUDE. These tiles used to count sign-up ticks only, so
+           they read low and disagreed with the detail page; now they are the full catering figures
+           and the reader should not have to guess which. *@
+        <p style="margin:6px 0 0;font-size:12.5px;color:#6b7280;">
+            Pre-day includes the always-on-site crew, the sponsors' booth members and the attendees
+            holding a 2-day (Master Class) ticket. Main day is everyone on site — lunch is ordered
+            for all. Same calculation as the Lunch headcount page and the venue spreadsheet.
+        </p>
         <p style="margin-top:8px;"><a asp-page="/Organizer/Lunch">Open Lunch headcount &rarr;</a></p>
     </div>
 

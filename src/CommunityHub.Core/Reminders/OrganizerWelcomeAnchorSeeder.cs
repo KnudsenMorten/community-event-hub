@@ -53,8 +53,61 @@ public sealed class OrganizerWelcomeAnchorSeeder
         _log = log;
     }
 
-    /// <summary>Seeds any unanchored active organizer. Returns how many were seeded.</summary>
-    public async Task<int> RunAsync(int eventId, CancellationToken ct = default)
+    /// <summary>
+    /// Seeds any unanchored active organizer, and (§1222) anyone welcomed without a stamp.
+    /// Returns how many were seeded.
+    /// </summary>
+    public async Task<int> RunAsync(int eventId, CancellationToken ct = default) =>
+        await SeedOrganizersAsync(eventId, ct) + await SeedFromWelcomeLedgerAsync(eventId, ct);
+
+    /// <summary>
+    /// 🔴 §1222 — anyone who WAS welcomed (a <c>welcome:{id}</c> ledger row exists) but has no
+    /// <see cref="Participant.WelcomeWithLoginSentAt"/> gets the ledger's send date as their anchor.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-14: <i>"sponsors are reporting that they dont get any weekly reminders
+    /// when get started is not completed"</i>. <c>WelcomeEmailService</c> — the path the sponsor and
+    /// speaker reconcile jobs use — wrote the ledger row and never the stamp, so §738's "never
+    /// welcomed ⇒ never chased" skipped people who HAD been welcomed. Found on PROD: 9 sponsor
+    /// coordinators plus speakers, volunteers, media and event partners.</para>
+    ///
+    /// <para>🔒 The anchor is the date the welcome was actually SENT, never "now" — same reasoning as
+    /// the organizer seed above: "now" would delay the first chase for people already waiting weeks.
+    /// Only fills a NULL. A sweep rather than a one-off backfill, so any other path that forgets the
+    /// stamp is healed the same way.</para>
+    /// </remarks>
+    private async Task<int> SeedFromWelcomeLedgerAsync(int eventId, CancellationToken ct)
+    {
+        var welcomedAt = await _db.SentReminders.AsNoTracking()
+            .Where(s => s.EventId == eventId && s.ReminderType == "welcome" && s.OccasionKey.StartsWith("welcome:"))
+            .Select(s => new { s.OccasionKey, s.SentAt })
+            .ToListAsync(ct);
+        if (welcomedAt.Count == 0) return 0;
+
+        var byParticipant = new Dictionary<int, DateTimeOffset>();
+        foreach (var w in welcomedAt)
+        {
+            if (!int.TryParse(w.OccasionKey["welcome:".Length..], out var pid)) continue;
+            if (!byParticipant.TryGetValue(pid, out var first) || w.SentAt < first) byParticipant[pid] = w.SentAt;
+        }
+
+        var ids = byParticipant.Keys.ToList();
+        var unanchored = await _db.Participants
+            .Where(p => p.EventId == eventId && p.IsActive
+                        && p.WelcomeWithLoginSentAt == null && ids.Contains(p.Id))
+            .ToListAsync(ct);
+        if (unanchored.Count == 0) return 0;
+
+        foreach (var p in unanchored) p.WelcomeWithLoginSentAt = byParticipant[p.Id];
+        await _db.SaveChangesAsync(ct);
+
+        _log?.LogInformation(
+            "§1222: seeded the Get-Started anchor for {Count} participant(s) from their welcome ledger "
+            + "row — they were welcomed but never stamped, so the digest had skipped them.", unanchored.Count);
+        return unanchored.Count;
+    }
+
+    private async Task<int> SeedOrganizersAsync(int eventId, CancellationToken ct)
     {
         var unanchored = await _db.Participants
             .Where(p => p.EventId == eventId

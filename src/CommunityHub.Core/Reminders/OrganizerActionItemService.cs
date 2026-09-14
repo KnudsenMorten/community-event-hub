@@ -34,6 +34,13 @@ public sealed class OrganizerActionItemService
     /// no tasks/tier/session were derived from it. An organizer must decide whether the
     /// sponsor config needs a new rule (e.g. after a webshop category rename).</summary>
     public const string TypeWebshopCategoryUnrecognized = "webshop-category-unrecognized";
+    /// <summary>§1161: CEH holds a Zoho sponsor or exhibitor record the company's CURRENT orders no
+    /// longer entitle it to — typically an order that was cancelled after the record was created.
+    /// <para>⚠️ CEH never deletes in Zoho (§56), so this is the ONLY way the removal reaches a
+    /// human. Operator 2026-08-31: <i>"i also need to get email on this, as i cancelled the
+    /// exhibitor order for 2linkit, so it must be removed … as it is only founding partner now"</i>.
+    /// </para></summary>
+    public const string TypeZohoRecordOrphaned = "zoho-record-orphaned";
     /// <summary>Type PREFIX for a participant change-request raised AFTER the edition
     /// lock date (the form is read-only). The concrete type carries the form topic
     /// (e.g. "change-requested:hotel") so each form keeps its own queue row, while
@@ -71,6 +78,7 @@ public sealed class OrganizerActionItemService
             TypeVolunteerShiftReassign => "Volunteer shift needs reassignment",
             TypeSponsorOrderRefunded => "Sponsor order refunded/cancelled",
             TypeWebshopCategoryUnrecognized => "Webshop category not recognized",
+            TypeZohoRecordOrphaned => "Zoho record no longer earned — remove it by hand",
             _                  => type,
         };
     }

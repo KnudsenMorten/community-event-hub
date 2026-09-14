@@ -279,7 +279,25 @@ public class SessionsModel : PageModel
         string? Tags = null,
         /// <summary>§1025 — the LINKED speaker participant ids, so the picker can pre-tick them.
         /// The display names alone cannot: two people can share one.</summary>
-        IReadOnlyList<int>? SpeakerIdList = null)
+        IReadOnlyList<int>? SpeakerIdList = null,
+        /// <summary>
+        /// §1178 — a REAL session that is never announced on social media (§1060(h)). The flag has
+        /// existed since 2026-08-11 and had no control anywhere until now, so nothing could set it.
+        /// </summary>
+        bool ExcludeFromSoMeAnnouncements = false,
+        /// <summary>
+        /// 🔴 §1208 — the LEGACY test flag (§909), shown because it is invisible and load-bearing.
+        /// </summary>
+        /// <remarks>
+        /// Operator 2026-09-12: <i>"i think we use it so define if it is a tst session, validate if
+        /// that is true"</i>. Validated: <b>it is not.</b> The "Mark as TEST session" button writes
+        /// <c>UsedForTesting</c>; nothing in the application has ever written <c>IsTestData</c>. But
+        /// it IS read — <c>SoMeSubjectScope</c> treats it as an exclusion — and PROD rows carry it
+        /// true (recorded when the four test sessions were hidden from the public pages). ⇒ a session
+        /// could be silently absent from the whole campaign, with nothing on any page saying why and
+        /// no way to undo it.
+        /// </remarks>
+        bool IsTestData = false)
     {
         /// <summary>§1025 — never null, so the view can just call Contains.</summary>
         public IReadOnlyList<int> SpeakerIds => SpeakerIdList ?? Array.Empty<int>();
@@ -617,9 +635,115 @@ public class SessionsModel : PageModel
             session.UsedForTesting = !session.UsedForTesting;
             session.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
+            // §1178 — the message names the SoMe half too, because the flag now reaches it. Saying
+            // only "hidden from the public pages" is what let a test Master Class keep its four
+            // organizers in the Security track GIF while the button read "Mark as TEST session".
             Message = session.UsedForTesting
-                ? "Marked as TEST session — hidden from the public pages and never synced to the public agenda."
-                : "Test flag removed — the session is publicly visible again.";
+                ? "Marked as TEST session — hidden from the public pages, never synced to the public "
+                  + "agenda, never announced on social media, and its speakers are left out of the "
+                  + "track and session graphics. Any planned post for it is removed on the next planner run."
+                : "Test flag removed — the session is publicly visible and announceable again.";
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// 🔴 §1208 — CLEAR the legacy <see cref="Session.IsTestData"/> flag (§909).
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"i think we use it so define if it is a tst session, validate if
+    /// that is true"</i>. <b>Validated, and it is not true.</b> "Mark as TEST session" writes
+    /// <c>UsedForTesting</c>; the only writer of any <c>IsTestData</c> in the application is on the
+    /// SPONSORS page, for <c>SponsorInfo</c>. No code has ever written the SESSION one.</para>
+    ///
+    /// <para>🔴 <b>It is still load-bearing.</b> <c>SoMeSubjectScope</c> reads it as an exclusion, so
+    /// a session carrying it is absent from the entire campaign — no track post, no session post, and
+    /// its speakers stripped from the graphics. PROD rows DO carry it: the four test sessions had it
+    /// true when they were hidden from the public pages. ⇒ silently excluded, invisible on every
+    /// page, and impossible to undo without touching the database.</para>
+    ///
+    /// <para>🔑 <b>CLEAR only — there is deliberately no way to SET it.</b> Adding a second control
+    /// that means "test session" beside the one that already does would be two buttons for one idea,
+    /// and the §1178 argument applies in reverse: the fix for a flag nobody can reach is a way OUT of
+    /// it, not a second way in. <c>UsedForTesting</c> stays the way a session is marked test, and
+    /// <c>ExcludeFromSoMeAnnouncements</c> the way a real session is kept off social media.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostClearLegacyTestDataAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+
+        var session = await _db.Sessions
+            .FirstOrDefaultAsync(s => s.Id == SessionId && s.EventId == me.EventId, ct);
+
+        if (session is null)
+        {
+            Error = "Session not found.";
+        }
+        else if (!session.IsTestData)
+        {
+            // §854 — say what was actually true, rather than reporting a change that did not happen.
+            Message = "That session did not carry the legacy flag — nothing to clear.";
+        }
+        else
+        {
+            session.IsTestData = false;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+
+            Message = "Legacy test-data flag cleared — this session can be announced on social media "
+                    + "again, and its speakers return to the track and session graphics. The planner "
+                    + "picks it up on the next run. (If you meant to keep it out of the campaign, use "
+                    + "\"Exclude from social media\"; if it is a test session, use \"Mark as TEST "
+                    + "session\".)";
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// 🔴 §1178 — toggle <see cref="Session.ExcludeFromSoMeAnnouncements"/> (§1060(h)).
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-11: <i>"we need 1 more option where a session gets a ExcludeFromSome
+    /// announcements flag. then it is removed. like eldk27 welcome and eldk27 closing session"</i>.</para>
+    ///
+    /// <para>🔴 <b>The flag, the approval gate, the auto-approve withdrawal and the eligibility sweep
+    /// all shipped on 2026-08-11 — and NOTHING could set it.</b> There was no control on any page, no
+    /// service wrote it, and no seed touched it, so the entire §1060(h) feature has been unreachable
+    /// since the day it was built. The same is true of <see cref="Session.IsTestData"/> (§909), which
+    /// is why the SoMe engine's test filter had no effect at all. ⇒ <b>A flag with readers and no
+    /// writer is not a feature, it is a decoration</b> — worth checking for on the day a flag is
+    /// added, not a month later from a bug report. <c>[[ceh-count-the-shared-things]]</c></para>
+    ///
+    /// <para>🔒 Deliberately SEPARATE from the TEST button. A Welcome session is real — it belongs on
+    /// the public agenda and in Backstage, it simply has nothing to announce. Folding the two together
+    /// would hide it from the public pages, which is not what he asked for.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostToggleSoMeExcludedAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+
+        var session = await _db.Sessions
+            .FirstOrDefaultAsync(s => s.Id == SessionId && s.EventId == me.EventId, ct);
+        if (session is null)
+        {
+            Error = "Session not found.";
+        }
+        else
+        {
+            session.ExcludeFromSoMeAnnouncements = !session.ExcludeFromSoMeAnnouncements;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            Message = session.ExcludeFromSoMeAnnouncements
+                ? "Excluded from social media — never announced on LinkedIn and left out of the track "
+                  + "and session graphics. It stays fully public everywhere else. Any planned post for "
+                  + "it is removed on the next planner run (restorable in the post editor)."
+                : "Back in the social-media campaign — the planner may propose posts for it again.";
         }
 
         await LoadAsync(me.EventId, ct);
@@ -911,6 +1035,8 @@ public class SessionsModel : PageModel
                 s.RoomQrUrl, s.EvaluationFormUrl, s.EvaluationEmailedAt,
                 s.PublicSlug, s.UsedForTesting, s.StartsAt, s.EndsAt, s.IsDateOverridden,
                 s.IsCommonForAllTracks, s.Track, s.Abstract, s.Level, s.Tags,
+                s.ExcludeFromSoMeAnnouncements,   // §1178
+                s.IsTestData,                     // §1208 — legacy, invisible, load-bearing
                 // Engagement counts so the grid can offer a SAFE delete only when
                 // there is no attendee data to lose (matches SessionDeletionService).
                 // MC seats are CEH-owned now (MasterClassSignup), not Zoho bookings.
@@ -949,7 +1075,9 @@ public class SessionsModel : PageModel
             Level: r.Level,
             Tags: r.Tags,
             // §1025 — the ids behind the names, for the picker's pre-ticking.
-            SpeakerIdList: r.SpeakerKeys.Select(k => k.ParticipantId).ToList())).ToList();
+            SpeakerIdList: r.SpeakerKeys.Select(k => k.ParticipantId).ToList(),
+            ExcludeFromSoMeAnnouncements: r.ExcludeFromSoMeAnnouncements,
+            IsTestData: r.IsTestData)).ToList();
 
         // §1025 — the speaker picker's options: everyone in the edition who IS a speaker. Read from
         // SpeakerProfiles rather than from Role, so a person who also holds another role (an

@@ -600,6 +600,9 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.ParticipantPh
 builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SyncHealthService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.PreselectionQueueService>();
+// §1146 — the volunteer availability grid, rendered by /Organizer/PreselectionQueue (under the
+// list) and /Organizer/Volunteers. ONE builder for both, so the two views cannot disagree.
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAvailabilityOverviewService>();
 // §59: delta-approval queue — the /Organizer/SyncQueue page approves/rejects detected
 // sync changes (audited; approve applies + emails; never auto-applied). On approve, a
 // CehToZoho Update PUSHES to Zoho via the push services (lazily resolved — they capture the
@@ -885,6 +888,9 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.DocLibraryF
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.SwagLogisticsProducer>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.FoodLogisticsProducer>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LunchLogisticsProducer>();
+// §1086 — the ONE lunch calculation: /Organizer/Lunch, the dashboard tiles and the venue
+// spreadsheet all read it, so the three can no longer give three answers.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LunchHeadcountService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.ExpoLogisticsProducer>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.HotelLogisticsProducer>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LogisticsRunService>();
@@ -935,6 +941,9 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SpeakerGraphi
 // §124: per-room session-evaluation QR codes — reads/uploads via the same
 // SharePoint file-store seam; inert until the QR folder path is configured.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService>();
+// §1078 — the media crew's picture/video libraries, managed in the hub under the APP's SharePoint
+// credentials (a SharePoint link would run in the visitor's own user context).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.MediaLibraryService>();
 // §146: reusable, server-proxied, LIVE venue images — reads an allowlisted Venue
 // SUBFOLDER via the same SharePoint file-store seam (app creds), caches bytes ~15 min,
 // and never exposes a SharePoint link. Inert until Graphics:SharePoint:VenueRootFolderPath
@@ -1005,6 +1014,7 @@ else
         CommunityHub.Core.Integrations.ILinkedInPostPublisher,
         CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
 }
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeCapacityReport>();   // §1199
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeQueueService>();
 // §889 — what each queued post is ABOUT, in words, for the list view.
@@ -1032,6 +1042,53 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.EventSoMePostImportSer
 // must fail fast and let the post compose without an intro.
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>(
     c => c.Timeout = TimeSpan.FromSeconds(15));
+// §1060(l) — the eligibility judge + its sweep. Registered in the WEB host too, not because a page
+// judges anything (the gate only ever READS the stored verdict), but so the sweep can be triggered
+// from /Organizer/Jobs like every other job — §833's lesson: a jobs-only service has no page, and
+// he cannot find or run it.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SoMeTextEligibilityJudge>(
+    c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeTextEligibilitySweep>();
+ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeAnnouncementNotifier>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeNext24HoursDigest>();
+// §1077 — volume-package qualification, registered in the WEB host too so the organizer page can
+// recompute on demand rather than only showing what the nightly job last wrote.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.VolumePackageQualificationService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.VolumePackageSweep>();
+// §1077 stage 2 — the approval-request mail. Registered in the WEB host as well because the
+// organizer page can ask again on demand; the automatic send is the job's, behind its feature key.
+builder.Services.AddScoped<CommunityHub.Core.Email.VolumePackageApprovalMailService>();
+// §1077 stage 3 — the company's own wizard (token-reached) and the invitation that carries its
+// link. WEB-ONLY on purpose: no job sends the invitation, an organizer does.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.VolumePackageWizardService>();
+builder.Services.AddScoped<CommunityHub.Core.Email.VolumePackageInviteMailService>();
+// §1077.9 — the post-event thank-you (pictures + the LinkedIn tagging ask). WEB-ONLY: no job sends
+// it, because "the gallery is live" is a fact only a person can check.
+builder.Services.AddScoped<CommunityHub.Core.Email.VolumePackagePostEventMailService>();
+
+// §1080 — mass mail. The audiences, and the suppression list every send must consult.
+// 🔴 The unsubscribe SECRET comes from configuration (Email:UnsubscribeSecret). Blank ⇒ no link can
+// be signed, and a campaign send must refuse: a mass mailing with a dead unsubscribe link costs the
+// sending reputation and the legal basis at the same time.
+builder.Services.AddScoped<CommunityHub.Core.Email.MailAudienceResolver>();
+builder.Services.AddScoped<CommunityHub.Core.Email.MailCampaignService>();
+builder.Services.AddScoped<CommunityHub.Core.Email.ExternalRecipientImportService>();
+// 🔒 The bounce webhook's shared secret — blank ⇒ the endpoint refuses everything.
+builder.Services.AddScoped(sp => new CommunityHub.Core.Email.MailBounceIngestService(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    sp.GetRequiredService<CommunityHub.Core.Email.MailSuppressionService>(),
+    builder.Configuration["Email:BounceWebhookSecret"]));
+builder.Services.AddScoped(sp => new CommunityHub.Core.Email.MailSuppressionService(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    builder.Configuration["Email:UnsubscribeSecret"],
+    sp.GetRequiredService<TimeProvider>()));
+// §1077 stage 4 — the group photo (linked to the EXISTING GroupPhotoRegistration, not a second
+// model) and the weekly reminder. The reminder is registered here too so the organizer page can
+// show exactly who the job would write to.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.VolumePackageGroupPhotoService>();
+// §1077 stage 5 — the timeslots, the planner and the publish, plus the partner's Excel + calendar.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.GroupPhotoScheduleService>();
+builder.Services.AddScoped<CommunityHub.Core.Email.VolumePackageReminderService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
 // §833 — the scheduler was JOBS-ONLY, which is why it had no page and he could not find it. The
 // planner page reads its readiness and can run it on demand, so it is registered here too.
@@ -1052,6 +1109,8 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeCadenceService>();
 // §850 — the approval blocker. Registered in BOTH hosts: the queue/editor approve through it, and
 // the DISPATCHER re-checks eligibility at send time. [[ceh-di-two-hosts]].
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeApprovalGate>();
+// §1206 — one readiness answer for the queue, the calendar and the settings page.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeReadiness>();
 // §918 — auto-approval; the settings page reads and writes its two knobs.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeAutoApproveService>();
 // Speaker self-service LinkedIn publish (REQUIREMENTS §52): a speaker pushes their
@@ -1100,7 +1159,22 @@ builder.Services.AddHttpClient<CommunityHub.Core.Settings.JobTriggerService>();
 // §525 — SINGLETON, deliberately: ZohoClient is created per-resolution by AddHttpClient, so the
 // shared access token must live here. Without it every one of the 27 call sites minted its own
 // token and tripped Zoho's refresh-grant rate limit, taking the whole Zoho integration down.
-builder.Services.AddSingleton<CommunityHub.Core.Integrations.ZohoAccessTokenCache>();
+// §1142 — the token is now SHARED ACROSS INSTANCES via the database, not merely across callers
+// within one process. The singleton above is still the fast path; the store is what makes a cold
+// instance inherit the live token instead of minting another against Zoho's 10-active-token cap.
+builder.Services.AddSingleton<CommunityHub.Core.Integrations.IZohoTokenStore>(sp =>
+    new CommunityHub.Core.Integrations.SqlZohoTokenStore(
+        sp.GetRequiredService<IServiceScopeFactory>(),
+        sp.GetService<ILogger<CommunityHub.Core.Integrations.SqlZohoTokenStore>>()));
+builder.Services.AddSingleton(sp =>
+{
+    var zoho = sp.GetRequiredService<CommunityHub.Core.Integrations.ZohoOptions>();
+    return new CommunityHub.Core.Integrations.ZohoAccessTokenCache(
+        clock: sp.GetService<TimeProvider>(),
+        store: sp.GetRequiredService<CommunityHub.Core.Integrations.IZohoTokenStore>(),
+        credentialKey: CommunityHub.Core.Integrations.ZohoAccessTokenCache.CredentialKeyFor(
+            zoho.ClientId, zoho.RefreshToken));
+});
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>();
 // Anonymous attendee telemetry (public "who's coming" page) — aggregate Zoho stats, cached.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.AttendeeTelemetryService>();
@@ -1136,6 +1210,16 @@ builder.Services.AddSingleton(backstageExhibitorWebOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.IBackstageExhibitorApi,
     CommunityHub.Core.Integrations.LiveBackstageExhibitorApi>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoProvisionService>();
+// §1158 — the one-time public-name sweep (organizer-triggered from SponsorAdmin; never on a timer).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorPublicNameNormalizer>();
+// §1173 — carry a sponsor profile forward when a company re-registers under a new legal entity.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorProfileCarryForward>();
+// §1165 — the sponsor swag catalogue, read from the webshop products.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorSwagCatalogService>();
+// §1165k — grant a sponsor a euro credit (creates the coupon in the webshop first).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogCreditService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogHoldService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogAnnouncementService>();
 builder.Services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadSyncService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadCaptureService>();
@@ -1240,12 +1324,21 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.ContentStudioService>(
 builder.Services.AddScoped<CommunityHub.Forms.SpeakerWizardService>();
 // Sponsor "Get started" wizard (§32): guided shell over the Company Details sections.
 builder.Services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
+// §1210 — the organizer chase list, built through the wizard service above.
+builder.Services.AddScoped<CommunityHub.Core.Sponsors.SponsorGetStartedReport>();
 // Generic "Get started" wizard (§43): guided shell for the remaining roles
 // (Volunteer / Organizer / Media / EventPartner); same design-A shell + entitlement
 // gating as the speaker wizard, reusing the existing pages untouched.
 builder.Services.AddScoped<CommunityHub.Forms.RoleWizardService>();
 // §207/§208: the ATTENDEE Get-Started stepper (Master Class + Party for 2-day; Party for 1-day).
 builder.Services.AddScoped<CommunityHub.Forms.AttendeeWizardService>();
+// §1085: the ONE role→wizard map — every role already has a wizard with a percent, and this is
+// where "which one, for this person?" is answered. Read by the completion sweep and by the
+// participant-status board, so neither re-derives completion.
+builder.Services.AddScoped<CommunityHub.Forms.WizardProgressReader>();
+// §1085: one participant-status board for ALL roles (the operator: seven per-role pages
+// "makes no sense"). Reads the wizard services; owns no arithmetic of its own.
+builder.Services.AddScoped<CommunityHub.Core.Participants.ParticipantStatusBoardBuilder>();
 // §173e: ensures EVERY Get-Started step a per-participant role has is mirrored by a
 // matching task (idempotent), so My-Tasks lists exactly the role's steps + deadline tasks.
 // Driven off the wizard services above; its done-state is synced by FormTaskReconciler.
@@ -1346,6 +1439,12 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPoolZohoActi
 // which resolves both of these. Registered in one host only, that is a green deploy and a 500 on
 // the first trigger.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponDiscoveryService>();
+// §1093 — one monitor link per billing customer; the coupon page provisions on save so a
+// just-mapped customer has its link immediately rather than at the next 5-minute tick.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponCustomerMonitorProvisioner>();
+// §1094 — the partner's self-service status: balances, caps, and "I need more tickets".
+builder.Services.AddScoped<CommunityHub.Core.Integrations.MonitorPrepaidBalanceQuery>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponCapRequestNotifier>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidBillingReminderService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidLowBalanceAlertService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.DraftInvoiceCreatedNotifier>();
@@ -1700,6 +1799,41 @@ CommunityHub.Uploads.DirectUploadEndpoints.MapDirectUploadEndpoints(app);
 // supported culture, so today it always resolves to en (English-only). POST +
 // antiforgery-free (no auth/state change beyond the cookie) so it works on
 // anonymous pages (Login) too. `returnUrl` is treated as local-only.
+// §1080 stage 5 — the provider's bounce/complaint webhook.
+// 🔴 Anonymous by necessity (Brevo cannot sign in) but NOT unauthenticated: a shared secret must be
+// presented, and without one configured the endpoint refuses everything. An open webhook here would
+// let anybody silence any address we hold.
+// 🔒 It answers 204 for events it ignores and 401 for a bad secret, and never reveals whether an
+// address is known — a webhook is a fine place to enumerate a mailing list from.
+app.MapPost("/api/mail/bounce", async (
+    HttpContext http,
+    CommunityHub.Core.Email.MailBounceIngestService ingest,
+    CancellationToken ct) =>
+{
+    var presented = http.Request.Headers["X-CEH-Webhook-Secret"].ToString();
+    if (string.IsNullOrEmpty(presented))
+        presented = http.Request.Query["secret"].ToString();   // Brevo can only append a query string
+
+    if (!ingest.VerifySecret(presented)) return Results.Unauthorized();
+
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(http.Request.Body, cancellationToken: ct);
+    var root = doc.RootElement;
+
+    string? Read(params string[] names)
+    {
+        foreach (var n in names)
+            if (root.TryGetProperty(n, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                return v.GetString();
+        return null;
+    }
+
+    // Brevo sends "event" + "email"; the reason field varies by event type.
+    var suppressed = await ingest.IngestAsync(
+        Read("event", "type"), Read("email", "recipient"), Read("reason", "message"), ct);
+
+    return suppressed ? Results.Ok(new { suppressed = true }) : Results.NoContent();
+}).AllowAnonymous();
+
 app.MapPost("/set-language", (HttpContext http, string culture, string? returnUrl) =>
 {
     var safe = supportedCultures.Any(c =>
@@ -1866,6 +2000,7 @@ app.MapGet("/some-post-media/{postId:int}", async (
         int postId,
         CommunityHub.Core.Integrations.SoMeAnnouncementQuery announcements,
         CommunityHub.Core.Integrations.SoMeGraphicLibrary library,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
         CommunityHub.Auth.ICurrentParticipantAccessor participant,
         HttpContext http,
         CancellationToken ct) =>
@@ -1874,9 +2009,17 @@ app.MapGet("/some-post-media/{postId:int}", async (
     if (me is null) return Results.Unauthorized();
 
     var post = await announcements.VisibleMediaPostAsync(me.EventId, me.ParticipantId, postId, ct);
-    if (post is null || string.IsNullOrWhiteSpace(post.ImageRef)) return Results.NotFound();
+    if (post is null) return Results.NotFound();
 
-    var f = await library.GetAsync(post.ImageRef, post.TemplateKind, post.MediaKind, ct);
+    // 🔴 §1178 — the SAME picture the card claims and the dispatcher will publish, not the ref
+    // stamped at plan time. This endpoint feeding one answer while the card shows another is how a
+    // sponsor ends up with a preview frame that 404s (or, worse, the previous artwork).
+    var imageRef = CommunityHub.Core.Integrations.SoMeSubjectGraphic.Effective(
+        await new CommunityHub.Core.Integrations.SoMeSubjectGraphic(db).FileNamesAsync(me.EventId, ct),
+        post);
+    if (string.IsNullOrWhiteSpace(imageRef)) return Results.NotFound();
+
+    var f = await library.GetAsync(imageRef, post.TemplateKind, post.MediaKind, ct);
     if (f is null) return Results.NotFound();
 
     // Immutable per post+name, and a page shows several. Private: it is scoped to this participant.

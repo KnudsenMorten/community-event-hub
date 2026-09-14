@@ -192,6 +192,11 @@ public sealed class AlertCoverageTests
         // fill up: on DEV the write guard blocks it by design, and an unconfigured folder looks
         // identical. It says which, so "no photos appeared" is never a mystery.
         "SpeakerPhotoArchiveJob",
+        // §1145 — the volunteer counterpart of the archive above, and the SAME failure shape: an
+        // unconfigured or unwritable folder produces no alias files, which is indistinguishable
+        // from "every volunteer already has one". It reports which, so a backlog that never
+        // clears cannot look like a backlog that is already done.
+        "VolunteerPhotoAliasBackfillJob",
         // §6.4 — the logistics files. The same failure shape with higher stakes: an unwritable
         // library means the venue's spreadsheets simply never appear, and "the folder is empty"
         // reads identically to "nothing changed today". It reports which one it is.
@@ -342,6 +347,21 @@ public sealed class AlertCoverageTests
             // group rather than a forgotten argument.
             "SpeakersHeldJob",
             "VolunteersAwaitingReviewJob",
+            // §1077 — hub-internal by the same test. It reads CEH's OWN mirror tables and writes
+            // CEH's own two tables; it calls nothing and mails nobody. Zoho is where the attendee
+            // data originally came from, not a system this job talks to — so Platform is the honest
+            // group rather than a forgotten argument.
+            "VolumePackageQualificationJob",
+            // §1077 stage 4 — the weekly chase. Platform for the same reason as its sibling above:
+            // it reads CEH's own volume-package rows and sends CEH's own mail. ⚠️ It DOES send —
+            // unlike the qualification job — but the recipient is a person CEH already holds, not an
+            // external system, so there is no integration whose outage this could be reporting.
+            "VolumePackageReminderJob",
+            // §1080 — the campaign sender. Platform for the same reason as the two above: it reads
+            // CEH's own tables and sends CEH's own mail. There is no integration behind it whose
+            // outage this could be reporting — the provider failing shows up as a failed recipient
+            // row, which is where an organizer looks.
+            "MailCampaignJob",
         };
 
         var undeclared = JobCatalog.All

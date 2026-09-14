@@ -69,9 +69,10 @@ public sealed class TaskBodyEmailHtmlRenderer : TaskBodyRenderer
         var fill = block.Style == TaskButtonStyle.Primary ? Blue : "#4b5563";
 
         // VML needs an explicit pixel width — the WORD engine does not size a roundrect to its
-        // content. Derived from the label so a short button is not stretched to full width and a
-        // long one is not clipped; clamped to stay inside the 560px mail column at both ends.
-        var width = Math.Clamp(label.Length * 9 + 48, 180, 440);
+        // content. §1089: the estimate lives in ONE place now. It used to be `label.Length * 9 + 48`
+        // here AND in SpeakerApprovalService, and the two copies were wrong in the same way — too
+        // tight, so Word wrapped a long label and the fixed 44px height clipped the second line.
+        var width = Email.MailButtonMetrics.WidthPx(label);
 
         sb.Append("<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" ")
           .Append("style=\"margin:6px 0 16px;\"><tr><td align=\"left\">")
@@ -90,7 +91,7 @@ public sealed class TaskBodyEmailHtmlRenderer : TaskBodyRenderer
           .Append("\" style=\"background-color:").Append(fill)
           .Append(";border-radius:999px;color:#ffffff;display:inline-block;font-family:").Append(Font)
           .Append(";font-size:15px;font-weight:700;line-height:44px;text-align:center;")
-          .Append("text-decoration:none;width:").Append(width)
+          .Append("text-decoration:none;white-space:nowrap;width:").Append(width)
           .Append("px;-webkit-text-size-adjust:none;\">").Append(label).Append("</a>")
           .Append("<!--<![endif]-->")
           .Append("</td></tr></table>");

@@ -1,0 +1,237 @@
+@page
+@model CommunityHub.Pages.Organizer.SwagCatalogModel
+@{
+    ViewData["Title"] = "Swag catalogue — logistics";
+    var money = (decimal? v) => v is null
+        ? "—"
+        : (Model.CurrencySymbol ?? string.Empty) + v.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+<div class="card">
+    <h1>Swag catalogue — logistics</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>Who has what, what is still free, and what has to happen before a branded item is in every
+           bag. The catalogue itself lives in the webshop; this is the side sponsors never see.</p>
+
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        @if (Model.Diagnostic is not null)
+        {
+            <p class="info" role="status" style="border-left:4px solid #6b7280;">
+                <strong>Nothing to show yet.</strong> @Model.Diagnostic
+            </p>
+        }
+
+        @* §1165l — the bag count is its own number because a bag goes to speakers and volunteers
+           too, not only attendees. Shown next to the live headcount so a gap is visible NOW rather
+           than at packing, when it is 250 people with an incomplete bag. *@
+        <p style="font-size:13px;color:#4b5563;">
+            Ordering against <strong>@Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</strong> bags.
+            CEH currently counts <strong>@Model.ReceivingHeadcount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</strong>
+            active people across every role that receives one (attendees, speakers, volunteers, crew).
+            @if (Model.BagQuantity > 0 && Model.ReceivingHeadcount > Model.BagQuantity)
+            {
+                <strong style="color:#b91c1c;">
+                    That is more people than bags — an order placed now would come up short.
+                </strong>
+            }
+        </p>
+
+        @if (Model.Rows.Count > 0)
+        {
+            <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Per piece</th>
+                        <th>Total &times; @Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</th>
+                        <th>Status</th>
+                        <th>Artwork</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var row in Model.Rows)
+                {
+                    <tr>
+                        <td>@row.Name</td>
+                        <td>@(row.PriceText ?? "—")</td>
+                        <td>@money(row.TotalPrice)</td>
+                        <td>
+                            @if (!row.InStock)
+                            {
+                                <span style="color:#6b7280;">Taken / out of stock</span>
+                            }
+                            else if (row.Hold is not null)
+                            {
+                                <span style="color:#92400e;">
+                                    Reserved for <strong>@row.Hold.CompanyName</strong>
+                                    until @row.Hold.ExpiresAt.ToString("yyyy-MM-dd")
+                                </span>
+                                @if (!string.IsNullOrWhiteSpace(row.Hold.Note))
+                                {
+                                    <div style="font-size:12px;color:#6b7280;">@row.Hold.Note</div>
+                                }
+                            }
+                            else
+                            {
+                                <span style="color:#065f46;">
+                                    Free@(row.RemainingCount is int n ? $" ({n} left)" : "")
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            @if (row.ArtworkOnFile is null)
+                            {
+                                <span style="color:#9ca3af;">—</span>
+                            }
+                            else if (row.ArtworkOnFile == true)
+                            {
+                                <span style="color:#065f46;">Logo on file</span>
+                            }
+                            else
+                            {
+                                <span style="color:#b91c1c;">No logo yet</span>
+                            }
+                        </td>
+                        <td>
+                            @if (row.Hold is not null)
+                            {
+                                <form method="post" asp-page-handler="Release" style="margin:0;">
+                                    <input type="hidden" name="holdId" value="@row.Hold.Id" />
+                                    <button type="submit">Release</button>
+                                </form>
+                            }
+                            else if (row.InStock)
+                            {
+                                <form method="post" asp-page-handler="Hold" style="margin:0;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                                    <input type="hidden" name="productId" value="@row.ProductId" />
+                                    <input type="hidden" name="productName" value="@row.Name" />
+                                    <select name="companyId" required aria-label="Company">
+                                        <option value="">Reserve for…</option>
+                                        @foreach (var c in Model.Companies)
+                                        {
+                                            <option value="@c.Id">@c.Name</option>
+                                        }
+                                    </select>
+                                    <input type="number" name="days" value="14" min="1" max="180"
+                                           style="width:70px;" aria-label="Days" title="Days until it lapses" />
+                                    <input type="text" name="note" placeholder="Note (optional)" style="width:150px;" />
+                                    <button type="submit">Hold</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+
+        <h2 style="margin-top:26px;">Credits</h2>
+        <p style="font-size:13px;color:#4b5563;">
+            Optional — not every sponsor gets one. Granting creates the coupon in the webshop with the
+            restrictions already set: catalogue items only, spendable once, expiring, and locked to
+            that sponsor's own contact e-mail addresses.
+        </p>
+
+        <form method="post" asp-page-handler="GrantCredit"
+              style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+            <select name="companyId" required aria-label="Company">
+                <option value="">Grant to…</option>
+                @foreach (var c in Model.Companies)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+            </select>
+            <input type="number" name="amount" step="1" min="1" required placeholder="Amount"
+                   style="width:110px;" aria-label="Amount" />
+            <input type="number" name="validDays" value="90" min="1" max="730"
+                   style="width:90px;" aria-label="Valid days" title="Days until it expires" />
+            <input type="text" name="note" placeholder="What was agreed (optional)" style="width:220px;" />
+            <button type="submit" data-ceh-confirm="confirmGrantCredit">Grant credit</button>
+        </form>
+
+        @if (Model.LiveCredits.Count > 0)
+        {
+            <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr><th>Company</th><th>Amount</th><th>Code</th><th>Valid until</th><th>Note</th><th></th></tr>
+                </thead>
+                <tbody>
+                @foreach (var credit in Model.LiveCredits)
+                {
+                    <tr>
+                        <td>@credit.CompanyName</td>
+                        <td>@money(credit.Amount)</td>
+                        <td><code>@credit.Code</code></td>
+                        <td>@(credit.ExpiresOn?.ToString("yyyy-MM-dd") ?? "no expiry")</td>
+                        <td style="font-size:12.5px;color:#6b7280;">@credit.Note</td>
+                        <td>
+                            <form method="post" asp-page-handler="RevokeCredit" style="margin:0;">
+                                <input type="hidden" name="creditId" value="@credit.Id" />
+                                <button type="submit" data-ceh-confirm="confirmRevokeCredit">Withdraw</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+        else
+        {
+            <p style="font-size:13px;color:#6b7280;">No credits are outstanding.</p>
+        }
+
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmGrantCredit",
+            Title: "Grant this credit?",
+            Body: "This creates a REAL coupon in the webshop, worth the amount you entered, spendable once on catalogue items, and locked to the contact e-mail addresses of that sponsor. Continue?",
+            ConfirmLabel: "Grant it",
+            CancelLabel: "Cancel")' />
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmRevokeCredit",
+            Title: "Withdraw this credit?",
+            Body: "CEH stops showing it to the sponsor. The coupon itself stays in the webshop — deleting a coupon there would orphan any order that already used it — so disable it in the shop too if it was never spent. Continue?",
+            ConfirmLabel: "Withdraw",
+            CancelLabel: "Cancel")' />
+
+        <h2 style="margin-top:26px;">Tell sponsors about it</h2>
+        <p style="font-size:13px;color:#4b5563;">
+            Writes to every active sponsor company that has not taken an item yet, linking to the
+            catalogue page in the hub &mdash; not the webshop, because the hub page knows who they are
+            and can offer the logo we already hold. Preview first: this is the one action here that
+            reaches every sponsor at once.
+        </p>
+        <form method="post" asp-page-handler="Announce" style="display:inline;margin:0;">
+            <input type="hidden" name="send" value="false" />
+            <button type="submit">Preview who would be written to</button>
+        </form>
+        <form method="post" asp-page-handler="Announce" style="display:inline;margin:0 0 0 8px;">
+            <input type="hidden" name="send" value="true" />
+            <button type="submit" data-ceh-confirm="confirmAnnounce">Send the announcement</button>
+        </form>
+
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmAnnounce",
+            Title: "Mail every sponsor about the catalogue?",
+            Body: "This sends a real e-mail to the contacts of every active sponsor company that has not taken a catalogue item yet. It cannot be recalled. Preview it first if you have not. Continue?",
+            ConfirmLabel: "Send it",
+            CancelLabel: "Cancel")' />
+
+        <p style="margin-top:18px;"><a asp-page="/Organizer/Index">Back to organizer</a></p>
+    }
+</div>

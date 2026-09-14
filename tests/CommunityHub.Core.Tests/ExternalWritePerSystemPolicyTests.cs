@@ -77,6 +77,37 @@ public sealed class ExternalWritePerSystemPolicyTests
     }
 
     /// <summary>
+    /// 🔴 §1119 — …but DEV still may not CREATE AN INVOICE, and that is a narrower ceiling than
+    /// <see cref="ExternalSystems.Erp"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-21, for the eighth time: <i>"no erp create of invoice from dev. this
+    /// can only happend on prod"</i>. The 2026-08-10 grant above — <i>"dev is allowed to readwrite to
+    /// erp"</i> — is still right for customers, contacts and orders; only invoices are
+    /// production-only, and one boolean could not say both.</para>
+    ///
+    /// <para>🔑 It works with NO app setting: <c>ErpInvoiceCreate</c> is unlisted, so it falls back to
+    /// <c>AllowExternalWrites</c> — false on DEV, true on PROD. ⚠️ Which means this test is also the
+    /// guard on that fallback: give <c>ErpInvoiceCreate</c> a key of its own in DEV's config and the
+    /// policy inverts silently.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Dev_may_write_to_erp_but_may_never_create_an_invoice()
+    {
+        using var db = NewDb();
+        var guard = Guard(db, DevPolicy());
+
+        Assert.True(await guard.AllowAsync(ExternalSystems.Erp, "CreateCustomerAsync"));
+        Assert.False(await guard.AllowAsync(
+            ExternalSystems.ErpInvoiceCreate, "CreateDraftInvoiceAsync"));
+
+        // PROD writes everywhere from its single default — invoicing included, or nobody gets billed.
+        var prod = Guard(db, new ExternalWriteOptions { AllowExternalWrites = true });
+        Assert.True(await prod.AllowAsync(
+            ExternalSystems.ErpInvoiceCreate, "CreateDraftInvoiceAsync"));
+    }
+
+    /// <summary>
     /// 🔒 A system nobody listed falls back to the host default — so an unconfigured host still
     /// writes NOTHING, and a new integration is governed the moment it calls the guard.
     /// </summary>
@@ -164,6 +195,8 @@ public sealed class ExternalWritePerSystemPolicyTests
         Assert.Contains("LinkedIn=BLOCKED", banner);
         Assert.Contains("e-conomic=ALLOWED", banner);
         Assert.Contains("SharePoint=ALLOWED", banner);
+        // §1119 — the line that answers "can the app in front of me invoice a customer".
+        Assert.Contains("e-conomic invoice creation=BLOCKED", banner);
     }
 
     /// <summary>
@@ -198,6 +231,7 @@ public sealed class ExternalWritePerSystemPolicyTests
         {
             ExternalSystems.Zoho, ExternalSystems.Erp,
             ExternalSystems.LinkedIn, ExternalSystems.SharePoint,
+            ExternalSystems.Webshop, ExternalSystems.ErpInvoiceCreate,
         };
 
         var unknown = used.Where(u => !known.Contains(u)).ToList();

@@ -4,6 +4,7 @@ using CommunityHub.Core.Integrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Speaker;
 
@@ -21,15 +22,28 @@ public class AnnouncementsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SoMeAnnouncementQuery _query;
+    private readonly CommunityHub.Core.Data.CommunityHubDbContext _db;
 
-    public AnnouncementsModel(ICurrentParticipantAccessor participant, SoMeAnnouncementQuery query)
+    public AnnouncementsModel(
+        ICurrentParticipantAccessor participant, SoMeAnnouncementQuery query,
+        CommunityHub.Core.Data.CommunityHubDbContext db)
     {
         _participant = participant;
         _query = query;
+        _db = db;
     }
 
     public bool AccessDenied { get; private set; }
     public SpeakerAnnouncements? Announcements { get; private set; }
+
+    /// <summary>
+    /// §1060(f) — this person's LinkedIn mention-resolution outcome, which is what the follow card
+    /// reads. Passed through RAW rather than reduced to a bool here: the partial is the one place
+    /// that decides what each of the five statuses is allowed to CLAIM, and collapsing it to
+    /// "follows / does not follow" at this layer would throw away the distinction between a real
+    /// negative and a lookup that never answered.
+    /// </summary>
+    public string? LinkedInStatus { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -38,6 +52,10 @@ public class AnnouncementsModel : PageModel
         if (me.Role != ParticipantRole.Speaker) { AccessDenied = true; return Page(); }
 
         Announcements = await _query.ForSpeakerAsync(me.EventId, me.ParticipantId, ct);
+        LinkedInStatus = await _db.Participants
+            .Where(p => p.Id == me.ParticipantId)
+            .Select(p => p.LinkedInPersonUrnStatus)
+            .FirstOrDefaultAsync(ct);
         return Page();
     }
 }

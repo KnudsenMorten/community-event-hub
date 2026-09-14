@@ -127,6 +127,15 @@ public sealed class ZohoExhibitorCreateSocialPagesTests
     /// ⚠️ The create must keep sending everything it already sent. A regression here is invisible:
     /// the record is still created, just poorer, and nobody looks at a create that succeeded.
     /// </summary>
+    /// <remarks>
+    /// 🔴 §1163 — TWO KEYS CHANGED HERE, AND THIS TEST WAS ASSERTING THE WRONG ONES. It locked in
+    /// <c>description</c> and <c>booth_label</c>, both of which Zoho rejects with
+    /// <c>400 {"message":"Extra key found"}</c> — measured in production 2026-08-31. The test was
+    /// written from the payload rather than from Zoho, so it froze the defect instead of catching
+    /// it. Corrected against what the rest of ZohoClient had already measured:
+    /// <c>company_overview</c> is the exhibitor's text field, and the booth is assigned by
+    /// <c>AssignExhibitorBoothAsync</c> as <c>booth_id</c> after the create.
+    /// </remarks>
     [Fact]
     public async Task The_rest_of_the_create_payload_is_unchanged()
     {
@@ -136,19 +145,39 @@ public sealed class ZohoExhibitorCreateSocialPagesTests
 
         Assert.Equal("Arki Test A/S", body.GetProperty("company_name").GetString());
         Assert.Equal("CAT-1", body.GetProperty("exhibitor_category_id").GetString());
-        Assert.Equal("E-28", body.GetProperty("booth_label").GetString());
         Assert.Equal("https://example.test", body.GetProperty("website_url").GetString());
-        Assert.Equal("About them", body.GetProperty("description").GetString());
+        Assert.Equal("About them", body.GetProperty("company_overview").GetString());
         Assert.Equal("aa@example.test", body.GetProperty("contact").GetProperty("email").GetString());
         // 🔒 §41a — Zoho derives the type from the category; sending it causes "category not found".
         Assert.False(body.TryGetProperty("exhibitor_type", out _));
     }
 
     /// <summary>
-    /// 🔴 The create is NOT gated on <c>PushExhibitorSocialPages</c>. That switch is off because
-    /// re-pushing on every UPDATE pass mailed a false success for ever (§791.4); a create happens
-    /// once per company and cannot loop. Gating it there would keep the one path that might work
-    /// switched off for the reason the other one failed.
+    /// 🔴 §1163 — the two keys that made Zoho refuse the create must NEVER come back.
+    /// </summary>
+    /// <remarks>
+    /// The failure they caused was worse than a failed create: the operator had deleted the record
+    /// by hand, and a create that succeeded would have silently re-created it every fifteen minutes.
+    /// The 400 was the only thing stopping that fight.
+    /// </remarks>
+    [Fact]
+    public async Task The_keys_zoho_refuses_are_not_sent()
+    {
+        var (client, handler) = NewClient();
+
+        var body = await CreateAsync(client, handler, "https://www.linkedin.com/company/x", null);
+
+        // The exhibitor's text field is company_overview; `description` belongs to the SPONSOR record.
+        Assert.False(body.TryGetProperty("description", out _));
+        // The booth field is booth_id, resolved from the label AFTER the create.
+        Assert.False(body.TryGetProperty("booth_label", out _));
+    }
+
+    /// <summary>
+    /// 🔴 The create is NOT gated on <c>PushExhibitorSocialPages</c>, and must stay ungated even now
+    /// that the switch defaults ON (§1087). The switch is the UPDATE path's kill switch: if Zoho
+    /// ever regresses it goes back to <c>false</c>, and the create — which happens once per company,
+    /// cannot loop, and was never the broken path — must keep sending social pages when it does.
     /// </summary>
     [Fact]
     public async Task The_create_is_not_gated_on_the_update_switch()
@@ -162,7 +191,7 @@ public sealed class ZohoExhibitorCreateSocialPagesTests
                 ApiDomain = "https://zoho.test",
                 BackstagePortalId = "P1",
                 BackstageEventId = "E1",
-                PushExhibitorSocialPages = false,   // the shipped default
+                PushExhibitorSocialPages = false,   // the KILL SWITCH thrown (§1087: default is now true)
             },
             NullLogger<ZohoClient>.Instance);
 

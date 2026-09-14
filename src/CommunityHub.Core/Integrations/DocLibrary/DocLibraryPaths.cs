@@ -115,6 +115,20 @@ public static class DocLibraryPaths
     /// <summary>§844.2 — videos for SPONSOR (Type 4) posts.</summary>
     public const string SponsorVideos = nameof(SponsorVideos);
 
+    // ---- event: volume-package group photo (§1077 stage 3) ---------------------------------
+    /// <summary>§1077 — the WEB logo a volume-package company uploads in its wizard.</summary>
+    public const string GroupPhotoLogoWeb = nameof(GroupPhotoLogoWeb);
+
+    /// <summary>§1077 — the same in print quality.</summary>
+    public const string GroupPhotoLogoPrint = nameof(GroupPhotoLogoPrint);
+
+    // ---- event: the media crew's own libraries (§1078) -------------------------------------
+    /// <summary>§1078 — the press/photo crew's picture library, managed in the hub.</summary>
+    public const string MediaPictures = nameof(MediaPictures);
+
+    /// <summary>§1078 — the same for video.</summary>
+    public const string MediaVideo = nameof(MediaVideo);
+
     // ---- event: evaluations -------------------------------------------------------------
     public const string EventEvalDuringSessions = nameof(EventEvalDuringSessions);
     public const string EventEvalAfterSponsor = nameof(EventEvalAfterSponsor);
@@ -296,6 +310,43 @@ public static class DocLibraryPaths
             DocLibraryDirection.Read | DocLibraryDirection.Upload,
             Notes: "Videos for TYPE 2 session posts. Mirrors SpeakerSessionGraphics; video wins over "
                  + "the graphic when present (§844.2)."),
+
+        // §1077 stage 3 (operator 2026-08-11: "SharePoint folders to register in DocLibraryPaths:
+        // …/Event/GroupPhotos/Web and …/Event/GroupPhotos/Print (he has pre-staged them)").
+        // 🔑 The company uploads its logo IN THE WIZARD, through a token link, and the bytes are
+        // written with the APP's credentials — the uploader has no SharePoint access and never
+        // receives a link to one (the §160 rule, same as sponsors and speakers).
+        new DocLibraryPathDefinition(
+            GroupPhotoLogoWeb, "Event/GroupPhotos/Web", "Event",
+            DocLibraryDirection.Read | DocLibraryDirection.Upload,
+            FileNamePattern: "vp-{companyId}-web.{ext}", CorrelationKey: "volume-package:{id}",
+            Notes: "Web-quality logo for the volume-package keynote mention and announcement. Named "
+                 + "by COMPANY ID, so a re-upload replaces rather than accumulating near-duplicates "
+                 + "nobody can tell apart at print time."),
+
+        new DocLibraryPathDefinition(
+            GroupPhotoLogoPrint, "Event/GroupPhotos/Print", "Event",
+            DocLibraryDirection.Read | DocLibraryDirection.Upload,
+            FileNamePattern: "vp-{companyId}-print.{ext}", CorrelationKey: "volume-package:{id}",
+            Notes: "The print-quality counterpart. Same naming rule and the same reason."),
+
+        // §1078 (operator 2026-08-11) — the MEDIA CREW's own two libraries, pre-staged by him.
+        // 🔑 DELETE is in the direction on purpose: "full permissions to add/delete files". The hub
+        // does it with the APP's credentials (his words: "not in their user context, but through the
+        // app context"), which is also why these are hub pages rather than the two SharePoint links
+        // he pasted — a link opens in the visitor's own session and needs their own tenant account.
+        new DocLibraryPathDefinition(
+            MediaPictures, "Event/Media/Pictures", "Event",
+            DocLibraryDirection.Read | DocLibraryDirection.Upload | DocLibraryDirection.Delete,
+            Notes: "The press/photo crew's picture library, managed on /Media/Pictures by the Media "
+                 + "role and organizers. Files are listed, uploaded, downloaded and deleted through "
+                 + "the hub — media people never get a SharePoint link (the §160 rule)."),
+
+        new DocLibraryPathDefinition(
+            MediaVideo, "Event/Media/Video", "Event",
+            DocLibraryDirection.Read | DocLibraryDirection.Upload | DocLibraryDirection.Delete,
+            Notes: "The same for video, on /Media/Videos. ⚠️ Uploads are STREAMED (§455): a whole "
+                 + "video must never sit in the web app's memory."),
 
         new DocLibraryPathDefinition(
             SponsorVideos, "Sponsors/Videos-SoMe/Sponsors", "Sponsors",

@@ -342,6 +342,125 @@ public sealed class TaskReminderBuilder
                 Cc: cc, MailKey: TemplateName));
         }
 
+        messages.AddRange(await BuildCompanySponsorRemindersAsync(
+            eventId, today, intervalMap, lastSentByOccasion,
+            communityName, eventDisplayName, ct));
+
+        return messages;
+    }
+
+    /// <summary>
+    /// 🔴 §1081 — COMPANY-SCOPED SPONSOR TASKS. The pass above requires an assignee, and a sponsor
+    /// task deliberately has none.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The gap this closes.</b> Sponsor tasks are ONE ROW PER COMPANY with
+    /// <c>AssignedParticipantId = NULL</c> and <c>SponsorCompanyId</c> set — that is the design, so
+    /// any coordinator's completion closes it for the team. But the main query filters
+    /// <c>AssignedParticipantId != null</c>, so **those rows could never match it**. Measured on prod
+    /// 2026-08-13: 131 open dated sponsor company tasks across 14 companies, and **zero** assigned
+    /// ones — meaning the coordinator fan-out in the main loop had never run for a single sponsor
+    /// task. Correct code behind a filter that excluded everything it was written for (§968's shape).</para>
+    ///
+    /// <para>🔑 <b>Operator 2026-08-13:</b> <i>"the logic must be linked to company, not people when
+    /// it is about sponsors"</i> — and, on why nothing had visibly broken, <i>"they are future tasks
+    /// with due date in future. reason they havent been chased yet"</i>. He was right: 123 of the 131
+    /// were future-dated. The 8 past-due were all the legacy <c>initial-onboarding-of-sponsor</c>
+    /// task, now retired — so this pass starts from a clean slate rather than firing a backlog.</para>
+    ///
+    /// <para>🔒 <b>Audience and cadence are the SAME rules as the assigned path</b>, deliberately:
+    /// <see cref="SponsorRecipientResolver"/> for who, a per-coordinator occasion key so each is
+    /// deduped and paced on their own clock (§707.11), and a per-coordinator render so each carries
+    /// THEIR own magic link (§169) rather than a shared one.</para>
+    ///
+    /// <para>⚠️ <b>An empty coordinator set sends NOTHING and never falls back to signers</b> — his
+    /// option A. Raising that gap is the sync job's job (§1081 stage 2c), not this builder's.</para>
+    /// </remarks>
+    private async Task<IReadOnlyList<ReminderMessage>> BuildCompanySponsorRemindersAsync(
+        int eventId, DateOnly today,
+        EmailReminderCadenceService.CadenceMap? intervalMap,
+        IReadOnlyDictionary<string, DateOnly> lastSentByOccasion,
+        string communityName, string eventDisplayName,
+        CancellationToken ct)
+    {
+        var tasks = await _db.Tasks
+            .Where(t => t.EventId == eventId
+                        && t.State != TaskState.Done
+                        && t.DueDate != null
+                        && t.AssignedParticipantId == null
+                        && t.SponsorCompanyId != null)
+            .Select(t => new { t.Id, t.Title, DueDate = t.DueDate!.Value, t.SponsorCompanyId })
+            .ToListAsync(ct);
+        if (tasks.Count == 0) return Array.Empty<ReminderMessage>();
+
+        var (placeholders, supportEmail) = ContactConfig();
+        var persona = Email.OnboardingEmailSets.PersonaFor(ParticipantRole.Sponsor).ToString();
+        var intervalDays = intervalMap is null
+            ? EmailTemplateCatalog.DefaultIntervalDaysFor(TemplateName)
+            : EmailReminderCadenceService.Resolve(intervalMap, TemplateName, ParticipantRole.Sponsor);
+
+        // One resolve per company, not per task: a company carries many dated tasks and the
+        // resolver may call e-conomic for its Role-2 set.
+        var byCompany = new Dictionary<string, IReadOnlyList<SponsorRecipient>>(StringComparer.Ordinal);
+
+        var messages = new List<ReminderMessage>();
+        foreach (var t in tasks)
+        {
+            // §81: fires ON the due day, and once more on the next run if it was missed — never before.
+            if (t.DueDate.DayNumber - today.DayNumber > 0) continue;
+
+            var companyId = t.SponsorCompanyId!;
+            if (!byCompany.TryGetValue(companyId, out var coordinators))
+            {
+                coordinators = await _sponsorRecipients.ResolveAsync(eventId, companyId, ct);
+                byCompany[companyId] = coordinators;
+            }
+            if (coordinators.Count == 0) continue;   // nobody to chase — see the remarks
+
+            var state = t.DueDate.DayNumber == today.DayNumber ? "due today" : "overdue";
+            var taskOccasion = $"task:{t.Id}";
+
+            foreach (var c in coordinators)
+            {
+                // §707.11 — the address is part of the ROOT and the date stays the last segment;
+                // putting the date first would make every day a new root and the cadence would
+                // never hold anyone back.
+                var cOccasion = $"{taskOccasion}:{c.Email}";
+                var cLastSent = lastSentByOccasion.TryGetValue(cOccasion, out var ls)
+                    ? ls : (DateOnly?)null;
+                if (!EmailReminderCadenceService.IsDue(
+                        today, t.DueDate, cLastSent, intervalDays, firstSendAtAnchor: true))
+                {
+                    continue;
+                }
+
+                var tokens = _templates.NewTokenSet(c.ParticipantId);
+                tokens["firstName"] = c.FirstName;
+                tokens["communityName"] = communityName;
+                tokens["eventDisplayName"] = eventDisplayName;
+                tokens["taskTitle"] = t.Title;
+                tokens["dueDate"] = t.DueDate.ToString("d MMM yyyy");
+                tokens["state"] = state;
+                tokens["taskLink"] = "Open the hub to see and update this task.";
+                RoleContact.AddTo(tokens, ParticipantRole.Sponsor, placeholders, supportEmail);
+                var rendered = _templates.Render(TemplateName, tokens);
+
+                messages.Add(new ReminderMessage(
+                    RecipientEmail: c.Email,
+                    ReminderType: ReminderTypeName,
+                    OccasionKey: $"{cOccasion}:{today:yyyyMMdd}",
+                    Subject: rendered.Subject,
+                    HtmlBody: rendered.HtmlBody,
+                    DeliverToEmail: c.Email,
+                    Persona: persona,
+                    ParticipantId: c.ParticipantId,
+                    RecipientName: c.FullName,
+                    // §422: CcEmail is already the resolved alternate (see SponsorRecipient).
+                    Cc: c.CcEmail is null ? null : new[] { c.CcEmail },
+                    MailKey: TemplateName));
+            }
+        }
+
         return messages;
     }
 }

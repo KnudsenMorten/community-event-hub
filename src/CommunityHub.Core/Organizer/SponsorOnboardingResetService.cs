@@ -114,11 +114,16 @@ public sealed class SponsorOnboardingResetService
 
         if (resetOverview)
         {
-            // The auto-close signal is a NON-EMPTY CompanyDescription, so it has to go — flipping
-            // the task alone would last exactly until the next webshop pull.
+            // Clearing the description is what actually reopens this obligation — and since §1081
+            // that is the whole mechanism: the Get Started "company" step reads SponsorInfo directly,
+            // so emptying the field puts the step back to open on the sponsor's own wizard.
+            //
+            // 🔒 §1081 — the `initial-onboarding-of-sponsor` REOPEN KEY IS GONE. That task is retired
+            // (superseded by Get Started) and is never raised again, so re-opening it here would
+            // resurrect a row the retirement sweep closes on the next webshop pull — a reset that
+            // silently undoes itself, which is worse than not resetting at all.
             overviewCleared = !string.IsNullOrWhiteSpace(info.CompanyDescription);
             info.CompanyDescription = null;
-            reopenKeys.Add(prefix + "initial-onboarding-of-sponsor");
             parts.Add(overviewCleared
                 ? "company overview cleared"
                 : "company overview was already empty");

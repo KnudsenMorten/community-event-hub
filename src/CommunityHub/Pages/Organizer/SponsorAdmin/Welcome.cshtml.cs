@@ -80,6 +80,8 @@ public class WelcomeModel : PageModel
     /// </summary>
     public record CompanyRow(
         string CompanyId,
+        // §1223 — operator 2026-09-14, on a grid of bare ids: "this is also useless, as i need company name".
+        string CompanyName,
         int Coordinators,
         int SignerOnly,
         int WelcomeSent,
@@ -211,18 +213,16 @@ public class WelcomeModel : PageModel
             })
             .ToListAsync(ct);
 
-        // GATE 1 — the provisioning guard: a booth company (Gold+) is blocked until its
-        // SharePoint upload folders exist, so exhibitors never land on dead upload links.
-        var boothCompanies = (await _db.SponsorInfos
-                .Where(s => s.EventId == eventId && s.SponsorPackage >= SponsorPackage.Gold)
-                .Select(s => s.SponsorCompanyId)
-                .ToListAsync(ct))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var provisioned = (await _db.SponsorUploadLocations
-                .Where(l => l.EventId == eventId && l.EditLinkUrl != null && l.EditLinkUrl != "")
-                .Select(l => l.SponsorCompanyId)
-                .ToListAsync(ct))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // ⚰️ §1223 — GATE 1 (the SharePoint upload-folder guard) IS GONE FROM THIS MONITOR TOO.
+        // §816 deleted it from SponsorWelcomeEmailService ("DO NOT REINSTATE IT" — it waited for a
+        // row a retired mechanism wrote, and could never clear). This page kept evaluating it, so
+        // on 2026-09-14 it showed "Blocked — waiting for its SharePoint upload folder" beside
+        // "1 / 1 welcome sent" for three companies that HAD been welcomed. A monitor must apply the
+        // sender's gates, not ones the sender dropped.
+
+        // §1223 — the name the organizer recognises: the canonical public → legal chain.
+        var names = await Core.Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, sponsors.Select(s => s.SponsorCompanyId!).Distinct(StringComparer.OrdinalIgnoreCase), ct);
 
         // GATE 2 — the per-recipient ring, evaluated with the SAME rule WelcomeEmailService
         // uses, so this column can never disagree with what the job will actually do.
@@ -273,26 +273,18 @@ public class WelcomeModel : PageModel
             .GroupBy(p => p.SponsorCompanyId!)
             .Select(g => new CompanyRow(
                 CompanyId: g.Key,
+                CompanyName: names.TryGetValue(g.Key, out var n) && !string.IsNullOrWhiteSpace(n) ? n : g.Key,
                 // Coordinator = the audience (both-roles counts as a coordinator).
                 Coordinators: g.Count(p => p.IsEventCoordinator && p.IsActive),
                 // Signer-only = excluded from sponsor mail (informational column).
                 SignerOnly: g.Count(p => p.IsSigner && !p.IsEventCoordinator),
                 WelcomeSent: g.Count(p => p.IsEventCoordinator && p.IsActive
                                           && Welcomed(p.Id, p.Email)),
-                // §326cd: the old text said "run the sponsor pull first", which was wrong
-                // advice — the pull runs itself every 30 minutes and PROVISIONS the folder
-                // (SponsorOrderPullService → EnsureFolderWithEditLinkAsync). So this state is
-                // normally transient. It only STICKS when provisioning cannot succeed, which
-                // is the thing worth telling the operator.
-                BlockedReason: boothCompanies.Contains(g.Key) && !provisioned.Contains(g.Key)
-                    ? "Waiting for its SharePoint upload folder. The sponsor pull provisions this "
-                      + "automatically within ~30 minutes — no action needed. If it stays here, "
-                      + "SharePoint provisioning is failing or not configured (check the pull job log)."
-                    : null,
+                BlockedReason: null,   // §1223 — no sender gate left to report (see above)
                 OutOfRing: g.Count(p => p.IsEventCoordinator && p.IsActive
                                         && !Welcomed(p.Id, p.Email)
                                         && outOfRing.Contains(p.Id))))
-            .OrderBy(r => r.CompanyId, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(r => r.CompanyName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 }

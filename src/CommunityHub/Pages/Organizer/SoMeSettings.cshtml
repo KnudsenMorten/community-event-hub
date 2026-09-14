@@ -24,6 +24,56 @@
         width:100%; box-sizing:border-box; }
     .som-hint { color:#4b5563; font-size:13px; margin:2px 0 6px; }
     .som-check { display:flex; align-items:center; gap:8px; }
+
+    /* 🔴 §1191 — the announcement rules. One panel per category, laid out by GRID so nothing can
+       overlap the way the hand-built summary table did at narrow widths. */
+    .rule-sep { border:none; border-top:1px solid #e5e7eb; margin:30px 0 22px; }
+    .rule-h2 { margin:0 0 4px; font-size:19px; }
+    .rules { display:flex; flex-direction:column; gap:10px; margin:16px 0 8px; max-width:860px; }
+    .rule { border:1px solid #e5e7eb; border-radius:8px; background:#fff; padding:14px 16px; }
+    /* 🔴 §1196 — EVERY colour set explicitly, on a class the site cannot reach. The previous version
+       used a bare <header>, inherited the page chrome's dark navy fill, and rendered dark text on
+       it — unreadable. Background included: without one it is whatever an ancestor decides. */
+    .rule-head {
+        display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 12px;
+        padding:0 0 10px; border-bottom:1px solid #eef0f3; background:transparent;
+    }
+    .rule-head h3 { margin:0; font-size:15px; font-weight:600; color:#111827; background:transparent; }
+    .rule-no {
+        font:600 11px/1.6 ui-monospace,Consolas,monospace; letter-spacing:.04em;
+        color:#1d4ed8; background:#eef6ff; border-radius:4px; padding:1px 7px; white-space:nowrap;
+    }
+    /* Fixed-width tracks, so a long label wraps INSIDE its own column instead of pushing a
+       neighbour out of the panel — the overlap he reported. */
+    .rule-dates { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; }
+    .rule-dates > div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .rule-dates label { font-size:13px; font-weight:600; color:#374151; }
+    .rule-dates input[type=date] {
+        width:100%; box-sizing:border-box; padding:6px 8px; font-size:14px;
+        border:1px solid #d1d5db; border-radius:6px; background:#fff; color:#111827;
+    }
+    .rule-dates input[type=date]:focus { outline:2px solid #008BD2; outline-offset:1px; border-color:#008BD2; }
+    .rule-fallback { font-size:12px; color:#6b7280; }
+    .rule-warn {
+        margin:10px 0 0; font-size:12.5px; color:#92400e;
+        background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:6px 9px;
+    }
+    .rule-on { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:12.5px;
+               font-weight:600; color:#374151; }
+    .rule-on input { margin:0; }
+    .rule-rounds { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px;
+                   padding-top:10px; border-top:1px dashed #e5e7eb; }
+    .rule-count { font-size:12.5px; color:#374151; }
+    /* §1202 — live state, set explicitly so no site rule can make it unreadable (§1196). */
+    .aa-state { margin:6px 0 12px; padding:8px 12px; border-radius:6px; font-size:13px;
+                max-width:760px; line-height:1.55; }
+    .aa-on  { background:#e6f2eb; border:1px solid #a7d3bb; color:#1d5b41; }
+    .aa-off { background:#f3f4f6; border:1px solid #d1d5db; color:#374151; }
+    .aa-blockers { margin:0 0 14px; max-width:760px; font-size:13px; }
+    .aa-blockers summary { cursor:pointer; font-weight:600; color:#374151; }
+    .aa-blockers ul { margin:8px 0 0 18px; padding:0; color:#374151; line-height:1.6; }
+    .rule-rounds .btn-secondary { font-size:12px; padding:4px 10px; }
+    @@media (max-width:420px) { .rule-dates { grid-template-columns:1fr; } }
 </style>
 
 @if (Model.Message is not null)
@@ -85,6 +135,72 @@
            explanation lives on the Post planner page; this is the short version at the switch,
            because that is where someone decides. *@
         <h3 style="margin-top:18px;">Auto-approval</h3>
+
+        @* 🔴 §1202 — WHAT IT IS DOING, not just what it is set to. Operator 2026-09-12: *"i dont
+           belive we use this anymore"* about a control that was ticked, running every ten minutes,
+           and had approved the very posts he complained about that morning — then, an hour later,
+           *"do we use it ?"*.
+           🔑 A checkbox states what is CONFIGURED and never what is HAPPENING. Answering his question
+           needed the job logs, which is not a trip an operator should have to make. *@
+        <p class="aa-state @(Model.AutoApproveEnabled ? "aa-on" : "aa-off")" role="status">
+            @if (Model.AutoApproveEnabled)
+            {
+                <strong>On.</strong>
+                @if (Model.AutoApproveLastRunAt is { } ran)
+                {
+                    <text>
+                        Last ran @CommunityHub.Core.Integrations.SoMeDisplayTime.DateTime(ran).
+                    </text>
+                }
+                else
+                {
+                    <text>It has not run yet in this edition.</text>
+                }
+                <text>
+                    Right now <strong>@Model.AutoApproveEligible</strong> post(s) would be approved and
+                    <strong>@Model.AutoApproveBlocked</strong> are held back by something missing.
+                </text>
+                @if (Model.AutoApproveEligible == 0 && Model.AutoApproveBlocked > 0)
+                {
+                    <text>
+                        Nothing is being approved at the moment — every candidate is waiting on
+                        something.
+                    </text>
+                }
+            }
+            else
+            {
+                <strong>Off.</strong>
+                <text>
+                    Every post waits for you. @Model.AutoApproveEligible post(s) would be approved if
+                    you switched it on.
+                </text>
+            }
+        </p>
+
+        @* 🔴 §1204 — WHAT the held-back posts are waiting on. Operator 2026-09-12: *"what are these
+           19 hold back ?"* — a question the system could not answer: §918 logs "19 waiting on a
+           missing dependency", which is a count of a problem rather than the problem. §854 settled
+           that: he has to chase these people, and "19 posts" is not chaseable.
+           🔑 Grouped, because twelve posts blocked on one sponsor's logo is ONE thing to do. *@
+        @if (Model.AutoApproveBlockers.Count > 0)
+        {
+            <details class="aa-blockers">
+                <summary>What the @Model.AutoApproveBlocked held-back post(s) are waiting on</summary>
+                <ul>
+                    @foreach (var (reason, count) in Model.AutoApproveBlockers)
+                    {
+                        <li><strong>@count ×</strong> @reason</li>
+                    }
+                </ul>
+                <p class="som-hint" style="margin:6px 0 0;">
+                    Each post shows its own reason in the
+                    <a asp-page="/Organizer/SoMeQueue">queue</a>. Clear the dependency and the post
+                    becomes approvable on the next tick — nothing needs re-planning.
+                </p>
+            </details>
+        }
+
         <div class="som-check">
             <input type="checkbox" id="autoapprove" name="AutoApproveEnabled" value="true" @(Model.AutoApproveEnabled ? "checked" : "") />
             <label for="autoapprove">Approve template-built posts automatically</label>
@@ -128,74 +244,168 @@
             </p>
         }
 
-        @* §928 — the two dates that decide WHEN a category is announced. They were previously
-           invisible: SpeakerAnnouncementFrom was set straight on the database and could only be
-           read there, which §925.1 called out as load-bearing and unprotectable. *@
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:26px 0;" />
-        <h2 style="margin-bottom:4px;">Announcement windows</h2>
-        <p class="som-hint" style="margin-top:0;">
-            When each part of the campaign is allowed to start. Leave a date empty to spread that
-            category evenly across the whole run-up like everything else.
+        @* 🔴 §1195 — THE RULES, DRIVEN BY THE CATEGORY TABLE.
+           Operator 2026-09-12: *"where is the button to add a round if needed"* · *"when a some post
+           has more rounds, it should be added into the planner and planned"* · *"basically we define
+           the rules like start date, end date, cadence inside the some settings and the some planner
+           must recalculate if they are changed"*.
+
+           🔑 Rendered from the RULES, not from a hand-written panel per category — which is why
+           "add a round" can exist at all: the round count is data, the planner reads the same data,
+           and a round added here is planned on the next run with nothing else to change. *@
+        <hr class="rule-sep" />
+        <h2 class="rule-h2">Announcement rules</h2>
+        <p class="som-hint" style="margin-top:0;max-width:64ch;">
+            Rounds, start dates and an end date per category. A blank round date spreads that round;
+            a blank end date means the event. A date only ever <strong>delays</strong> a post —
+            readiness rules still apply on top.
         </p>
 
-        @* §925.2 — the fact the track settle signal was missing. *@
-        <label for="cfscloses">Call for Speakers closes</label>
-        <input type="date" id="cfscloses" name="CallForSpeakersClosesOn"
-               value="@(Model.CallForSpeakersClosesOn?.ToString("yyyy-MM-dd"))" />
-        <p class="som-hint">
-            A track is only announced once its line-up has stopped growing — but a track that is
-            still <em>empty</em> looks exactly like one that is <em>finished</em>. This date tells
-            them apart: nothing counts as settled until the Call for Speakers has closed and the
-            sessions have actually arrived. After that the data takes over, so if the intake runs
-            late the announcements move with it on their own.
-        </p>
-        @if (Model.CallForSpeakersClosesOn is null)
-        {
-            <p class="muted" style="margin-top:-4px;">
-                Empty — track readiness then relies on session arrivals alone, which reads a track
-                that has not received its sessions yet as one that has finished receiving them.
-            </p>
-        }
+        <div class="rules">
+            @for (var i = 0; i < Model.Rules.Count; i++)
+            {
+                var rule = Model.Rules[i];
+                var isEventPosts = rule.Category == SoMeAnnouncementCategory.EventPosts;
 
-        <label for="speakerfrom">Speaker posts (tracks and sessions) not before</label>
-        <input type="date" id="speakerfrom" name="SpeakerAnnouncementFrom"
-               value="@(Model.SpeakerAnnouncementFrom?.ToString("yyyy-MM-dd"))" />
-        <p class="som-hint">
-            Your Call for Speakers deadline plus the week you spend selecting. A track post lists
-            that track's speakers, so publishing before this date announces a line-up that does not
-            exist yet — and a published post can never pick anyone up afterwards.
-        </p>
-        @if (Model.SpeakerAnnouncementFrom is null)
-        {
-            @* 🔴 §925.1 — this is not a tidy-up prompt. The settle signal cannot yet tell a track
-               that has FINISHED from one that has not STARTED, so with this cleared every track
-               reads as ready and all eight go out at once. *@
-            <p class="error" role="alert" style="font-size:13.5px;margin-top:-4px;">
-                Empty — so every speaker track can be announced <strong>immediately</strong>. Each
-                track currently holds only its confirmed master classes, so those posts would name a
-                handful of speakers out of the full programme. Set this date unless you mean it.
-            </p>
-        }
+                <section class="rule" data-rule="@i">
+                    <input type="hidden" name="Rules[@i].Category" value="@((int)rule.Category)" />
 
-        <label for="mcfrom">Master class announcements start</label>
-        <input type="date" id="mcfrom" name="MasterClassAnnouncementFrom"
-               value="@(Model.MasterClassAnnouncementFrom?.ToString("yyyy-MM-dd"))" />
-        <p class="som-hint">
-            The master classes go out <strong>together</strong> from this day, filling forward at
-            your normal posts-per-day, instead of being spread across the months to the event.
-            Empty = spread them like any other session.
-        </p>
-        @if (Model.MasterClassAnnouncementFrom is not null && Model.MasterClassTitles.Count > 0)
-        {
-            @* ⚠️ Said plainly: this is the one setting that moves posts you have already approved. *@
-            <p class="muted" style="margin-top:-4px;">
-                Covers <strong>@Model.MasterClassTitles.Count</strong> master class(es):
-                @string.Join(" · ", Model.MasterClassTitles).
-                Saving moves their posts — <strong>including ones you have already approved</strong>
-                — into this window on the next scheduler run. Only the date changes; the wording and
-                the approval stay as they are.
-            </p>
-        }
+                    @* 🔴 §1196 — a DIV, not a <header>. Operator 2026-09-12: *"noboddy can ead this"* —
+                       the site stylesheet paints bare <header> elements dark navy for the page
+                       chrome, so this panel's dark text landed on a dark ground and the category
+                       name and "Announce" were invisible. Styling by element name means inheriting
+                       whatever the rest of the site does to that element; the class cannot collide. *@
+                    <div class="rule-head">
+                        <span class="rule-no">@rule.Label.Split(" — ")[0]</span>
+                        <h3>@rule.Label.Split(" — ").Last()</h3>
+                        <label class="rule-on">
+                            <input type="checkbox" name="Rules[@i].Enabled" value="true"
+                                   @(rule.Enabled ? "checked" : "") />
+                            <span>Announce</span>
+                        </label>
+                        <input type="hidden" name="Rules[@i].Enabled" value="false" />
+                    </div>
+
+                    @if (isEventPosts)
+                    {
+                        @* ⚠️ Type 5's dates come from the deck (§834.4) and are used as written, so a
+                           round count and start dates would be controls that decide nothing. Only the
+                           cut-off is real. *@
+                        <input type="hidden" name="Rules[@i].Rounds" value="1" />
+                        <div class="rule-dates">
+                            <div>
+                                <label for="end-@i">Last day one may run</label>
+                                <input type="date" id="end-@i" name="Rules[@i].EndsOn"
+                                       lang="da-DK" value="@(rule.EndsOn?.ToString("yyyy-MM-dd"))" />
+                                <span class="rule-fallback">Empty = 8 days before the event</span>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="rule-dates" data-rounds>
+                            @for (var r = 0; r < rule.RoundStarts.Count; r++)
+                            {
+                                <div data-round>
+                                    <label for="r-@i-@r">Round @(r + 1) from</label>
+                                    <input type="date" id="r-@i-@r" name="Rules[@i].RoundStarts[@r]"
+                                           lang="da-DK" value="@(rule.RoundStarts[r]?.ToString("yyyy-MM-dd"))" />
+                                    <span class="rule-fallback">
+                                        @(r == 0 ? "Empty = when each is ready" : "Empty = spread")
+                                    </span>
+                                </div>
+                            }
+                            <div>
+                                <label for="end-@i">Last round no later than</label>
+                                <input type="date" id="end-@i" name="Rules[@i].EndsOn"
+                                       lang="da-DK" value="@(rule.EndsOn?.ToString("yyyy-MM-dd"))" />
+                                <span class="rule-fallback">Empty = the event</span>
+                            </div>
+                        </div>
+
+                        @* ⚠️ §1198 — NO SUMMARY LINE HERE. I added one to make a missing date visible
+                           and it restated the boxes directly above it, down to printing the round
+                           count a second time — operator: *"why show it twice"*. The boxes already
+                           show the dates; a second rendering of the same facts is noise, and noise is
+                           what made this page unreadable in the first place. *@
+                        <div class="rule-rounds">
+                            <input type="hidden" name="Rules[@i].Rounds" value="@rule.Rounds" data-count />
+                            <span class="rule-count"><strong data-countlabel>@rule.Rounds</strong> round(s)</span>
+                            <button type="button" class="btn-secondary rule-add"
+                                    data-add="@i" data-next="@rule.RoundStarts.Count">+ Add a round</button>
+                            @if (rule.Rounds > 1)
+                            {
+                                <button type="button" class="btn-secondary rule-del" data-del="@i">Remove last</button>
+                            }
+                            <span class="rule-fallback">Saving plans the new round on the next run.</span>
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+
+        @* 🔑 §1195 — "add a round" adds a DATE BOX and raises the count in the same click. It has to
+           do both: the count is what the planner reads, and the box is the only way to date it.
+           ⚠️ Plain DOM, no framework — the page posts a normal form, and a round added here is a
+           real input that arrives with it. *@
+        <script>
+            (function () {
+                document.querySelectorAll('.rule').forEach(function (section) {
+                    var count = section.querySelector('[data-count]');
+                    var label = section.querySelector('[data-countlabel]');
+                    var list = section.querySelector('[data-rounds]');
+                    var add = section.querySelector('.rule-add');
+                    var del = section.querySelector('.rule-del');
+                    if (!count || !list || !add) return;
+
+                    var index = section.getAttribute('data-rule');
+
+                    function sync() {
+                        var n = list.querySelectorAll('[data-round]').length;
+                        count.value = n;
+                        if (label) { label.textContent = n; }
+                        if (del) { del.hidden = n <= 1; }
+                    }
+
+                    add.addEventListener('click', function () {
+                        var n = list.querySelectorAll('[data-round]').length;
+                        var wrap = document.createElement('div');
+                        wrap.setAttribute('data-round', '');
+                        var id = 'r-' + index + '-' + n;
+
+                        var lbl = document.createElement('label');
+                        lbl.setAttribute('for', id);
+                        lbl.textContent = 'Round ' + (n + 1) + ' from';
+
+                        var input = document.createElement('input');
+                        input.type = 'date';
+                        input.id = id;
+                        input.name = 'Rules[' + index + '].RoundStarts[' + n + ']';
+
+                        var hint = document.createElement('span');
+                        hint.className = 'rule-fallback';
+                        hint.textContent = 'Empty = spread';
+
+                        wrap.appendChild(lbl); wrap.appendChild(input); wrap.appendChild(hint);
+                        // Before the end-date box, so the rounds stay in order and the end stays last.
+                        list.insertBefore(wrap, list.lastElementChild);
+                        sync();
+                        input.focus();
+                    });
+
+                    if (del) {
+                        del.addEventListener('click', function () {
+                            var rounds = list.querySelectorAll('[data-round]');
+                            if (rounds.length <= 1) return;
+                            rounds[rounds.length - 1].remove();
+                            sync();
+                        });
+                    }
+
+                    sync();
+                });
+            })();
+        </script>
 
         <label for="notifylist">Publish notification email list</label>
         <textarea id="notifylist" name="NotificationEmails" rows="3"

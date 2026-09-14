@@ -1,11 +1,11 @@
 @page
 @model CommunityHub.Pages.Organizer.SponsorAdmin.DashboardModel
 @{
-    ViewData["Title"] = "Sponsor status dashboard";
+    ViewData["Title"] = "Sponsor maintenance";
 }
 
 <div class="card">
-    <h1>Sponsor status dashboard</h1>
+    <h1>Sponsor maintenance</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">This area is for organizers only.</p>
@@ -13,8 +13,19 @@
     }
     else
     {
-        @* §784.6 — "and lead volume" removed with the columns it described. *@
-        <p>Per-sponsor view of task completion. Sorted by overdue tasks first.</p>
+        @* 🔴 §1085 — the per-company STATUS TABLE is gone; status lives in one place for every role
+           now. The link is not a courtesy: the operator asked for the second board to be retired
+           precisely because two of them disagreed, and a retired page with no forwarding address is
+           how somebody ends up trusting a bookmark to a board that no longer exists. *@
+        <p>The sponsor maintenance actions — contact sync, coordinator migration, Zoho provisioning
+           and the ERP&nbsp;&rarr;&nbsp;webshop reconcile.</p>
+        <p style="font-size:13.5px;color:#555;">
+            Looking for sponsor <strong>status</strong>? It moved to
+            <a asp-page="/Organizer/ParticipantStatus" asp-route-role="@ParticipantRole.Sponsor">Participant status</a>,
+            one board for every role — completion per company, what is still open, and overdue tasks.
+            Stage-by-stage detail stays on
+            <a asp-page="/Organizer/SponsorDeliverables">Sponsor deliverables</a>.
+        </p>
         <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
 
         @if (!string.IsNullOrEmpty(Model.ActionMessage))
@@ -29,10 +40,10 @@
                 then re-sync every sponsor record to Zoho Backstage. This also corrects the older UTF-8 mojibake (æ/ø/å) in Zoho.
             </p>
             <form method="post" asp-page-handler="MigrateResync" style="display:inline;margin:0;">
-                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.Rows.Count">Migrate coordinators &amp; re-sync all to Event System (Zoho)</button>
+                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.CompanyCount">Migrate coordinators &amp; re-sync all to Event System (Zoho)</button>
             </form>
             <form method="post" asp-page-handler="Provision" style="display:inline;margin:0 0 0 8px;">
-                <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.Rows.Count">Create / link missing in Event System (Zoho)</button>
+                <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.CompanyCount">Create / link missing in Event System (Zoho)</button>
             </form>
             <form method="post" asp-page-handler="ReconcileErp" style="display:inline;margin:0 0 0 8px;">
                 <button type="submit" data-ceh-confirm="confirmReconcileErp">Reconcile ERP → webshop (users + defaults)</button>
@@ -42,6 +53,37 @@
                waiting for the scheduled pull. Idempotent — pressing it twice changes nothing. *@
             <form method="post" asp-page-handler="SyncContacts" style="display:inline;margin:0 0 0 8px;">
                 <button type="submit">Sync contacts webshop → hub (now)</button>
+            </form>
+            @* §1158 — the one-time public-name sweep. PREVIEW is a separate, unconfirmed button on
+               purpose: it writes nothing, so making him confirm it would train him to click through
+               the confirmation that actually matters. *@
+            <form method="post" asp-page-handler="NormalizePublicNames" style="display:inline;margin:0 0 0 8px;">
+                <input type="hidden" name="apply" value="false" />
+                <button type="submit">Preview public-name cleanup (A/S, ApS, GmbH &hellip;)</button>
+            </form>
+
+            @* §1173 — when a sponsor re-registers under a new VAT number it becomes a NEW company:
+               new contract, new ERP customer, new webshop company. The contract belongs to the legal
+               entity, but the logo and description belong to the organisation — so they are carried
+               forward rather than asked for a second time. *@
+            <div style="margin-top:12px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+                <strong style="font-size:13.5px;">Company re-registered under a new legal entity?</strong>
+                <p style="margin:4px 0 8px;font-size:12.5px;color:#6b7280;">
+                    Carries logo, descriptions, website, LinkedIn and coordinator from the old company
+                    to the new one. Never copies Zoho ids, ERP links or anything the orders decide, and
+                    only fills fields that are still empty. The new company needs its first completed
+                    order before it has a record to copy into.
+                </p>
+                <form method="post" asp-page-handler="CarryForward" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0;">
+                    <input type="text" name="fromCompanyId" placeholder="From company id" required style="width:140px;" />
+                    <input type="text" name="toCompanyId" placeholder="To company id" required style="width:140px;" />
+                    <button type="submit" name="apply" value="false">Preview</button>
+                    <button type="submit" name="apply" value="true" data-ceh-confirm="confirmCarryForward">Carry it forward</button>
+                </form>
+            </div>
+            <form method="post" asp-page-handler="NormalizePublicNames" style="display:inline;margin:0 0 0 8px;">
+                <input type="hidden" name="apply" value="true" />
+                <button type="submit" data-ceh-confirm="confirmNormalizeNames">Apply public-name cleanup</button>
             </form>
             <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
                 <strong>Create / link</strong> provisions sponsors/exhibitors that don't exist in Zoho yet (replaces the legacy sync script — also runs automatically after each order pull when enabled).
@@ -53,7 +95,7 @@
             Body: "This creates or links {count} sponsor compan(ies) in Zoho Backstage from webshop data. Existing/linked companies are left unchanged. Continue?",
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel",
-            DefaultCount: Model.Rows.Count.ToString())' />
+            DefaultCount: Model.CompanyCount.ToString())' />
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmReconcileErp",
             Title: "Reconcile ERP to webshop?",
@@ -61,12 +103,24 @@
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel")' />
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmCarryForward",
+            Title: "Carry the sponsor profile forward?",
+            Body: "This copies logo, descriptions, website, LinkedIn and coordinator from the old company to the new one, filling only fields that are still empty. The old company is left untouched, and nothing that the orders decide is copied. Continue?",
+            ConfirmLabel: "Carry it forward",
+            CancelLabel: "Cancel")' />
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmNormalizeNames",
+            Title: "Remove legal forms from public names?",
+            Body: "This rewrites the PUBLIC company name in the webshop for every sponsor whose name ends in a legal form (A/S, ApS, GmbH, LLC, K/S, AG …), so the audience-facing name reads like a brand. The billing/legal name is NOT touched. Sponsors can edit their public name afterwards and this will not run again on its own. Preview it first if you have not. Continue?",
+            ConfirmLabel: "Rewrite the names",
+            CancelLabel: "Cancel")' />
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmMigrateResync",
             Title: "Migrate coordinators & re-sync to Zoho?",
             Body: "This fills missing Event Coordinators from the webshop and re-syncs {count} sponsor compan(ies) to Zoho Backstage, overwriting the synced fields there. Continue?",
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel",
-            DefaultCount: Model.Rows.Count.ToString())' />
+            DefaultCount: Model.CompanyCount.ToString())' />
 
         @* 🗑 §784.3/§784.6 — the "Zoho pipeline not yet configured" notice is GONE.
            Operator 2026-08-03: it *"seems wrong"* — and it was. It described Zoho OAuth as unwired
@@ -77,43 +131,9 @@
     }
 </div>
 
-@if (!Model.AccessDenied)
-{
-    <div class="card">
-        <h2>Sponsors (@Model.Rows.Count)</h2>
-        @if (Model.Rows.Count == 0)
-        {
-            <p class="info">No sponsor companies have participants with tasks yet.</p>
-        }
-        else
-        {
-            <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;min-width:640px;">
-                @* §784.3 — "Tasks done / Total tasks" collapse into ONE "3/10" cell. His words:
-                   "it is obvious that 3 is completed and 10 is total". Two right-aligned integer
-                   columns made the reader do the pairing; the fraction states the relationship.
-                   🗑 §784.6 — the Leads / Leads 7d columns are REMOVED: "this feature is turned off
-                   in settings", so both were columns of zeroes that implied a pipeline was running
-                   and empty rather than switched off. *@
-                <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>Company</th>
-                    <th style="text-align:right;">Contacts</th>
-                    <th style="text-align:right;">Tasks</th>
-                    <th style="text-align:right;">Overdue</th>
-                    <th>Last Zoho sync</th>
-                </tr>
-                @foreach (var r in Model.Rows)
-                {
-                    <tr style="border-bottom:1px solid #eee; @(r.TasksOverdue > 0 ? "background:#fff5f5;" : "")">
-                        <td>@r.CompanyName <span style="color:#9aa0aa;font-size:12px;">#@r.CompanyId</span></td>
-                        <td style="text-align:right;">@r.Contacts</td>
-                        <td style="text-align:right;" title="@r.TasksDone of @r.TasksTotal tasks completed">@r.TasksDone/@r.TasksTotal</td>
-                        <td style="text-align:right;@(r.TasksOverdue > 0 ? "color:#c0392b;font-weight:700;" : "")">@r.TasksOverdue</td>
-                        <td>@(r.LastZohoSync?.ToString("u") ?? "-")</td>
-                    </tr>
-                }
-            </table>
-            </div>
-        }
-    </div>
-}
+@* 🗑 §1085 — THE PER-COMPANY STATUS TABLE WAS HERE (company · contacts · tasks done/total ·
+   overdue · last Zoho sync), plus the "+N former sponsors hidden" line that explained its
+   omissions. Both are retired: status is now ONE board for every role at /Organizer/ParticipantStatus,
+   which reads each participant's WIZARD rather than counting tasks a second way. Counting them a
+   second way is exactly what let this page and the deliverables board disagree — the reason the
+   operator said he trusted neither. The four maintenance actions above are what this page is now. *@

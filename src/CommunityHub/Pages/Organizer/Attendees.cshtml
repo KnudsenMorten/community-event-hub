@@ -76,18 +76,24 @@
             <label for="Ticket">Ticket</label>
             <select id="Ticket" name="Ticket">
                 <option value="">All</option>
+                @* §1077 (operator 2026-08-11: "shows 1-day tickets as 'other'" / "prints the raw
+                   enum names") — the OPTION TEXT is the label ("2-day" / "1-day" / "No ticket");
+                   the VALUE stays the enum name so the `Ticket=` query key and saved links are
+                   unchanged. Picking "1-day" here filters on `Other`, as it always did. *@
                 @foreach (var t in Enum.GetValues<TicketStatus>())
                 {
-                    <option value="@t" selected="@(Model.Ticket == t.ToString())">@t</option>
+                    <option value="@t" selected="@(Model.Ticket == t.ToString())">@t.Label()</option>
                 }
             </select>
 
             <label for="Booking">Master Class booking</label>
             <select id="Booking" name="Booking">
                 <option value="">All</option>
+                @* §1077 — option TEXT is the label, VALUE stays the enum name so saved
+                   `?Booking=NotBooked` links keep working (the same rule as the ticket filter). *@
                 @foreach (var b in Enum.GetValues<MasterClassBookingStatus>())
                 {
-                    <option value="@b" selected="@(Model.Booking == b.ToString())">@b</option>
+                    <option value="@b" selected="@(Model.Booking == b.ToString())">@b.Label()</option>
                 }
             </select>
 
@@ -141,6 +147,16 @@
                                asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
                                asp-route-Sort="email" asp-route-Desc="@Model.NextDescFor("email")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Email"]@Model.SortIndicator("email")</a>
                         </th>
+                        @* §1065 — COMPANY, next to the person it belongs to. Operator 2026-08-11:
+                           *"this page must include company name for attendees"*. Placed after Email
+                           because "who is this and where are they from" is one thought, and it is
+                           what an organizer is holding when a sponsor asks about their people. *@
+                        <th scope="col" aria-sort="@Model.AriaSort("company")">
+                            <a asp-page="/Organizer/Attendees"
+                               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                               asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@Model.SortIndicator("company")</a>
+                        </th>
                         <th scope="col" aria-sort="@Model.AriaSort("ticket")">
                             <a asp-page="/Organizer/Attendees"
                                asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
@@ -160,14 +176,20 @@
                         <tr style="border-bottom:1px solid #eee;@(a.HasReconciliationMismatch ? "background:#fffdf3;" : "")">
                             <td>@a.FirstName @a.LastName</td>
                             <td style="word-break:break-all;">@a.Email</td>
+                            @* §1065 — an em dash rather than an empty cell: blank reads as a
+                               rendering fault, "—" reads as "Zoho sent no company for this one". *@
+                            <td>@(string.IsNullOrWhiteSpace(a.CompanyName) ? "—" : a.CompanyName)</td>
                             @* §380 (operator 2026-07-26: "remove the word TwoDay - just show the
                                ticket in no parantes"). The cell read "TwoDay (2-day ticket incl.
                                Master Class)" — the raw enum name followed by the real ticket name in
                                brackets, i.e. the same fact twice, once in developer spelling. Show
                                the ticket's OWN name; fall back to the enum only when Zoho sent no
                                class name, so the column is never blank. *@
-                            <td>@(string.IsNullOrWhiteSpace(a.TicketClassName) ? a.TicketStatus.ToString() : a.TicketClassName)</td>
-                            <td>@a.BookingStatus</td>
+                            @* §1077: the fallback is the LABEL, not the enum name — "1-day"
+                               rather than "Other", matching the 1-day summary tile above. *@
+                            <td>@(string.IsNullOrWhiteSpace(a.TicketClassName) ? a.TicketStatus.Label() : a.TicketClassName)</td>
+                            @* §1077 — the label, for the same reason as the ticket column beside it. *@
+                            <td>@a.BookingStatus.Label()</td>
                             <td>@a.MasterClassName</td>
                             <td>
                                 @if (a.HasReconciliationMismatch)

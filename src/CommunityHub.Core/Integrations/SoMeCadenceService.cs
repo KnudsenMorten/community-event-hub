@@ -32,7 +32,10 @@ public sealed class SoMeCadenceService
     /// <summary>§824.1's shipped counts — what applies until he changes one.</summary>
     public static int DefaultOccurrences(SoMeTemplateKind kind) => kind switch
     {
-        SoMeTemplateKind.SpeakerTracks => 2,
+        // §1185 — operator 2026-09-12: *"speaker tracks must have 3 rounds in the some post"*.
+        // ⚠️ Only the DEFAULT: `Times()` reads a saved cadence row first, so an edition whose
+        // posting-frequency page says 2 keeps 2 and its round-3 date governs nothing.
+        SoMeTemplateKind.SpeakerTracks => 3,
         SoMeTemplateKind.Session => 1,
         SoMeTemplateKind.SponsorCategory => 2,
         SoMeTemplateKind.Sponsor => 2,

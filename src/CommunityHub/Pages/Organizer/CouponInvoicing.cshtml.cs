@@ -38,6 +38,87 @@ public class CouponInvoicingModel : PageModel
     private readonly TimeProvider _clock;
     private readonly IEconomicContactAdminClient? _economic;
     private readonly IEconomicInvoiceClient? _invoices;
+    private readonly CouponCustomerMonitorProvisioner? _monitorProvisioner;
+
+    /// <summary>
+    /// §1093 — the customer's real name for the monitor label, or null to fall back to the number.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Returns null when the customer list has not been loaded on this request (the save path
+    /// does not always load it). That is deliberate: a monitor named "customer 1234" that EXISTS is
+    /// worth more than a prettier one that does not, and the organizer can rename it.
+    /// </remarks>
+    private string? CustomerNameOrNull(int customerNumber) =>
+        Customers.FirstOrDefault(c => c.CustomerNumber == customerNumber)?.Name;
+
+    /// <summary>
+    /// §1116 — the customer as a PERSON reads them: the name, with the number in brackets.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-21: *"it was the same with customer id - noboddy knows a 13 digit customer
+    /// id - use names"*. The number stays because it is what he SEARCHES on in e-conomic; it is just
+    /// not the identity. Falls back to the bare number only when the page's customer list has not
+    /// been loaded — a number is still better than nothing at all.
+    /// </remarks>
+    public string CustomerLabel(int customerNumber)
+    {
+        var name = CustomerNameOrNull(customerNumber);
+        var no = customerNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return string.IsNullOrWhiteSpace(name) ? no : $"{name} ({no})";
+    }
+
+    /// <summary>
+    /// §1109 — the customer's name for a mail, falling back to e-conomic when the page's list has
+    /// not been loaded on this request.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <c>Customers</c> is filled by <c>LoadAsync</c>, and the POST handlers that send these mails
+    /// do not all call it — so relying on the list alone would put the NAME in the mail only when he
+    /// happened to arrive by a path that had loaded it. The same asymmetry that nearly shipped in
+    /// §1093b: a value read from request-scoped state is only as good as the handler that filled it.
+    /// <para>⚠️ Fail-soft: a name is a nicety, and the mail is still useful with the number alone.</para>
+    /// </remarks>
+    private async Task<string?> CustomerNameForMailAsync(int? customerNumber, CancellationToken ct)
+    {
+        if (customerNumber is not > 0) return null;
+
+        var known = CustomerNameOrNull(customerNumber.Value);
+        if (!string.IsNullOrWhiteSpace(known)) return known;
+
+        if (_invoices is null) return null;
+        try { return (await _invoices.GetCustomerAsync(customerNumber.Value, ct))?.Name; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// §1093 — the live monitor URL for a billing customer, or null when there is none.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Queries the database rather than reading <see cref="MonitorLinkByCustomer"/>, so it gives
+    /// the same answer in EVERY handler. The dictionary is only populated by <c>LoadAsync</c>, and
+    /// the send handler does not call it — a preview showing a link that the sent mail omitted would
+    /// mean approving a body that is not what went out.
+    /// <para>⚠️ Revoked monitors excluded: a withdrawn link must not be mailed to a partner.</para>
+    /// </remarks>
+    private async Task<string?> MonitorUrlForAsync(
+        int eventId, int? customerNumber, CancellationToken ct)
+    {
+        if (customerNumber is not > 0) return null;
+
+        var value = customerNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var token = await _db.AttendeeMonitors
+            .AsNoTracking()
+            .Where(m => m.EventId == eventId
+                        && m.Kind == AttendeeMonitorKind.ErpCustomer
+                        && m.Value == value
+                        && m.RevokedAt == null)
+            .Select(m => m.Token)
+            .FirstOrDefaultAsync(ct);
+
+        return string.IsNullOrEmpty(token)
+            ? null
+            : $"{Request.Scheme}://{Request.Host}/monitor/{token}";
+    }
 
     public CouponInvoicingModel(
         ICurrentParticipantAccessor participant, CommunityHubDbContext db, TimeProvider clock,
@@ -61,12 +142,26 @@ public class CouponInvoicingModel : PageModel
         // edition config that supplies the ticket base URL.
         CommunityHub.Core.Email.IEmailSender? emailSender = null,
         CommunityHub.Core.Email.IEmailContextAccessor? emailContext = null,
-        CommunityHub.Core.Config.EventEditionConfig? editionConfig = null,
+        // 🔴 §1110 — the LOADER and its path, not a bare EventEditionConfig.
+        //
+        // This used to take `EventEditionConfig? editionConfig = null`, a type NOTHING registers —
+        // only the loader is in DI. So the optional parameter silently defaulted to null on every
+        // request, `ticketBaseUrl` fell to "", and the claim invite mailed partners the bare
+        // fragment `#/buyTickets?promoCode=…`, which resolves against whatever page they are on.
+        CommunityHub.Core.Config.EventEditionConfigLoader? editionConfigLoader = null,
+        CommunityHub.Core.Config.EventConfigOptions? eventConfigOptions = null,
+        // The DB override layer, so a TicketUrl changed in /Organizer/Settings/Config reaches the
+        // mail too rather than only the shipped default.
+        CommunityHub.Core.Config.ConfigOverrideStore? configOverrides = null,
         // 🔴 §1019 — Backstage's own ticket-class list, so a class can be NAMED before anybody has
         // bought one. Optional: with no Zoho wiring the page falls back to the attendee/claim
         // mirrors exactly as before.
-        CommunityHub.Core.Integrations.ZohoClient? zoho = null)
+        CommunityHub.Core.Integrations.ZohoClient? zoho = null,
+        // §1093 — one monitor link per billing customer. Optional like the rest, so every existing
+        // test that constructs this page keeps compiling.
+        CouponCustomerMonitorProvisioner? monitorProvisioner = null)
     {
+        _monitorProvisioner = monitorProvisioner;
         _participant = participant;
         _db = db;
         _clock = clock;
@@ -80,7 +175,9 @@ public class CouponInvoicingModel : PageModel
         _draftNotices = draftNotices;
         _emailSender = emailSender;
         _emailContext = emailContext;
-        _editionConfig = editionConfig;
+        _editionConfigLoader = editionConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+        _configOverrides = configOverrides;
         _zoho = zoho;
     }
 
@@ -88,7 +185,43 @@ public class CouponInvoicingModel : PageModel
 
     private readonly CommunityHub.Core.Email.IEmailSender? _emailSender;
     private readonly CommunityHub.Core.Email.IEmailContextAccessor? _emailContext;
-    private readonly CommunityHub.Core.Config.EventEditionConfig? _editionConfig;
+    private readonly CommunityHub.Core.Config.EventEditionConfigLoader? _editionConfigLoader;
+    private readonly CommunityHub.Core.Config.EventConfigOptions? _eventConfigOptions;
+    private readonly CommunityHub.Core.Config.ConfigOverrideStore? _configOverrides;
+
+    /// <summary>
+    /// 🔴 §1110 — the PUBLIC ticket site the claim link is built on (operator 2026-08-21: *"url looks
+    /// wrong here … correct url format -&gt; https://eldk27.expertslive.dk#/buyTickets?promoCode=…"*).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Resolved through the loader, per request.</b> The bare <c>EventEditionConfig</c>
+    /// this page used to inject is not in DI at all, so it was always null and the base was always
+    /// blank — a mail already sent to two real partners with a link that goes nowhere.</para>
+    ///
+    /// <para>⚠️ Fails soft to <see cref="string.Empty"/> exactly as before; the difference is that
+    /// <see cref="BuildInviteAsync"/> now REFUSES to send on a blank base rather than shipping a
+    /// fragment. A missing config must not 500 the coupon page.</para>
+    /// </remarks>
+    private async Task<string> TicketBaseUrlAsync(int eventId, CancellationToken ct)
+    {
+        if (_editionConfigLoader is null || _eventConfigOptions is null) return string.Empty;
+        try
+        {
+            var overrideJson = _configOverrides is null
+                ? null
+                : await _configOverrides.GetOverrideJsonAsync(
+                    eventId, CommunityHub.Core.Domain.ConfigSection.Event, ct);
+            return _editionConfigLoader
+                .Load(_eventConfigOptions.EventConfigPath, overrideJson)
+                .TicketSale?.TicketUrl ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex, "§1110: could not read the ticket base URL from {Path}.",
+                _eventConfigOptions.EventConfigPath);
+            return string.Empty;
+        }
+    }
     private readonly DraftInvoiceCreatedNotifier? _draftNotices;
     private readonly InvoicingOptions? _invoicing;
 
@@ -129,6 +262,29 @@ public class CouponInvoicingModel : PageModel
     /// <para>⚠️ Empty when e-conomic is not configured — the page still works, it just falls back to
     /// the number box rather than pretending the list is empty.</para>
     /// </remarks>
+    /// <summary>
+    /// §1093 — the partner's monitor link, by e-conomic customer number.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Shown on the COUPON row rather than only on /Organizer/AttendeeMonitors, because this is
+    /// the page an organizer is on when a partner asks *"can I see who has used it?"*. A link that
+    /// exists but lives one page away is a link nobody sends.
+    /// <para>⚠️ Revoked monitors are excluded: the page must not offer a URL that will 404.</para>
+    /// </remarks>
+    public IReadOnlyDictionary<int, string> MonitorLinkByCustomer { get; private set; }
+        = new Dictionary<int, string>();
+
+    /// <summary>
+    /// §1094b — an outstanding "I need more tickets" request from a partner, by customer number.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Shown on the COUPON row because that is where he can act on it — the ad-hoc cap and the
+    /// prepaid increase box are both right there. A request that only exists in an e-mail is a
+    /// request that gets actioned once and then forgotten about.
+    /// </remarks>
+    public IReadOnlyDictionary<string, (int Requested, DateTimeOffset At)> CapRequestByCoupon
+    { get; private set; } = new Dictionary<string, (int, DateTimeOffset)>(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyList<EconomicCustomerRow> Customers { get; private set; }
         = Array.Empty<EconomicCustomerRow>();
 
@@ -350,7 +506,10 @@ public class CouponInvoicingModel : PageModel
                        "coupon-claim-invite", me.EventId, null, preview.ToName ?? preview.ToEmail,
                        RingExempt: true)))
             {
-                await _emailSender.SendAsync(preview.ToEmail!, preview.Subject, preview.Html, ct);
+                // §1118 — the organizer team is copied on everything a paying customer receives.
+                await _emailSender.SendAsync(
+                    preview.ToEmail!, preview.Subject, preview.Html,
+                    CommunityHub.Core.Integrations.Erp.CouponMailAudience.CcFor(preview.ToEmail), ct);
             }
 
             var rule = await _db.CouponInvoicingSettings
@@ -409,16 +568,27 @@ public class CouponInvoicingModel : PageModel
             ? "tickets"
             : TicketClassDisplay(pool.TicketClassId, pool.TicketClassLabel);
 
+        var ticketBaseUrl = await TicketBaseUrlAsync(eventId, ct);
+
         var invite = CouponClaimInviteComposer.From(
             rule,
             eventDisplayName: ev?.DisplayName ?? "the event",
             ticketClassLabel: classLabel,
-            ticketBaseUrl: _editionConfig?.TicketSale?.TicketUrl ?? string.Empty,
+            ticketBaseUrl: ticketBaseUrl,
             defaultIntervalDays: DefaultInvoiceIntervalDays,
             extendDkk: _invoicing?.ExtendTermsPriceDkk ?? 3000m,
             extendEur: _invoicing?.ExtendTermsPriceEur ?? 390m,
             prepaidQuantity: rule.IsPrepaid && pool is { Quantity: > 0 } ? pool.Quantity : null,
-            invoiceNumber: rule.IsPrepaid ? pool?.Invoice?.ErpInvoiceNumber : null);
+            invoiceNumber: rule.IsPrepaid ? pool?.Invoice?.ErpInvoiceNumber : null,
+            // 🔴 §1093 — the partner's own usage page, resolved HERE rather than read from
+            // MonitorLinkByCustomer.
+            //
+            // That dictionary is filled by LoadAsync, and OnPostSendInvite does NOT call LoadAsync —
+            // only the preview handler does. Reading it here would have put the link in the PREVIEW
+            // and left it out of the mail actually sent, which is the worst of both: he approves a
+            // body that is not what goes out. Querying directly makes this independent of which
+            // handler is running.
+            monitorUrl: await MonitorUrlForAsync(eventId, rule.ErpCustomerNumber, ct));
 
         var (subject, html) = CouponClaimInviteComposer.Build(invite);
 
@@ -467,6 +637,19 @@ public class CouponInvoicingModel : PageModel
         {
             blocker = "This coupon has no e-conomic customer, so there is nobody to notify. "
                     + "Pick the customer above first.";
+        }
+
+        // 🔴 §1110 — REFUSE rather than mail a link that goes nowhere.
+        //
+        // The claim URL is the entire point of this mail; with no ticket base it degrades to the bare
+        // fragment "#/buyTickets?promoCode=…", which resolves against whatever page the reader happens
+        // to be on. That shipped, and two real partners got it. A blocker is the same treatment the
+        // draft-invoice number gets below, for the same reason: a wrong value sent to a paying
+        // customer costs more than a send he has to retry.
+        if (blocker is null && string.IsNullOrWhiteSpace(ticketBaseUrl))
+        {
+            blocker = "The edition has no public ticket URL configured (ticketSale.ticketUrl), so the "
+                    + "claim link would have no site to point at. Set it in Settings → Config first.";
         }
 
         // 🔒 A provisional DRAFT number must never be quoted to a partner — they would look for an
@@ -570,6 +753,52 @@ public class CouponInvoicingModel : PageModel
     /// the strictest partner's terms onto everybody.
     /// </remarks>
     [BindProperty] public int? InvoiceIntervalDays { get; set; }
+
+    /// <summary>
+    /// §1091 — the agreed price per ticket for this coupon, in DKK. Blank ⇒ the price the ticket
+    /// actually sold for in Zoho.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-19: *"prio 1: custom (agreed) price and prio 2 if prio 1 is not filled out:
+    /// use zoho price"*.
+    /// </remarks>
+    [BindProperty] public decimal? AgreedUnitPriceDkk { get; set; }
+
+    /// <summary>
+    /// §1091 — the percentage of that price the <b>LINKED COMPANY</b> is invoiced. Blank ⇒ 100.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 The company's share, NOT the attendee's discount — the operator asked for that to be said
+    /// plainly, because at 50/50 the two readings produce the same number and only diverge once
+    /// somebody types 30.
+    /// </remarks>
+    [BindProperty] public int? InvoicedSharePercent { get; set; }
+
+    /// <summary>
+    /// §1094 — the agreed ticket ceiling for a capped ad-hoc coupon. Blank ⇒ uncapped.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Reported and invoiced against, never enforced — the limit that stops a claim is Zoho's
+    /// (§787.14). Raising it re-sends the Backstage instruction so the two numbers stay in step.
+    /// </remarks>
+    [BindProperty] public int? ClaimCapTickets { get; set; }
+
+    /// <summary>
+    /// §1098 — the partner-contact switches, OFF by default and set by hand.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 Off is the safe direction: the failure mode of ON is "a customer was contacted who
+    /// should not have been", which cannot be taken back. ⚠️ A checkbox posts nothing when unticked,
+    /// so an absent value binds as <c>false</c> — which is what makes unticking work at all.</para>
+    ///
+    /// <para>⚰️ §1111 — there were THREE; the claim-invite one is gone. These two gate things that
+    /// happen without him (a link a provisioner issues, a mail on a timer), so the tick is the only
+    /// consent that exists. The claim invite has a button, and that button is the consent.</para>
+    /// </remarks>
+    [BindProperty] public bool IssueUsageLink { get; set; }
+
+    /// <inheritdoc cref="SendClaimInviteMail"/>
+    [BindProperty] public bool SendUsageStatusMail { get; set; }
 
     /// <summary>§1016d — the edition default, shown as the placeholder so a blank box is not blank
     /// in meaning: it says which number is in force when nothing is typed.</summary>
@@ -677,6 +906,16 @@ public class CouponInvoicingModel : PageModel
         }
 
         var now = _clock.GetUtcNow();
+        // §1091 — remember the split BEFORE it is overwritten, so the Backstage instruction mail can
+        // fire on a real change only. Read here rather than after the assignments below, where
+        // `existing` already holds the new values and every comparison would say "unchanged".
+        var isNewRule = existing is null;
+        var priorAgreedPrice = existing?.AgreedUnitPriceDkk;
+        var priorSharePercent = existing?.InvoicedSharePercent;
+        // §1094 — a cap change is a Backstage change too: the promo code's own limit has to move
+        // with it, or the hub reports a ceiling Zoho will not honour.
+        var priorCap = existing?.ClaimCapTickets;
+
         if (existing is null)
         {
             _db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
@@ -692,6 +931,19 @@ public class CouponInvoicingModel : PageModel
                 // number in a form, and a typo must fall back to the edition default rather than
                 // silently change a partner's billing terms.
                 InvoiceIntervalDays = InvoiceIntervalDays is >= 0 ? InvoiceIntervalDays : null,
+                // §1091 — same defensive read as the interval above. A price of 0 or less and a
+                // percentage outside 1–100 are typos, and both are stored as NULL rather than
+                // honoured: null means "bill the whole ticket at what it cost", which is the old
+                // behaviour and the only wrong answer nobody loses money on.
+                AgreedUnitPriceDkk = AgreedUnitPriceDkk is > 0m ? AgreedUnitPriceDkk : null,
+                InvoicedSharePercent = InvoicedSharePercent is > 0 and <= 100 ? InvoicedSharePercent : null,
+                // §1094 — same defensive read: 0 or negative is a typo, and null means "uncapped"
+                // rather than "a cap of nothing", which would report every claim as over the limit.
+                ClaimCapTickets = ClaimCapTickets is > 0 ? ClaimCapTickets : null,
+                // §1098 — the contact switches, exactly as ticked (§1111: the claim-invite one is
+                // retired — the "Send the claim link now" button is that decision).
+                IssueUsageLink = IssueUsageLink,
+                SendUsageStatusMail = SendUsageStatusMail,
                 CreatedAt = now,
                 UpdatedAt = now,
                 LastUpdatedByEmail = me.Email,
@@ -708,6 +960,13 @@ public class CouponInvoicingModel : PageModel
             existing.RequesterName = requesterName;
             existing.Notes = string.IsNullOrWhiteSpace(Notes) ? null : Notes.Trim();
             existing.InvoiceIntervalDays = InvoiceIntervalDays is >= 0 ? InvoiceIntervalDays : null;
+            // §1091 — see the create branch: a bad price or percentage is stored as null, which
+            // means "the whole ticket at what it cost", never 0.
+            existing.AgreedUnitPriceDkk = AgreedUnitPriceDkk is > 0m ? AgreedUnitPriceDkk : null;
+            existing.InvoicedSharePercent = InvoicedSharePercent is > 0 and <= 100 ? InvoicedSharePercent : null;
+            existing.ClaimCapTickets = ClaimCapTickets is > 0 ? ClaimCapTickets : null;
+            existing.IssueUsageLink = IssueUsageLink;
+            existing.SendUsageStatusMail = SendUsageStatusMail;
             existing.UpdatedAt = now;
             existing.LastUpdatedByEmail = me.Email;
             Message = $"'{name}' updated.";
@@ -716,6 +975,62 @@ public class CouponInvoicingModel : PageModel
         try
         {
             await _db.SaveChangesAsync(ct);
+
+            // 🔴 §1091 (operator 2026-08-19: *"rgr 2, create that"*) — TELL HIM TO SET THE PROMO
+            // CODE UP. Only the prepaid path did this before, so an ad-hoc coupon could carry a
+            // 50/50 in CEH while Backstage still charged the attendee full price: the hub would
+            // invoice the company its half and nobody would be told the other half never happened.
+            //
+            // 🔒 On CREATE, or when the split actually CHANGED — never on every Save. Mailing him
+            // because somebody fixed a typo in the notes field is the §302 "70-mail night" rebuilt,
+            // and an instruction mail that arrives when there is nothing to do gets filtered.
+            //
+            // ⚠️ AFTER the save, and inside the try: a mail telling him to configure a split that
+            // failed to persist is worse than no mail. The notifier never throws.
+            // §1093 — give this customer its monitor link NOW rather than at the next 5-minute
+            // tick. The job is still the authority (it catches coupons mapped by any other route);
+            // this only removes the window where a freshly-mapped customer shows no link and the
+            // page looks broken. Idempotent, so the two callers cannot double up.
+            if (_monitorProvisioner is not null && customer is > 0)
+            {
+                try
+                {
+                    await _monitorProvisioner.EnsureAsync(
+                        me.EventId,
+                        // The page HAS the customer names loaded already, so unlike the job it can
+                        // afford a real name — "Coupon usage — Arrow ECS" rather than "customer 1234"
+                        // on a page a partner opens.
+                        nameFor: (n, _) => Task.FromResult(CustomerNameOrNull(n)),
+                        ct);
+                }
+                catch (Exception ex)
+                {
+                    _log?.LogWarning(ex, "§1093: monitor provisioning after coupon save threw.");
+                }
+            }
+
+            if (_zohoAction is not null
+                && BillingType == CouponBillingType.ClaimableAdHocPaymentByCustomer)
+            {
+                var newAgreedPrice = AgreedUnitPriceDkk is > 0m ? AgreedUnitPriceDkk : null;
+                var newSharePercent = InvoicedSharePercent is > 0 and <= 100 ? InvoicedSharePercent : null;
+                var newCap = ClaimCapTickets is > 0 ? ClaimCapTickets : null;
+                var splitChanged = newAgreedPrice != priorAgreedPrice
+                                   || newSharePercent != priorSharePercent
+                                   // §1094 — the cap is the one field on this row that Backstage
+                                   // ALSO holds, so a change here is the strongest reason of all to
+                                   // send the instruction: leave it and the partner is stopped at
+                                   // the old number while the hub reports the new one.
+                                   || newCap != priorCap;
+
+                if (isNewRule || splitChanged)
+                {
+                    await _zohoAction.NotifyAdHocAsync(
+                        name, newAgreedPrice, newSharePercent, customer, isNewRule, ct, newCap,
+                        // §1109 — the NAME as well as the id; the page already has the customer list.
+                        customerName: await CustomerNameForMailAsync(customer, ct));
+                }
+            }
         }
         catch (DbUpdateException)
         {
@@ -777,6 +1092,194 @@ public class CouponInvoicingModel : PageModel
     /// (§794.4): purchased is the SUM of these rows, claimed is derived from the order mirror, and
     /// neither is ever written down as a running figure.</para>
     /// </remarks>
+    /// <summary>
+    /// §1094b — apply a partner's requested cap to an AD-HOC coupon, in one click.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"the extend should trigger email to me, so i will manually extend
+    /// zoho cap. and secodnly the cap increase will be extended inside ceh. if it is a prepaid, it
+    /// would trigger a new invoice of the difference (extend amount). if it is an ad-hoc billing,
+    /// invoices will come automatically with the cadence"*.</para>
+    ///
+    /// <para>🔴 <b>AD-HOC ONLY, and it raises no money.</b> That is his rule, not a shortcut: an
+    /// ad-hoc cap is a ceiling, and the tickets under it are already invoiced as they are claimed on
+    /// the coupon's own cadence. Raising the ceiling bills nothing today. **A PREPAID extension is a
+    /// different act** — it is a purchase, and it goes through the §992 "increase to a new total"
+    /// box, which derives the delta and invoices exactly that. Routing prepaid through here would
+    /// raise a limit and never bill for it.</para>
+    ///
+    /// <para>🔒 <b>He presses this AFTER raising the code's limit in Backstage</b>, which is why it
+    /// is a click and not automatic. CEH's number must never promise a ceiling Zoho will refuse —
+    /// the same invariant the partner-facing request was built around.</para>
+    ///
+    /// <para>⚠️ Clears the PENDING ask (<c>LastCapRequestedTickets</c>) but keeps
+    /// <c>LastCapRequestAt</c>: the throttle and the audit of when they asked both survive.</para>
+    /// </remarks>
+    /// <summary>
+    /// §1095 — "the code is live in Backstage": confirm it, and the partner is notified at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"customer will get email with secure link to monitor usage (i
+    /// need to click send mail). actually i prefer to have you send this automatically"*.</para>
+    ///
+    /// <para>🔴 <b>Automatic, but NOT unattended — and the ordering is why.</b> The invite says
+    /// *"you can now use the below registration URL to start claiming"*. Backstage has no coupon API
+    /// (§787.14), so CEH cannot know the code exists; a send triggered by the coupon row appearing
+    /// would usually beat him to creating it, and the partner would click a dead code in a mail from
+    /// us. This button records the one fact only he has, and sending is then immediate.</para>
+    ///
+    /// <para>🔑 <b>It replaces the ritual, not the judgement.</b> He no longer composes, previews and
+    /// sends; he states that the code is live and the mail goes with the monitor link in it. The
+    /// preview button stays for the times he wants to read it first.</para>
+    ///
+    /// <para>🔒 <b>Every §1016c blocker still applies</b>, because this reuses
+    /// <c>BuildInviteAsync</c> verbatim: no contact e-mail, no customer, and above all an UNBOOKED
+    /// draft invoice (§1013a — quoting a draft number sends the partner looking for an invoice that
+    /// will be renumbered). A blocker refuses the send and says why; the confirmation still stands,
+    /// so fixing the blocker and pressing again is all that is needed.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostConfirmCodeLiveAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var rule = await _db.CouponInvoicingSettings
+            .FirstOrDefaultAsync(c => c.Id == InviteSettingId && c.EventId == me.EventId, ct);
+        if (rule is null) return RedirectWithFlash(null, "That coupon no longer exists.");
+
+        var now = _clock.GetUtcNow();
+        if (rule.BackstageCodeConfirmedAt is null)
+        {
+            rule.BackstageCodeConfirmedAt = now;
+            rule.BackstageCodeConfirmedByEmail = me.Email;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // ⚰️ §1111 — the `SendClaimInviteMail` tick used to veto this handler, so pressing a button
+        // labelled "Send the claim link now" could answer "no mail was sent". Operator 2026-08-21:
+        // *"i dont get the point of having this tick … if there is also a button"*.
+        //
+        // 🔑 The two switches that remain (IssueUsageLink, SendUsageStatusMail) gate things that
+        // happen WITHOUT him — a link issued by a provisioner, a mail on a timer — so an explicit
+        // opt-in is the only consent there is. This one has a button, and pressing the button IS the
+        // consent. A second, invisible one only made the visible one lie.
+        //
+        // The one-off-sale case (§1098: set up, invoiced, never written to) is still served exactly
+        // as well: don't press the button.
+
+        // Already told them? Confirming again must not re-mail a partner.
+        if (rule.ClaimInviteSentAt is not null)
+        {
+            return RedirectWithFlash(
+                $"'{rule.CouponName}' is marked live. The partner was already notified on "
+                + $"{rule.ClaimInviteSentAt:d MMM yyyy} — use \"Notify again…\" to re-send.", null);
+        }
+
+        await LoadAsync(me.EventId, ct);
+        var preview = await BuildInviteAsync(me.EventId, rule.Id, ct);
+
+        if (preview is null) return RedirectWithFlash(null, "That coupon no longer exists.");
+        if (preview.Blocker is { } why)
+        {
+            return RedirectWithFlash(
+                $"'{rule.CouponName}' is marked live, but the partner was NOT notified: {why}",
+                null);
+        }
+        if (_emailSender is null)
+            return RedirectWithFlash(null, "No email sender is configured on this host.");
+
+        try
+        {
+            // §707.2 / §1016c — same identity and the same ring exemption as the manual send: the
+            // recipient is an e-conomic contact, not a participant, so the ring gate cannot resolve
+            // them and would fail closed.
+            using (_emailContext?.Set(new CommunityHub.Core.Email.EmailContext(
+                       "coupon-claim-invite", me.EventId, null, preview.ToName ?? preview.ToEmail,
+                       RingExempt: true)))
+            {
+                // §1118 — the organizer team is copied on everything a paying customer receives.
+                await _emailSender.SendAsync(
+                    preview.ToEmail!, preview.Subject, preview.Html,
+                    CommunityHub.Core.Integrations.Erp.CouponMailAudience.CcFor(preview.ToEmail), ct);
+            }
+
+            rule.ClaimInviteSentAt = _clock.GetUtcNow();
+            rule.ClaimInviteSentToEmail = preview.ToEmail;
+            await _db.SaveChangesAsync(ct);
+
+            return RedirectWithFlash(
+                $"'{rule.CouponName}' marked live and the partner notified at {preview.ToEmail}"
+                + " — the mail includes their usage link.", null);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError(ex, "§1095: auto-notify after confirming {Coupon} failed.", rule.CouponName);
+            return RedirectWithFlash(
+                null,
+                $"'{rule.CouponName}' is marked live, but the notification could not be sent. "
+                + "Use \"Notify requester…\" to try again.");
+        }
+    }
+
+    public async Task<IActionResult> OnPostApplyCapRequestAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var rule = await _db.CouponInvoicingSettings
+            .FirstOrDefaultAsync(c => c.Id == SettingId && c.EventId == me.EventId, ct);
+        if (rule is null) return RedirectWithFlash(null, "That coupon no longer exists.");
+
+        if (rule.BillingType != CouponBillingType.ClaimableAdHocPaymentByCustomer)
+        {
+            return RedirectWithFlash(
+                null,
+                "This is a prepaid coupon — use \"Increase to new total\" on its pool instead, so "
+                + "the extra tickets are invoiced.");
+        }
+
+        if (rule.ErpCustomerNumber is not > 0)
+            return RedirectWithFlash(null, "That coupon has no billing customer.");
+
+        // §1096 — the ask lives on the COUPON, so applying one leaves any other coupon's request
+        // untouched. Under the old per-customer field, applying Arrow's ad-hoc cap would have
+        // silently cleared their prepaid request too.
+        if (rule.RequestedCapTickets is not { } requested || requested <= 0)
+            return RedirectWithFlash(null, "There is no outstanding request for that coupon.");
+
+        var priorCap = rule.ClaimCapTickets;
+        rule.ClaimCapTickets = requested;
+        rule.RequestedCapTickets = null;   // applied — stop showing it as outstanding
+        rule.UpdatedAt = _clock.GetUtcNow();
+        rule.LastUpdatedByEmail = me.Email;
+        await _db.SaveChangesAsync(ct);
+
+        // The Backstage instruction goes again, because the limit that actually stops a claim is
+        // still the one on the promo code and it has to match what CEH now reports.
+        if (_zohoAction is not null)
+        {
+            try
+            {
+                await _zohoAction.NotifyAdHocAsync(
+                    rule.CouponName, rule.AgreedUnitPriceDkk, rule.InvoicedSharePercent,
+                    rule.ErpCustomerNumber, isNew: false, ct, requested,
+                    customerName: await CustomerNameForMailAsync(rule.ErpCustomerNumber, ct));
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning(ex, "§1094b: Backstage instruction after a cap apply threw.");
+            }
+        }
+
+        return RedirectWithFlash(
+            $"'{rule.CouponName}' cap set to {requested}"
+            + (priorCap is { } p ? $" (was {p})" : string.Empty)
+            + ". Tickets stay billed as they are claimed — no invoice raised.",
+            null);
+    }
+
     public async Task<IActionResult> OnPostAddTicketsAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -1226,6 +1729,47 @@ public class CouponInvoicingModel : PageModel
                 _log?.LogWarning(ex, "§1013a: prepaid invoice-number refresh failed.");
             }
         }
+
+        // §1093 — the monitor link per billing customer, so it sits beside the coupon it belongs to.
+        // Live links only: offering a revoked one would hand the organizer a URL that 404s.
+        var monitorLinks = await _db.AttendeeMonitors
+            .AsNoTracking()
+            .Where(m => m.EventId == eventId
+                        && m.Kind == AttendeeMonitorKind.ErpCustomer
+                        && m.RevokedAt == null)
+            .Select(m => new { m.Value, m.Token })
+            .ToListAsync(ct);
+
+        var linkBase = $"{Request.Scheme}://{Request.Host}";
+        var byCustomer = new Dictionary<int, string>();
+        foreach (var m in monitorLinks)
+        {
+            if (int.TryParse(
+                    m.Value, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var n))
+            {
+                byCustomer[n] = $"{linkBase}/monitor/{m.Token}";
+            }
+        }
+        MonitorLinkByCustomer = byCustomer;
+
+        // §1096 — outstanding partner requests, PER COUPON. `RequestedCapTickets` is the pending
+        // ask; it is cleared when he applies it, so a coupon carrying one is still waiting on him.
+        // ⚰️ This used to read the monitor row, which is per CUSTOMER — Arrow Denmark, holding a
+        // prepaid pool AND a capped ad-hoc coupon, is exactly why that could not work: one field
+        // could not say which of the two the partner meant.
+        var pending = await _db.CouponInvoicingSettings
+            .AsNoTracking()
+            .Where(c => c.EventId == eventId
+                        && c.RequestedCapTickets != null
+                        && c.RequestedCapAt != null)
+            .Select(c => new { c.CouponName, c.RequestedCapTickets, c.RequestedCapAt })
+            .ToListAsync(ct);
+
+        CapRequestByCoupon = pending.ToDictionary(
+            p => p.CouponName,
+            p => (p.RequestedCapTickets!.Value, p.RequestedCapAt!.Value),
+            StringComparer.OrdinalIgnoreCase);
 
         // §787.13 — the customer list by NAME, from the API. Fail-soft: e-conomic being unreachable
         // must not take down a page whose main job (the mapping) lives in our own database.

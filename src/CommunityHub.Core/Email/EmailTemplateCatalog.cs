@@ -104,6 +104,11 @@ public static class EmailTemplateCatalog
             ["travel-reimbursement-paid"]  = ("Travel reimbursement paid", "travel-reimbursement-email"),
             ["group-photo-invite"]         = ("Group-photo invite", "group-photo-invites"),
             ["app-game-gift-reminder"]     = ("App-game gift reminder", "sponsor-reminders"),
+            // §1127: chases a sponsor whose WEBSHOP website or LinkedIn is blank. Since §1125/§1126
+            // the webshop OWNS those fields and the CEH inputs are read-only, so a blank can only be
+            // fixed at the source — which is why this mail exists rather than a CEH task.
+            // ⚠️ X/Twitter is deliberately NOT chased (operator: "twitter is optional").
+            ["sponsor-webshop-links-missing"] = ("Sponsor webshop links missing", "sponsor-reminders"),
             ["volunteer-help-raised"]      = ("Volunteer help raised", "outbound-email"),
             ["sponsor-leads-digest"]       = ("Sponsor leads round-up", "sponsor-leads"),          // §879.2 — display only; key unchanged
             // §26c (2026-06-24): the only attendee chaser now — a 2-day-ticket holder
@@ -113,6 +118,12 @@ public static class EmailTemplateCatalog
             ["pending-master-class-selection"] = ("Attendee: pending master class selection", "attendee-reconcile"),
             // §26c "Help Promote": notify a speaker when their promo graphics are released.
             ["speaker-graphics-ready"]     = ("Speaker: promo graphics ready", "speaker-graphics-promote"),
+            // §1060(b) — ONE template for BOTH audiences and BOTH sends (scheduled · day before).
+            // 🛑 Deliberately separate from `speaker-graphics-ready` above, though they can land in
+            // the same minute: that one says "your artwork is ready, go promote it", this one says
+            // "ELDK is announcing you, here is when". Operator 2026-08-11: *"that template is
+            // different and separate"*.
+            ["some-announcement"]          = ("Speaker/sponsor: your announcement is scheduled", "some-scheduling"),
             // §705.13 (operator 2026-07-29: "session-change-alert is just an email" … "if you have
             // not created it as an email, then you need to change that"). Both templates SHIP and
             // SEND today but had NO registry entry, so neither appeared on the Settings page — a
@@ -487,6 +498,10 @@ public static class EmailTemplateCatalog
         "welcome-speaker-sponsor"        => EmailAudience.Speaker,   // §726
         "speaker-question-digest"        => EmailAudience.Speaker,
         "speaker-graphics-ready"         => EmailAudience.Speaker,
+        // ⚠️ Speaker AND sponsor share this one. Filed under Speaker because that is the larger
+        // audience and the enum has no "both" — the per-send recipient list is what actually
+        // decides who gets it (SoMeAnnouncementNotifier.AudienceForAsync).
+        "some-announcement"              => EmailAudience.Speaker,
         "getstarted-digest"              => EmailAudience.Speaker,
         "getstarted-deadline-reminder"   => EmailAudience.Speaker,
         "onboarding-getting-started"     => EmailAudience.Speaker,
@@ -506,6 +521,8 @@ public static class EmailTemplateCatalog
         "welcome-sponsor"                => EmailAudience.Sponsor,
         "sponsor-leads-digest"           => EmailAudience.Sponsor,
         "app-game-gift-reminder"         => EmailAudience.Sponsor,
+        // §1127 — sponsor-facing: it chases the company's own missing webshop links.
+        "sponsor-webshop-links-missing"  => EmailAudience.Sponsor,
 
         // --- Volunteers -------------------------------------------------------------
         "welcome-volunteer"              => EmailAudience.Volunteer,
@@ -764,6 +781,8 @@ public static class EmailTemplateCatalog
         "welcome-speaker-sponsor"      => "A SPONSOR-brought speaker, once.",
         "speaker-question-digest"      => "A speaker who has unanswered questions on their session.",
         "speaker-graphics-ready"       => "A speaker whose promo graphics have just been released.",
+        "some-announcement"            => "The speaker or sponsor a scheduled social-media post is "
+                                        + "about — once when it is scheduled, once the day before.",
         "getstarted-digest"            => "Speakers who have not finished Get Started — biweekly until they do.",
         "getstarted-deadline-reminder" => "Speakers with Get Started still open, once, before the deadline.",
         "onboarding-getting-started"   => "A speaker starting onboarding.",
@@ -782,6 +801,7 @@ public static class EmailTemplateCatalog
         "sponsor-leads-digest"   => "Sponsor contacts, with the leads scanned at their booth.",
         // §561 — the row he singled out. Say how narrow it is.
         "app-game-gift-reminder" => "Only sponsors running an app game who still owe their gift — a handful of companies, not all sponsors.",
+        "sponsor-webshop-links-missing" => "Only sponsor companies whose WEBSHOP website or LinkedIn is blank, and only their event-coordinator contacts. Stops by itself once both are filled. X/Twitter is optional and never chased.",
 
         // --- volunteers ------------------------------------------------------------------
         "welcome-volunteer"    => "Every volunteer, once, when their account is created.",

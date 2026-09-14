@@ -64,6 +64,29 @@ public sealed class CouponPrepaidLowBalanceAlertService
     private sealed record Candidate(CouponPrepaidAllocation Row, CouponPoolBalance Balance, string Coupon);
 
     /// <summary>
+    /// §1094c — the AD-HOC twin: a coupon with an agreed cap that is nearly used up.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"make alerting, emails the same for any coupon no matter if adhoc
+    /// or prepaid, if cap is applied include also available/remaining in mails/alerting"*.</para>
+    ///
+    /// <para>🔑 <b>Same alert, same mail, same rules — because the failure is identical.</b> Prepaid
+    /// or capped ad-hoc, CEH cannot stop a claim (§787.14), so passing the agreed number means
+    /// somebody takes a ticket outside the agreement either way. Two separate alerts would have been
+    /// two chances to tune one of them wrong, and two mails for one problem.</para>
+    ///
+    /// <para>⚠️ An UNCAPPED ad-hoc coupon is never a candidate: there is no number to be near.</para>
+    /// </remarks>
+    private sealed record CapCandidate(CouponInvoicingSetting Row, int Claimed, int Cap)
+    {
+        public string Coupon => Row.CouponName;
+        public int Remaining => Cap - Claimed;
+        public bool IsOverCap => Remaining < 0;
+        public bool IsExhausted => Remaining == 0;
+        public bool IsLow => Remaining <= CouponPrepaidBalance.DefaultLowBalanceThreshold;
+    }
+
+    /// <summary>
     /// Warn about prepaid pools at or below their threshold. Returns how many were named in the
     /// mail; 0 when every pool is healthy or still inside its quiet period.
     /// </summary>
@@ -82,9 +105,20 @@ public sealed class CouponPrepaidLowBalanceAlertService
         // 🔒 Only pools on a coupon that is STILL prepaid — an allocation left behind on a rule
         // switched to another billing type is not a pool anyone is claiming against.
         var live = pools.Where(a => a.CouponInvoicingSetting?.IsPrepaid == true).ToList();
-        if (live.Count == 0)
+
+        // §1094c — capped AD-HOC coupons are watched by the same alert. Uncapped ones are skipped:
+        // there is no agreed number to be near.
+        var capped = await _db.CouponInvoicingSettings
+            .Where(c => c.EventId == eventId
+                        && c.BillingType == CouponBillingType.ClaimableAdHocPaymentByCustomer
+                        && c.ClaimCapTickets != null
+                        && c.ClaimCapTickets > 0)
+            .ToListAsync(ct);
+
+        if (live.Count == 0 && capped.Count == 0)
         {
-            _log?.LogInformation("§796: no prepaid pools in this edition — nothing to warn about.");
+            _log?.LogInformation(
+                "§796/§1094c: no prepaid pools and no capped ad-hoc coupons — nothing to warn about.");
             return 0;
         }
 
@@ -116,17 +150,31 @@ public sealed class CouponPrepaidLowBalanceAlertService
 
         var due = candidates.Where(c => IsDue(c, now)).ToList();
 
-        if (due.Count == 0)
+        // §1094c — the ad-hoc side, built the same way and judged by the same rules.
+        var capCandidates = new List<CapCandidate>();
+        foreach (var rule in capped)
+        {
+            claimsByCoupon.TryGetValue(rule.CouponName, out var claims);
+            var claimed = (claims ?? Array.Empty<CouponClaim>()).Count(c => !c.IsCancelled);
+            var c = new CapCandidate(rule, claimed, rule.ClaimCapTickets!.Value);
+            if (c.IsLow) capCandidates.Add(c);
+        }
+
+        var capDue = capCandidates.Where(c => IsCapDue(c, now)).ToList();
+
+        if (due.Count == 0 && capDue.Count == 0)
         {
             // ⚠️ Silent. "Nothing is low" and "the job did not run" must not both produce a mail.
             _log?.LogInformation(
-                "§796: {Low} low pool(s) of {Total}, none due an alert (quiet period, and none got "
-                + "worse).", candidates.Count, live.Count);
+                "§796/§1094c: {Low} low pool(s) of {Total} and {CapLow} capped coupon(s), none due "
+                + "an alert (quiet period, and none got worse).",
+                candidates.Count, live.Count, capCandidates.Count);
             return 0;
         }
 
         var over = due.Where(c => c.Balance.IsOversubscribed).ToList();
-        await SendAsync(due, over, ct);
+        var capOver = capDue.Where(c => c.IsOverCap).ToList();
+        await SendAsync(due, over, capDue, capOver, ct);
 
         foreach (var c in due)
         {
@@ -135,12 +183,27 @@ public sealed class CouponPrepaidLowBalanceAlertService
             // "still low" and from "recovered".
             c.Row.LastLowBalanceAlertRemaining = c.Balance.Remaining;
         }
+        foreach (var c in capDue)
+        {
+            c.Row.LastCapAlertAt = now;
+            c.Row.LastCapAlertRemaining = c.Remaining;
+        }
         await _db.SaveChangesAsync(ct);
 
         _log?.LogInformation(
-            "§796: warned about {Count} low prepaid pool(s), {Over} of them oversubscribed.",
-            due.Count, over.Count);
-        return due.Count;
+            "§796/§1094c: warned about {Count} low pool(s) ({Over} oversubscribed) and {CapCount} "
+            + "capped coupon(s) ({CapOver} over cap).",
+            due.Count, over.Count, capDue.Count, capOver.Count);
+        return due.Count + capDue.Count;
+    }
+
+    /// <summary>§1094c — the ad-hoc twin of <see cref="IsDue"/>, with identical rules.</summary>
+    private static bool IsCapDue(CapCandidate c, DateTimeOffset now)
+    {
+        if (c.Row.LastCapAlertAt is not { } last) return true;
+        if (now - last >= ReAlertAfter) return true;
+
+        return c.Row.LastCapAlertRemaining is { } before && c.Remaining < before;
     }
 
     /// <summary>
@@ -162,7 +225,9 @@ public sealed class CouponPrepaidLowBalanceAlertService
     }
 
     private async Task SendAsync(
-        IReadOnlyList<Candidate> due, IReadOnlyList<Candidate> over, CancellationToken ct)
+        IReadOnlyList<Candidate> due, IReadOnlyList<Candidate> over,
+        IReadOnlyList<CapCandidate> capDue, IReadOnlyList<CapCandidate> capOver,
+        CancellationToken ct)
     {
         static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
 
@@ -192,16 +257,48 @@ public sealed class CouponPrepaidLowBalanceAlertService
                  + "</tr>";
         }));
 
-        var subject = over.Count > 0
-            ? $"ACTION REQUIRED: {over.Count} prepaid coupon pool(s) OVERSUBSCRIBED"
-              + (due.Count > over.Count ? $", {due.Count - over.Count} running low" : string.Empty)
-            : $"ACTION REQUIRED: {due.Count} prepaid coupon pool(s) running low";
+        // §1094c — the ad-hoc rows, in the SAME table. Operator 2026-08-19: *"make alerting, emails
+        // the same for any coupon no matter if adhoc or prepaid"*. The "of N" column carries the
+        // remaining/available number he asked to see for both kinds.
+        var capRows = string.Join("", capDue
+            .OrderBy(c => c.Remaining)
+            .ThenBy(c => c.Coupon, StringComparer.OrdinalIgnoreCase)
+            .Select(c =>
+            {
+                var colour = c.IsOverCap ? "#c8322a" : "#b45309";
+                var state = c.IsOverCap
+                    ? $"<strong style=\"color:#c8322a;\">{-c.Remaining} beyond the agreed cap</strong>"
+                    : c.IsExhausted ? "<strong>cap reached</strong>" : "near the cap";
 
-        var lead = over.Count > 0
-            ? "<p><strong>At least one partner has claimed more tickets than they paid for.</strong> "
-              + "A negative balance is not a warning about the future — those tickets exist and "
-              + "nobody has been billed for them.</p>"
-            : "<p><strong>These prepaid coupon pools are nearly used up.</strong></p>";
+                return "<tr>"
+                     + $"<td style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb;\">{Enc(c.Coupon)}</td>"
+                     + "<td style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb;\">"
+                     + "<em>ad-hoc cap</em></td>"
+                     + $"<td style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:right;\">"
+                     + $"<strong style=\"color:{colour};font-size:16px;\">{c.Remaining}</strong>"
+                     + $"<span style=\"color:#6b7280;\"> of {c.Cap}</span></td>"
+                     + $"<td style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb;\">{c.Claimed} claimed</td>"
+                     + $"<td style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb;\">{state}</td>"
+                     + "</tr>";
+            }));
+
+        rows += capRows;
+
+        var totalDue = due.Count + capDue.Count;
+        var totalOver = over.Count + capOver.Count;
+
+        // 🔑 "coupon(s)", not "prepaid pool(s)": one mail now covers both kinds, and a subject that
+        // still said prepaid would make a capped ad-hoc warning look misfiled.
+        var subject = totalOver > 0
+            ? $"ACTION REQUIRED: {totalOver} coupon(s) OVER their agreed number"
+              + (totalDue > totalOver ? $", {totalDue - totalOver} running low" : string.Empty)
+            : $"ACTION REQUIRED: {totalDue} coupon(s) running low";
+
+        var lead = totalOver > 0
+            ? "<p><strong>At least one partner has claimed more tickets than was agreed.</strong> "
+              + "This is not a warning about the future — those tickets exist, and for a prepaid "
+              + "pool nobody has been billed for them.</p>"
+            : "<p><strong>These coupons are nearly used up.</strong></p>";
 
         var body =
             lead

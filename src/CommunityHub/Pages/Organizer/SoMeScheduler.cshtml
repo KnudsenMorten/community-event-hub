@@ -133,11 +133,29 @@
             </p>
         </div>
 
+        @* 🔴 §1199 — WHERE "no room" GETS ITS ARITHMETIC. Operator 2026-09-12: *"we cannot sell the
+           same seat twice like an airplane company"*. This page reports that a subject could not be
+           placed; it never showed by how much, where in the year, or what would fix it. Linked from
+           here rather than added as an eighth hub card — the answer belongs beside the failure. *@
+        <p class="muted" style="margin-top:12px;">
+            <a asp-page="/Organizer/SoMeCapacity"><strong>Posting capacity →</strong></a>
+            how many slots exist between now and the event, how many are taken, and whether what is
+            left to announce will fit.
+        </p>
+
         <p class="muted" style="margin-top:12px;">
             Approve, edit or reschedule an individual post in the
             <a asp-page="/Organizer/SoMeQueue">Calendar for LinkedIn Posts</a>. Change the wording every post is built
             from in <a asp-page="/Organizer/SoMeTemplates">post templates</a>, and how OFTEN each
-            type is announced in <a asp-page="/Organizer/SoMeCadence">posting frequency</a>.
+            type is announced in <a asp-page="/Organizer/SoMeSettings">SoMe settings</a>.
+        </p>
+        @* 🔒 §1207 — the old frequency page KEEPS ITS LINK even though the setting moved. The
+           reachability guardrail is right: a page that still exists must stay reachable, and someone
+           who remembers "posting frequency" needs to land somewhere that tells them where it went
+           rather than on a 404. The page itself now says so and links onward. *@
+        <p class="muted" style="margin-top:4px;">
+            Looking for <a asp-page="/Organizer/SoMeCadence">posting frequency</a>? Rounds moved in
+            with the rest of each category's rules.
         </p>
     </div>
 }

@@ -31,6 +31,8 @@ public sealed class ReminderJob
     private readonly OrganizerWelcomeAnchorSeeder _organizerAnchors;
     private readonly GetStartedDeadlineReminderBuilder _getStartedDeadline;
     private readonly HotelCutoffReminderBuilder _hotelCutoffs;
+    // §1127 — the sponsor webshop-links chaser.
+    private readonly SponsorWebshopLinksReminderBuilder _sponsorWebshopLinks;
     private readonly ReminderEngine _engine;
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
     private readonly CommunityHub.Core.Email.SpeakerQuestionDigestService _speakerQuestionDigest;
@@ -50,6 +52,7 @@ public sealed class ReminderJob
         OrganizerWelcomeAnchorSeeder organizerAnchors,
         GetStartedDeadlineReminderBuilder getStartedDeadline,
         HotelCutoffReminderBuilder hotelCutoffs,
+        SponsorWebshopLinksReminderBuilder sponsorWebshopLinks,
         ReminderEngine engine,
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
         CommunityHub.Core.Email.SpeakerQuestionDigestService speakerQuestionDigest,
@@ -68,6 +71,7 @@ public sealed class ReminderJob
         _organizerAnchors = organizerAnchors;
         _getStartedDeadline = getStartedDeadline;
         _hotelCutoffs = hotelCutoffs;
+        _sponsorWebshopLinks = sponsorWebshopLinks;
         _engine = engine;
         _stepResetEmails = stepResetEmails;
         _speakerQuestionDigest = speakerQuestionDigest;
@@ -160,6 +164,14 @@ public sealed class ReminderJob
             // Organizer role, never participants.
             var hotelCutoffs = await _hotelCutoffs.BuildDueAsync(eventId, ct);
             sent += await _engine.SendDueAsync(eventId, hotelCutoffs, ct);
+
+            // §1127: chase a sponsor whose WEBSHOP website or LinkedIn is blank, and send the
+            // operator one weekly list of the companies still missing something. Since §1125/§1126
+            // the webshop owns those fields and the CEH inputs are read-only, so a blank can only
+            // be fixed at the source — the chaser is what stops that being a dead end.
+            // ⚠️ X/Twitter is optional and is never chased.
+            var sponsorLinks = await _sponsorWebshopLinks.BuildAsync(eventId, ct);
+            sent += await _engine.SendDueAsync(eventId, sponsorLinks, ct);
 
             // The digest/notification sends are a SECOND, finer gate ('digest-emails',
             // which itself depends on the global outbound-email switch): an organizer

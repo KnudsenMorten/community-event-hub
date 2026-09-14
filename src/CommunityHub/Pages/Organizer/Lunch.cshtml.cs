@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations.DocLibrary;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -14,10 +15,15 @@ public class LunchModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
 
-    public LunchModel(CommunityHubDbContext db, ICurrentParticipantAccessor participant)
+    /// <summary>§1086 — the ONE lunch calculation, shared with the dashboard and the venue Excel.</summary>
+    private readonly LunchHeadcountService _lunch;
+
+    public LunchModel(
+        CommunityHubDbContext db, ICurrentParticipantAccessor participant, LunchHeadcountService lunch)
     {
         _db = db;
         _participant = participant;
+        _lunch = lunch;
     }
 
     public bool AccessDenied { get; private set; }
@@ -126,52 +132,24 @@ public class LunchModel : PageModel
             .ToListAsync(ct);
         var crewIds = crew.Select(c => c.Id).ToHashSet();
 
-        // §298: sum each checked-in company's declared booth-member count (real arrival slot, not
-        // the opt-out). This is the sponsor pre-day lunch contribution — company-level, not per CEH
-        // participant — so sponsors are EXCLUDED from the per-participant "declared" set below (no
-        // double-count).
-        var boothMemberCount = (await _db.SponsorInfos
-            .Where(s => s.EventId == me.EventId
-                && s.BoothCheckInSlot != null
-                && s.BoothCheckInSlot != BoothCheckInSlots.NotParticipating
-                && s.BoothCheckInMemberCount != null)
-            .Select(s => s.BoothCheckInMemberCount!.Value)
-            .ToListAsync(ct))
-            .Sum();
+        // 🔴 §1086 — EVERY NUMBER ON THIS PAGE COMES FROM THE ONE ENGINE.
+        // Operator 2026-08-14: *"i need to trust numbers and have logic consistent across"*. This
+        // page used to compute the whole thing inline — correctly — while the dashboard tile and the
+        // venue's Excel each computed their own version, and the three disagreed. The arithmetic
+        // moved to LunchHeadcountService; what stays here is the AUDIT LIST below, which is this
+        // page's actual job.
+        var counts = await _lunch.ComputeAsync(me.EventId, ct);
 
-        var declaredIds = rows.Where(r => r.LunchPreDay && r.Role != ParticipantRole.Sponsor)
-            .Select(r => r.Id).ToHashSet();
-
-        // Participant-level heads (crew ∪ declared), deduped; the company-level booth member count
-        // is added on top.
-        var preDaySet = new HashSet<int>(crewIds);
-        preDaySet.UnionWith(declaredIds);
-
-        TotalResponses = rows.Count;
-        EarlySetupDayCount = rows.Count(r => r.LunchEarlySetupDay);
-        SetupDayCount      = rows.Count(r => r.LunchSetupDay);
-        AutoCountedPreDayCount = crewIds.Count;
-        DeclaredPreDayCount = declaredIds.Except(crewIds).Count();
-        BoothCheckInPreDayCount = boothMemberCount;
-
-        // §326bv — ATTENDEES eat too, and were missing from both pre-day and main day.
-        // Pre-day IS the Master Class day, which only a 2-day ticket admits; the main day
-        // admits every ticket class. Mirror-active rows only, so a cancellation (§326as)
-        // drops out of the catering order on the next sync.
-        AttendeePreDayCount = await _db.Attendees.CountAsync(
-            a => a.EventId == me.EventId
-                 && a.MirrorState == MirrorState.Active
-                 && a.TicketStatus == TicketStatus.TwoDay, ct);
-        AttendeeMainDayCount = await _db.Attendees.CountAsync(
-            a => a.EventId == me.EventId && a.MirrorState == MirrorState.Active, ct);
-
-        // MAIN DAY is not a sign-up: lunch is ordered for everyone on site (§326h), so the
-        // crew side is simply every ACTIVE participant — no checkbox, no dedup needed.
-        CrewMainDayCount = await _db.Participants
-            .Where(ParticipantActivation.IsActiveExpr)
-            .CountAsync(p => p.EventId == me.EventId && !p.IsTestUser, ct);
-
-        PreDayCount = preDaySet.Count + boothMemberCount + AttendeePreDayCount;
+        TotalResponses = counts.SignupResponses;
+        EarlySetupDayCount = counts.EarlySetupDay;
+        SetupDayCount      = counts.SetupDay;
+        AutoCountedPreDayCount = counts.PreDayCrewAutoCounted;
+        DeclaredPreDayCount = counts.PreDayDeclared;
+        BoothCheckInPreDayCount = counts.PreDaySponsorBoothMembers;
+        AttendeePreDayCount = counts.PreDayTwoDayAttendees;
+        AttendeeMainDayCount = counts.MainDayAttendees;
+        CrewMainDayCount = counts.MainDayCrew;
+        PreDayCount = counts.PreDay;
 
         // The audit list: everyone who declared a day, PLUS the auto-counted crew that no
         // form ever produced a row for. Crew who DID fill the form keep their declared row

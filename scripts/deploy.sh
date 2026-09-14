@@ -23,7 +23,13 @@
 #       AZURE_SUBSCRIPTION_ID=<your-sub-id> ./scripts/deploy.sh dev
 #     The script selects the subscription explicitly before deploying.
 #
-#  See docs/RUNBOOK.md for the full deploy + post-deploy procedure.
+#  Parameter file:
+#     Reads infra/main.<env>.parameters.json. The repo ships
+#     infra/main.<env>.parameters.example.json -- copy it to that name and fill
+#     in your own values first (baseName, Entra SQL admin group, hostname).
+#
+#  See README.md "Getting started" and docs/DESIGN.md sections 11-12 and 15 for
+#  the full deploy + post-deploy procedure.
 # ===========================================================================
 
 set -euo pipefail
@@ -100,6 +106,10 @@ fi
 
 if [[ ! -f "$PARAM_FILE" ]]; then
   echo "ERROR: parameter file not found: $PARAM_FILE" >&2
+  if [[ -f "${INFRA_DIR}/main.${ENVIRONMENT}.parameters.example.json" ]]; then
+    echo "       Copy the shipped example and fill in your own values first:" >&2
+    echo "         cp infra/main.${ENVIRONMENT}.parameters.example.json infra/main.${ENVIRONMENT}.parameters.json" >&2
+  fi
   exit 1
 fi
 
@@ -162,9 +172,9 @@ az deployment group show \
 
 echo
 echo "-----------------------------------------------------------------"
-echo " NEXT STEPS (see docs/RUNBOOK.md):"
-echo "   1. Store the real secret VALUES in Key Vault (Brevo, WooCommerce,"
-echo "      Company Manager, the SQL admin password just used)."
+echo " NEXT STEPS (see README.md 'Getting started' and docs/DESIGN.md section 12):"
+echo "   1. Store the real secret VALUES in Key Vault (./scripts/set-secrets.sh"
+echo "      ${ENVIRONMENT}) -- Brevo SMTP, plus any integration you enable."
 echo "   2. Create the DNS CNAME for your event hostname and bind it."
 echo "   3. Deploy the application code (Stage 2+) to the web + Functions apps."
 echo "-----------------------------------------------------------------"

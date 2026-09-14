@@ -245,7 +245,7 @@
                             <span class="so-tag">@(s.LengthMinutes is int lm ? $"{lm} min" : lengthLabel(s.Length))</span>
                             @if (!string.IsNullOrWhiteSpace(s.Room))
                             {
-                                <span class="so-tag">@Localizer["SessOv.RoomTag"] @s.Room</span>
+                                <span class="so-tag">@Localizer["SessOv.RoomTag"] @CommunityHub.Core.Sessions.SessionRoomLabel.ForDisplay(s.Room)</span>
                             }
                             @if (!string.IsNullOrWhiteSpace(s.Track))
                             {

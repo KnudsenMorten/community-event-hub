@@ -80,9 +80,29 @@ public sealed class EngineAlertSender
     /// §752.9 — <c>true</c> for an alert that reports CONFIGURATION or INTEGRATION state which is
     /// deliberately different on DEV, and is therefore news only in PROD.
     /// </param>
+    /// <param name="alsoTo">
+    /// §1121 — extra ops addresses that must get this alert ALONGSIDE <paramref name="recipient"/>,
+    /// on the SAME mail rather than a copy each.
+    ///
+    /// <para>🔒 <b>They go on the To: line, NOT CC</b> (operator 2026-08-25: *"put in to field"* ·
+    /// *"not cc"*). These are co-owners of the job the mail describes, not people being kept in the
+    /// loop, and a CC reads as "for your information" — which is exactly the wrong instruction for a
+    /// speaker sitting held in the Zoho queue.</para>
+    ///
+    /// <para>🔑 <b>One mail, several To — never a send each.</b> These alerts start conversations
+    /// ("I've done it"); two independent sends give two threads in which neither person can see the
+    /// other already acted. That is the very failure the shared <c>info@</c> inbox exists to prevent,
+    /// so a send-per-recipient would undo it one address at a time.</para>
+    ///
+    /// <para>🔒 Every extra rides the same <see cref="EmailContext.RingExempt"/> context as the
+    /// primary, so a NON-PARTICIPANT address delivers. Without that it is dropped by
+    /// <c>BrevoEmailSender.ShouldRingDropAsync</c>, which fails closed on an unknown recipient — the
+    /// same trap that made engine alerts vanish before this class existed.</para>
+    /// </param>
     public async Task AlertAsync(
         string subject, string htmlBody, CancellationToken ct,
-        string? throttleKey = null, string? recipient = null, bool devSilent = false)
+        string? throttleKey = null, string? recipient = null, bool devSilent = false,
+        IReadOnlyCollection<string>? alsoTo = null)
     {
         // 🔑 §752.9 (operator 2026-08-01: *"i still get alerts from dev env which i thought we
         // disabled"*). §716 silenced the "Engine INACTIVE" family by guarding ONE call site. It
@@ -124,6 +144,22 @@ public sealed class EngineAlertSender
 
         var to = string.IsNullOrWhiteSpace(recipient) ? Recipient : recipient.Trim();
 
+        // §1121 — the primary FIRST, then the extras, de-duplicated case-insensitively so a caller
+        // that names an address already on the line cannot produce it twice. Order matters only for
+        // legibility: the shared ops inbox stays the address the mail is visibly addressed to.
+        var recipients = new List<string> { to };
+        if (alsoTo is not null)
+        {
+            foreach (var raw in alsoTo)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var extra = raw.Trim();
+                if (recipients.Any(r => string.Equals(r, extra, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                recipients.Add(extra);
+            }
+        }
+
         // §702 (operator 2026-07-29: "include [DEV] and [PROD] in all alert mails so i can see which
         // env is sending the alert / impacted. only for alerts of course, not to roles").
         //
@@ -139,13 +175,55 @@ public sealed class EngineAlertSender
         try
         {
             using var _ = _ctx.Set(new EmailContext("engine-alert", RingExempt: true));
-            await _email.SendAsync(to, tagged, htmlBody, ct);
-            _log.LogInformation("EngineAlert sent to {To}: {Subject}", to, tagged);
+            // 🔒 One address ⇒ the ORIGINAL 4-arg call, byte for byte. Every existing alert and every
+            // test double that only implements SendAsync keeps the exact path it had; the multi-To
+            // overload is entered only by a caller that actually asked for extra recipients.
+            if (recipients.Count == 1)
+                await _email.SendAsync(to, tagged, htmlBody, ct);
+            else
+                await _email.SendToManyAsync(recipients, tagged, htmlBody, ct);
+
+            _log.LogInformation(
+                "EngineAlert sent to {To}: {Subject}", string.Join(", ", recipients), tagged);
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "EngineAlert email to {To} failed: {Subject}", to, tagged);
+            _log.LogWarning(
+                ex, "EngineAlert email to {To} failed: {Subject}", string.Join(", ", recipients), tagged);
         }
+    }
+
+    /// <summary>
+    /// §1124 — send one ops alert to a WHOLE recipient list (typically
+    /// <see cref="EmailOptions.SpeakerSessionRecipients"/>), first address as the primary.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Exists so the seven speaker/session pending-task mails read IDENTICALLY at their
+    /// call sites — <c>AlertToAsync(opts.SpeakerSessionRecipients(), …)</c> — instead of each
+    /// re-deriving a primary and a tail. The drift this replaces was not hypothetical: those seven
+    /// had five different answers for who should be told.</para>
+    ///
+    /// <para>An empty or null list sends nothing and says so in the log, rather than falling back to
+    /// the developer mailbox. A speaker/session mail that quietly reverts to <c>mok@</c> is exactly
+    /// what §1124 was asked to remove.</para>
+    /// </remarks>
+    public Task AlertToAsync(
+        IReadOnlyList<string>? recipients, string subject, string htmlBody, CancellationToken ct,
+        string? throttleKey = null, bool devSilent = false)
+    {
+        if (recipients is null || recipients.Count == 0)
+        {
+            _log.LogWarning(
+                "§1124: no speaker/session recipients configured — alert NOT sent: {Subject}", subject);
+            return Task.CompletedTask;
+        }
+
+        return AlertAsync(
+            subject, htmlBody, ct,
+            throttleKey: throttleKey,
+            recipient: recipients[0],
+            devSilent: devSilent,
+            alsoTo: recipients.Count > 1 ? recipients.Skip(1).ToList() : null);
     }
 
     /// <summary>

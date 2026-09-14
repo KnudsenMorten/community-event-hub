@@ -24,6 +24,8 @@ public class VolunteersModel : PageModel
 
     public bool AccessDenied { get; private set; }
 
+    // §1146e — the availability grid moved to its own page (/Organizer/VolunteerAvailability) at the
+    // operator's request. This hub is back to what it was: a card-link landing holding no data.
     public IActionResult OnGet()
     {
         var me = _participant.Current;

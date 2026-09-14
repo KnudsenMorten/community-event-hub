@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Core.Email;
@@ -54,13 +55,63 @@ public sealed class ZohoChangeNotifier
     /// </summary>
     public const string ActionableRecipient = "info@expertslive.dk";
 
+    /// <summary>
+    /// §1121 — the <paramref name="area"/> values whose notices are SPEAKER / SESSION organizer
+    /// to-dos, and therefore also go to <see cref="EmailOptions.SpeakerSessionAlsoTo"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>These are the exact literals the six call sites pass today. The other four —
+    /// <i>Exhibitor profiles</i>, <i>Sponsors / exhibitors</i>, <i>Coupon invoicing</i>,
+    /// <i>Webshop orders</i> — are deliberately absent: he named speakers and sessions.</para>
+    ///
+    /// <para>🔒 <b>Matched by PREFIX, not equality.</b> <c>"Speakers — details missing in
+    /// Backstage"</c> already exists alongside plain <c>"Speakers"</c>, so the area strings visibly
+    /// grow qualifiers over time. Exact matching would mean the next such variant silently loses its
+    /// extra recipients with nothing failing anywhere — the quiet kind of wrong. A prefix rule errs
+    /// the other way: a new <c>"Speakers — …"</c> area is included by default, which is what someone
+    /// adding it would expect.</para>
+    /// </remarks>
+    public static readonly IReadOnlyList<string> SpeakerSessionAreaPrefixes = new[]
+    {
+        "Speakers",          // "Speakers", "Speakers — details missing in Backstage"
+        "Agenda / sessions", // the session push (the "ACTION NEEDED: session '…'" mail)
+    };
+
+    /// <summary>
+    /// §1121 — is this area a speaker/session organizer to-do? Case-insensitive prefix match against
+    /// <see cref="SpeakerSessionAreaPrefixes"/>.
+    /// </summary>
+    public static bool IsSpeakerOrSessionArea(string? area) =>
+        !string.IsNullOrWhiteSpace(area)
+        && SpeakerSessionAreaPrefixes.Any(p =>
+            area.Trim().StartsWith(p, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// §1123 — is this area the one whose Backstage API is genuinely CREATE-ONLY (speakers)?
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Deliberately NARROWER than <see cref="IsSpeakerOrSessionArea"/>: sessions are created AND
+    /// updated, so "Agenda / sessions" must not claim create-only either. Only the speakers areas do.
+    /// </remarks>
+    public static bool IsSpeakerArea(string? area) =>
+        !string.IsNullOrWhiteSpace(area)
+        && area.Trim().StartsWith("Speakers", StringComparison.OrdinalIgnoreCase);
+
     private readonly EngineAlertSender _alerts;
     private readonly ILogger<ZohoChangeNotifier>? _log;
 
-    public ZohoChangeNotifier(EngineAlertSender alerts, ILogger<ZohoChangeNotifier>? log = null)
+    // §1121 — optional so every existing test construction keeps compiling. Null ⇒ no extra
+    // recipients, i.e. exactly the pre-§1121 behaviour, never a crash.
+    private readonly EmailOptions? _emailOptions;
+
+    public ZohoChangeNotifier(
+        EngineAlertSender alerts,
+        ILogger<ZohoChangeNotifier>? log = null,
+        IOptions<EmailOptions>? emailOptions = null)
     {
         _alerts = alerts;
         _log = log;
+        _emailOptions = emailOptions?.Value;
     }
 
     /// <summary>
@@ -117,6 +168,24 @@ public sealed class ZohoChangeNotifier
             // person can fix it; a pure record of what the hub wrote stays with the single operator
             // (§493), because for the shared inbox that is noise nobody can act on.
             var to = actionable ? ActionableRecipient : Recipient;
+
+            // §1121/§1124 — a speaker/session to-do goes to the SHARED audience
+            // (EmailOptions.SpeakerSessionRecipients), not to a locally-assembled list.
+            //
+            // 🔒 Gated on `actionable` as well as the area. A non-actionable notice goes to the
+            // single operator mailbox by construction (§736), and putting two more people on the
+            // To: of a mail that asks nobody to do anything is the noise §493 removed from info@ in
+            // the first place.
+            var speakerSession = actionable && IsSpeakerOrSessionArea(area)
+                ? _emailOptions?.SpeakerSessionRecipients()
+                : null;
+
+            if (speakerSession is { Count: > 0 })
+            {
+                await _alerts.AlertToAsync(
+                    speakerSession, subject, html, ct, throttleKey: null, devSilent: true);
+                return;
+            }
             // throttleKey: null — every real change batch must reach the operator.
             // §752.9 — DEV-silent: these announce CHANGES to test data, and say "publish/delete may
             // be needed" about a sandbox nobody publishes. throttleKey stays null for PROD, where
@@ -156,11 +225,36 @@ public sealed class ZohoChangeNotifier
             // was inherited from the session push, where it is true, and it flatly contradicted the
             // body two lines below ("the speakers API is create-only"). He went looking for a change
             // that was not there.
-            sb.Append("<p><strong>CEH could not write these to Zoho Backstage</strong> — the ")
-              .Append("Backstage speakers API is <strong>create-only</strong>, with no update or ")
-              .Append("delete endpoint. Nothing has changed over there, so there is nothing to ")
-              .Append("publish: please open Backstage and <strong>make the changes below by ")
-              .Append("hand</strong>.</p>");
+            sb.Append("<p><strong>CEH could not write these to Zoho Backstage</strong> — ");
+
+            // 🔴 §1123 — THE REASON MUST MATCH THE AREA. Operator 2026-08-25, on a
+            // "Sponsors / exhibitors" mail: *"it also refers to speakes api"*.
+            //
+            // 🔑 §763 wrote this preamble for the create-only SPEAKERS area and hard-coded its
+            // reason into the shared builder. Every later area that set `manualOnly` — sponsors and
+            // exhibitors (§792), coupon invoicing — then inherited a sentence about an API it does
+            // not use. And it is not merely off-topic: it states, in bold, that no update endpoint
+            // exists, which for exhibitors is FALSE (ZohoClient.UpdateExhibitorAsync PUTs website,
+            // overview, short description and social pages). A wrong explanation is worse than none
+            // — it teaches him the system cannot do something it does every sync.
+            //
+            // ⇒ The create-only claim is made ONLY for the area it is true of. Everywhere else the
+            // preamble says what is certain (these values did not reach Backstage; enter them by
+            // hand) and does not invent a cause. The per-area REASON belongs to the caller, which
+            // knows why its own push did not land; the shared builder must not guess.
+            if (IsSpeakerArea(area))
+            {
+                sb.Append("the Backstage speakers API is <strong>create-only</strong>, with no ")
+                  .Append("update or delete endpoint. Nothing has changed over there, so there is ")
+                  .Append("nothing to publish: please open Backstage and ");
+            }
+            else
+            {
+                sb.Append("these values did not reach Backstage, so there is nothing to publish ")
+                  .Append("over there. Please open Backstage and ");
+            }
+
+            sb.Append("<strong>make the changes below by hand</strong>.</p>");
         }
         else
         {

@@ -124,8 +124,8 @@ public sealed class WooCommercePullJob
                 if (!pr.Enabled) continue;
                 var did = pr.SponsorsCreated + pr.SponsorsLinked + pr.ExhibitorsCreated + pr.ExhibitorsRequested + pr.ExhibitorsLinked + pr.Skipped;
                 _log.LogInformation(
-                    "Zoho provision (event {Event}): created {C}, linked {L}, exhibitor-created {EC}, exhibitor-requests {E}, exhibitor-linked {EL}, skipped {S}.",
-                    id, pr.SponsorsCreated, pr.SponsorsLinked, pr.ExhibitorsCreated, pr.ExhibitorsRequested, pr.ExhibitorsLinked, pr.Skipped);
+                    "Zoho provision (event {Event}): created {C}, linked {L}, exhibitor-created {EC}, exhibitor-requests {E}, exhibitor-linked {EL}, skipped {S}, declined {D}.",
+                    id, pr.SponsorsCreated, pr.SponsorsLinked, pr.ExhibitorsCreated, pr.ExhibitorsRequested, pr.ExhibitorsLinked, pr.Skipped, pr.Declined);
                 if (did > 0 || pr.Notes.Count > 0)
                     await _audit.RecordAsync(new AuditEntry
                     {
@@ -150,6 +150,14 @@ public sealed class WooCommercePullJob
                 // When the webshop has sponsors/exhibitors the engine could NOT create or
                 // link in Zoho (pr.Skipped > 0), email the developer so it never fails
                 // silently again ("I have no way of knowing it otherwise").
+                //
+                // 🔴 §1164 — DECLINED IS NOT SKIPPED. Operator 2026-08-31, on receiving this alert
+                // for a record the engine had correctly refused to create: *"still getting
+                // errors"*. It was not an error — §1163 had just declined to re-create an exhibitor
+                // record whose order he had cancelled, which is the fix working. Counting a correct
+                // decision as a failure mails him every fifteen minutes about the system behaving,
+                // and that is how an operator learns to ignore the alert that will one day matter
+                // (the §1154 complaint, in a new place).
                 if (pr.Skipped > 0)
                     await SendDriftAlertAsync(id, pr, ct);
             }
@@ -190,18 +198,29 @@ public sealed class WooCommercePullJob
         string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
         var items = string.Join("", pr.Notes.Select(n => $"<li>{Enc(n)}</li>"));
         var label = await EventLabelAsync(eventId, ct);
+        // 🔴 §1164 — SAY WHAT HAPPENED, DO NOT GUESS WHY.
+        //
+        // This paragraph used to assert a cause — *"most likely Zoho's 'email is the key' rule"* —
+        // on every alert, whatever the actual reason. It was a plausible guess written once and
+        // then printed as a finding for ever, which sent the operator looking at contact e-mails
+        // for a record that had been refused for an entirely different reason. The per-record notes
+        // below already say precisely why each one was not created; a standing guess above them can
+        // only contradict them.
         var html =
-            $"<p><b>{pr.Skipped}</b> webshop sponsor/exhibitor record(s) could NOT be reconciled to Zoho Backstage "
-            + $"({Enc(label)}). The webshop order shows them, but they are missing from Zoho and the engine "
-            + "could not create them (most likely Zoho's \"email is the key\" rule — the contact email is already "
-            + "in use, so a create returns success with no record).</p>"
+            $"<p><b>{pr.Skipped}</b> webshop sponsor/exhibitor record(s) could NOT be created in Zoho "
+            + $"Backstage ({Enc(label)}). The reason for each is below.</p>"
             + $"<p>Created {pr.SponsorsCreated} sponsor(s), linked {pr.SponsorsLinked}; "
             + $"created {pr.ExhibitorsCreated} exhibitor(s), linked {pr.ExhibitorsLinked}.</p>"
             + (items.Length > 0 ? $"<p><b>Details:</b></p><ul>{items}</ul>" : "")
+            + (pr.Declined > 0
+                ? $"<p style=\"color:#555\">({pr.Declined} further record(s) were deliberately NOT created "
+                  + "because the company's current orders do not earn them. That is the engine working "
+                  + "and needs nothing from you.)</p>"
+                : string.Empty)
             + "<p>Next run is in ≤15 min. Check the Function logs (ZohoClient CreateSponsor/CreateExhibitor) "
             + "for the exact Zoho response body.</p>";
         await _alerts.AlertAsync(
-            $"Sponsor/exhibitor NOT in Zoho — {pr.Skipped} need attention ({label}) [ELDK27]",
+            $"Sponsor/exhibitor could not be created in Zoho — {pr.Skipped} need attention ({label}) [ELDK27]",
             // §752.9 — DEV-silent. Drift against a Zoho sandbox full of test orders is the normal
             // state of DEV, not news. 🔒 The `Sponsor→Zoho provision FAILED` alert in the caller is
             // deliberately NOT flagged: it fires when the engine THREW, and a throwing engine stays

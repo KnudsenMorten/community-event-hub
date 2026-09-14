@@ -4,9 +4,12 @@ This is the **single design document** for the Community Event Hub: how the buil
 works — its architecture, data model, integrations, jobs, email, build, infra, deploy, and
 operational runbook. It absorbs the former CONCEPT / RUNBOOK / build / design-notes / parity
 material into one place. For *what we still want to build* (backlog + status with ◻/🟡/✅
-markers) see [`REQUIREMENTS.md`](REQUIREMENTS.md). For test procedures (smoke walkthrough,
-Playwright suites, Pester) see [`TESTS.md`](TESTS.md). For the documentation model and the
-rules about which doc owns what, see [`../CLAUDE.md`](../CLAUDE.md).
+markers) see `docs/REQUIREMENTS.md`. For test procedures (smoke walkthrough, Playwright suites,
+Pester) see `docs/TESTS.md`. For the documentation model and the rules about which doc owns what,
+see `CLAUDE.md`. Those three — together with `CONTRIBUTING.md`, `internal/`, `config/` and the
+maintainers' operator scripts under `tools/` — are the maintainers' internal material and are **not
+part of the public template**; references to them below describe how the upstream instance is run.
+To set up your own instance, follow the README's *Getting started*.
 
 ---
 
@@ -45,8 +48,8 @@ pre-event obligations; organizers run the event from an admin hub; sponsors get 
 portal; timer jobs pull upstream systems and send reminders.
 
 It is a **role-personalized crew-management web app** for a Microsoft-community conference
-(first edition: Experts Live Denmark 2027 / **ELDK27**, 9–10 February 2027 at Bella Center
-Copenhagen, pre-day 8 Feb). It replaces a previous spreadsheet + PowerShell + Microsoft Planner
+(first edition: the upstream community's 2027 conference, edition code **ELDK27**, a two-day
+event with a master-class pre-day). It replaces a previous spreadsheet + PowerShell + Microsoft Planner
 workflow with a single database-backed self-service hub: speakers/volunteers/sponsors see and
 manage their own submissions, organizers get one overview instead of five, and data syncs to
 subsystems (Backstage / ERP / webshop) rather than living in email threads.
@@ -59,7 +62,7 @@ subsystems (Backstage / ERP / webshop) rather than living in email threads.
   Bicep base name. Fixed; not renamed per community. (`EventHub` was rejected — it collides with
   the Azure Event Hubs service.)
 - **Product display name = "Community Event Hub (CEH)"** — shown in the layout chrome only.
-- **Community name = `Event.CommunityName` data field** (e.g. "Experts Live Denmark") — per-edition
+- **Community name = `Event.CommunityName` data field** (e.g. "Demo Community") — per-edition
   data, never hard-coded.
 
 The year appears in exactly two places: user-facing labels (the active event's display name) and
@@ -75,7 +78,7 @@ payments. Azure isolates the app, gives first-class Bicep IaC, and is existing h
 
 **Estimated cost:** ~€25/month per instance (~€50/month dev + prod combined).
 
-The private repo (`eldk-community-event-hub`) carries the real config; the public mirror
+A private repository carries the real config; the public mirror
 (`community-event-hub`) is the sanitized template (§13).
 
 ![Architecture overview — the web hub + Functions job host sharing one Core library and one Azure SQL database](img/image1.png)
@@ -93,7 +96,8 @@ The private repo (`eldk-community-event-hub`) carries the real config; the publi
 | `src/CommunityHub.Core` | class library | EF Core `CommunityHubDbContext`, domain entities, services, integrations, email, auth — shared by web + jobs |
 | `src/CommunityHub` | ASP.NET Core Razor Pages (+1 MVC API controller) | the web hub (participant / sponsor / organizer pages, Leads API, `/health`) |
 | `src/CommunityHub.Jobs` | Azure Functions v4 isolated worker (timer triggers) | scheduled pulls, reconciliation, reminders, watchers |
-| `tools/CommunityHub.OneShot` | console CLI | run one job once locally against the same services |
+| `tools/CommunityHub.OneShot` | console CLI | run one job once locally against the same services *(maintainer tooling — not in the public template, and the published solution omits it)* |
+| `tests/CommunityHub.Core.Tests`, `tests/CommunityHub.Web.Tests` | xUnit | unit, scenario and page-model tests |
 
 `CommunityHub.Core` is organized into `Config/` (typed config loader + schema validation),
 `Domain/`, `Data/` (DbContext + migrations), `Auth/` (PIN generation/verification/session + the
@@ -798,6 +802,22 @@ A clean .NET slice of the legacy PowerShell ERP/webshop pipeline, in
   payload/webshop HTTP wiring is the remaining **◻** item (needs operator creds/endpoints —
   config holds secret NAMES only, never values). A write method must throw rather than fake a
   call while `CanWrite` is false.
+- 🔴 **Creating an INVOICE is production-only, and it is its own ceiling** (§1119). Every invoice the
+  platform has ever raised — the coupon sweep, the coupon prepaid button, the webshop sweep — goes
+  through the single method `IEconomicInvoiceClient.CreateDraftInvoiceAsync`, and the live client
+  refuses it unless the host is permitted to write to the system
+  **`e-conomic invoice creation`** (`Integrations:ExternalWrites:ErpInvoiceCreate`). ⚠️ That is a
+  NARROWER ceiling than `Erp`: a non-production host is deliberately allowed to read and write ERP
+  customers, contacts and orders while never being able to bill anybody. It needs no setting in
+  either environment — an unlisted system falls back to `Integrations:AllowExternalWrites`, which is
+  already off outside production and on within it. Reads are never gated: looking a customer up
+  changes nothing in e-conomic; creating a draft does.
+  🔒 **Why the client and not the callers:** the client is provably every caller, including the next
+  one. The gate previously relied on the jobs host swapping in a TestMode invoice client — but the
+  web host registers the LIVE client unconditionally, so the "Create Invoice" button on
+  *Organizer → Coupon invoicing* was held back only by `Invoicing:DryRun` defaulting to true on a
+  host that never sets it. The recurring invoicing sweeps additionally do not START on a TestMode
+  host, so they neither invoice nor send their "could not be invoiced" mail from there.
 - **Customer create/sync** (`EconomicCustomerSyncService`) — maps a Company Manager company →
   `ErpCustomer` (name ALWAYS resolved through the shared `SponsorCompanyName` public→legal→
   billing→"Company {id}" chain; CVR / currency / VAT zone / existing customer number read from
@@ -836,6 +856,28 @@ flag (off by default, checked across active editions) AND the service's own
 `ErpWebshopContactSyncService.CanRun` (so it no-ops until ERP/webshop creds are configured —
 no faked writes). Idempotent: a contact that already exists is skipped, so a save on either
 side that fires both the write-through and the next timer tick never double-creates.
+
+**Leaving the sponsor group is an EVENT, not an absence (2026-08-21).** The reconcile enumerates
+customer **group 1**, so a customer moved to another group used to simply stop appearing — no note,
+no change, and the hub went on treating an attendee company as a sponsor indefinitely. After the
+ordinary sweep the service now checks every webshop company whose ERP number is *not* in group 1 and,
+when the customer is **positively still present** in the full e-conomic customer list, runs the
+standard company withdrawal (sponsor status → withdrawn, contacts deactivated, party seats released,
+audited, reversible from *Organizer → Sponsors*). e-conomic and Zoho are never written.
+🔒 It acts only on a positive finding, never on absence: a number missing from e-conomic **entirely**
+is reported and left alone (deleted, renumbered and unreadable are indistinguishable); a failed or
+implausibly short customer read does nothing at all; a single-company re-run skips the sweep; and a
+company the hub holds as an **established sponsor** (a Zoho sponsor record and/or a booth) is
+reported for a human decision rather than withdrawn, because withdrawal deactivates every contact.
+
+**Response-body inspection inside the HTTP pipeline (2026-08-21).** `CredentialFailureAlertHandler`
+reads response bodies to catch auth failures hidden behind a 200 (§524). It runs *inside* the handler
+chain, where the content is still the live network stream — `HttpClient` buffers only after the chain
+returns — so a read that fails part-way leaves the content consumed and unbuffered and the caller's
+own read throws `InvalidOperationException: The stream was already consumed`, which names nothing and
+is not retryable. The handler therefore **buffers explicitly and rethrows a failed buffering** as the
+transport fault it is; only the classify-and-alert half stays fail-soft. Any future handler that
+inspects a body must do the same.
 
 ### SharePoint (Graph)
 Per-sponsor upload folders + a watcher job (SponsorUploadWatch) that detects new sponsor
@@ -1026,7 +1068,7 @@ reports agenda sync health.
 - **Three independent timers** (§7): view rotation, internal page flip, data refresh. The rotation
   advances on its own cycle regardless of which page is showing.
 - **Colour** is `SignagePalette`, which returns background/foreground **as a pair** so unreadable
-  combinations are unreachable: never white on Experts Live Green (~2:1 — what the current OptiSigns
+  combinations are unreachable: never white on the community's brand green (~2:1 — what the current OptiSigns
   portrait template does). Rating colours are derived from `EvaluationReportLayout` rather than
   re-typed, so the wall and the speaker's PDF cannot drift; rating 2 is yellow `#E4B400`.
 - **The feedback view** reuses the PDF report's hero + distribution (§754.2): the event-wide pooled
@@ -1073,6 +1115,26 @@ The only Zoho delete it performs is a booth **member** delete (below).
   under the §41a rule). Social URLs live under `company_social_pages.{linkedin,twitter}`; the read is
   hardened to treat both a plain-string and an object-wrapped (`{url:…}`) value as "set", so
   read↔write blank-detection stays symmetric and a second pass never re-pushes.
+- **What the sponsor/exhibitor sync WRITES, and what it can only report (2026-08-17).** The engine
+  pushes every profile field the Backstage API accepts — on the **exhibitor** record `website_url`,
+  `company_overview`, `company_short_description` and `company_social_pages.{linkedin,twitter}`; on
+  the **sponsor** record `description` and `website_url`. Each is sent only when it is blank or
+  different in Zoho (`NeedsManualEntry`), and never when the hub's own value is blank, so a sync can
+  fill and correct but never erase.
+  - **Two things are reported by e-mail instead of written, for reasons that are not retryable.**
+    **Booth videos and collateral** have no Backstage endpoint at all, and **contact details** are
+    deliberately never PUT because Zoho hard-caps contact-email updates at three (a no-op resend
+    burns one). These become an actionable hand-entry list to the ops mailbox, stamped so a company
+    is listed once per real change rather than once per pass. When there is nothing to report — the
+    normal case — no mail is sent.
+  - ⚠️ **`company_social_pages` merges; it does not replace.** A key omitted from the payload keeps
+    its stored value and `{}` is a no-op, so a link can be blanked to `""` but only the Backstage GUI
+    can remove one. The hub can therefore set and change a social link, never delete one — safe only
+    because it refuses to push a blank in the first place.
+  - 🔒 **Kill switch.** `Zoho:PushExhibitorSocialPages` (default on) turns the social push off in one
+    setting with no deploy, restoring the hand-entry route. It exists because a regression on this
+    field is *silent* — the API answers 200 and discards the value — which is exactly how it behaved
+    from 2026-08-04 until Zoho repaired it on 2026-08-16. **Trust a live read-back, never the 200.**
 - **Booth member delete — real Zoho delete (§41a/§56).** Zoho now supports per-member delete
   (`DELETE …/exhibitors/{id}/members/{memberId}` → `200 {"status":"success"}`). On a hub delete the
   member id is resolved by EMAIL (`GetBoothMembersAsync` captures each member `id`) and
@@ -2014,6 +2076,15 @@ publishes, not when it was planned.** The model that makes that work:
 - **Everything else is a variable.** `{Organizers}`, `{EventTags}`, `{SponsorTier}`, `{Speakers}` and
   the rest resolve from settings and event data **at publish time**, through the same resolver the
   editor's preview uses — so the preview shows exactly what will publish.
+- **Session announcements tag their speakers (§1224, 2026-09-14).** The Type 2 template and every
+  imported session wording carry `🎤 With {Speakers}` directly under `{IntroText}`. None of them did
+  before, so master class, panel and technical session posts named nobody. `{Speakers}` renders a
+  LinkedIn mention for a speaker with a stored `LinkedInPersonUrn` and the plain name otherwise, and
+  it is **required** by `SoMeEmptyVariableGate` — a session with no resolvable speaker is held, never
+  published with a bare "With". Existing bodies (wordings, template overrides, unpublished posts in
+  both text columns) were rewritten by migration `SoMeSessionBodiesTagSpeakers`; published posts are
+  left as the record of what went out. Type 1 (track) posts tag the same way: the shipped default now
+  uses `{Speakers}`; the imported track wordings and queued track posts already did.
 - **The organizer credit is an ordinary variable.** It used to be appended at publish time, which
   made it the one value that was not in the body, not editable and not movable — and, because it
   bypassed the variable pipeline, not eligible for @-mention resolution either. `{Organizers}` now
@@ -2059,6 +2130,14 @@ built to drop — the "Tag:" line for a sponsor with no mentionable contact, an 
   is written *from*. An empty one yields not a shorter post but an **invented** one, made permanent by
   the teaser reuse. `SoMeApprovalGate` therefore carries an explicit check for the session's
   description. The general rule is the floor, not the ceiling.
+- **Co-presented formats need 2+ linked speakers** (master class, panel discussion — §1060(m)): one
+  linked speaker usually means the others were never linked, and would announce the wrong people.
+  **One-speaker override (§1218, 2026-09-13):** `Session.SoMeSingleSpeakerConfirmed` lets an organizer
+  confirm that one speaker is correct. It lifts **only** that rule, only for **exactly one** linked
+  speaker (zero stays blocked), and lives on the session so every post for it is covered. The post
+  editor offers the button when `SoMeApprovalGate.SingleSpeakerOverrideAsync` says the rule applies —
+  the gate, not the page, decides — and confirming does not approve. Un-confirming re-blocks at send
+  time via the dispatcher's gate check.
 
 **A subject can be excluded outright**, which is different from being blocked. `SoMeTitleExclusions`
 matches operator-authored **title patterns** (one per line, `*` wildcard, anchored, case-insensitive)
@@ -2234,10 +2313,217 @@ compose), `/Organizer/SoMeSettings` (enable/disable, company page, pre-alert org
 + toggle). Both organizer-gated, mobile-first (~360px) + a11y. All outbound (pre-alert + publish
 notifications) goes through `IEmailSender`, so the DEV redirect / ring gate / kill switch apply.
 
+**Audit (§1216, 2026-09-12).** `SoMeDispatchService` writes one audit row **per post** it publishes
+(`some.post-published`) or fails to publish (`some.post-failed`): category Engine, source Job, target
+`SoMePost` + id, the type and first 100 characters of the published text in the summary, schedule time
+and LinkedIn id (or the error) in the detail. Written after the post's status is saved, so the
+status-as-sent-marker idempotency means a re-run writes no second row. `SoMeDispatchJob`'s per-run count
+row (`some-scheduling`) is unchanged. `IAuditTrail` is an optional constructor dependency — best-effort,
+it never fails the publish.
+
 **Operator config (flagged 🟡 — never committed).** The LinkedIn company-page URL / organization id
 (operator config, placeholder only) and the LinkedIn OAuth access token (Key Vault secret
 `linkedin-some-access-token`). Until both are wired + posting is enabled, the Null publisher keeps the
 queue inert with nothing faked.
+
+#### One exclusion rule, one graphic answer, one guard (§1178, 2026-09-12)
+
+**`SoMeSubjectScope`** is the single answer to *"may this subject be announced?"*, shared by the
+planner, both graphics builders and the guard. A session is out when any of these holds:
+
+| Rule | Set by |
+|---|---|
+| `Session.UsedForTesting` | the **"Mark as TEST session"** button on `/Organizer/Sessions` |
+| `Session.ExcludeFromSoMeAnnouncements` | the **"Exclude from social media"** button beside it |
+| `Session.IsTestData` | nothing — kept only so pre-existing seeded data still behaves |
+| `SoMeSettings.ExcludedSessionTitlePatterns` | his own wildcard title list |
+| every speaker on it is a test user | derived (mixed sessions keep their place) |
+
+Service sessions are deliberately **not** in this set — every caller already filters them as "not a
+session at all", and folding them in would make the set mean two things.
+
+Before §1178 these were spread over four services with four different definitions, the **graphics
+sweep having the narrowest** — so a session nothing else in the campaign would touch could still be
+rendered into the track GIF that goes on the company page.
+
+**Graphic resolution.** `SoMeSubjectGraphic.Effective(map, post)` is the dispatcher's rule as a
+function: for a subject-owned post (types 1–4) the subject's CURRENT graphic wins and the stamped
+`ImageRef` is only a fallback; for a Type 5 or ad-hoc post the stamp IS the answer. The queue badge,
+the Post calendar, the sponsor/speaker announcement preview, `/some-post-media` and the dispatcher all
+call it, so a preview and a publish cannot disagree.
+
+🔒 **Release is the BRANDING gate, not the ANNOUNCEMENT gate.** `GraphicsService.InitialStatusFor`
+returns `Generated` for `GraphicAssetType.Sponsor` alone — sponsor artwork is internal-only and feeds
+`BrandingGraphicsProvider` — and nothing ever releases it. `SoMeSubjectGraphic` therefore admits a
+sponsor row on `FileName`, while track / session / tier artwork keeps its Released gate unchanged.
+Sponsor rows are **not** auto-released: that would change which artwork the branding surfaces pick up.
+
+**`SoMeQueueGuard`** runs first in every planner run, before subject collection — a surviving post for
+an excluded subject would otherwise read as "already handled". Any queued, unpublished post whose
+subject key is excluded is **tombstoned (§853)**, which is also what stops the planner re-proposing it;
+the reason travels into the planner's own message. Published posts are never touched, and a removal is
+reversed by clearing the flag and pressing Restore in the post editor.
+
+#### One post per subject per round, and no Type 5 churn (§1201/§1203, 2026-09-12)
+
+**`SoMeQueueGuard.RemoveDuplicatesAsync`** runs beside the exclusion guard, keyed on
+`(TemplateKind, SubjectKey, Occurrence)`. The **round is half the key**: the same subject on several
+dates is not a duplicate but a separate run, and for Type 5 those dates are the operator's deck. The
+keeper is ordered *published → accepted → active → lowest id*, and a losing post that has itself
+published is left alone — two posts that both went out are two facts. Losers are tombstoned, not
+deleted.
+
+**§848.2's discard now skips `SoMeTemplateKind.EventPost`.** The discard exists so the *spread* can be
+recomputed as subjects arrive; a Type 5 date is fixed input (§834.4), so re-planning it every tick
+achieved nothing and cost identity — each rebuild issued a new `Id`, so ids climbed past 321,000 in an
+edition of a few dozen posts and every link already mailed pointed at a row that no longer existed.
+PROD confirmed the fix: `created 50 (31 event posts)` → `created 19 (0 event posts)`, run after run.
+
+### Sponsor Get-started chase list (§1210, 2026-09-12)
+
+`SponsorGetStartedReport.NotCompletedAsync(eventId)` → one row per in-scope company that has not
+finished the wizard: company name (the canonical `SponsorCompanyNameService` chain, one query),
+its **event coordinators** (name + email — §7c's audience, so a signer-only contact is not offered),
+progress over the EVALUABLE steps (§250's honest denominator), and the open step keys. Rendered at
+`/Organizer/SponsorGetStarted`, linked from the Sponsors page.
+
+🔒 **Completion is `SponsorWizardService`'s answer, never a re-implementation** — the same object the
+sponsor's own page renders and §250's digest chases with. One wizard build per COMPANY (it is
+company-scoped, so building it per contact would repeat the same answer), and scope comes from
+`SponsorZohoScope.MayPushToZoho` so test and withdrawn companies are out by the same stored flag that
+governs Backstage.
+
+🛑 **A company with NO coordinator is reported, flagged and sorted first** rather than dropped. It is
+the worst case: the wizard cannot even be built, and the reminder mails have no recipient either, so
+nothing at all is chasing that company (§854).
+
+#### One round count, and a dated round is a round (§1207, 2026-09-12)
+
+**`SoMeCategoryRules.EffectiveRounds(rule, roundStarts)` = `max(rule.Rounds, highest dated round)`**,
+used by `Windows()`, by the planner's `RoundsOf` and by the settings page, so the count, the windows
+and the boxes on screen cannot disagree.
+
+⚠️ **The engine had two sources of truth for "how many rounds".** §1195 seeds a new rule's `Rounds`
+from the legacy `SoMeCadenceSettings.Occurrences` (so a configured edition keeps its choice), while
+`RoundSeeds` seeds the round DATES from the `SoMeSettings` columns — `SpeakerTracksRound3From` among
+them. An edition whose posting-frequency page still said **2** got `Rounds = 2` **and** a dated round
+**3**; `Windows` iterated `1..Rounds` and dropped it. The date was entered, stored and displayed, and
+nothing planned it. It cannot stick high: `SaveAsync` deletes round rows above the saved count.
+
+⇒ **The legacy cadence table is no longer read by the planner at all.** It remains the SEED for a new
+rule and nothing more; `Times()` and its `sessionTimes` local are gone. `/Organizer/SoMeCadence` keeps
+its route and its inbound link (the reachability guardrail is right — a page that exists must be
+reachable) but no longer offers an editable second number: it states where rounds live and links on.
+
+🔴 **Same family, found beside it:** sponsor speaker sessions were gated on `sessionTimes > 0` — the
+ORDINARY session cadence — so turning Type 2 off silently cancelled a separate category, and that
+category's own `Enabled` switch governed nothing. It is now gated on
+`RoundsOf(SponsorSpeakerSessions)`.
+
+#### Which category a post belongs to — 2a / 2b / 2c (§1209, 2026-09-12)
+
+`SoMeCategoryRules.CategoryOf(kind, subjectKey, masterClassSessionIds)` maps a post to its
+`SoMeAnnouncementCategory`. Three categories share `SoMeTemplateKind.Session`, so the KIND cannot
+answer it: a `sponsorsession:` key is 2c, a `session:` key whose id is a master class is 2a, and
+anything else is 2b — the fallback deliberately being the category **without** its own earlier window,
+since a wrong guess would point at the wrong rule. The caller resolves the master-class ids once per
+page (§889), and the label comes from `SoMeCategoryRules.Label`, the settings page's own.
+
+#### `Session.IsTestData` — a legacy flag, now visible and clearable (§1208, 2026-09-12)
+
+**It is not how a test session is defined.** "Mark as TEST session" writes `Session.UsedForTesting`;
+the only writer of any `IsTestData` in the application is the Sponsors page, for `SponsorInfo`
+(§905.1). 🔴 But `SoMeSubjectScope` reads the session one as an exclusion and PROD rows carry it, so a
+session could be absent from the entire campaign — no track post, no session post, speakers stripped
+from the graphics — with nothing on any page saying why. The Sessions grid now shows it when set and
+offers **Clear legacy test flag**. Clear-only by design: a second control meaning "test session" is
+what produced the ambiguity, so the remedy is a way out, not another way in.
+
+#### Every re-time takes `now` (§1213, 2026-09-12)
+
+All four passes that move an existing post — §928's master classes, §1144/§1205's overdue push,
+§1179's blackout and §1183's window move — now receive `now`, and `MoveOutOfWindowAsync` clamps its
+window start to it (`Later(window, now)`). It was the only one that did not, and
+`SoMeSchedulePlanner.RetimeIntoWindow` packs from `windowStartUtc` while comparing only against the
+window and the event — so a window that had already opened could place a post in a day that was gone.
+
+⚠️ **Recorded honestly: this is a latent hole that was closed, not the cause of the reported
+past-dated post.** §1183 shipped the same day as that report, and the tests pass with the clamp
+reverted (§1144's push re-dates an overdue proposal first). A post dated in the past is a PLACEMENT
+question, never an approval one — §1068 approving a backdated post is the operator's own rule
+(*"if a post has NOT been published yet and points to the past, then it must approve and publish
+it"*), so the only place it can be prevented is where the date is chosen.
+
+#### Track artwork is reconciled with the tracks that exist (§1214, 2026-09-12)
+
+`SoMeBundleBuildService.ReconcileTrackGraphicsAsync` runs after the track builds, comparing the stored
+`GraphicAssetType.TrackBundle` rows against the **live** track set (and against the input hashes the
+sweep just computed).
+
+- **A track with no sessions left** — deleted, retracked, or excluded by §1178 — no longer appears in
+  the build query at all, so nothing used to retire its asset and `SoMeSubjectGraphic` kept serving
+  the old GIF. Its asset is now **un-released** (`Released` → `Generated`), which is precisely the gate
+  that class reads. 🔒 The file and row survive: the track returning releases it again, and the
+  condition is often a mid-edit move between tracks.
+- **An `IsOrganizerOverridden` asset is never rebuilt** (`GenerateTrackBundleAsync` returns it
+  untouched) and is never retired either — both correct, both his decision. What was missing is that
+  nothing said when the line-up behind it changed. The computed hash is compared with `InputHash` and
+  a mismatch is **reported by name** on the sweep result and in the log. ⚠️ An asset with no recorded
+  hash is not reported: it predates the column, so a mismatch would be an upgrade artefact, and a
+  false alarm on his own artwork is how a warning gets ignored.
+
+Both surface on `BundleResult` (`TrackGraphicsRetired`, `StaleOverriddenTracks`) rather than living
+only in the log. ◻ Session graphics have the same override-staleness gap; only tracks are covered.
+
+#### One readiness answer for every screen (§1206, 2026-09-12)
+
+**`SoMeReadiness`** answers *"is this post ready, and if not, in a few words, why?"* for the queue, the
+post calendar and the SoMe settings page. It asks `SoMeApprovalGate` — one query per post — and is
+therefore scoped to **held** posts only (not approved, not published, not tombstoned): an approved
+post's state already says it is ready, a published one is history.
+
+Three renderings of one answer: `HeldReasonsAsync` (post id → the gate's full sentence, a ready post
+simply **absent** rather than present-and-empty), `Short` (the action clause, with the reassurance tail
+cut and the subject kept — §1204's grouping key), and `Chip` (a table-cell label: *graphic missing*,
+*logo missing*, *sponsor text missing*, …, falling back to *not ready* rather than guessing).
+
+⚠️ **What this replaced was two screens describing one condition differently.** The queue's only
+readiness signal was `AwaitingGraphicPostIds` — one blocker out of a dozen — so a post waiting on a
+sponsor's social text or a session description rendered as healthy; that is the real cause behind
+§1193's *"when i click activate nothing happens"*. The calendar's `held — not approved` covered both a
+post nobody has got to and a post nobody **can** approve, which is §335: the symptom of the second is
+that nothing happens. `SoMeAnnouncementQuery.ForEventWithReadinessAsync` is the calendar's opt-in path,
+kept separate from `ForEventAsync` so the per-post cost never lands on a caller that does not need it.
+
+🔒 **Readiness gates APPROVAL, never PLACEMENT.** The planner has never refused to plan an unready
+subject — a held-back post is a planned post with a date, a seat in the capacity report (§1199) and a
+date §1205 keeps honest. Operator 2026-09-12: *"i prefer to see them inside the plan, as i can then
+also see capacity"*.
+
+#### Overdue posts, and the ones that are held back (§1144/§1205, 2026-09-12)
+
+`PushOverduePostsAsync` moves a queued, unpublished post whose slot has passed onto the next free one
+(`SoMeSchedulePlanner.RetimeIntoWindow` from `now`, so weekends, the §1179 blackout, the per-day
+ceiling and every other post are all obstacles).
+
+⚠️ **It had required `IsActive` — i.e. already APPROVED — which is the inverse of the case it was
+written for.** A post blocked on a logo or social text never passes `SoMeApprovalGate`, so it is never
+active, so it was never movable: it sat in the past indefinitely, holding a seat in a month that had
+already gone. §1205 drops that condition. *Approval is a different question from whether the date is
+still true* — and an overdue date is a mis-sold seat, which is exactly what §1199 measures.
+
+What the pass may **not** re-date, each named with its reason (§854) rather than counted:
+
+| Left alone | Why |
+|---|---|
+| `PlanState.Scheduled` | §848.2 — an accepted slot is the operator's |
+| `SoMeTemplateKind.EventPost` | §834.4 — the date is his deck's input |
+| nothing free before the event | the capacity wall (§1199), named with the posts |
+
+🔑 **What actually reaches this pass is not most of the queue.** §848.2's discard runs first and throws
+away every un-accepted, un-approved, template-built proposal, so those are re-planned from `now` on
+the same tick and can never be overdue. The survivors are the ones that had no mechanism at all: a
+post the operator **edited**, one he **approved** that then slipped, an **accepted** one, and Type 5.
 
 ### HTTP resilience — TransientFaultRetryHandler (2026-06-27, §138)
 
@@ -3080,6 +3366,21 @@ Attendees, Action queue). The top-level menu therefore stays short while every e
 still reachable in two clicks; no route is renamed or removed (the deep-links all still resolve, just
 reached via their hub). `NavBuilderTests` covers the consolidated hub set + the organizer gate.
 
+**Hub card guards.** `BreadcrumbHubCardCoverageTests` parses each section hub's tile list and requires
+every target to resolve to `Organizer ▸ that hub` in `BreadcrumbBuilder.FeatureToHub`, so a card added
+without a map entry fails the build rather than rendering a root-only trail. The Marketing / SoMe hub is
+additionally capped by `SoMeHubMergeReachabilityTests` — **8 cards** since §1215 added *Posting
+capacity* (2026-09-12; was 7 after §914's merge) — and a page merged off the hub must stay linked from
+the card that absorbed it.
+
+**Attendee telemetry — registration-question headings (§1217, 2026-09-12).** The ticketing platform's
+custom fields arrive as generic keys and are titled in `AttendeeTelemetryService.FriendlyFieldLabels`,
+mapped by the answers each key actually holds: `single_choice` → *Type of attendee*, `single_choice_1` →
+*Attendee interest / primary track*, `single_choice_2` → *Job role of attendees*, `single_choice_3` →
+*How did attendee learn about the event?*, `multiple_choice` → *Have you attended before?*. Unknown keys
+fall back to a prettified key. The free-text job title typed by the attendee is a separate card
+(`JobTitleLabel`), so no two panels share a heading.
+
 **Per-role participant menus — minimal + targeted (2026-06-21).** The participant menu is no longer a
 union of every form; each role gets a deliberately trimmed list of exactly what it needs:
 - **Attendee** — a MINIMAL menu: Home + the in-hub Master Class chooser (`/Attendee`) + My plan
@@ -3555,7 +3856,7 @@ landing surfaces. Two parts:
 
     🔒 **NEVER partition this on the RECIPIENT ADDRESS.** That was the first implementation, it passed
     every unit test, and the first DEV render showed the section EMPTY beside 25 live engine alerts —
-    they go to `mok@`, which is also the organizer's own participant address, so all 25 were filed as
+    they go to the operator's mailbox, which is also the organizer's own participant address, so all 25 were filed as
     his personal mail (§818.5). A blank template counts as ops deliberately: ops senders carry no
     template identity (PROD 2026-08-04 — all 364 ops rows have none, every `session-eval` row has
     one), and a participant's mail inside a labelled ops section is a far milder error than an alert
@@ -4320,16 +4621,21 @@ dotnet build CommunityHub.sln
 ```json
 {
   "Sql": {
-    "ConnectionStringTemplate": "Server=(localdb)\\MSSQLLocalDB;Database=CommunityHub;TrustServerCertificate=True;",
-    "AdminUser": "",
-    "AdminPassword": ""
+    "ConnectionStringTemplate": "Server=localhost,1433;Database=CommunityHub;TrustServerCertificate=True;",
+    "AdminUser": "<local-sql-login>",
+    "AdminPassword": "<local-sql-password>"
   },
-  "Email": { "SmtpUsername": "<brevo-smtp-username>", "SmtpKey": "<brevo-smtp-key>" },
+  "Email": { "SmtpUsername": "<brevo-smtp-username>", "SmtpKey": "<brevo-smtp-key>",
+             "FromAddress": "noreply@your-event.example", "RedirectAllTo": "you@your-event.example" },
   "Embedding": { "BackstageOrigin": "" }
 }
 ```
-For LocalDB the template uses integrated auth, so `AdminUser`/`AdminPassword` can stay empty. The
-Jobs project takes the same settings via `local.settings.json` (also git-ignored).
+Use a SQL Server (or SQL Server container) with a **SQL login** locally: when `Sql:AdminPassword` is
+empty the app appends `Authentication=Active Directory Managed Identity;` to the template — the Azure
+path — so integrated/LocalDB authentication does not work without a password. The template must end
+with `;`. `Email:RedirectAllTo` sends every local mail to one inbox. The Jobs project takes the same
+settings via `local.settings.json` (also git-ignored). Per-edition files go in `config/` — start from
+[`../config-examples/`](../config-examples/README.md).
 
 **Schema:**
 ```bash
@@ -4344,7 +4650,8 @@ dotnet run --project src/CommunityHub                 # web
 cd src/CommunityHub.Jobs && func start                # scheduler (separate terminal)
 ```
 Go to `/Login`, enter a seeded email, collect the PIN from the email (or the logs in dev), sign in.
-`tools/CommunityHub.OneShot` runs a single job once locally against the same services.
+The maintainers' `tools/CommunityHub.OneShot` (not in the public template) runs a single job once
+locally against the same services.
 
 > The code is written and statically reviewed; the first `dotnet build` after any large change may
 > surface real errors (most plausibly the Azure Functions worker API or EF Core query translation)
@@ -4442,11 +4749,16 @@ first.
    az webapp deploy                            -g rg-<baseName>-<env> -n <webApp> --src-path publish-out/web.zip --type zip
    az functionapp deployment source config-zip -g rg-<baseName>-<env> -n <fnApp>  --src publish-out/jobs.zip
    ```
-   (`tools/deploy-app.ps1 -Env <env>` wraps these build → zip → deploy → health-check steps.)
-4. **Run EF migrations** against the env's SQL — `dotnet ef database update`. The SQL server is
-   Azure-AD-only, so authenticate as an Entra principal that is a database user (no SQL login); if a
-   firewall rule is needed for your client IP, add it temporarily and remove it afterwards.
-5. **Seed** the env's Event row.
+   (The maintainers' `tools/deploy-app.ps1 -Env <env>` wraps these build → zip → deploy →
+   health-check steps; it is not in the public template.)
+4. **Database access + schema.** The web app applies EF migrations itself at startup, so it needs to
+   be a database user: connect to the database as a member of the Entra SQL admin group and run
+   `CREATE USER [<webAppName>] FROM EXTERNAL PROVIDER;` then `ALTER ROLE db_datareader / db_datawriter /
+   db_ddladmin ADD MEMBER [<webAppName>];` — and the same for the Functions app (and a prod staging slot,
+   `<webAppName>/slots/staging`, if you add one). Alternatively apply them from your machine with
+   `dotnet ef database update` as an Entra principal that is a database user; if a firewall rule is
+   needed for your client IP, add it temporarily and remove it afterwards.
+5. **Seed** the env's `Events` row and a first organizer — the README's *Getting started* has the SQL.
 
 **Zero-downtime prod:** S1 plan + a staging slot — deploy to the slot, warm it up, then swap. A bad
 deploy is rolled back by swapping the slot back.
@@ -4477,14 +4789,27 @@ soft-delete/purge protection).
 
 ## 13. Governance, branching & publishing
 
-**Two repos.** Private `KnudsenMorten/eldk-community-event-hub` (real config) → sanitized public
-mirror `KnudsenMorten/community-event-hub` (the reusable template).
+**Two repos.** A private repository (real config) → the sanitized public mirror
+`KnudsenMorten/community-event-hub` (the reusable template).
 
 **The denylist is the single authority.** `tools/publish-to-public.ps1` is the ONLY place that
 decides public vs private: a `$denylist` array (private-only paths) and a `$substitutions` map
 (ship a sanitized version of a private file). To keep a new file private, add its path to
 `$denylist`. **Publish from the maintainer's box via the local script** (ambient git creds) — not
 the stale-PAT tag-fired workflow.
+
+**A published file must not point at a stripped one (2026-09-14).** The denylist decides which
+*files* are private; it cannot see a published file that *references* a private one. That gap shipped
+a public `CommunityHub.sln` naming the two `tools/` console projects, so a fresh clone failed
+`dotnet build` with MSB3202 before compiling anything. The script now closes it for the case that
+breaks a build: every `*.sln` in the plan is rewritten for the mirror by `Get-PublishedSolutionText`
+(projects whose path is not in the publish set are removed with their configuration and
+`NestedProjects` lines, and a solution folder emptied by that removal goes too — the private solution
+is untouched), and a published `.csproj` whose `ProjectReference` points at a stripped project
+**blocks** the publish. `-WhatIf` lists the solution entries it would remove. Documentation and
+getting-started text that name private files are kept honest by hand (README *Getting started* uses
+only published files; `config-examples/` and `infra/*.parameters.example.json` stand in for the
+private `config/` and parameter files, and `ConfigExamplesParseTests` holds them to the code).
 
 **Publish workflow** (`.github/workflows/publish-public.yml`) fires on tags `public-vX.Y.Z`,
 `eldk-vX.Y.Z` (team-generic), or `eldkNN-vX.Y.Z` (event-specific — works for eldk27/eldk28/… with no
@@ -4560,7 +4885,8 @@ dev and prod and the schema note is recorded.
 Code changes reach prod via the next zip deploy. **Runtime config drift** — app settings added by
 `az` CLI that the Bicep doesn't yet emit — is what bites; those are lost on the next `bicep deploy`
 unless re-applied or fixed in Bicep. The live parity checklist (with per-line applied/not-applied
-status) lives in [`../infra/DEV_TO_PROD_PARITY.md`](../infra/DEV_TO_PROD_PARITY.md). Substance:
+status) lives in the maintainers' private `infra/DEV_TO_PROD_PARITY.md` (not in the public template).
+Substance:
 
 - **Critical app settings missing from the Bicep template** (must be re-applied per env or fixed in
   `infra/modules/appservice.bicep`):
@@ -4673,7 +4999,7 @@ string. Keep dev↔prod schema in sync by applying this migration to both enviro
 
 Always run the app/jobs in a real process before committing — a parse check is necessary but not
 sufficient. The smoke walkthrough (seeded per-role accounts, end-to-end login + hub checks), the
-mobile Playwright suites, and the Pester smoke tests are documented in **[`TESTS.md`](TESTS.md)**
+mobile Playwright suites, and the Pester smoke tests are documented in the maintainers' `TESTS.md`
 (and the suite READMEs under `../tests/`). Mobile-first is a hard requirement: every UI change must
 work at ~360px, shipped in the same commit as the desktop CSS.
 
@@ -4681,7 +5007,17 @@ work at ~360px, shipped in the same commit as the desktop CSS.
 
 ## 17. Configuration & Key Vault reference
 
-**Per-edition config** (`config/*.<edition>.json`, examples ship as `*.eldk27.json`):
+**Per-edition config** (`config/*.<edition>.json`). The real files are private to each instance; the
+public template ships sanitized starters in [`config-examples/`](../config-examples/README.md)
+(`event`, `sponsor`, `speaker-deadlines`, `signal-groups`, plus Sessionize and AI-guidance settings
+samples), which `ConfigExamplesParseTests` runs through the real loaders. The loaders' default paths
+still name the upstream edition (`config/event.eldk27.json`, …); point them at your own files with
+the app settings `EventConfig__EventConfigPath`, `SponsorConfig__SponsorConfigPath`,
+`SpeakerDeadlines__ConfigPath` and `SignalGroups__ConfigPath` on **both** hosts. Of the files below,
+`hotel.<edition>.json` and `content.<edition>.json` are reference documents no code reads today, and
+`integrations.<edition>.json` is the editable reference behind **Settings → Config** — the integration
+clients themselves bind from app-setting sections (`Email`, `WooCommerce`, `Zoho`, `Sessionize`,
+`SharePoint`, `LinkedIn`, …).
 
 | File | Holds |
 |---|---|
@@ -4696,6 +5032,18 @@ work at ~360px, shipped in the same commit as the desktop CSS.
 Coverage resolves: per-person override → speaker-type rule → role rule → default.
 `woocommerce.enabled=false` must leave a fully working hub (sponsor module then runs from manual CSV
 import only).
+
+🔴 **Consuming edition config: inject the LOADER, never the config object.** The container holds
+`EventEditionConfigLoader` (singleton) + `EventConfigOptions`; a resolved `EventEditionConfig` is
+**not registered anywhere**. A component that asks for one gets `null` — and where the parameter is
+optional (as page-model dependencies generally are, so the page still constructs without every
+integration wired) that null is **silent**: nothing throws, nothing logs, and the failure only
+surfaces in whatever the missing value produced. It shipped a claim-invite mail whose ticket URL was
+the empty string, so the link degraded to a bare `#/buyTickets?…` fragment and reached two real
+partners. ⇒ Take `EventEditionConfigLoader` + `EventConfigOptions`, and add `ConfigOverrideStore`
+when the value may be edited in **Settings → Config** — `Load(path, overrideJson)` applies the
+per-edition override on top of the shipped default. A reflection test in the web suite fails the
+build if any page model injects `EventEditionConfig` again.
 
 **Graphics / SharePoint folders (`GraphicsSharePointOptions`, added 2026-06-27).** Two drive-relative
 folder paths on the existing `Graphics:SharePoint` options, both **blank by default ⇒ the feature stays
@@ -5307,9 +5655,26 @@ operator decision from 2026-06-22) — while `GetStartedDigestBuilder`'s §738 g
   page, imports and seeding, so hooking one path works today and breaks silently when a path is
   added. "Which organizer has no anchor?" catches every path, including future ones.
 - 🔒 `CreatedAt`, **not "now"** — "now" restarts the cadence for someone who joined months ago.
-  Only ever fills a NULL. **Organizers only**: every other role's anchor is stamped by a welcome that
-  really was sent, and seeding one would fake it.
+  Only ever fills a NULL. **Organizers only** from `CreatedAt`: seeding another role without a welcome
+  would fake one.
 - 🔑 An anchor grants **eligibility**, not a mail — the digest still skips a 100 %-complete wizard.
+
+### 20.2 Every welcome stamps the anchor (§1222, 2026-09-14)
+
+⚠️ The premise above — "every other role's anchor is stamped by a welcome that really was sent" — was
+**false for one of the two welcome paths**. `WelcomeWithLoginEmailService` stamps
+`WelcomeWithLoginSentAt`; `WelcomeEmailService`, the path `SponsorWelcomeReconcileJob` and
+`WelcomeReconcileJob` use, wrote only the `welcome:{id}` ledger row. So §738 skipped people who *had*
+been welcomed: on PROD, 9 sponsor coordinators plus speakers, volunteers, media and event partners
+were never chased (sponsors reported it).
+
+- `WelcomeEmailService` now sets the stamp on delivery (`??=` — a forced resend never moves an
+  existing anchor), and saves on a resend too.
+- The same seeder, before the digest, fills a NULL stamp from the **earliest `welcome:{id}` ledger
+  row's `SentAt`** — the date the welcome actually went out, never "now". A sweep, so any future
+  path that forgets the stamp heals the same way. No ledger row ⇒ no anchor.
+- 🔑 Consequence on the first run after deploy: everyone affected whose welcome is at least one
+  interval old and whose wizard is incomplete is due at once — which is the chase they missed.
 
 ### 21.13 Increase TO a total, and the reconcile line (§992, 2026-08-09)
 
@@ -5370,6 +5735,61 @@ accepting a PUT and storing nothing, which is how §784.13 survived three sessio
 updated". 🔒 Booth-member create/delete keep *"Added"* / *"Deleted"*: §793.4 proved those end-to-end,
 so the words are earned. The rule is to stop claiming what is unverified — not to hedge everything.
 
+⚠️ **The field that prompted this rule was repaired — and the rule survives it.** Zoho fixed
+`company_social_pages` on 2026-08-16 and CEH pushes it again (§1087), so the specific 2026-08-04
+measurement above is history. The wording rule is **not**: a `200` still means accepted, the API can
+still change under us without notice, and the only thing that proves arrival is a read-back. §1087
+was confirmed exactly that way — a fresh GET of all 13 exhibitors, not a log line.
+
+### 6.y The push ledger — say it once, keep sending (§1175)
+
+`ZohoPushLedger` records, per company, the **hash of each value CEH has sent to Zoho that Zoho has
+not given back** (`SponsorInfo.ZohoUnconfirmedPushesJson`). Keys are record-prefixed —
+`sponsor:description`, `exhibitor:website_url` — because both records live on ONE `SponsorInfo` row
+and both have a `website_url`; unprefixed, one arriving would clear the other's entry.
+
+Per field and per run: the value ARRIVES ⇒ `Clear`; the value is written ⇒ `RecordSent`, and
+`ReportFor(attempts)` decides the mail — `Normal` (the ordinary *"Pushed to …"* line) below three,
+`Warn` (one notice naming the two causes) at exactly three, `Silent` after. A CHANGED value resets
+the count to 1, so a sponsor's edit is announced.
+
+🔴 **It gates the MAIL, never the PUSH — and must stay that way.** §784.13's `ZohoSocialPushedHash`
+recorded intent, stopped re-sending, and left **ten of thirteen sponsors' LinkedIn URLs blank in Zoho
+indefinitely**; that is why the block carries *"Do NOT reintroduce a 'push once' memo to reduce
+chatter"*. A first cut of this ledger capped the push at three attempts and would have rebuilt
+exactly that: §1087 — Zoho repairing the social endpoint on 2026-08-16 — heals nothing if CEH stopped
+sending a fortnight earlier. The re-push is idempotent and fires only while Zoho is blank, so it
+self-heals; the mail was the only real cost. `ZohoPushLedgerTests` asserts by reflection that the
+class exposes **no** method capable of stopping a push.
+
+🔑 **Why the comparison itself was not the bug** (operator 2026-09-03: *"the reconsile must verify the
+existing value and only change it different"*): `NeedsManualEntry` is correct and the read/write keys
+match, so this is not the §1140 shape. Zoho returning blank after a `200` has two causes CEH cannot
+tell apart from outside — an unpublished draft, or a silently discarded field (§791.3) — and neither
+is fixed by comparing harder.
+
+🔴 **An unread record is not a blank record (§1220, 2026-09-14).** Zoho periodically answers bursts
+of sponsor GET-by-id calls with HTTP `400`. The reader returns `null`, and `NeedsManualEntry` scored
+`null` as "blank in Zoho", so each failed read was followed by a PUT and a *"Pushed … Website"* line
+for a value Zoho already held. The next good read then `Clear`ed the ledger, so the count never
+reached `Silent` and the mail recurred with every burst. Now, when a record (primary sponsor, extra
+category sponsor, or exhibitor) cannot be read, **nothing is compared, pushed, announced or cleared**
+for it that run; it counts as a transient skip and the next run compares for real. It is §1153's
+name rule — *unknown is not different* — applied to every field.
+
+🔴 **Dead extra category links are removed on strikes, not on one answer (§1221).** Zoho answers a
+deleted sponsor id with `400 {"message":"Sponsor not found"}` rather than `404`, and the §1157 extra
+category ids had no self-heal, so a record deleted in Backstage was read and failed every run for
+ever. `ZohoClient` now flags that body as `ExternalLinkResult.NotFoundReported` while keeping the
+state `Unknown`; `HealDeadLinksAsync` probes each extra id and feeds `ZohoDeadLinkStrikes`
+(`SponsorInfo.ZohoDeadLinkStrikesJson`). A report counts only if **12 hours** have passed since the
+last counted one; the **5th** removes the link, and the provisioner then re-creates a record under
+that category on its next pass. A successful read clears the count; any other failure (bare `400`,
+`5xx`) neither counts nor clears. 🔑 The gap is the point: the same endpoint returns bare-`400`
+bursts for live records (above), and a link removed on one bad afternoon would be re-created as a
+duplicate beside a record that still exists. The primary and exhibitor ids keep their existing
+repair (the provisioner's list check and the `404` probe).
+
 ### 21.11 Un-invoiceable orders are alerted, not just logged (§813)
 
 `InvoiceProblemNotifier` mails the refusal reasons from both invoice sweeps. Before the §786.4
@@ -5383,6 +5803,81 @@ the window living in process memory, so a deploy can allow one repeat.
 
 ⚠️ Fires in a dry run too: dry run governs whether CEH may WRITE to e-conomic, never whether a human
 is told something cannot be billed (the §787 precedent).
+
+⚠️ **§1119 — it does not fire at all on a host that cannot invoice.** Both sweeps return before this
+notifier when TestMode is on: every effect they have is an e-conomic draft or a mail about one, so a
+host holding a stand-in invoice client has no work to do and nothing to report. See §7a for the
+matching ceiling on invoice CREATION, which is where the guarantee actually lives.
+
+### 21.14 Customer self-service: the monitor page, the cap, and who hears from us (§1091–§1105)
+
+The billing customer gets a token page of their own (`/monitor/{token}`, one per CUSTOMER, from
+§1093). It answers *who signed up*, *where they stand* and *"we need more"*, without an account.
+
+**The data model, and why each field sits where it does**
+
+| Field | On | Why there |
+|---|---|---|
+| `AgreedUnitPriceDkk`, `InvoicedSharePercent` | `CouponInvoicingSetting` | the commercial terms are a property of the AGREEMENT, not of a claim. Both nullable; null ⇒ ticket price / 100% |
+| `ClaimCapTickets` | `CouponInvoicingSetting` | the agreed ceiling for a capped ad-hoc coupon |
+| `RequestedCapTickets`, `RequestedCapAt` | `CouponInvoicingSetting` | 🔴 **moved off the monitor in §1096.** One field per CUSTOMER could not hold two pending requests, and applying one silently cleared the other — a customer holding a prepaid pool *and* a capped coupon is the normal case |
+| `UsageReportSentAt` | `AttendeeMonitor` | the 14-day stamp is per LINK, because the mail is per link |
+| `LastCapRequestAt` | `AttendeeMonitor` | 🔒 the rate limit stays here on purpose: it protects an ANONYMOUS endpoint, so it must be per link. Three codes must not buy three times the access to the ops inbox |
+
+`CouponBillableShare` is the ONE place a customer's amount is decided — basis precedence, percent
+clamp, amount, and the invoice wording. 🔒 **Null is never zero**: every ad-hoc coupon predates both
+columns, so a missing percent means 100 and a missing price means "what the ticket sold for".
+
+**The self-service write path (§1104).** ⚰️ This REVERSES §1094's design at the operator's
+instruction. §1094 argued the click must be his, because Backstage has no coupon API (§787.14) and
+the hub must never promise a ceiling the ticket platform will refuse. He pointed out that the
+disagreement with Backstage is not a reason to make him retype arithmetic the hub already holds. ⇒
+the hub applies what it CAN and states the rest:
+
+- **Ad-hoc capped** — raises `ClaimCapTickets` immediately. No money moves.
+- **Prepaid** — adds a purchase for the DIFFERENCE at the last agreed unit price and raises the
+  e-conomic draft. 🔒 The price comes from what was agreed, never a default: an invoice raised
+  without a human present must not invent one.
+- **Both** — mail the operator with the one step left, raising the Backstage limit.
+- 🔴 **Increases above 100 are mailed but NOT applied.** A TYPO guard, not a credit limit: the
+  endpoint is anonymous and now spends money, and a mistyped 4000 against a 3000 DKK ticket is a
+  ~12M DKK invoice. Settled at 100 by the operator after seeing the mail the guard produces.
+- 🔴 **The submitted coupon name is CHECKED against the lines the token actually shows** — it arrives
+  on an anonymous form post, and trusting it would let one customer's URL raise a request against
+  another's coupon.
+- The form requires a requester name + e-mail, reported as **self-reported** beside the contact on
+  file. CEH cannot verify them and the mail does not pretend otherwise.
+
+**What the page deliberately withholds.** `MonitoredPoolBalance` is a PROJECTION of
+`CouponPoolBalance`, not the record itself: `UnbilledPurchases` (what we have not yet invoiced) and
+the internal low-balance threshold are statements about our books, on a page handed to the customer.
+The fortnightly mail is a SUMMARY and never lists attendees — names stay behind a token whose access
+can be withdrawn; a mail cannot be unsent. Both pinned by test.
+
+**Contact control (§1098/§1111).** `IssueUsageLink` and `SendUsageStatusMail` on the coupon, **both
+false by default** in the model and the migration, so an existing coupon is silent until ticked. 🔑
+Ticks, not a fourth `CouponBillingType`: the enum answers *how money is collected*, and a one-off
+invoice sale collects exactly like any other ad-hoc coupon — a communication preference on a billing
+axis would have forced an audit of every `IsPrepaid`/`IsInvoiceable` switch in the engine. The weekly
+cadence such a customer wants needed no code at all: `InvoiceIntervalDays` is per coupon (§1016d).
+
+🔴 **The link is per CUSTOMER, the tick is per COUPON**, so "no link" cannot suppress the link of a
+customer who also holds a normal agreement. ⇒ an unticked coupon is excluded from the monitor's
+SCOPE — absent from the page, the balances and the export — and a customer whose coupons are ALL
+unticked gets no monitor row at all. Both halves of the page apply the same filter, or the balances
+would count a coupon whose sign-ups are not listed beneath them.
+
+⚰️ `SendClaimInviteMail` was retired by §1111: its only effect was to make the *"Send the claim link
+now"* button refuse, and **the button is the consent**. The column remains, unread. The other two
+gate things that happen without anyone pressing anything, which is what a tick is for.
+
+**One alert for both billing types (§1094c).** A capped ad-hoc coupon feeds
+`CouponPrepaidLowBalanceAlertService` — the same service, throttle and mail as a prepaid pool, with
+`LastCapAlertAt` / `LastCapAlertRemaining` as its stamps (a capped coupon has no allocation row to
+stamp). 🔑 Same alert because the failure is identical: the hub cannot stop a claim either way. The
+wording generalised with it — "more than they paid for" → "more than was agreed" — because an ad-hoc
+cap is not *paid for*, while the distinction the tests exist for ("over" must never read like
+"running low") is untouched.
 
 ## 22. LinkedIn person mentions (§858.16)
 
@@ -5507,3 +6002,1029 @@ and knows every class from the moment it is defined. The coupon page reads it an
 mail services read — fixing them all at the source rather than teaching each to call Zoho.
 🔑 Claims and attendees were the earlier sources and both mean *"somebody already bought this
 class"*; a prepaid pool exists **before** anybody buys, which is why the id kept surfacing.
+
+#### Volume-package qualification: three checks, one union (§1077, 2026-08-11)
+
+A company with **10 or more** active attendees earns the volume package — keynote mention, social
+announcement, group photo. `VolumePackageQualificationService` (`Threshold = 10`) answers "who".
+
+**One row is one entity.** `VolumePackageCompany` carries `CustomName` (a label), `Domains`,
+`CouponCodes`, `LinkedEmails`, `ErpCustomerNumbers`, the benefit approvals and the status fields.
+Both linking cases the organizer asked for collapse into it: several company *names* sharing one
+domain (a distributor's per-country subsidiaries on one `@distributor.example` domain) were never apart — the domain already groups them, and
+`CustomName` replaces the three varying order names; several *domains* under one mother go on one
+row. 🔑 **The e-mail domain is the identity; the company name is a label.** Had the name been the
+identity, the first case would have needed alias matching over free text — the §1045 trap
+(*"Contoso" / "Contoso ApS" / "CONTOSO"*) inside a feature that decides who appears in a keynote.
+
+| Check | Resolves by | Contributes |
+|---|---|---|
+| 1 Order | active order → buyer e-mail domain ∈ `Domains` | every active attendee on that order, whatever their own address |
+| 2 Coupon | ticket coupon ∈ `CouponCodes`, **or** owned by an ERP customer in `ErpCustomerNumbers` via `CouponInvoicingSetting` | that ticket's attendee |
+| 3 Attendee | attendee domain ∈ `Domains`, or address ∈ `LinkedEmails` | that attendee |
+
+🔴 **The checks are never summed.** Each produces a `HashSet<string>` of attendee e-mails and the
+answer is `distinct(union).Count >= 10`. A company buying 20 tickets on its own coupon is found by
+check 1 **and** check 2; with sets the double count is structurally impossible rather than merely
+absent today. ⇒ The per-check figures shown on `/Organizer/VolumePackage` **do not add up to the
+total**, and the page says so in words above the table.
+
+🔒 **Check 2 goes through the invoicing mapping, not a second list.** `CouponInvoicingSetting` already
+carries a curated coupon → ERP customer link, so the coupon→company answer is derived rather than
+typed again and left to drift; `CouponCodes` on the row remains the override for a coupon with no ERP
+mapping behind it. Claims are read with `CouponClaimExtractor` (§787) — the same parser, which
+already knows that a blank ticket-level `promo_code` must fall back to the order-level one (`??`
+does not do that) — and cross-checked against the live mirror, so a ticket cancelled after the order
+snapshot is not counted.
+
+🔒 **The two role flags are DERIVED, never stored on `Attendee`.** `Attendee` is the Zoho mirror,
+rewritten by the sync; a flag written there would be erased on the next tick, silently. A person **is**
+the approver because `ApproverEmail` matches their address.
+
+**`VolumePackageSweep`** recomputes every entity daily (`VolumePackageQualificationJob`), writing a
+`VolumePackageQualificationSnapshot` per entity per day — **updating today's row rather than
+appending**, so triggering the job by hand cannot double the history. 🔴 **Approval is sticky:**
+falling below 10 sets `QualifiedNow = false` and reports the drop, but never clears
+`BenefitsApprovedAt` — otherwise one cancellation silently removes a company from a keynote slide
+already being designed. `SuggestApproverAsync` names the buyer whose orders brought the most
+attendees, and returns **null** where nobody bought anything (ten freelancers who each paid for
+themselves) rather than nominating a stranger.
+
+⚠️ **Stage 1 sends nothing.** The organizer page computes and displays; the approval mail, the token
+wizard and the weekly reminders are later stages.
+
+#### The media libraries: why two menu items became two hub pages (§1078, 2026-08-11)
+
+The media crew manage the event's **picture** and **video** libraries at `/Media/Pictures` and
+`/Media/Videos` — list, upload, download, delete — under `MediaLibraryService`, with the folders
+registered as `DocLibraryPaths.MediaPictures` (`Event/Media/Pictures`) and `MediaVideo`
+(`Event/Media/Video`).
+
+🔴 **The operator asked for two menu items pointing at two SharePoint URLs, and said in the same
+breath that it "should not run in their user context, but through the app context". Those cannot
+both be true of a link.** Following a SharePoint web URL opens SharePoint in the visitor's own
+session: their account, their permissions on the library, a tenant login each. Only a page we serve
+can act as the app. ⇒ The links became the **folders to configure**, and the menu items point into
+the hub — which is what §160 already required of every other document surface (speakers, sponsors
+and attendees never receive a SharePoint link).
+
+| Decision | Why |
+|---|---|
+| `ParticipantRole.Media` + `Organizer` | The Media role **already existed** ("press / photo / video crew"). No new role, no migration, no change to the auth model — the menu is gated on something the hub already had |
+| Uploads **streamed** (`UploadStreamToFolderAsync`), 1 GB request cap | §455: a 2 GB video must never be buffered into the web app's memory, let alone twice on a shared instance. Same cap as speaker decks and exhibitor-wall artwork |
+| Delete acts **only on a name the folder listing returned** | The name arrives from a form. Making the listing the allowlist means a crafted value has nothing to address, whatever the path handling underneath does |
+| A small **denylist** of executables, not an allowlist of media types | A photographer's real work arrives as `.cr3`, `.arw`, `.xmp`, `.srt`. An allowlist rejects genuine files and reads as "the hub is broken"; the actual risk is an executable landing in the event's library |
+| Downloads stream **through the hub** | The §160 rule again: no SharePoint URL ever reaches a media person, so no tenant access is implied by having a file |
+| "Not connected yet" is stated in words | An unwired integration and an empty folder look identical to a reader, and only one of them means "upload your pictures here" |
+
+⚠️ **A delete is real and irreversible from the hub** (SharePoint's own version history is the only
+recovery). The button confirms; there is **no per-delete audit entry yet** — see REQUIREMENTS §1078.
+
+##### §1078b — the library is PER ENVIRONMENT, and the page says which one
+
+Operator 2026-08-11: *"sharepoint goes to diff urls depending on env"*. Correct, and by design: the
+registry key is **relative** (`Event/Media/Pictures`) and each environment supplies the root —
+`General/DEVELOPMENT/EventHub` on DEV, `General/Events/ELDK 2027/EventHub` on PROD. The site and
+drive are identical in both today. Three consequences are now handled rather than assumed:
+
+- **The page prints the resolved folder.** Two empty libraries are the same picture on screen, and
+  "which environment's library am I about to put 400 photographs into?" was otherwise unanswerable.
+- 🔴 **A missing folder is distinguished from an empty one.** `ProbeAsync` is asked only when the
+  listing came back empty — the one case where the two are indistinguishable — and the page then
+  says the folder does not exist here yet and that the first upload creates it. This was not
+  hypothetical: on the day it shipped, PROD's `Event/Media` answered **404** while the DEV tree held
+  the operator's staged `Pictures` and `Video`.
+- 🔴 **The two config sections must agree.** The folder comes from `DocLibrary:*`; the bytes are
+  written through the store, which reads `Graphics:SharePoint:*`. **Both carry a site URL and a
+  drive name**, and their agreement today is a property of the configuration, not of the code. If
+  they ever diverge, an upload would succeed against a path computed for a different site — it
+  returns success, the listing stays empty, and nothing says why. ⇒ `ConfigurationProblem` names the
+  disagreement and **`CanManage` goes false**: refusing beats writing a file where nobody is looking.
+  🔒 Unknown-on-one-side is *not* a mismatch — a warning that fires when everything is correct is a
+  warning nobody reads.
+
+#### Stage 2: asking who approves — the one mail, and what it is not (§1077, 2026-08-11)
+
+`VolumePackageApprovalMailService` sends the feature's only outbound mail: when a company first
+reaches ten attendees, the **organizer mailbox** (`info@`, §1075's rule — an event action, not an ops
+alert) is asked who at that company we should deal with, naming the purchaser who brought the most
+people for the organizer to confirm or overrule on `/Organizer/VolumePackage`.
+
+🔴 **Nobody at the company is written to.** Stage 2 mails the organizers *about* a purchaser. That is
+the whole distance between stage 2 and stage 3, and it is why stage 2 could be built on the strength
+of "who do we ask?" while stage 3 still needs its own conversation.
+
+| Decision | Why |
+|---|---|
+| Sent via `EngineAlertSender` with a recipient override | The transport ring-gate **fails closed** for a recipient who is not an imported participant, and `info@` is not one — a direct send would be dropped as *"RING-DROP (unknown recipient)"* and the feature would look built and be silent. Same path as §879's organizer-review mail |
+| The send lives in the **JOB**, not in `VolumePackageSweep` | The organizer page runs the same sweep on Save and on "Recompute now". A send inside it would mail `info@` as a side effect of an organizer looking at the page |
+| **One mail per pass**, listing every waiting company | A morning where four companies cross the line is one decision session; four mails are four chances to action three of them |
+| `ApprovalRequestedAt` is the dedupe, not a throttle window | The job runs daily. Without a durable mark, a company nobody has approved is asked about every morning — how a shared inbox learns to ignore us. §879's reasoning: an in-memory window would decide the real spacing while the page and the data said something else |
+| The suggestion is computed **at send time**, never stored | Orders keep arriving; a stale name in a mail is one the organizer has to re-check anyway |
+| `devSilent: true` from the job, `false` from the page button | §752.9 — on DEV the companies are test data, so the automatic mail asks for a decision that does not exist. An organizer who clicks the button on DEV is testing the mail and should receive it |
+
+🔒 **Gated by `volume-package-approval-mail`, default OFF** — outbound mail is the part the operator
+said he wants to approve first. **The COUNTING is not gated:** switching the feature off stops the
+asking and never stops the answer. ⚠️ §1018c is the failure mode attached to this pattern (a feature
+defaulted off, forgotten, and never run), so the **organizer page states the switch's position** in
+words instead of leaving it discoverable only in the settings grid — and the page's "Ask now" button
+**obeys the same switch**, because a kill switch a button can walk past is not a kill switch.
+
+**Approval itself records a decision and contacts nobody.** `OnPostApprove` refuses an approval with
+no e-mail address (it would look settled on the page while stage 3 has nobody to write to);
+`OnPostWithdraw` reopens the decision and **keeps the approver contact**, which answers a different
+question than the one being reopened. The daily sweep still never clears an approval — sticky
+approval is unchanged.
+
+#### Stage 3: the company's own page, opened by a token that WRITES (§1077, 2026-08-11)
+
+The qualifying company gets its own four-step page at `/volume-package/{token}` — participation
+(keynote / social / group photo, or an explicit *"we do not want to participate"*), the group-photo
+coordinator, the logo, and the LinkedIn URL. `VolumePackageWizardService` owns it;
+`VolumePackageInviteMailService` delivers the link.
+
+🔑 **Why a token and not a login.** The operator asked for it (*"same as what you made yesterday so
+i click the link and get access"*), and the code agrees twice over: a qualifying attendee may hold a
+**1-day ticket**, which `OneDayAccessGate` blocks at every sign-in entry point plus the cookie
+backstop — opening it for two roles means four holes in a deliberate gate and a new "may this person
+see this?" rule on every attendee surface. And the coordinator **need not be an attendee at all**,
+which no sign-in could serve.
+
+🔴 **This token WRITES, and the §1040 monitor token did not.** That page rested on four legs:
+unguessable, scoped, revocable/expiring, and **read-only**. The fourth is gone, so the design pays
+for it elsewhere:
+
+| Leg | How it is carried here |
+|---|---|
+| Unguessable | The same 256-bit `AttendeeMonitor.NewToken()`, and a **unique filtered index** on the column — the lookup that resolves a credential must be an index, and one link can never resolve to two companies |
+| Scoped | **Every method takes the resolved company, never a company id** — there is no parameter a caller could substitute. A forwarded link can misstate this company's own wishes and reach nothing else |
+| Revocable + expiring | Re-issuing mints a new token (killing the old URL — what you want when a link went to the wrong person); revoking **keeps** the token row, because *"revoked on the 3rd"* is a different fact from *"there was never a link"*; expiry defaults to the §1040 date |
+| ~~Read-only~~ → **no disclosure** | The page shows the company's own name and what they typed themselves. It lists no attendees, no colleagues, no e-mail addresses — nothing a holder did not already know |
+
+🔒 **Every POST re-resolves the token**, not just the GET. Otherwise a revoked link stays usable for
+anyone who kept the page open, and the revocation is cosmetic — worse than none, because an organizer
+believes the link is dead.
+
+**The invitation is the first mail in this feature that leaves the building.** It goes to
+`ApproverEmail` — the person a human confirmed in stage 2, never the suggestion — behind its own
+switch `volume-package-invite-mail`, **default OFF**, sent only by a deliberate organizer click.
+⚠️ **It is deliberately RING-GOVERNED**, through the ordinary participant path rather than
+`EngineAlertSender`'s ring-exempt channel: the rings exist to stop mail reaching real people before
+we mean it, and this is exactly such a person. A company that has **declined** is never invited
+again, and a dead link is re-minted before sending rather than mailed as a URL that 404s.
+
+**Logos** land in `DocLibraryPaths.GroupPhotoLogoWeb` / `GroupPhotoLogoPrint`
+(`Event/GroupPhotos/{Web,Print}`) through the app's own credentials — the uploader has no SharePoint
+access and never receives a link (§160). 🔑 The stored name is `vp-{companyId}-{web|print}.{ext}`,
+derived from the **company id and never from the uploaded file name**: a re-upload replaces rather
+than leaving the design team with `logo.png`, `logo(1).png` and `logo-final-v2.png`, and the
+uploader's file name never becomes a path. Logos use an **allowlist** (PNG/JPG/SVG/EPS/AI/PDF, 25 MB)
+— the opposite of §1078's denylist, and for the opposite reason: this upload arrives from an
+anonymous token holder and ends on a keynote slide.
+
+#### Stage 4: the group photo joins the model that already existed, and the chase that stops (§1077, 2026-08-11)
+
+🔑 **There was nearly a second group-photo model.** `GroupPhotoRegistration` (§25f, June) already
+holds the slot, the duration, the location and a **stable-UID** calendar invite, and
+`/Organizer/GroupPhotos` already schedules and sends it. Stage 4 **links** the volume-package entity
+to that row (`VolumePackageCompanyId`) rather than adding a second slot, a second contact and a
+second invite to drift apart. ⚠️ This is §1076's lesson applied: the last time something looked
+missing it was missing *by decision*.
+
+🔴 **Linking them exposed that they disagreed about the number 10.** The June rule was
+`TicketCount > 10` — exactly ten did **not** qualify, pinned by a test asserting it — while §1077
+defines the volume package as **≥10** and names the group photo as one of its three benefits. A
+company with exactly ten therefore earned the package and was refused the photo, with a message
+telling them to raise the ticket count. ✅ **The operator settled it: *"10 or more is correct"***.
+There is now ONE rule, `>= QualifyingTicketThreshold`, and the test asserts the decision.
+
+- **The ticket count is derived**, not typed: the June entity's own comment said *"there is no
+  automated ticket-volume feed"* — stage 1 built it.
+- 🔒 **A refresh never moves an agreed slot.** Updating a contact name is not permission to change a
+  time the photographer and the company have been told.
+- **The day hint** counts the company's own attendees by ticket type: a 1-day holder is not there on
+  the pre-day, so a pre-day slot would photograph an empty space. It **suggests** — which company
+  goes where is a scheduling decision with a room and a running order behind it.
+- 🔒 **The coordinator downloads their own calendar file** from the token page, same stable UID (a
+  moved slot updates what they forwarded) and **no ATTENDEE line** (a forwarded copy must not become
+  an accept/decline on somebody else's behalf). **CEH never mails the company's attendees about the
+  photo** — some will not want to be photographed.
+
+**The weekly reminder** (`volume-package-reminders`, default OFF, `DependsOn` the invitation) chases
+an invited company that has not answered. 🔴 **Stopping is the feature**: four independent
+conditions end it — completed, declined, never invited, or the link is no longer live — because the
+wizard promises *"one click and we stop asking"*, and a loop that outlives the answer turns that into
+a weekly lie. ⚠️ **The cadence lives in the service, not the trigger**: the job ticks daily and the
+service decides who is a week overdue, so one missed run costs hours rather than a fortnight. The
+interval is a week *minus four hours* — a strict 7×24 against a job that runs a minute later each
+week silently becomes an 8-day cadence.
+
+#### Mass mail: four locks, a ledger, and a way out (§1080, 2026-08-12/13)
+
+Campaigns are the only thing in the hub that can write to **thousands of people at once**, and one
+of their twelve audiences — *previous attendees not attending this edition* — is people who are not
+participants, whom the transport's ring gate exists to refuse. The design is mostly about that.
+
+🔴 **Four locks, all four, every send.** They are separate because each covers a different failure:
+1. the `mail-campaigns` **switch** (default OFF);
+2. an **acknowledged dry run** of *that* audience and template — an organizer has seen the count
+   **and a sample of real addresses**. A count can be right about the wrong audience; five actual
+   addresses is what catches it. Changing the audience or template **invalidates** the approval;
+3. a configured **unsubscribe secret** — no signed link, no send;
+4. the recipient is **not suppressed at send time**, re-read every batch.
+
+| Piece | Decision, and why |
+|---|---|
+| `MailAudienceResolver` | The twelve, each in **one place**, deduplicated by address. "All attendees" must mean the same set in the preview an organizer approves and in the send that follows |
+| `MailCampaignRecipient` | One row per person per campaign, **unique index** on (campaign, address). It is what makes a batch resumable and nobody mailed twice — the guarantee belongs to the database, not to the loop that happens to be running. The audience is frozen at **start**; suppression is still re-read per batch |
+| `MailSuppressionService` | Links are **signed, not stored** (HMAC over edition+address): no table, no cleanup, and editing the address in the URL invalidates it. **Fails closed** with no secret |
+| `/unsubscribe` | Anonymous by necessity — previous years' attendees have no account. 🔴 **The GET never unsubscribes**: scanners fetch every URL in a message, so the button POSTs. One message for every invalid case, so it never confirms whether an address exists |
+| `MailBounceIngestService` | Anonymous but **not unauthenticated** — a shared secret compared in constant time; blank refuses everything, because an open webhook lets anybody silence any address we hold. **Hard bounces suppress, soft ones do not**: a full mailbox today is a real attendee tomorrow |
+| `ExternalRecipientImportService` | Columns found **by name, not position** — a spreadsheet that has been through three people has its columns moved, and an importer keyed on "column A is the address" mails names. It **refuses the file** rather than guess; re-import updates rather than duplicates |
+| `MailCampaignJob` | **One batch per campaign per tick.** The pacing lives in the campaign's own interval, not the trigger — draining as fast as the job ticks defeats the batching it exists to provide |
+
+⚠️ **The imported list is its own table, never `Participant`** — eight thousand strangers in the
+participant tables would corrupt every count in the hub and put them in front of role-gated pages.
+🔒 **Legal basis: the existing-customer relationship** (operator, 2026-08-12), which is *why* the
+unsubscribe footer is appended by the sender to every campaign mail rather than left to whoever
+writes the template.
+
+#### Stage 5: planning the photo times, and publishing them (§1077, 2026-08-11)
+
+**Slots are DATA, not a formula.** `GroupPhotoSlot` stores each timeslot an organizer defines
+(date+time, duration, pre-day flag, label, blockable), entered by pasting one per line. A first draft
+generated a grid from a start time and a length; that was wrong, because the real slots sit around
+the keynote, the breaks and the lunch queue — facts about the running order only the organizers know.
+🔒 A **unique index on (event, start)** prevents two slots at the same moment: two companies in front
+of the camera at once is the one mistake a photo schedule cannot recover from on the day.
+
+**`GroupPhotoPlanner` is pure and deterministic** — no database, no clock, no randomness. Two rules
+carry it: a **1-day-only company can only take a main-day slot** (their people are not at the venue
+on the pre-day — a constraint, not a preference), and **flexible companies fill the pre-day first**,
+keeping the scarce main day for those with nowhere else to go. Published slots are **pinned**;
+unplaced companies are **listed with a reason**, never dropped.
+
+🔴 **Propose and publish are two separate acts.** `PlannedAtUtc` is a proposal — arguable,
+re-runnable, disposable, told to nobody. `PublishAsync` copies it to `ScheduledAtUtc` and stamps
+`SlotPublishedAt`, and only then does the company's own page show a time. ⚠️ Because a time on that
+page is forwarded to eleven colleagues the moment they read it.
+
+**For the partner coordinating from our side** (`/Organizer/GroupPhotos`): an **Excel** running order
+— including the unscheduled and unpublished rows, marked as such, because a list of only the settled
+companies looks complete and is not — and **one calendar file holding every scheduled photo**, same
+stable UIDs as the company invites (a moved slot updates rather than duplicates), `METHOD:PUBLISH`,
+no ATTENDEE lines, and the coordinator's phone number in each entry's description: on the day the
+partner is holding a phone, not a spreadsheet.
+
+#### The ticket-type LABEL is presentation; the enum name is the contract (§1077, 2026-08-11)
+
+`TicketStatus` has three members and the sync can only ever set two meanings: `TwoDay` (the class
+granting Master Class access) and `Other` — *"an active ticket that is not the 2-day class"*, which
+for this edition is the 1-day ticket. `TicketStatusDisplay.Label()` (`Core/Domain/Attendee.cs`) maps
+them to the organizer's words — **"2-day" / "1-day" / "No ticket"** — and every surface that prints a
+ticket type uses it: the `/Organizer/Attendees` grid fallback cell, its ticket filter, the CSV/XLSX
+export, and the `/Organizer/Exports` printable list + CSV (`AttendeeListRow.TicketStatusLabel`).
+
+🔒 **The filter's option VALUE stays the enum name** (`?Ticket=Other`), only its TEXT is the label —
+so saved links keep working. Making the label the value too would silently resolve every stored link
+to "no filter", and a page listing all attendees under a 1-day heading reads as an answer, not a
+fault. Nothing branches on the label: `AttendeeListRow.TwoDay` is the flag for anything conditional.
+
+⚠️ The member is **not** renamed to `OneDay`. It is the sync's own category, and the mirror stores its
+numeric value; a rename would be a migration to fix wording, which is what a display label is for.
+
+## §1081 — Sponsor company content: one predicate, three consumers
+
+**`CommunityHub.Core.Sponsors.SponsorCompanyContent`** is the single answer to *"what company content
+has this sponsor delivered?"*. It exists because three surfaces used to answer that question three
+different ways:
+
+| Surface | Asked (before) |
+|---|---|
+| `SponsorWizardService` (Get Started "company" step) | `WebsiteUrl` **OR** `CompanyDescription` |
+| `SponsorOrderPullService` (closes `initial-onboarding-of-sponsor`) | `CompanyDescription` non-empty |
+| `SoMeApprovalGate` (blocks a sponsor post) | `SocialMediaIntro` **AND** a logo |
+
+⇒ A sponsor could read *done* in Get Started, *onboarded* to the task reconciler, and still be the
+reason a social post could not be approved — with nothing chasing them for the field that blocked it.
+
+### The rule
+```
+delivered =  CompanyDescription has text
+         &&  SocialMediaIntro   has text
+         &&  (HasBooth ? CompanyDescriptionShort has text : true)
+```
+
+- **Text means whitespace-trimmed non-empty.** The form stores blank input as null, so the two agree.
+- 🔒 **`CompanyDescriptionShort` is exhibitor-only** because `SponsorCompanyFormService` writes it
+  only inside `if (info.HasBooth)`. Requiring it from a non-exhibitor would hold them below 100% on a
+  field their own form refuses to save — the §732 defect. The conditionality lives in the predicate,
+  once, so no caller can forget it.
+- 🔒 **`WebsiteUrl` is not part of it.** The webshop owns it and `ReconcileWithWebshopAsync` (§41b)
+  fills it into CEH; chasing a sponsor in the hub for it would send them somewhere that cannot fix it.
+- 🔒 **The logo is not part of it either.** `SponsorUploadAudits.Kind` distinguishes `some` (web/SoMe)
+  from `print` — the axis the wizard's logo step needs — while `Logo{Vector,Raster}Path` distinguishes
+  file *format*. A vector file is not evidence of a print logo, so folding them together would
+  downgrade "both kinds" to "some logo exists". Each caller keeps its own logo rule.
+
+### Two forms of one rule
+The type carries the rule twice — `StatusOf(SponsorInfo)` in memory and `IsMissingContent` as an EF
+expression — because a list filter and a per-row reason that disagree is exactly the §867.1 defect.
+`The_EF_expression_and_the_in_memory_predicate_agree` runs both against the database and asserts the
+same set.
+⚠️ `SponsorInfo.HasBooth` is **derived** (`IsExhibitor || SponsorPackage >= Gold`) with no column
+behind it, so the expression spells out the two mapped columns instead; EF cannot translate the
+property.
+
+## §1081 — The completion denominator counts only evaluable steps
+
+`SponsorWizardView` now divides by **`EvaluableSteps`** (`Done != null`), not `TotalSteps`.
+
+A step whose state cannot be determined — in practice the ERP-backed **contacts** step — was counted
+in the denominator and never in the numerator, so such a company could **never** reach 100%: the
+progress bar stuck below it permanently and `AllDone` never became true, so the completion notice
+never fired. ⚠️ It is not only a transient outage: `ContactsDoneAsync` also returns null when the
+company has **no ERP customer number**, which is permanent.
+
+🔑 This makes the three surfaces agree. `GetStartedDigestBuilder` already treated a null step as
+not-open (`s.Done == false`), so the chase correctly stopped while the bar and the notice insisted the
+sponsor was unfinished. `TotalSteps` remains the **display** base, so the numbered list and
+"step X of Y" are unchanged.
+
+## §1081 stage A — The Get Started digest states the shared checklist
+
+`GetStartedDigestBuilder` now renders three things it did not before:
+
+1. **`{{openStepsHtml}}`** — open steps, and for the sponsor `company` step the **missing field
+   names** (`SponsorContent.Field.*` in SharedResource.resx), following §854: what someone has to act
+   on must be named.
+2. **`{{doneBlockHtml}}`** — the completed steps with attribution, as **one token** so the whole block
+   disappears when nothing is done (a heading reading *"Already done (0):"* would be worse than
+   silence, and that is a new sponsor's state).
+3. Copy framing the list as the **company's** checklist rather than *"waiting for you"*.
+
+**Attribution is read, never inferred** — `SponsorUploadAudits.UploadedByEmail`/`UploadedAt` for the
+logos, `BoothCheckInSetByEmail`/`SetAt` for check-in, `SponsorInfo.LastUpdatedByEmail`/`UpdatedAt` for
+company details. A step completed by a route that recorded no actor renders as done with no name.
+Dates use `InvariantCulture` because the fragment is composed in code inside an English template.
+
+🔑 Sponsor facts are loaded **once per company** and shared across that company's coordinators — the
+same row, the same answer, and one query set rather than one per recipient.
+🔒 Attribution is sponsor-only: the other wizards' steps are personal, where *"completed by you"* is
+noise.
+
+## §1081 — WebsiteUrl is read-only in the hub
+
+The webshop is authoritative for `WebsiteUrl`, so the hub no longer writes it: the assignment is gone
+from `SponsorCompanyFormService.SaveAsync` and both handlers in `CompanyDetails.cshtml.cs`. Dropping
+the **write** is what makes read-only real — a `readonly` input still POSTs its value, so the view
+change alone would have been cosmetic.
+
+The field renders greyed with a **Change on the webshop** link carrying
+`data-webshop-interstitial="1"`. The §653 dialog in `_Layout.cshtml` binds a **document-level
+delegated** click handler, so the existing hand-off works on any page with no new dialog, script or
+style — including its modified-click pass-through, its "don't show again" opt-out, and opening the tab
+on a real user gesture (§464, popup blockers).
+⚠️ `LinkedInUrl` and `TwitterUrl` are webshop-reconciled too but remain editable — deliberately, not
+by oversight; the operator asked only about the website.
+
+## §1081 — Retiring `initial-onboarding-of-sponsor`
+
+**Operator 2026-08-13:** *"i think that initial onboarding is legacy before we had get started wizard
+… it is being replaced by get started"*, and on how: ***"auto-close the task (never delete)"***.
+
+He was right, and the definition read that way: raised for **every** sponsor, due
+`FromConfig("sponsorDescription")`, `Completion: Manual()`, and auto-closed by `SponsorOrderPullService`
+the moment a `CompanyDescription` was saved. That is the Get Started **company** step, written before
+the wizard existed.
+
+🔑 **Why it had to go rather than stay harmlessly:** one missing description produced **two chases** —
+the Get Started digest naming the blank fields, and this task's own reminder cadence — in different
+words, about the same fact. Measured on PROD when this was decided: **all 8 past-due copies belonged to
+companies whose description was blank**, so every one was a duplicate of the wizard step.
+
+### What was done
+| | |
+|---|---|
+| The definition | **removed** from `SponsorTaskDefinitions`, with a do-not-re-add note and a test (`The_legacy_initial_onboarding_task_is_no_longer_defined`) |
+| Existing rows | **retired** by an event-wide sweep in `SponsorOrderPullService`: `State = Done`, `ClosedReason = SupersededByGetStarted` |
+| The conditional auto-close | removed — the key is no longer raised, so there is nothing to close conditionally |
+| `SponsorOnboardingResetService` | the reopen key is **gone** — re-opening a row the sweep closes on the next pull is a reset that silently undoes itself |
+| `/Organizer/SponsorDeliverables` | the "Contract & onboarding" stage now asks `SponsorCompanyContent` |
+
+🔒 **Closed, never deleted.** The row keeps its deadline and, for the four companies that finished it,
+the fact that they did. `TaskClosedReason.SupersededByGetStarted` distinguishes a retirement from work
+somebody actually did — a completion ratio counting it as a completion would overstate sponsor
+readiness. It is the §502 leaver rule applied to a task.
+
+⚠️ **The sweep is event-wide and sits OUTSIDE the per-company loop**, because that loop only visits
+companies present in the current order pull — a sponsor with no new orders would otherwise keep their
+legacy task for ever. It matches `State != Done` rather than `== Open`, so an `InProgress` row is
+retired too.
+
+### The deadline survives *because* the rows are closed
+`/Organizer/SponsorDeliverables` takes the onboarding stage's **deadline** from the task row, and
+`EarliestDue` does not filter by state — so retiring rather than deleting keeps the date on the page
+for free. Deleting would have silently dropped it. 🔑 A case where the safer instruction was also the
+one that preserved a feature.
+
+### The stage now agrees with everything else
+`onboardingDone` tested `CompanyDescription` alone, so an organizer could see *"Contract & onboarding ✓"*
+for a sponsor still missing their SoMe branding text — while `SoMeApprovalGate` was blocking that
+company's posts for exactly that field. It is now the **fourth** consumer of `SponsorCompanyContent`,
+alongside the wizard, the digest and the SoMe gate.
+
+## §1081 stage 3 — One audience rule, asked through one resolver
+
+`SponsorRecipientResolver` was already *"the single authority for who at a sponsor company should
+receive this email"* — but only the task reminder actually asked it. `GetStartedDigestBuilder` filtered
+inline:
+
+```csharp
+if (p.Role == ParticipantRole.Sponsor && !p.IsEventCoordinator) continue;
+```
+
+That is only the **fallback** half of the rule. The resolver treats the **e-conomic Role-2 set as
+PRIMARY** and the hub flag as an additive override. ⇒ A coordinator holding Role 2 in ERP whose hub
+flag was never set received sponsor **task** reminders and silently did **not** receive the Get Started
+digest. One question, two answers — the §366 shape.
+
+The digest now resolves through it, **once per company** and cached across that company's coordinators
+in the same pass (the resolver may call e-conomic). The resolver is an optional, last constructor
+parameter; when absent the builder keeps exactly the old flag-only behaviour.
+
+⚠️ **Deliberately NOT changed: the digest still does not CC** the §422 alternate inbox, though
+`SponsorRecipient` carries it and the task reminder uses it. That would widen the audience, which is a
+separate decision.
+
+## §1081 — Company-scoped sponsor tasks are chased
+
+`TaskReminderBuilder`'s main query requires `AssignedParticipantId != null`. **Every sponsor task is
+company-scoped with no assignee** — one row per company, so any coordinator's completion closes it for
+the team. Those rows could therefore never match it.
+
+| Measured on PROD, 2026-08-13 | |
+|---|---|
+| Open dated sponsor company tasks (unassigned) | **131** |
+| Open dated sponsor tasks WITH an assignee | **0** |
+
+⇒ The coordinator fan-out inside the main loop — written for exactly this case, with per-coordinator
+magic links and per-coordinator ledger dedup — **had never run once.** Correct code behind a filter
+that excluded everything it was written for: §968's shape.
+
+`BuildCompanySponsorRemindersAsync` is a **second pass**, not a widened first one, because the main
+loop dereferences `t.Participant` throughout (role, name, CC, speaker-country gate) and a company task
+has no participant. It reuses the same rules deliberately:
+
+- **Audience** — `SponsorRecipientResolver`, so the two mechanisms cannot drift.
+- **Cadence** — `IsDue(..., firstSendAtAnchor: true)`: first mail ON the due day (§81), repeats spaced
+  by the operator's interval, resolved for `ParticipantRole.Sponsor` (§881).
+- **Ledger** — a per-coordinator occasion root `task:{id}:{email}` with the date as the **last**
+  segment (§707.11); date-first would make every day a new root and the cadence would never hold.
+- **Rendering** — per coordinator, so each carries **their own** magic link (§169). One shared render
+  would be one person's credential mailed to a colleague.
+- 🔒 **An empty coordinator set sends nothing and never falls back to signers** — his option A.
+  Raising that gap is the sync job's job (stage 2c).
+
+🔑 **Deploy impact, measured: ZERO mails on the first run.** All 120 remaining company tasks are
+future-dated; the earliest is **27 Sep 2026**. The operator's read was right — *"they are future tasks
+with due date in future. reason they havent been chased yet"* — and the 8 that WERE past due were all
+the legacy onboarding task, now retired. So this ships without a backlog blast.
+
+## §1081 stage 2c — The "no event coordinator" notice goes to the event-actions mailbox
+
+**Stage 2c was already built.** `ErpWebshopContactSyncService` has always detected it, in the right
+place and with the right content:
+
+```csharp
+if (!contacts.Any(c => c.IsEventCoordinator))
+    notes.Add($"{name} (e-conomic #{n}): no contact with Event Coordinator role (Role:2) — add it in e-conomic.");
+```
+
+That is the operator's decision exactly — raised **by the sync job as the data arrives**, naming the
+company and the fix, rather than discovered days later when somebody was due a mail. What did **not**
+match his rule was the **address**: it went to his personal organizer mailbox, and §1075 sends event
+actions to the shared organizer inbox (`info@`).
+
+⇒ `AlertEmail` is now the shared organizer inbox. **The whole mail moved, not just the coordinator line** —
+his call when the trade-off was put to him (*"you are ok to move ops mail to info@ as
+well"*), because the mail also carries orphaned webshop users and company-failure notices, and
+splitting one note out would make the job send two mails whenever both occur.
+
+### 🔴 The ring exemption became load-bearing
+The send was already `RingExempt: true` (§1072) as *insurance*. After this move it is the **only**
+thing keeping the mail alive: `info@` is a fixed mailbox, not a participant, so the transport's
+ring-gate **fails closed** on it — §1060(i) is precisely that, an `info@` mail silently dropped as an
+unknown recipient. Removing the exemption would not fail loudly; the job would run, report success,
+and nobody would be told about a sponsor with no coordinator. The comment at the send site was
+rewritten to say so, because its old premise (*"AlertEmail is the operator's OWN organizer address"*)
+is now false and a stale premise is what makes the next reader trust the wrong half.
+
+📊 **Measured 2026-08-13: 0 of 15 sponsor companies currently lack a coordinator** — this is a guard
+for the future, not a live gap, which is why nobody had noticed the address was wrong.
+
+## §1081 — Organizer tasks already have a lead: it is `AssignedParticipantId`
+
+The plan carried an item to give organizer tasks a *responsible person* defaulting to the operator.
+**Measured on PROD 2026-08-13 — they already have one:**
+
+| Role | Tasks | Ownerless |
+|---|---|---|
+| Organizer | 28 | **0** |
+| Speaker / Volunteer / Sponsor / Attendee / Media / Partner | 615 | **0** |
+| *(unassigned)* | 139 | 139 — **all sponsor COMPANY rows**, deliberately company-scoped |
+
+⇒ **No new field, no migration, no backfill.** `AssignedParticipantId` *is* the lead, organizer tasks
+already carry one, and reassignment is the ordinary edit he described. The only ownerless tasks in the
+event are the sponsor company rows, which are meant to be — they are the ones the §1081 company-scoped
+reminder now chases.
+◻ **What remains is a DEFAULT, not a mechanism:** a new organizer task arriving without an owner
+should get the lead organizer's mailbox. Nothing today creates one, so this is a rule to hold rather than code
+to write — worth adding to the organizer task-creation path if one is ever added.
+
+## §1082 — Retire, never delete: the closure model for tasks
+
+**Operator 2026-08-13,** after the sponsor orphan prune hard-deleted 15 production rows (four of them
+completed): *"when you implement a guard, do we agree that you dont delete, but close them (as they
+were inactive)"*. He is right, and the hub already said so in three places — §502 deactivates a
+leaver, §253 tombstones, and `ParticipantDeactivationService` closes tasks with a reason and re-opens
+them verbatim on reactivation.
+
+### The two halves
+1. **`TaskClosure.Retire(task, reason, now)`** — sets `State = Done`, stamps `CompletedAt`, and labels
+   `ClosedReason`. 🔒 **Idempotent and never destructive**: a row a PERSON completed is left exactly
+   as it is, so retiring a catalog entry can never erase that somebody finished it.
+2. **`TaskClosure.IsSystemClosed` / `NotSystemClosed`** — keeps retirements out of everything a
+   participant reads as *"what I have done"*.
+
+⚠️ **The second half is what makes the first safe.** A retired row is `State = Done`, so every
+"completed" list absorbs it unless filtered — a sponsor would be congratulated for nine tasks they
+never saw. The doc-comment on `AbandonedOnDeactivation` had always *claimed* such rows were "excluded
+from completion ratios"; measured 2026-08-13, **nothing implemented it**. It does now.
+
+### Converted from delete to retire
+| Where | Was |
+|---|---|
+| `SponsorOrderPullService` orphan prune | deleted — **the incident** |
+| `SpeakerDeadlineSeeder` per-speaker orphan prune | deleted — same fault, **357 speaker tasks** |
+| `SpeakerDeadlineSeeder` ex-speaker sweep | deleted a role-changer's completed deadlines |
+| `SpeakerDeadlineSeeder` §264 retired title/abstract | retired a family **by deleting it** — the pattern he ruled out |
+| `RoleChangeTaskReconciler` | deleted the old role's tasks, completions included |
+
+🔒 **Hard deletion survives in exactly one place:** `WizardStepTaskSeeder`'s duplicate sweep, where two
+rows share one `SourceKey` and one is redundant *by construction*. Closing it would leave a phantom
+"completed" twin beside the real row — the only case where the row records nothing a human did.
+
+### Filtered so retirements never read as completions
+`ParticipantChecklistBuilder`, `WebAiHelperOwnDataProvider`, `/Sponsor/Tasks`.
+`DeadlinesFormService` and `TaskReminderBuilder` already filter `State != Done`, so a retired row is
+silently correct there.
+
+### 🔴 The bug this model introduced, and its guard
+`FormTaskReconciler` syncs some tasks **both ways** off a data signal: answered ⇒ Done, un-answered ⇒
+**reopen**. A retired task has no data by definition, so the reconciler **resurrected it on the next
+page load** — a retirement that silently undid itself.
+
+⇒ All three reopen sites now require `ClosedReason == null` ("a person did this"). A system-closed row
+stays closed; a person's own completion still reopens when their answer disappears.
+🔑 **This could not happen while prunes deleted** — a deleted row cannot be reopened. It was caught by
+an existing role-change test the moment the behaviour changed, which is the argument for converting
+the prunes and running the whole suite rather than patching one call site.
+
+## §1082 — Organizers deactivate; nothing hard-deletes a person
+
+**Operator 2026-08-13:** *"we only make things inactive by filter"* · *"i think we should remove the
+delete buttons for organizers, so they can only deactive"* · *"we dont use that testdataclean-up
+service, turn it off in code"*.
+
+**Every path that could physically remove a participant is now closed:**
+
+| Path | Was | Now |
+|---|---|---|
+| `/Organizer/Participants` per-row button | `HardDeleteAsync` (typed confirm) | **Deactivate** — same typed confirm, relabelled |
+| `/Organizer/PreselectionQueue` | hard-delete a "clean" row, deactivate on FK refusal | **Deactivate**, one answer for everybody |
+| `/Organizer/Dashboard` decline applicant | `Participants.Remove` + dependent cleanup | **Deactivate**; only the LOGIN PIN is still removed |
+| `TestDataCleanupService` | hard-deleted clean test rows | 🛑 **Disabled** (`Enabled = false`); preview still works |
+
+🔑 **Why the queue one mattered most:** it hard-deleted when the row was "clean" and deactivated when a
+`Restrict` FK refused — so whether a person's rows survived depended on which dependencies they
+happened to have. That is not a rule, it is an accident. Now it is one outcome for everyone.
+
+🔒 **PINs are still deleted, deliberately.** A PIN belonging to somebody who may no longer sign in is a
+live credential, not history. The same reasoning keeps magic-link grants and secretary tokens as hard
+deletes.
+
+⚠️ **The trade, stated:** a genuinely mistaken row — a test participant, a typo'd applicant — now stays
+in the database as INACTIVE for ever. That is the same trade §502 already makes for a leaver, and the
+UI copy was rewritten so it no longer promises a deletion it does not perform (a button labelled
+"Delete" that deactivates is its own kind of lie).
+
+### What this closed by itself
+`ParticipantDeletionService` classed `Tasks` as a "safe dependent" — deletable with the person, on the
+assumption they *"carry no history worth keeping once the person is gone"*. §1082 had already settled
+that completions ARE history. With no reachable hard-delete path, that code is unreachable rather than
+merely unlikely.
+
+## §1082 — Where deletion still happens, and why (the settled map)
+
+Audited end-to-end on 2026-08-13 after the sponsor prune destroyed 15 rows. The rule the operator
+stated — *"we only make things inactive by filter"* — now holds for everything that records what a
+person did. What remains is deliberate:
+
+| Still hard-deletes | Why it must |
+|---|---|
+| **Credentials** — `LoginPins`, `MagicLinkGrants`, `ParticipantSecretaryTokens` | A key belonging to somebody who may no longer sign in is a live credential, not history |
+| **Ledgers / bookkeeping** — `SentReminders`, `TaskAllocationDrafts`, `EventSoMePostOccurrences`, `EvaluationSessionSpeakers`, the Zoho webhook queue | Deleting a `SentReminders` row **is** the "allow a resend" feature; the rest are derived rows that carry no authorship |
+| **Audit retention** — `AuditEntries` | A retention policy, applied in batches |
+| **Organizer catalog edits** — sessions, hotels, schedule entries, SoMe templates, group-photo slots, evaluation devices | These have no active/inactive concept; "delete" is the meaning of *remove this row from the list*, and they hold no human history |
+| **Survey reset** — `ResetResponsesAsync` | A deliberate, audited organizer action that exists so a survey can be re-run. ◻ Worth a typed confirm |
+| **Duplicate task rows** — `WizardStepTaskSeeder` dedupe | Two rows share one `SourceKey`; one is redundant *by construction*, and closing it would leave a phantom "completed" twin |
+
+🔒 **Cascade check:** `ParticipantTask.AssignedParticipant` is `OnDelete(Restrict)`, so nothing
+cascades into tasks from a person. `ParticipantTask.Event` is `Cascade` — harmless today because
+**no code path deletes an Event**, and that is worth preserving: an event delete would silently take
+every task with it.
+
+## §1085 — One participant-status board for all roles
+
+**Route:** `/Organizer/ParticipantStatus` (organizer-gated, read-only, no writes).
+**Replaces:** the per-company status table on `/Organizer/SponsorAdmin/Dashboard` — retired; that
+page is now purely its four maintenance actions (contact sync, coordinator migration, Zoho
+provisioning, ERP→webshop reconcile). `/Organizer/SponsorDeliverables` survives as the stage-by-stage
+**drill-down** behind a sponsor row.
+
+### The model that made it cheap
+All seven roles already have a Get Started wizard with a percent — `SpeakerWizardService`,
+`AttendeeWizardService`, `RoleWizardService` (volunteer / media / partner / organizer) and
+`SponsorWizardService`. *"What is this person's status?"* therefore had one answer for every role
+already; what was missing was a page that asked it.
+
+`WizardProgressReader` (Core/Forms) is that question, asked once. It normalises the four unrelated
+step records into `WizardProgress` — `OpenKeys`, `DoneKeys`, `EvaluableCount`, `TitlePrefix` — and is
+**the one place that maps a role to its wizard**. `GetStartedCompletionSweep` now reads it too; it
+used to carry an identical `switch (role)`, and the status board would have been the third copy.
+`GetStartedDigestBuilder` deliberately keeps its own, because it additionally needs per-company
+credits and missing content fields.
+
+🔒 **The board never re-derives completion.** That is why it cannot disagree with a participant's own
+progress bar — the §1081 failure mode, where two boards with their own arithmetic disagreed with each
+other and the operator trusted neither.
+
+### Row shape
+`ParticipantStatusBoardBuilder` → `ParticipantStatusRow`. One row per person, **one row per SPONSOR
+COMPANY** (their wizard and their tasks are company-scoped; a per-contact row would repeat one
+company's state N times, which is the shape of the §1081 incident). The company row is built for the
+event coordinator where there is one — the contact sponsor mail addresses (§7c) — else the oldest
+contact; every coordinator returns the same answer.
+
+| Rule | Where it comes from |
+|---|---|
+| Only people who can sign in are listed | `.Remindable()` (§499) — the same population the reminders use; §1071 was this rule missing on the retired board |
+| System-closed tasks are never counted | `TaskClosure.NotSystemClosed` (§1082) — a retired row is `State = Done`, so counting it would credit work nobody did |
+| A task belongs to a person **or** their company | `ParticipantTaskQueries.VisibleTo` (§1081) |
+| Blank sponsor content fields are named | `SponsorCompanyContent.StatusOf(info).MissingFieldKeys` (§854/§1081) — the same keys the sponsor's own reminder renders |
+| A sponsor with no company link has **no wizard**, not 0% | `SponsorWizardService.BuildAsync` returns null; the row reports `HasWizard = false` |
+| Company display names come from the local copy | `SponsorCompanyNameService.ResolveFromLocalAsync` (§443) — never Company Manager on a request path |
+| **Test people and test companies are out** unless asked for | §1212 — `Participant.IsTestUser` in SQL, plus `SponsorInfo.IsTestData` over the company set. Both halves: sponsors are listed per COMPANY, so hiding only the people leaves the test company on the board with its contacts stripped. `includeTest` is part of the cache key |
+
+### §1211 — the addresses behind the filtered rows
+The board carries `ChaseEmails`: every address for rows matching the CURRENT role + status filter,
+**across all pages** (exporting only the visible 50 would be a quiet way to miss people),
+de-duplicated and semicolon-joined for BCC. Sponsors resolve to their **event coordinators** (§7c) in
+one query — the row's own `Email` is one arbitrary contact of several. Companies in the filter with no
+coordinator are listed separately (§854): they are absent from the addresses AND from the reminder
+engine's audience, so nothing is chasing them at all.
+
+### 🔴 §1212 — the control that lied
+Operator 2026-09-12: *"i hit refresh while selecting sponsor but it newer filters on sponsors"*, with
+the dropdown reading **Sponsor** and the URL carrying no `role` at all. ⚠️ **The server was right and
+the control was wrong:** on a reload the browser RESTORES a select's last value, overriding the
+`selected` attribute the server rendered — so the filter described one question while every figure on
+screen, the §1211 export included, answered another. ⇒ `autocomplete="off"` on the form and every
+control, an **Apply** button that is always present rather than `noscript`-only (an auto-submitting
+select is a convenience, not a mechanism), and a line under the filters naming what is actually
+applied. 🔑 That line is the real guard: a disagreement between the controls and the board is now
+readable rather than invisible, which is the only kind of defence that survives the next browser
+behaviour nobody predicted.
+
+Core returns **keys plus a resx prefix**, never English: the hub ships en + da-DK and the view
+localises (`SpeakerWiz.Step.*` / `RoleWiz.Step.*` / `SponsorWiz.Step.*` / `SponsorContent.Field.*`).
+
+Default order is **at-risk first**: overdue, then most overdue, then least complete, then name — so
+the rows that need chasing are the rows on screen.
+
+### 🔴 The performance decision (§1085 required one before building)
+A wizard build is several queries per person, and `GetStartedCompletionSweep` carries the operator's
+objection about exactly this shape. The options were (a) filter + paginate, (b) a short cache, (c) a
+nightly snapshot table. **Chosen: (a) + (b).**
+
+1. Everything that is not the wizard — tasks, sponsor content, company names — is read in **batch**
+   before the loop: a fixed handful of queries whatever the population.
+2. The **role filter is applied in SQL**, before any wizard is built. Filtering one role is the normal
+   way the page is used, and it is what makes it cheap.
+3. The page holds the built board in `IMemoryCache` for **90 seconds**, keyed by `(eventId, role)` —
+   so paging, re-sorting and flipping the completion filter cost nothing. The key carries the scope
+   that was built, so an all-roles board can never answer a single-role question.
+
+**(c) was rejected on principle:** a snapshot table is a second source of truth for completion, which
+is the defect §1081 was reported for.
+
+⚠️ The completion filter and the sort are applied by the PAGE, over the built rows, because both need
+a percent that only exists after the build — which is why the builder returns the whole role-scoped
+set rather than a page of it. The page states **when its figures were built** and offers Refresh: a
+board that silently shows 90-second-old work reads as broken to whoever just finished a step.
+
+## §1086 — One lunch calculation engine, and one attendee scope
+
+### The engine
+`LunchHeadcountService` (`Core/Integrations/DocLibrary/LunchHeadcount.cs`) → `LunchHeadcount`.
+**Three readers, one call:** `/Organizer/Lunch` (which keeps its audit LIST), the
+`/Organizer/Dashboard` tiles, and `LunchLogisticsProducer` (which keeps only the workbook).
+
+| Component | Rule |
+|---|---|
+| `PreDayCrewAutoCounted` | Organizer / Media / EventPartner — never shown a pre-day checkbox (`LunchAudience.PreDayAutoCountedRole`), so a stored `false` means *never asked* |
+| `PreDayDeclared` | ticked the box, minus the auto-counted, **minus sponsors** (their heads arrive as a company count) |
+| `PreDaySponsorBoothMembers` | §298 booth check-in; the opt-out slot contributes nothing |
+| `PreDayTwoDayAttendees` | §1086 — `LogisticsAudience.PreDayAttendees`: the pre-day IS the Master Class day |
+| `MainDayCrew` / `MainDayAttendees` | §326h — lunch is ordered for everyone: every countable participant + every live ticket, any class |
+
+Participants are scoped by `LogisticsAudience.Countable` (active, not a test user — §946/§253 G4).
+`PreDayNamedIdsAsync` returns the ids the engine counted, so the spreadsheet's named rows and its
+totals agree **by construction** rather than by coincidence.
+
+🔑 **The rule that could not be shared was the one that broke.** `PreDayAutoCountedRole` lived in
+`LunchFormService` in the **web** project, which Core's producers cannot reference — so the Excel
+grew its own answer and left every organizer, media and partner out of the venue's order. It is in
+Core now (`LunchAudience`), with the web form delegating.
+
+⚠️ **Attendees are a COUNT, never named rows** in the lunch file: CEH holds no dietary answer for
+them (`DietarySurface` is crew catering + the dinner), and the file goes to an external venue mailbox
+once approved. Names would add identities without adding anything a caterer can cook against.
+
+### The attendee scope
+`AttendeeScope` (`Core/Attendees`) — `LiveIn(eventId)` / `Live()` / `IsLive()`, the attendee twin of
+`ParticipantLifecycleScope`. **`MirrorState == Active` is the whole rule.**
+
+🔴 The attendee table is deliberately a **history**: §326as keeps a cancelled ticket's row, §707.23
+keeps the previous holder on a reassignment. Any consumer that reads it as a head-count silently
+counts people who are not coming — which is exactly what `/Organizer/Dashboard` (100 vs 97), the
+command centre and the reporting export were doing, plus two reconciliation-mismatch tiles that
+counted work on cancelled tickets nobody could ever clear.
+
+🔒 **`No_attendee_HEAD_COUNT_is_written_without_the_live_ticket_rule`** fails the build when a new
+reader aggregates `Attendees` without the scope. Fixing the three surfaces was not the fix — nothing
+failed when a fourth invented a fourth answer. The guard reads whole STATEMENTS, not the text before
+the call, because the predicate lives inside the lambda (its first version produced five false
+positives, and a guard that cries wolf gets allowlisted into uselessness).
+
+### Navigation
+`/Organizer/ParticipantStatus` (§1085) is now a **direct** organizer menu entry rather than only a
+People-hub tile — the operator could not find it the day after it shipped. Same precedent as §646,
+which promoted Platform Health and Jobs for the same reason.
+
+## §1086b — The lunch files: two days, named people, no diets
+
+| File | Contents |
+|---|---|
+| `<event>-lunch-day1-preday.xlsx` | named pre-day heads (crew auto-count ∪ declared, sponsors excluded) + booth-member count + 2-day attendee count |
+| `<event>-lunch-day2-mainday.xlsx` | **§1086b** — named crew (every countable participant) + every live ticket as one count |
+| `<event>-breakfast-day{1,2}.xlsx` | figures only, 75% estimate (§770.8) |
+
+🔒 **No lunch sheet carries dietary information**, and the summary says why. The removed column read
+`DietarySurface.SpeakerCatering` — a surface **no CEH form writes**; only `DietarySurface.Dinner` is
+captured (`DinnerFormService`), and `FoodLogisticsProducer` serves that to the dinner file. An
+always-empty diet column tells a caterer "nobody has a dietary need", which is a stronger and wronger
+claim than saying nothing. Lunch options are agreed with the venue in the ordering process.
+
+⚠️ **Attendees are named nowhere in these files** — they are a count on both days. The crew are
+named because an organizer works from that list on the day; adding hundreds of attendee identities to
+a spreadsheet that leaves the organisation buys the caterer nothing.
+
+**The Appreciation Dinner is the only dietary capture in the product.** Its default is `"None"`
+("No special diet"), both as the pre-selected option and as the persisted value when the dropdown is
+untouched — pinned by `DietaryDefaultTests` since §1086b, after the operator had to ask whether a
+one-time Vegetarian default had really been fixed.
+
+## §1140c — The ERP-owned webshop block: field ownership, and the wire type
+
+The ERP→webshop reconcile pushes the company page's **"Data owner: ERP"** block. Two contracts
+govern it, and both have been a source of silent failure.
+
+**1. Ownership is split, and the split is deliberate.**
+
+| Owner | Fields |
+|---|---|
+| **ERP** | billing e-mail, address 1/2, city, postcode, country, **CVR/VAT id**, **phone**, **currency**, **VAT zone** |
+| **Webshop** | website, public company name, social links, notes, the two default contacts |
+
+🔒 The website is **not** ERP-owned, even though the retired PowerShell sync pushed it. The hub made
+the webshop authoritative for it, and re-adding it here would put two systems in a fight over one
+field. A field must have exactly one owner or it oscillates.
+
+**2. The wire type is part of the field's identity, not a detail of it.**
+
+`vat_zone_number` is the only **numeric** field in the block — the API returns it as a JSON number,
+while `currency`, `phone` and the CVR are strings, all four in the same payload. The push therefore
+cannot treat the block uniformly:
+
+- **Write:** the zone goes out as a JSON number (`FollowNumber`), every other field as a string
+  (`Follow`).
+- **Read:** the zone is parsed with a reader that accepts either form and renders it as text, so the
+  before/after comparison has one representation to work in.
+- **Verify:** the §897 read-back renders the intended value invariantly rather than casting it —
+  casting a boxed number to a string yields null, and a null intent never matches a read-back, so
+  the field would report itself refused after landing correctly.
+
+⚠️ **The failure mode is silent in both directions.** A key that does not exist reads as an empty
+string, which is an ordinary value; a value of the wrong type reads as empty too. Neither throws,
+neither returns a non-2xx, and both make the sync believe the stored value is blank — so it rewrites
+the field on every run and then reports that the write was refused. The reconcile therefore verifies
+against the **live payload's own shape**, and adding a field to this block means adding it in three
+places: the push, the read, and the read-back map.
+
+## §1141 — Zoho access tokens: reuse, rejection, and why the retry lives in the client
+
+One access token is shared by every caller and reused for most of its hour, because the token
+endpoint is metered far more tightly than the API is (§525). Three rules keep that safe.
+
+**1. A token can stop being valid before it expires.** Reuse alone is not enough: the credential is
+shared across environments, so a refresh in one place can retire a token another place is still
+holding. The client therefore treats a `401` on a cached token as a **recoverable** condition — it
+drops the token, re-authenticates once, and retries the same request. Only a second rejection is a
+real failure.
+
+**2. Invalidation is conditional, never unconditional.** A rejected token is dropped **only if it is
+still the cached one**. Many jobs hold the same token and are rejected within moments of each other;
+if each cleared the cache unconditionally, the first job's freshly-obtained token would be discarded
+by the second, and so on — one token request per job, against a budget measured in requests per ten
+minutes. Comparing first makes the operation idempotent: **one refresh per rejection, not one per
+caller.**
+
+**3. Retry belongs at the client, not in each job.** A retry that re-presents the same rejected token
+cannot succeed — it converts one failure into three and reports it as diligence. Because the
+re-authentication lives in the single paging routine that every collection read goes through, a job
+only has to decide *how many times* to try, and every existing retry loop became effective the moment
+this landed.
+
+⚠️ **The corollary for alerting:** a notice sent on the first failed attempt is a notice about
+network weather. Jobs that mail a human retry first and state the attempt count, so a message that
+does arrive is evidence of an outage rather than of one unlucky call. Where a job caches what it
+last read — the signage agenda is the example — the cached copy stays in place throughout, so
+retrying costs nothing a user can see.
+
+🔒 **One case is deliberately NOT retried:** being unable to obtain a token at all. That means the
+post-failure cooldown is in force and the request budget is already spent; asking again is what turns
+a transient throttle into a sustained outage.
+
+## §1142 — The shared Zoho access token
+
+Zoho meters the *token endpoint* far more tightly than the API: a small number of grants per
+ten-minute window, and only about ten simultaneously-valid access tokens per credential, with the
+oldest evicted when a new one pushes past that. Reusing one token is therefore not an optimisation —
+it is the difference between working and not.
+
+The reuse happens at two levels, and the second exists because the first is not enough.
+
+**In-process** — one token per host process, held until shortly before expiry. This is the fast path
+and handles the great majority of calls.
+
+**Across processes** — a single database row per credential holds the live token. This matters
+because an elastic host does not have "a process": the jobs host runs thousands of short-lived
+instances a day, and a per-process cache in that setting means a fresh token per instance, which
+pushes older still-valid tokens out of the credential's pool and produces authentication failures on
+tokens that were healthy a minute ago.
+
+The row's important property is not storage but **arbitration**. A cold instance first asks the row;
+if a live token is there it adopts it and never contacts Zoho. Only when there is nothing usable does
+it try to claim the right to refresh, and that claim is **one conditional update whose affected-row
+count is the verdict** — the database chooses a single winner. Instances that lose wait briefly and
+take what the winner published; they never refresh as a fallback, because a fallback refresh is the
+stampede a moment later. The claim is time-boxed so an instance that dies mid-exchange cannot lock
+everyone out.
+
+The post-failure cooldown lives in the same row for the same reason. A cooldown held per process,
+multiplied across hundreds of instances, is not a cooldown at all — the point is that one instance
+meeting a throttle spares every other instance from meeting it too.
+
+🔒 **Every interaction with the row is fail-soft, and the claim fails open.** If the store cannot be
+reached the system degrades to per-process behaviour, which is merely less efficient. Throwing would
+take down every integration that depends on the credential, so the failure is absorbed rather than
+propagated — and deployment order stops mattering, since a host whose table does not exist yet simply
+behaves the way it did before.
+
+⚠️ **The row is a cache, not a record.** It is entirely re-derivable from the long-lived credential,
+so it is excluded from backups on purpose: restoring a stale short-lived token is worse than
+restoring none. The long-lived credential itself stays in the secret store, which is what a secret
+store is for — it offers no compare-and-swap, and would accumulate a permanent version per rotation.
+
+## §1157 — One sponsor, several event-platform records: how the heading is chosen
+
+A company can hold **several sponsor records in the event platform, one per sponsorship heading**.
+That is not a workaround; it is how the platform represents a company that supports more than one
+part of the event, confirmed against last year's edition where one company appears under two
+headings with the same contact.
+
+### Where the heading comes from
+
+The heading used to be derived from the sponsorship **package**, which is derived from the **booth
+tier** — so a company that bought no booth was the entry-level tier by definition, and every
+non-booth sponsorship was filed under that tier's heading no matter what it was.
+
+It now comes from the **product**, through a config-driven map:
+
+| Stage | Where | What it produces |
+|---|---|---|
+| Map a product's categories → headings | `sponsor.<edition>.json → zohoSponsorCategoryMap`, read by `SponsorZohoCategoryMapper` | a **set**, not one answer |
+| Union across the company's order lines | `SponsorOrderPullService` | `SponsorInfo.ZohoSponsorCategoriesJson` — the **entitlement** |
+| Sign-ups with no product behind them | `SponsorZohoProvisionService` (app-game participation) | one more heading, unioned per company |
+| Create/adopt one record per heading | `SponsorZohoProvisionService` | `SponsorInfo.ZohoSponsorLinksJson` — the **links** |
+| Push company fields to every record | `SponsorZohoSyncService` | one company reads identically everywhere |
+
+🔑 **Entitlement and links are deliberately two columns.** The entitlement is what the company has
+*bought*; the links are what *exists*. Keeping them apart is what lets the provisioner answer "which
+record is missing?" — a single merged column could only say what it had already done.
+
+⚠️ **The mapper returns a SET and does not stop at the first hit**, unlike the product classifier
+whose question ("what kind of thing is this?") has one answer. One product can carry two headings, so
+first-match-wins here would reproduce the original defect in a new place.
+
+### The two guards, and why both fail closed
+
+Nothing is created unless the platform's current state can actually be seen:
+
+1. **An empty sponsor list is not evidence of an empty platform.** The list read returns empty on any
+   auth or HTTP failure, so a failed read makes every heading look missing — and the provisioner
+   would then create a full set of records for every company, with no delete path to undo it.
+2. **An unreadable heading is UNKNOWN, not "no heading".** If the list does not report which heading a
+   record sits under, we cannot tell whether one is missing. Creating on that basis adds a duplicate
+   on *every* run. It is reported instead: adding a missing record by hand takes a minute, and
+   removing a hundred duplicates does not.
+
+Both refusals are **reported per company**, so a heading that never materialises is visible in the
+run's notes rather than being silence.
+
+### Raise-only, and what happens when a sponsorship lapses
+
+The entitlement set is **raise-only**, matching the tier, package and session flags around it. A
+lapsed sponsorship therefore leaves its record in place and reports the orphan. Two reasons, and the
+second is the real one: there is no delete path into the platform (a record carries the company's
+leads and identity), and un-listing a sponsor publicly is a decision that belongs to a human, not to
+an unattended ten-minute job.
+
+### The primary link is stable
+
+`SponsorInfo.ZohoSponsorId` remains the primary and every pre-existing caller reads it unchanged. It
+moves **only** when the record it points at is gone — never merely because a new heading sorted ahead
+of it. The profile-pushed hash, the stale-id self-heal and the admin pages all describe "the" record
+through it, and a primary that drifted would silently re-point all of them at a different one.
+
+## §1158 — Two company names, two rules
+
+A company has a **legal/billing name** and a **public name**, and they are not variants of each
+other — they answer different questions:
+
+| Name | Question it answers | Legal form (A/S, ApS, GmbH, LLC …) |
+|---|---|---|
+| Legal / billing | Who is the invoice made out to? | **Required** — an invoice without it is wrong |
+| Public | What does an audience call them? | **Never** — this is the LinkedIn-style name |
+
+⚠️ **An empty public name is not neutral.** Every consumer resolves `PublicName ?? Name`, so a
+company that has never had one publishes its **legal** name — form and all — on the sponsor wall and
+in the event platform. Most wrong public names are this case rather than a badly-typed one.
+
+### Who may write the public name, and when
+
+| Actor | May write it? |
+|---|---|
+| The sponsor, in the webshop | Always. It is theirs. |
+| The recurring reconcile, when the field is **empty** | Yes — fills it from the legal name, minus the form; the mail lists it as a receipt (`PUBLIC NAME set automatically`), not as attention (§1219) |
+| The recurring reconcile, when the field is **set** | **No.** Reports only |
+| The legal-name rename path | Yes, and only then (the standing rule that predates this) |
+| The organizer's one-time sweep | Yes — but only when a human starts it, and only after a preview |
+
+🔑 **Why the recurring job may not clean a name someone typed.** It runs every ten minutes; the
+sponsor can edit the field at any time. An automatic rewrite would not be a fix but a standing
+argument the sponsor cannot win, and they would never be told why their wording kept reverting. The
+one-time sweep is the same edit made once, by a person, with the list shown first — which is a
+different act despite being the same string operation.
+
+### Matching rules, and the failure they are shaped around
+
+The form is matched as **whole trailing tokens only**, normalised (upper-cased, dots and inner
+spaces removed), longest run first. Each of those exists because of a specific way a looser rule
+destroys real names: substring matching renames *Incentive*, *Aspect* and *Vagabond*; a
+non-trailing match turns *AG Consulting* into *Consulting*; a shortest-first match leaves
+*GmbH & Co. KG* as *& Co.*; and stripping a name that is only a form empties the field, which
+publishes the legal name — the exact state being removed.
+
+Ambiguous two-letter forms that are also ordinary words are deliberately not recognised. The cost of
+a miss is one slightly formal name; the cost of a false positive is an operator who stops trusting
+the report.
+
+### Downstream
+
+Nothing else needs its own rule. The event-platform reconcile already pushes the resolved company
+name to **both** the sponsor and the exhibitor record whenever it differs from what is stored there,
+so correcting the source corrects both on the next pass. A second alerting channel for those records
+was considered and rejected: it would report the same company twice for one cause.

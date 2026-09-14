@@ -17,6 +17,18 @@
            already approved in Sessionize) so they flow to Zoho fast. Released Zoho ring today:
            <strong>Ring @((int)Model.Pending.ReleasedRing)</strong>@(Model.Pending.FeatureEnabled ? "" : " (feature disabled — everyone is held)").</p>
 
+        @* §1092 (operator 2026-08-19) — the category is not cosmetic: it decides who ELDK covers
+           hotel and travel for. That consequence was invisible on the page where the choice is made,
+           so the rule is stated AT the choice rather than remembered. Same note in the §877 mail,
+           because the three one-click buttons there approve everyone in one go — and Community is
+           the first and most tempting of them. *@
+        <p class="info" role="note" style="border-left:4px solid #1565c0;padding:10px 12px;">
+            <strong>Microsoft speakers and invited guests must be set to “Guest”.</strong>
+            They have individual agreements with ELDK covering <strong>hotel and travel</strong>,
+            and the Guest category is what applies them. Picking Community or Sponsor for one of
+            them quietly removes that cover.
+        </p>
+
         @if (!string.IsNullOrEmpty(Model.Message))
         {
             <p class="@(Model.IsError ? "error" : "info")" role="status">@Model.Message</p>
@@ -61,10 +73,18 @@
                                     <option value="Sponsor">Sponsor</option>
                                     <option value="Guest">Guest</option>
                                 </select>
+                                @* §1090 (operator 2026-08-19: "the default ring here must be ring 3
+                                   (not ring 2 as today)"). Ring 3 is the RELEASED Zoho ring, so it
+                                   is the only default that makes the one-click Save do what this
+                                   page exists for — approve a speaker so they flow to Backstage.
+                                   Defaulting to Ring 2 held them back at the last step, silently,
+                                   and matched neither the page's own "Released Zoho ring today:
+                                   Ring 3" line nor the three e-mail buttons, which all approve at
+                                   ring 3. *@
                                 <select name="ring" style="max-width:110px;margin:0;">
                                     <option value="Ring1">Ring 1</option>
-                                    <option value="Ring2" selected>Ring 2</option>
-                                    <option value="Broad">Ring 3</option>
+                                    <option value="Ring2">Ring 2</option>
+                                    <option value="Broad" selected>Ring 3</option>
                                 </select>
                                 @* Saving ACTIVATES automatically — the speaker was already
                                    approved in Sessionize (operator 2026-07-24). *@

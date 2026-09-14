@@ -64,8 +64,8 @@ public sealed class SoMeScheduleServiceTests
             // every sponsor test would be exercising the not-plannable path by accident.
             db.GraphicAssets.Add(new GraphicAsset
             {
-                EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = $"co-{i}",
-                StableKey = $"sponsor-co-{i}",
+                EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = $"co-{i}",
+                StableKey = $"sponsor-co-{i}", FileName = $"sponsor-co-{i}.png",
                 CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
             });
         }
@@ -229,8 +229,8 @@ public sealed class SoMeScheduleServiceTests
         // §854 — the newcomer has delivered their logo, so they are announceable.
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-NEW",
-            StableKey = "sponsor-co-NEW",
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-NEW",
+            StableKey = "sponsor-co-NEW", FileName = "sponsor-co-NEW.png",
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
         });
         await db.SaveChangesAsync();
@@ -345,14 +345,14 @@ public sealed class SoMeScheduleServiceTests
         db.Sessions.Add(session);
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.TrackBundle,
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.TrackBundle,
             StableKey = "track:ai-for-makers-copilot-agents",
             FileName = "track-ai-for-makers-copilot-agents.gif",
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
         });
         db.GraphicAssets.Add(new GraphicAsset
         {
-            EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = "co-1",
             StableKey = "sponsor:co-1", FileName = "sponsor-co-1.png",
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
         });
@@ -693,18 +693,26 @@ public sealed class SoMeScheduleServiceTests
     }
 
     /// <summary>
-    /// §908 — TRACKS RUN IN TWO ROUNDS: as soon as the speaker gate allows, then one month out.
+    /// §908/§1195 — TRACKS RUN IN ROUNDS: the first as soon as the speaker gate allows, the LAST one
+    /// month out, and any in between spread across the gap.
     /// </summary>
     /// <remarks>
-    /// Operator 2026-08-06: <i>"build post for each speakertracks so they run 2 times; now and jan
-    /// 2027"</i>. The generic spread had been putting the eight tracks one per month from September
-    /// to February — announced once, then silent for weeks.
+    /// <para>Operator 2026-08-06: <i>"build post for each speakertracks so they run 2 times; now and
+    /// jan 2027"</i>. The generic spread had been putting the eight tracks one per month from
+    /// September to February — announced once, then silent for weeks.</para>
+    ///
+    /// <para>🔴 <b>§1195 — this said "TWO rounds" and asserted round 2 was the month-out one.</b>
+    /// Operator 2026-09-12: <i>"speaker tracks must have 3 rounds"</i>, so the month-out round is now
+    /// round 3 and round 2 is an intermediate. The RULE the test protects is unchanged and is what it
+    /// now asserts: the first round waits for the gate, the LAST lands in the final month. Pinning it
+    /// to "round 2" was pinning the cadence, not the rule — and the cadence is his to change.</para>
+    ///
     /// <para>🔒 "Now" is "as soon as the gate allows" (his choice when asked): a track post lists
     /// {Speakers}, and posting before the CfS decision announces a line-up the post can never
     /// correct (§851).</para>
     /// </remarks>
     [Fact]
-    public async Task Track_posts_run_in_two_rounds_the_gate_and_one_month_before_the_event()
+    public async Task Track_posts_run_from_the_gate_with_the_last_round_one_month_before_the_event()
     {
         using var db = NewDb();
         await SeedAsync(db, sponsors: 0, sessions: 2);
@@ -730,15 +738,31 @@ public sealed class SoMeScheduleServiceTests
             p.ScheduledAtUtc < new DateTimeOffset(2026, 10, 15, 0, 0, 0, TimeSpan.Zero),
             $"round 1 landed {p.ScheduledAtUtc:u} — that is the old spread, not a round"));
 
-        // Round 2: the month before the event (ELDK27 starts 9 Feb 2027 ⇒ from 9 Jan).
-        var round2 = trackPosts.Where(p => p.Occurrence == 2).ToList();
-        Assert.NotEmpty(round2);
-        Assert.All(round2, p => Assert.True(
+        // The LAST round: the month before the event (ELDK27 starts 9 Feb 2027 ⇒ from 9 Jan).
+        // 🔑 Found from the data rather than hardcoded to "2", so the assertion survives him
+        // changing the cadence again — which is exactly what broke it this time.
+        var lastRound = trackPosts.Max(p => p.Occurrence!.Value);
+        var final = trackPosts.Where(p => p.Occurrence == lastRound).ToList();
+        Assert.NotEmpty(final);
+        Assert.All(final, p => Assert.True(
             p.ScheduledAtUtc >= new DateTimeOffset(2027, 1, 9, 0, 0, 0, TimeSpan.Zero),
-            $"round 2 landed {p.ScheduledAtUtc:u}, before the one-month-out window"));
-        Assert.All(round2, p => Assert.True(
+            $"the last round landed {p.ScheduledAtUtc:u}, before the one-month-out window"));
+        Assert.All(final, p => Assert.True(
             p.ScheduledAtUtc < new DateTimeOffset(2027, 2, 9, 0, 0, 0, TimeSpan.Zero),
-            $"round 2 landed {p.ScheduledAtUtc:u}, after the event started"));
+            $"the last round landed {p.ScheduledAtUtc:u}, after the event started"));
+
+        // ⚠️ And every round in between sits between the two — an intermediate reminder that lands
+        // before its own announcement, or after the final push, is the failure the clamp prevents.
+        foreach (var round in trackPosts.Select(p => p.Occurrence!.Value).Distinct().Order())
+        {
+            var earliest = trackPosts.Where(p => p.Occurrence == round).Min(p => p.ScheduledAtUtc);
+            if (round > 1)
+            {
+                var before = trackPosts.Where(p => p.Occurrence == round - 1).Min(p => p.ScheduledAtUtc);
+                Assert.True(earliest >= before,
+                    $"round {round} opened before round {round - 1}");
+            }
+        }
     }
 
     /// <summary>§908 — the post is worded from HIS catalog when the edition has one.</summary>
@@ -978,8 +1002,8 @@ public sealed class SoMeScheduleServiceTests
             // running out of WEEKDAYS, not about sponsors who are not ready.
             db.GraphicAssets.Add(new GraphicAsset
             {
-                EventId = EventId, Type = GraphicAssetType.Sponsor, SponsorCompanyId = $"co-{i}",
-                StableKey = $"sponsor-co-{i}",
+                EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor, SponsorCompanyId = $"co-{i}",
+                StableKey = $"sponsor-co-{i}", FileName = $"sponsor-co-{i}.png",
                 CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
             });
         }

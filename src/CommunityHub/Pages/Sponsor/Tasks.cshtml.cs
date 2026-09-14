@@ -332,11 +332,15 @@ public class TasksModel : PageModel
             return;
         }
 
+        // §1082 — a RETIRED row is not the sponsor's business: the catalog stopped asking, they did
+        // not do it, and showing it under "completed" would credit them with work they never saw.
+        // Retired rows stay in the database for audit; they just leave this page.
         SponsorTasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId
                         && t.SourceKey != null
                         && t.SourceKey.StartsWith("sponsor:")
                         && t.SponsorCompanyId == companyId)
+            .Where(CommunityHub.Core.Tasks.TaskClosure.NotSystemClosed)
             .OrderBy(t => t.State)
             .ThenBy(t => t.DueDate)
             .ToListAsync(ct);

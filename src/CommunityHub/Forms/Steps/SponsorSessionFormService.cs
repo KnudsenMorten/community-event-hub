@@ -507,6 +507,31 @@ public sealed class SponsorSessionFormService : IWizardFormService
             // re-uploading never fixed it — each upload just wrote another unfetchable URL.
             profile.PhotoSharePointPath = fileName;
             profile.PhotoUrl = SpeakerPhotoUrl.Resolve(webUrl, fileName);
+
+            // §1132 — the NAME ALIAS, so the folder is searchable by person and not only by id.
+            //
+            // 🔒 A SECOND streamed upload, not a buffered copy. `IFormFile.OpenReadStream()` hands
+            // back a fresh stream, so §455's rule holds: the file is never held in RAM twice.
+            // 🔒 Best-effort and AFTER the real file is stored — the id file is what PhotoUrl points
+            // at, and a failure here must not cost the sponsor their upload.
+            var aliasName = SpeakerPhotoFileName.BuildAlias(
+                profile.ParticipantId, $"{profile.FirstName} {profile.LastName}", ext);
+            if (aliasName is not null)
+            {
+                try
+                {
+                    await using var aliasUpload = file.OpenReadStream();
+                    await _sp.UploadFileStreamAsync(
+                        sp.SiteUrl, sp.DriveName, photoFolder, aliasName, aliasUpload, file.Length,
+                        string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                        ct);
+                }
+                catch (Exception)
+                {
+                    // Swallowed on purpose: the photo IS stored under its id and everything that
+                    // reads it works. The alias is a convenience for a human browsing SharePoint.
+                }
+            }
         }
         catch (Exception)
         {

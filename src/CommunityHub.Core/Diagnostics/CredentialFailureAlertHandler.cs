@@ -18,9 +18,16 @@ namespace CommunityHub.Core.Diagnostics;
 /// and a never-set Backstage read flag (§621; 🗑 deleted in §754.5) each hid for an unknown time.
 /// Every one of them was visible in a log and invisible to him.</para>
 ///
-/// <para>🔒 <b>Fail-soft, always.</b> An alert that throws would turn a recoverable 403 into a
-/// crashed job. The response is returned untouched no matter what happens here — this handler
-/// observes, it never intervenes.</para>
+/// <para>🔒 <b>Fail-soft on the OBSERVING.</b> An alert that throws would turn a recoverable 403
+/// into a crashed job, so everything from classification to sending is swallowed and the response
+/// comes back untouched.</para>
+///
+/// <para>🔴 <b>§1113 — but NOT fail-soft on the body read, and the difference is the whole bug.</b>
+/// Reading the body happens inside the handler pipeline, where the content is still the live network
+/// stream. A read that dies half way leaves it consumed and unbuffered, and the caller's own read
+/// then throws <i>"The stream was already consumed"</i> — a non-transient exception describing none
+/// of what happened. Swallowing that is not fail-soft; it is handing back a corpse. The transport
+/// fault is now rethrown instead, where the retry handler can act on it and a human can read it.</para>
 /// </remarks>
 public sealed class CredentialFailureAlertHandler : DelegatingHandler
 {
@@ -50,25 +57,68 @@ public sealed class CredentialFailureAlertHandler : DelegatingHandler
         if (response.IsSuccessStatusCode
             && response.StatusCode != System.Net.HttpStatusCode.OK) return response;
 
-        try
-        {
-            // 🔒 Only read the body when the status is one that could carry a hidden auth failure
-            // (§524: Zoho answers 200 with {"error":"invalid_code"} for a revoked grant). Reading
-            // every 200 body would double the memory cost of every list pull for nothing.
-            string? body = null;
-            var status = response.StatusCode;
-            var couldHideAuthFailure =
-                status is System.Net.HttpStatusCode.OK
-                       or System.Net.HttpStatusCode.Unauthorized
-                       or System.Net.HttpStatusCode.Forbidden
-                       or System.Net.HttpStatusCode.BadRequest;
+        // 🔒 Only read the body when the status is one that could carry a hidden auth failure
+        // (§524: Zoho answers 200 with {"error":"invalid_code"} for a revoked grant). Reading
+        // every 200 body would double the memory cost of every list pull for nothing.
+        string? body = null;
+        var status = response.StatusCode;
+        var couldHideAuthFailure =
+            status is System.Net.HttpStatusCode.OK
+                   or System.Net.HttpStatusCode.Unauthorized
+                   or System.Net.HttpStatusCode.Forbidden
+                   or System.Net.HttpStatusCode.BadRequest;
 
-            if (couldHideAuthFailure && response.Content is not null)
+        // 🔴 §1113 — OUTSIDE the swallow-everything block below, on purpose. The catch that keeps a
+        // failed ALERT from breaking a working call would also bury a failed BODY READ, and those
+        // two are opposites: the first leaves the response intact, the second has already destroyed
+        // it. Burying the second is exactly how the operator got "Order 10764: The stream was
+        // already consumed" instead of a network error.
+        if (couldHideAuthFailure && response.Content is not null)
+        {
+            // 🔴 §1113 — BUFFER FIRST, AND LET A FAILED BUFFERING THROUGH.
+            //
+            // ⚠️ The line this replaced read the body with a comment saying *"Buffered by
+            // HttpClient, so reading here does NOT consume it for the caller"*. That is true only
+            // when the read SUCCEEDS. `HttpClient` buffers the response AFTER the handler chain
+            // returns, so in here the content is still the live network stream; a read that dies
+            // half way — a socket reset, the connection dropped — leaves it CONSUMED AND
+            // UNBUFFERED, and the caller's own read then throws
+            // `InvalidOperationException: The stream was already consumed. It cannot be read
+            // again.`
+            //
+            // 🔑 <b>That message named nothing and blamed the wrong layer.</b> It reached the
+            // operator as *"Order 10764: The stream was already consumed. It cannot be read
+            // again."* on an invoicing report (2026-08-20) — an error about a network blip,
+            // rendered as an unexplained internal fault against a specific customer's order.
+            // Worse, `InvalidOperationException` is not transient, so the retry handler wrapped
+            // around this one saw nothing to retry.
+            //
+            // 🔒 So: rethrow the REAL fault. It is an `HttpRequestException`/`IOException`, which
+            // the outer <see cref="Integrations.TransientFaultRetryHandler"/> does retry, and
+            // which says what actually happened if it survives to a human. Observing must never
+            // break the call it observed — and handing back a response whose body can no longer
+            // be read is breaking it, just quietly.
+            try
             {
-                // Buffered by HttpClient, so reading here does NOT consume it for the caller.
-                body = await response.Content.ReadAsStringAsync(ct);
+                await response.Content.LoadIntoBufferAsync(ct);
+            }
+            catch (Exception readEx) when (readEx is not OperationCanceledException)
+            {
+                _log?.LogWarning(readEx,
+                    "CredentialFailureAlertHandler[{Integration}]: reading the response body "
+                    + "failed, so the credential check was skipped and the transport fault is "
+                    + "being surfaced to the caller.",
+                    _integration);
+                response.Dispose();
+                throw;
             }
 
+            // Safe now: the content is a buffer, and the caller re-reads it from memory.
+            body = await response.Content.ReadAsStringAsync(ct);
+        }
+
+        try
+        {
             var verdict = CredentialFailureDetector.Classify(_integration, status, body);
             if (!verdict.ShouldAlert) return response;
 

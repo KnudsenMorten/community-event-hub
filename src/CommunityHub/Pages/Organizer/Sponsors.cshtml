@@ -16,6 +16,13 @@
     {
         if (!string.IsNullOrEmpty(Model.Error))   { <p class="error" role="alert">@Model.Error</p> }
         if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+        @* 🔴 §1210 — the chase list lives one click from here, because this is the page an organizer
+           is on when the question occurs to them. The counts in THIS grid are tasks; that page
+           measures the Get started wizard, which is a different (smaller) set. *@
+        <p class="muted" style="margin:0 0 10px;">
+            <a asp-page="/Organizer/SponsorGetStarted">Who has not finished Get started?</a>
+            — sponsor, coordinator and email, for chasing.
+        </p>
         @* §366: what the reset could NOT undo. Shown as a distinct block, not folded into the
            success line — these are the cases where a sync pass will legitimately re-close a task
            the operator just re-opened, and not saying so is what makes a reset look broken. *@

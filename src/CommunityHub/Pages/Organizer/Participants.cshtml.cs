@@ -421,21 +421,39 @@ public class ParticipantsModel : PageModel
             });
         }
 
+        // 🔴 §1082 — ORGANIZERS DEACTIVATE; THEY DO NOT HARD-DELETE A PERSON.
+        //
+        // Operator 2026-08-13: *"i think we should remove the delete buttons for organizers, so they
+        // can only deactive"*, and *"we only make things inactive by filter"* — which is what the
+        // rest of the hub already does (§502's leaver, §253's tombstones, the whole IsActive /
+        // LifecycleState model).
+        //
+        // 🔑 The hard delete removed dependent rows it classed as "safe", INCLUDING the person's
+        // TASKS — on the assumption they *"carry no history worth keeping once the person is gone"*.
+        // §1082 settled that completions ARE history: they record what somebody did. Deactivating
+        // runs the full §253 G1 cascade instead (party RSVP cancelled, room released, open tasks
+        // closed, shifts vacated, audited) and keeps every row.
+        //
+        // ⚠️ The trade, stated plainly: a genuinely mistaken row — a test participant, a typo'd
+        // applicant — now stays in the database as INACTIVE for ever. That is the same trade §502
+        // already makes, and test fixtures have their own purge (TestDataCleanupService), which is
+        // scoped to rows explicitly marked as test data.
         var actorLabel = $"{me.FullName} ({me.Email})";
-        var hard = await _deletion.HardDeleteAsync(me.EventId, participantId, ct);
+        var hard = await _deletion.DeactivateAsync(me.EventId, participantId, ct);
 
-        if (hard.Status == ParticipantDeletionService.DeletionStatus.HardDeleted)
+        if (hard.Status is ParticipantDeletionService.DeletionStatus.Deactivated
+                        or ParticipantDeletionService.DeletionStatus.AlreadyInactive)
         {
             await _audit.RecordAsync(
                 me.EventId, ImpersonationActorKind.Organizer,
                 actorParticipantId: me.ParticipantId, actorLabel: actorLabel,
                 targetParticipantId: hard.ParticipantId,
                 action: ImpersonationAuditService.ActionDelete,
-                detail: $"Organizer hard-deleted {hard.FullName} (no dependent data).", ct: ct);
+                detail: $"Organizer deactivated {hard.FullName} (rows kept).", ct: ct);
             return RedirectToPage(new
             {
                 ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo,
-                Msg = $"{hard.FullName} was permanently deleted.",
+                Msg = $"{hard.FullName} was deactivated — their history is kept.",
             });
         }
 

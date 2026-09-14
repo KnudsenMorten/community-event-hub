@@ -42,20 +42,38 @@
         <input type="text" value="@Model.TypeLabel" readonly />
 
         <!-- Links -->
+        @* 🔒 §1081 — READ-ONLY: the webshop is authoritative and the §41b reconcile fills it in.
+           The link carries data-webshop-interstitial="1" so the §653 "different system, own
+           credentials" dialog shows first — the same hand-off the nav uses. *@
         <label for="WebsiteUrl">Website URL</label>
         <input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               placeholder="https://www.example.com" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Must be a full URL including https://</p>
+               readonly style="background-color:#f3f4f6;color:#6b7280;" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your website address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+        <p style="margin:2px 0 12px;">
+            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+        </p>
 
+        @* §1126 — webshop-owned, exactly like the website above. Read-only is REQUIRED by the
+           overwrite: an editable field the sync silently reverts is worse than one you cannot
+           edit, because nothing tells the sponsor it happened. *@
         <label for="LinkedInUrl">LinkedIn URL</label>
         <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               placeholder="https://www.linkedin.com/company/yourcompany" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Full URL, e.g. https://www.linkedin.com/company/2linkit</p>
+               readonly style="background-color:#f3f4f6;color:#6b7280;" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your LinkedIn address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+        <p style="margin:2px 0 12px;">
+            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+        </p>
 
         <label for="TwitterUrl">Twitter / X URL</label>
         <input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               placeholder="https://www.twitter.com/yourcompany" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Full URL, e.g. https://www.twitter.com/xyz</p>
+               readonly style="background-color:#f3f4f6;color:#6b7280;" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your Twitter / X address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+        <p style="margin:2px 0 14px;">
+            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+        </p>
 
         <!-- Overview -->
         <label for="CompanyOverview">Company Overview</label>
@@ -288,6 +306,26 @@
                   style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Web</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, good quality, max 5 MB.</p>
+                @* 🔴 §1143b — THE LOGO IS PLACED ON A WHITE PLATE. Operator 2026-08-28, with a
+                   promotion graphic showing an empty white box where a sponsor's logo should be:
+                   *"we need to stress that they must upload a logo with positive colors … as it
+                   otherwise dissapears on a white background"*.
+
+                   🔑 Nothing was WRONG with the file — a reversed/knockout logo is a perfectly
+                   valid asset, just the wrong one for this placement. The sponsor cannot know
+                   that, because they never see the composed graphic. So the requirement is stated
+                   where the choice is made, in their words rather than ours ("positive" alone
+                   means nothing to most people — the example is what carries it). *@
+                <p style="color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;
+                          padding:9px 12px;font-size:12.5px;margin:0 0 8px;">
+                    <strong>Please upload the POSITIVE version of your logo</strong> — the one made for
+                    <strong>light backgrounds</strong> (dark or full-colour artwork).
+                    <br />
+                    We place your logo on a <strong>white panel</strong> in the promotion graphics, so a
+                    white / reversed / “knockout” logo becomes <strong>invisible</strong> there.
+                    A transparent background is fine and preferred — it is the <em>colour of the logo
+                    itself</em> that matters.
+                </p>
                 <input type="file" name="UploadFile" accept=".png,image/png" required
                        style="display:block;margin-bottom:8px;" />
                 <button type="submit">Upload</button>

@@ -182,6 +182,12 @@ public class SponsorWebshopCompanyModel : PageModel
             var publicName = company is null ? companyKey
                 : (!string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name);
             var sync = await _zohoSync.SyncAsync(eventId, companyKey, publicName, ct);
+            // §1088 — a SKIPPED company must not be reported as "updated in … Zoho": nothing was
+            // sent, on purpose. It must not read as "pending" either, which promises a retry that
+            // will never come. Three outcomes, three sentences.
+            if (sync.Skipped)
+                return " Default event coordinator updated in CEH (not sent to Zoho — test or withdrawn company).";
+
             return sync.Enabled && sync.Error is null
                 ? " Default event coordinator updated in CEH + Zoho."
                 : " Default event coordinator updated in CEH (Zoho sync pending).";

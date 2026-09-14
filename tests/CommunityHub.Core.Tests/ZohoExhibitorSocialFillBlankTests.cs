@@ -49,11 +49,16 @@ public sealed class ZohoExhibitorSocialFillBlankTests
     }
 
     /// <param name="pushSocial">
-    /// 🔴 §791.4/§801.2 — the social push now ships <b>OFF</b>: the v3 exhibitor PUT SILENTLY
-    /// DISCARDS <c>company_social_pages</c> (measured twice against live PROD — 200, echoed back in
-    /// the response, absent from the very next GET). These tests still pin the payload SHAPE, because
-    /// the shape was never the problem (§791.3) and is what must be right if Zoho ever repairs the
-    /// endpoint — so they turn the switch on explicitly. The OFF default has its own test below.
+    /// ✅ §1087 — the social push ships <b>ON</b> again.
+    /// <para>⚰️ This used to read *"the social push now ships OFF: the v3 exhibitor PUT SILENTLY
+    /// DISCARDS <c>company_social_pages</c>"* — true when measured (twice against live PROD: 200,
+    /// echoed in the response, absent from the very next GET), and **wrong since Zoho repaired the
+    /// endpoint on 2026-08-16**. Confirmed in production 2026-08-17: all 13 exhibitors read their
+    /// LinkedIn back (§1087.1).</para>
+    /// <para>🔑 These tests pin the payload SHAPE, which is the half that never changed and is the
+    /// reason the fix was a one-line default rather than a rewrite. They pass the flag explicitly so
+    /// they keep testing the shape whichever way the default goes; the DEFAULT itself is pinned in
+    /// <c>ZohoExhibitorUpdatePayloadTests</c>, deliberately without setting the flag.</para>
     /// </param>
     private static (ZohoClient Client, StubHandler Handler) NewClient(
         Func<HttpRequestMessage, (HttpStatusCode, string)> respond, bool pushSocial = true)
@@ -87,7 +92,7 @@ public sealed class ZohoExhibitorSocialFillBlankTests
             linkedInUrl: "https://www.linkedin.com/company/patchmypc",
             twitterUrl: "https://x.com/PatchMyPC");
 
-        Assert.True(ok);
+        Assert.Equal(ZohoClient.ZohoWriteOutcome.Written, ok);
         Assert.Equal(HttpMethod.Put, handler.LastMethod);
 
         using var doc = JsonDocument.Parse(handler.LastBody!);

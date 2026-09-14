@@ -43,7 +43,13 @@ public sealed record CompanyManagerCompany(
     // ⚠️ A 2-letter code ("DK"), not a country name — the sync refuses to overwrite it with
     // e-conomic's spelled-out form, which would not match Company Manager's country list.
     string BillingCountry = "",
-    string BillingCompany = "");
+    string BillingCompany = "",
+
+    /// <summary>
+    /// §1140 — the company's phone, part of the webshop's ERP-owned block. Read so the ERP sync can
+    /// COMPARE before writing; without it the sync could only push blindly on every run.
+    /// </summary>
+    string Phone = "");
 
 /// <summary>One user linked to a Company Manager company.</summary>
 public sealed record CompanyManagerUser(
@@ -167,7 +173,26 @@ public sealed class CompanyManagerClient
             EventCoordinationDefaultContactUserId: GetInt(o, "event_coordination_default_contact_id"),
             CorporateIdentificationNumber: GetString(o, "corporate_identification_number"),
             Currency: GetString(o, "currency"),
-            VatZone: GetString(o, "vat_zone"),
+            // 🔴 §1140 — THE KEY WAS WRONG. Company Manager returns `vat_zone_number`; there is no
+            // `vat_zone` field at all, so this read ALWAYS produced an empty string.
+            //
+            // ⚠️ Verified against the live API for company 32 on 2026-08-26: the payload carries
+            // `vat_zone_number = "2"` while `vat_zone` is absent. Nothing failed — an empty string is
+            // a perfectly ordinary value — which is why it survived: the read simply reported "no
+            // VAT zone" for every company, forever.
+            //
+            // 🔒 The retired PowerShell sync WROTE `vat_zone_number`. Read and write now name the
+            // same field, which is what lets the ERP sync compare before writing instead of pushing
+            // on every run.
+            // 🔴 §1140b — `vat_zone_number` arrives as a JSON NUMBER (`2`), not a string, so
+            // GetString returned "" for every company. Measured on the live API 2026-08-26:
+            // `"currency":"EUR"` is a string but `"vat_zone_number":2` is not.
+            //
+            // ⚠️ An empty read here is not cosmetic — it is indistinguishable from "not set", so the
+            // sync saw every company's VAT zone as blank, wrote it on EVERY run, and then reported
+            // it as refused. That is the 52-company "set it by hand" alert. Same class of bug as
+            // GetInt above, which exists because CM already does this with ids.
+            VatZone: GetScalarString(o, "vat_zone_number"),
             ErpCustomerNumber: GetString(o, "erp_customer_number"),
             Notes: GetString(o, "notes"),
             // §821 — verified against the live payload for company 18 on 2026-08-04:
@@ -183,7 +208,11 @@ public sealed class CompanyManagerClient
             BillingState: GetString(o, "billing_state"),
             BillingPostcode: GetString(o, "billing_postcode"),
             BillingCountry: GetString(o, "billing_country"),
-            BillingCompany: GetString(o, "billing_company"));
+            BillingCompany: GetString(o, "billing_company"),
+            // §1140 — same key the retired PowerShell sync WROTE (`phone`), so the read and the
+            // write address the same field. A read/write key mismatch is invisible until it makes
+            // the comparison always differ and rewrites the row on every run.
+            Phone: GetString(o, "phone"));
     }
 
     /// <summary>
@@ -256,10 +285,15 @@ public sealed class CompanyManagerClient
         if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(CreateUserAsync), ct))
             return 0;
 
-        var local = (email ?? string.Empty).Split('@')[0];
         var body = new Dictionary<string, object?>
         {
-            ["username"] = string.IsNullOrWhiteSpace(local) ? email : local,
+            // 🔴 §1226 — THE USERNAME IS THE FULL ADDRESS, never its local part. It used to be the
+            // part before the @, so ERP contact info@shc.dk asked for username "info" — already held
+            // by info@systemcenterdudes.com (WP user #78). The webshop answered 409 on every run since
+            // 2026-09-11 and the reconcile mailed "NOT LINKED" blaming an address that did not exist.
+            // Generic mailboxes (info@, sales@, events@) share local parts across companies; the full
+            // address is unique by definition. Existing users keep their usernames.
+            ["username"] = email,
             ["email"] = email,
             ["first_name"] = firstName ?? string.Empty,
             ["last_name"] = lastName ?? string.Empty,
@@ -390,6 +424,22 @@ public sealed class CompanyManagerClient
         e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
+
+    /// <summary>
+    /// A scalar rendered as text, whether Company Manager sends it as a JSON string or a number.
+    /// <para>§1140b — <c>vat_zone_number</c> is a number; <c>currency</c> beside it is a string.
+    /// <see cref="GetString"/> yields "" for the former, which reads exactly like "not set".</para>
+    /// </summary>
+    private static string GetScalarString(JsonElement e, string prop)
+    {
+        if (!e.TryGetProperty(prop, out var v)) return string.Empty;
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString() ?? string.Empty,
+            JsonValueKind.Number => v.ToString(),
+            _ => string.Empty,
+        };
+    }
 
     private static string GetStringAny(JsonElement e, params string[] props)
     {

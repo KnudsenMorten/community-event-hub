@@ -86,14 +86,16 @@
         }
 
         <!-- Filters: search, status (active default + show inactive/all), persona, sponsor company -->
-        <form method="get" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:end;">
-            <span style="display:flex;flex-direction:column;gap:2px;">
+        <form method="get" class="ceh-filterbar">
+            @* §1129 — WIDER than the dropdowns on purpose: this one box holds an id, a name OR an
+               e-mail address, so it is the field most likely to be truncated mid-value. *@
+            <span class="ceh-filterbar__field ceh-filterbar__field--wide">
                 <label for="Search">@Localizer["OrgGrid.Search"]</label>
                 @* §769.10 — the CEH id is searchable here too: type 73 to find participant 73. *@
                 <input type="search" id="Search" name="Search" value="@Model.Search"
                        placeholder="ID / @Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]" />
             </span>
-            <span style="display:flex;flex-direction:column;gap:2px;">
+            <span class="ceh-filterbar__field">
                 <label for="ActiveFilter">Status</label>
                 <select id="ActiveFilter" name="ActiveFilter">
                     @* §707.38 — the DEFAULT (operator 2026-07-30: "set the new dropdown as default").
@@ -105,7 +107,7 @@
                     <option value="all" selected="@(Model.ActiveFilter == "all")">Show inactive too (all)</option>
                 </select>
             </span>
-            <span style="display:flex;flex-direction:column;gap:2px;">
+            <span class="ceh-filterbar__field">
                 <label for="RoleFilter">Persona</label>
                 <select id="RoleFilter" name="RoleFilter">
                     <option value="">All personas</option>
@@ -115,7 +117,7 @@
                     }
                 </select>
             </span>
-            <span style="display:flex;flex-direction:column;gap:2px;">
+            <span class="ceh-filterbar__field">
                 <label for="SponsorCompanyFilter">Sponsor company</label>
                 <select id="SponsorCompanyFilter" name="SponsorCompanyFilter">
                     <option value="">All companies</option>
@@ -127,7 +129,7 @@
                     }
                 </select>
             </span>
-            <span style="display:flex;flex-direction:column;gap:2px;">
+            <span class="ceh-filterbar__field">
                 <label for="FlagFilter">Flag</label>
                 <select id="FlagFilter" name="FlagFilter">
                     <option value="">Any flag</option>
@@ -143,7 +145,7 @@
                assigning rings could act but never check the result. Labels come from Rings.Label,
                the same source the bulk control and the e-mail Settings page use, so the three
                places can never name a ring differently. *@
-            <span style="display:flex;flex-direction:column;gap:2px;">
+            <span class="ceh-filterbar__field">
                 <label for="RingFilter">Ring</label>
                 <select id="RingFilter" name="RingFilter">
                     <option value="">Any ring</option>
@@ -165,11 +167,17 @@
            🔒 These download ALL participants, deliberately ignoring the filters above — a button
            that says "all" and quietly honours a filter hands you a short file you have no reason
            to distrust. Inactive people are included for the same reason. *@
-        <p style="margin:-6px 0 16px;font-size:13px;">
-            <a asp-page-handler="ExportXlsx" style="font-weight:600;">⬇ Export all participants (Excel)</a>
-            <span style="color:#9ca3af;"> · </span>
-            <a asp-page-handler="Export">CSV</a>
-            <span style="color:#6b7280;"> — ID, name, email, role, active. Every participant, not the current filter.</span>
+        @* §1131 (operator 2026-08-25: *"i also need this as a button"*) — the export was a text
+           link in 13px grey prose, so the page's most useful ACTION looked like a footnote about
+           the page. It is a thing you DO, and it now reads like one.
+
+           🔒 The caveat stays as prose beside the buttons, not inside them: "every participant, not
+           the current filter" is the surprising part (§ above), and a button label cannot carry it.
+           Moving it into a tooltip would hide exactly the sentence that prevents a wrong export. *@
+        <p class="ceh-actionrow" style="margin:-6px 0 16px;">
+            <a asp-page-handler="ExportXlsx" class="ceh-btn">⬇ Export all participants (Excel)</a>
+            <a asp-page-handler="Export" class="ceh-btn ceh-btn--secondary">⬇ CSV</a>
+            <span style="color:#6b7280;font-size:13px;">ID, name, email, role, active — every participant, <strong>not</strong> the current filter.</span>
         </p>
 
         @if (Model.Participants.Count == 0)
@@ -437,7 +445,7 @@
                                             data-pid="@p.Id" data-pname="@p.FullName"
                                             style="background:none;border:1px solid #e0b4b4;color:#b91c1c;cursor:pointer;padding:6px 10px;border-radius:6px;"
                                             aria-haspopup="dialog">
-                                        Delete
+                                        Deactivate
                                     </button>
                                 </div>
                                 </details>
@@ -498,10 +506,10 @@
                     padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
             <h3 id="deleteModalTitle" style="margin-top:0;">Delete participant?</h3>
             <p id="deleteModalBody">
-                You are about to delete <strong id="deleteModalName"></strong>.
-                If they have linked data (sessions, volunteer tasks, claims, history)
-                they will be <strong>deactivated</strong> instead of permanently
-                removed, so nothing important is lost.
+                You are about to deactivate <strong id="deleteModalName"></strong>.
+                They can no longer sign in and they leave every active list, but
+                <strong>nothing is deleted</strong> — their answers, tasks and history
+                are kept, and they can be reactivated.
             </p>
             <form method="post" asp-page-handler="Delete">
                 <input type="hidden" name="ActiveFilter" value="@Model.ActiveFilter" />
@@ -512,7 +520,7 @@
                    only how a human supplies the phrase. *@
                 <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
                     CommunityHub.Core.Organizer.TypedConfirmation.DeletePhrase,
-                    "Permanently removes the person when they have no linked data; otherwise they are deactivated instead.",
+                    "Deactivates the person. Nothing is deleted — their rows are kept and they can be reactivated.",
                     InputId: "deleteModalPhrase"))" />
                 <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" id="deleteModalCancel" class="secondary"
@@ -521,7 +529,7 @@
                     </button>
                     <button type="submit"
                             style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
-                        Delete
+                        Deactivate
                     </button>
                 </div>
             </form>

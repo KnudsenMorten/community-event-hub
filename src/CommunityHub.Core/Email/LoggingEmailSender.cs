@@ -225,7 +225,19 @@ public sealed class LoggingEmailSender : IEmailSender
                     TargetId = Trim(toEmail, 128),
                     Summary = $"Email “{Trim(subject, 120)}” to {Trim(toEmail, 120)}",
                     Detail = ctx?.Category,
-                    Outcome = success ? Domain.AuditOutcome.Success : Domain.AuditOutcome.Failure,
+                    // 🔴 §1061 — A RING-DROPPED MAIL IS *DROPPED*, NOT *FAILED*.
+                    //
+                    // The EmailLog row above has recorded `Dropped` since it was built; this audit
+                    // row, written five lines later from the SAME facts, threw that away and asked
+                    // only `success ? Success : Failure`. So the trail called a working policy gate
+                    // an error. Operator 2026-08-11, looking at ~18 of them in a row: *"a dropped
+                    // email due to ring-gate should not show as failure"*.
+                    //
+                    // ⚠️ The two records disagreeing is the real defect — one store said "dropped",
+                    // the other said "failed", about the same send. Derive both from one expression.
+                    Outcome = success
+                        ? Domain.AuditOutcome.Success
+                        : dropped ? Domain.AuditOutcome.Dropped : Domain.AuditOutcome.Failure,
                     OccurredUtc = _clock.GetUtcNow(),
                 });
             }

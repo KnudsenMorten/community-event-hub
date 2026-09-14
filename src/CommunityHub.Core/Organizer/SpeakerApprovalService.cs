@@ -218,6 +218,17 @@ public sealed class SpeakerApprovalService
             $"<p><strong>{n} speaker(s)</strong> need approval before they can "
             + "flow to Zoho Backstage — set the speaker category, place the ring and activate:</p>"
             + $"<ul>{rows}</ul>"
+            // 🔴 §1092 (operator 2026-08-19) — the category decides who ELDK covers hotel and travel
+            // for, and that consequence is invisible at the moment of choosing. It goes ABOVE the
+            // one-click buttons on purpose: those approve the WHOLE queue in one go, "Community" is
+            // the first and most tempting of them, and a Microsoft speaker swept into Community
+            // loses their cover silently. A warning after the button it is warning about is decor.
+            + "<p style=\"margin:18px 0 6px;padding:10px 12px;border-left:4px solid #1565c0;"
+            + "background:#f6f8fa;\"><strong>Microsoft speakers and invited guests must be set to "
+            + "&ldquo;Guest&rdquo;.</strong> They have individual agreements with ELDK covering "
+            + "<strong>hotel and travel</strong>, and the Guest category is what applies them. "
+            + "If any of the speakers above are in that group, approve them individually on the "
+            + "page rather than using the buttons below.</p>"
             // §877 — the common case is one click. Community first: "it will be the case for most".
             + $"<p style=\"margin:18px 0 6px;font-weight:bold;\">Approve all {n} at ring 3:</p>"
             + MailButton($"{root}{AdminPath}?approveAll=community", $"Approve all {n} as Community", primary: true)
@@ -244,7 +255,10 @@ public sealed class SpeakerApprovalService
     {
         const string font = "Aptos,'Segoe UI',Arial,sans-serif";
         var fill = primary ? "#1565c0" : "#4b5563";
-        var width = Math.Clamp(label.Length * 9 + 48, 200, 440);
+        // §1089 — ONE shared estimate, because this formula existed here AND in the task-body
+        // renderer and both were too tight: Word wrapped "Approve all 1 as Community" and clipped
+        // the second line against the fixed 44px height, so the button did not say what it did.
+        var width = Email.MailButtonMetrics.WidthPx(label);
         return
             "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" "
             + "style=\"margin:6px 0;\"><tr><td align=\"left\">"
@@ -262,7 +276,7 @@ public sealed class SpeakerApprovalService
             + "<a href=\"" + href + "\" style=\"background-color:" + fill
             + ";border-radius:999px;color:#ffffff;display:inline-block;font-family:" + font
             + ";font-size:15px;font-weight:700;line-height:44px;text-align:center;"
-            + "text-decoration:none;width:" + width
+            + "text-decoration:none;white-space:nowrap;width:" + width
             + "px;-webkit-text-size-adjust:none;\">" + label + "</a>"
             + "<!--<![endif]-->"
             + "</td></tr></table>";

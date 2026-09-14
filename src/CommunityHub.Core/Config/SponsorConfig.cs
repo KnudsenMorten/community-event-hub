@@ -143,6 +143,73 @@ public sealed class ProductClassification
     public List<ProductClassificationRule> Rules { get; set; } = new();
 }
 
+/// <summary>
+/// §1157 — one rule mapping a WooCommerce product CATEGORY to a Zoho sponsor CATEGORY.
+/// </summary>
+public sealed class ZohoSponsorCategoryRule
+{
+    [JsonPropertyName("zohoCategory")]
+    public string ZohoCategory { get; set; } = string.Empty;
+
+    [JsonPropertyName("matchCategoryContains")]
+    public List<string> MatchCategoryContains { get; set; } = new();
+}
+
+/// <summary>
+/// §1165 — the <c>swagCatalog</c> section: which webshop category holds the sponsor swag catalogue.
+/// </summary>
+/// <remarks>
+/// 🔑 A NAME, not a list of product ids. Ids change when a product is recreated and say nothing when
+/// a new item is added; a category is the same knob every other product rule in this file already
+/// turns, so adding an item to the catalogue is a webshop action, not a config edit.
+/// </remarks>
+public sealed class SwagCatalogConfig
+{
+    [JsonPropertyName("categoryName")]
+    public string? CategoryName { get; set; }
+
+    /// <summary>
+    /// §1165 — how many pieces one bag order is, so the catalogue can show a TOTAL beside the unit
+    /// price. Operator 2026-09-01: <i>"where they see unit price and total price x1500"</i>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Deliberately its own number rather than reusing <c>edition.expectedAttendees</c>. They
+    /// answer different questions — how many people we expect, versus how many units we commit a
+    /// sponsor to paying for — and a supplier order is placed against the second. Tying them would
+    /// silently re-price every catalogue item the day someone revised the attendee forecast.
+    /// Falls back to the attendee count only when unset, so a new edition still shows something
+    /// sensible.
+    /// </remarks>
+    [JsonPropertyName("bagQuantity")]
+    public int? BagQuantity { get; set; }
+
+    /// <summary>
+    /// The webshop's currency symbol, shown beside prices. Empty ⇒ the number is shown bare.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 No default is guessed. A price rendered in the wrong currency is worse than a price with
+    /// no symbol: one is ambiguous, the other is confidently wrong, and a sponsor deciding on a
+    /// four-figure order deserves neither surprise.
+    /// </remarks>
+    [JsonPropertyName("currencySymbol")]
+    public string? CurrencySymbol { get; set; }
+}
+
+/// <summary>
+/// Parsed <c>zohoSponsorCategoryMap</c> section of sponsor.&lt;edition&gt;.json.
+/// </summary>
+/// <remarks>
+/// 🔑 Separate from <see cref="ProductClassification"/> on purpose. That one answers "what KIND of
+/// thing did they buy, and does it generate tasks?"; this one answers "under which HEADING should
+/// they appear in Zoho?" — and the two do not partition the same way: a pre-day track sponsor is a
+/// booth purchase for tasks and a Track sponsor for the public listing.
+/// </remarks>
+public sealed class ZohoSponsorCategoryMap
+{
+    [JsonPropertyName("rules")]
+    public List<ZohoSponsorCategoryRule> Rules { get; set; } = new();
+}
+
 /// <summary>One tier in <c>boothWallSpecs.tiers</c>.</summary>
 public sealed class BoothWallSpecTier
 {
@@ -207,6 +274,12 @@ public sealed class SponsorConfig
 
     [JsonPropertyName("productClassification")]
     public ProductClassification? ProductClassification { get; set; }
+
+    [JsonPropertyName("zohoSponsorCategoryMap")]
+    public ZohoSponsorCategoryMap? ZohoSponsorCategoryMap { get; set; }
+
+    [JsonPropertyName("swagCatalog")]
+    public SwagCatalogConfig? SwagCatalog { get; set; }
 
     [JsonPropertyName("boothWallSpecs")]
     public BoothWallSpecs? BoothWallSpecs { get; set; }

@@ -95,6 +95,76 @@ public class SponsorInfo
     public string? ZohoSponsorId { get; set; }
 
     /// <summary>
+    /// §1157 — EVERY Zoho sponsor record this company has, one per sponsorship CATEGORY.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-31: <i>"a sponsor that buys 3 products that fits into 3 categories
+    /// must be created 3 times and linked to each category"</i> · <i>"it is important, that ceh
+    /// stored multiple ids in the sponsor field (array), so any updates happens to all entries …
+    /// like company name, company description, company website"</i>. Confirmed against last year's
+    /// event, where ARROW appears under both COMMUNITY &amp; APPRECIATION and CONTENT &amp; PROGRAM
+    /// with the same contact — so this is the established shape in Zoho, not a new idea.</para>
+    ///
+    /// <para>🔑 <b>Why a JSON array and not a child table.</b> The id alone is not enough: to avoid
+    /// re-creating a record we must know WHICH category each id already covers, so this stores
+    /// pairs. A JSON column keeps that without a relationship to load, track and join on every read
+    /// of a hot entity — and this codebase already carries structured JSON this way
+    /// (<c>RawJson</c>, <c>CustomFieldsJson</c>).</para>
+    ///
+    /// <para>🔒 <see cref="ZohoSponsorId"/> is KEPT and stays the PRIMARY link. Every existing
+    /// caller, query and test reads it and is unchanged; this column is additive. The primary is
+    /// simply the first entry, so a company with one category behaves exactly as before.</para>
+    ///
+    /// <para>⚠️ Null / empty for every company until the next provision run fills it in — a
+    /// migration cannot invent which category an existing id belongs to, and guessing would file a
+    /// sponsor publicly under the wrong heading. The links are DISCOVERED, never assumed.</para>
+    /// </remarks>
+    public string? ZohoSponsorLinksJson { get; set; }
+
+    /// <summary>
+    /// §1157 — the Zoho sponsor CATEGORIES this company's purchases entitle it to, as a JSON array
+    /// of category names. What <see cref="ZohoSponsorLinksJson"/> is measured against.
+    /// </summary>
+    /// <remarks>
+    /// <para>Written by the order pull from each ordered product's WooCommerce categories (see
+    /// <c>SponsorZohoCategoryMapper</c>), because that is where the product lines are read; the
+    /// provisioner then creates one Zoho record per entry that has no link yet.</para>
+    ///
+    /// <para>🔒 <b>Raise-only — a category is never removed.</b> Same rule as
+    /// <see cref="Tier"/>, <see cref="SponsorPackage"/> and <see cref="HasSponsorSession"/>, and for
+    /// the same reason: an organizer's manual correction must survive the next pull, and CEH has no
+    /// delete path into Zoho (§56). If a company stops buying a product the record it already has
+    /// stays, and the run REPORTS it so a human decides — an automated un-listing of a sponsor is
+    /// not a decision this job gets to make.</para>
+    /// </remarks>
+    public string? ZohoSponsorCategoriesJson { get; set; }
+
+    /// <summary>
+    /// §1175 — fields sent to Zoho that Zoho has not given back, with how many times running.
+    /// </summary>
+    /// <remarks>
+    /// <para>The reconcile compares before it writes and reads the right keys — verified. So a field
+    /// that reappears in the ops mail run after run is not a comparison fault: Zoho is not returning
+    /// what was written, either because the write is an unpublished draft or because the field is
+    /// being discarded (§791.3 measured the latter for <c>company_social_pages</c>).</para>
+    ///
+    /// <para>🔑 This column is what lets CEH tell "I have not sent it yet" from "I have sent it three
+    /// times and it is not landing" — the second is worth a sentence to a human, and worth NOT
+    /// sending a fourth time.</para>
+    ///
+    /// <para>🔒 Cleared the moment the value arrives, and reset whenever the value CHANGES: a new
+    /// value is a new fact and deserves its own attempt.</para>
+    /// </remarks>
+    public string? ZohoUnconfirmedPushesJson { get; set; }
+
+    /// <summary>
+    /// §1221 — extra Zoho sponsor ids Zoho has reported "not found", with how often and when
+    /// (JSON, see <c>ZohoDeadLinkStrikes</c>). A link is removed only after five reports at least
+    /// twelve hours apart, so an API bad patch cannot un-link a company from a record that exists.
+    /// </summary>
+    public string? ZohoDeadLinkStrikesJson { get; set; }
+
+    /// <summary>
     /// Zoho Backstage EXHIBITOR id for this company — present only when the company
     /// bought booth products (so it appears as an exhibitor as well as a sponsor).
     /// Null for sponsor-only companies. A company can therefore carry TWO Zoho ids.
@@ -149,6 +219,31 @@ public class SponsorInfo
     /// thing; the OR is what makes the transition safe rather than a flag day.</para>
     /// </remarks>
     public bool HasBooth => IsExhibitor || SponsorPackage >= SponsorPackage.Gold;
+
+    /// <summary>
+    /// §1163 — does the company have a booth product in its <b>CURRENT</b> completed orders?
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>The one entitlement field that is NOT raise-only, and that is the entire point.</b>
+    /// <see cref="Tier"/>, <see cref="SponsorPackage"/>, <see cref="IsExhibitor"/> and
+    /// <see cref="HasBooth"/> all survive a cancellation deliberately, so an organizer's manual
+    /// correction is never undone by a re-pull. That is right for them and wrong for one question:
+    /// <i>may CEH CREATE an exhibitor record?</i></para>
+    ///
+    /// <para>⚠️ <b>The failure it prevents, observed 2026-08-31.</b> The operator cancelled a
+    /// company's exhibitor order and deleted its Zoho record by hand. <c>HasBooth</c> stayed true —
+    /// it is raise-only — so the provisioner saw a booth company with no exhibitor record and tried
+    /// to re-create it, on every pull. He would have been deleting the same record every fifteen
+    /// minutes, for ever, with nothing telling him why it kept coming back.</para>
+    ///
+    /// <para>🔒 Written on EVERY pull from the live completed orders. Its default of <c>false</c>
+    /// fails safe: until the first pull sets it, no exhibitor is created — the cost is a few
+    /// minutes' delay, against re-creating a record a human deleted.</para>
+    ///
+    /// <para>🔑 It gates CREATE only. LINKING an existing record is still allowed, because linking
+    /// records a fact rather than making one.</para>
+    /// </remarks>
+    public bool HasCurrentBoothOrder { get; set; }
 
     /// <summary>
     /// 🔴 §1034 — <b>IS THIS COMPANY A SPONSOR AT ALL?</b> True when it bought at least one

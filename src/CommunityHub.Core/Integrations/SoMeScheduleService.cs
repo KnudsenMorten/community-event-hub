@@ -11,8 +11,34 @@ namespace CommunityHub.Core.Integrations;
 /// <param name="NoRoom">
 /// Subjects that could not be placed before the event. Reported, never silently dropped.
 /// </param>
+/// <param name="GuardRemoved">
+/// §1178 — planned posts the queue guard removed on this run because their subject is test data or
+/// excluded from announcements. Trailing with a default so no existing caller changes.
+/// </param>
 public sealed record SoMeScheduleRunResult(
-    int Created, int AlreadyPlanned, IReadOnlyList<string> NoRoom, string Message);
+    int Created, int AlreadyPlanned, IReadOnlyList<string> NoRoom, string Message,
+    int GuardRemoved = 0);
+
+/// <summary>§1144/§1205 — what one overdue-push pass did.</summary>
+/// <param name="Moved">Posts re-dated onto the next free slot.</param>
+/// <param name="HeldBack">
+/// How many of <paramref name="Moved"/> were still waiting on a dependency — the ones §1205 exists
+/// for. A subset of the count, not an addition to it.
+/// </param>
+/// <param name="Locked">
+/// Overdue posts left exactly where they are because he ACCEPTED that date (§848.2). Named, not
+/// counted (§854): these are the only ones he has to move himself.
+/// </param>
+/// <param name="Full">
+/// Overdue posts with nowhere left to go — every remaining weekday is at its posts-per-day ceiling.
+/// The capacity wall (§1199), named where he reads the run.
+/// </param>
+public sealed record OverduePush(
+    int Moved, int HeldBack, IReadOnlyList<string> Locked, IReadOnlyList<string> Full)
+{
+    public static readonly OverduePush None =
+        new(0, 0, Array.Empty<string>(), Array.Empty<string>());
+}
 
 /// <summary>
 /// §824.21 — turns CEH's data into a queue of held, scheduled posts.
@@ -157,6 +183,8 @@ public sealed class SoMeScheduleService
             {
                 s.EventSystemUrl, s.EventTags, s.OrganizerCredits,
                 s.MaxPostsPerDay, s.ExceptionPostsPerDay,
+                // §1181 — the Type 5 window's closing day rides the row this already reads.
+                s.EventPostWindowEndsOn,
             })
             .FirstOrDefaultAsync(ct);
 
@@ -184,6 +212,27 @@ public sealed class SoMeScheduleService
         var slots = SoMeSchedulePlanner.PreferredTimes.Length;
         var normalPerDay = Math.Clamp(footer?.MaxPostsPerDay ?? 2, 1, slots);
         var exceptionPerDay = Math.Clamp(footer?.ExceptionPostsPerDay ?? normalPerDay, normalPerDay, slots);
+
+        // 🔴 §1178 — THE GUARD RUNS BEFORE ANYTHING IS PLANNED. Operator 2026-09-12: *"guard needed.
+        // no test sessions or test sponsor or excluded can exist in some planner"*.
+        //
+        // 🔑 Placed FIRST on purpose. `CollectSubjectsAsync` skips a subject whose posts already
+        // exist (§824.21a — "nothing is ever re-planned"), so a post for a subject that has since
+        // become excluded would both survive the run AND make the planner believe that subject is
+        // handled. Removing it first is what lets the rest of this method see the truth.
+        //
+        // ⚠️ It cannot revive an excluded subject: the tombstone it writes is exactly what
+        // `CollectSubjectsAsync` reads as "do not propose this again".
+        var queueGuard = new SoMeQueueGuard(_db);
+        var guard = await queueGuard.EnforceAsync(eventId, ct);
+
+        // 🔴 §1203 — and ONE POST PER SUBJECT PER ROUND. Operator 2026-09-12: *"and cleaned up, so we
+        // have only 1 per post"*. Runs beside the exclusion guard and for the same reason: the
+        // planner's model is one post per (subject, occurrence), so a second one is always wrong and
+        // nothing was removing it.
+        // ⚠️ The same subject on several DATES is not a duplicate — those are different rounds, and
+        // for Type 5 they are the dated runs he wrote himself.
+        var dupes = await queueGuard.RemoveDuplicatesAsync(eventId, ct);
 
         // §908 — the planner's two clocks travel with it: "now" for round 1's floor, the event start
         // for round 2's ("one month out"), so neither is re-derived and neither can drift.
@@ -252,7 +301,26 @@ public sealed class SoMeScheduleService
                         && p.Status == SoMePostStatus.Queued
                         && p.PublishedAtUtc == null
                         && p.ManualTextOverride == null
-                        && p.TemplateKind != null)
+                        && p.TemplateKind != null
+                        // 🔴 §1201 — TYPE 5 IS NEVER DISCARDED, because re-planning it achieves
+                        // NOTHING. Operator 2026-09-12: *"something is wrong with event post 5. i
+                        // dont recall having added so many"*.
+                        //
+                        // §834.4: an event post's date comes from his deck and is used AS WRITTEN.
+                        // So the discard deleted every un-approved Type 5 post and re-created it on
+                        // the same date, every ten minutes, for no gain at all — the planner's own
+                        // log read "created 48 (32 event posts)" on run after run, which is how this
+                        // was visible at all.
+                        //
+                        // ⚠️ And it was not merely wasteful. The post got a NEW ID each time, so
+                        // every link already sent — the 24-hour alert's "Open it →", a URL he had
+                        // pasted somewhere — pointed at a row that no longer existed. The ids
+                        // climbing past 321,000 in an edition with a few dozen posts is the churn
+                        // made visible.
+                        //
+                        // 🔑 The discard exists so the SPREAD can be recomputed as subjects arrive
+                        // (§848.2). A type whose dates are fixed input has nothing to recompute.
+                        && p.TemplateKind != SoMeTemplateKind.EventPost)
             .ToListAsync(ct);
 
         if (stale.Count > 0)
@@ -270,6 +338,26 @@ public sealed class SoMeScheduleService
         // 🔒 AFTER the discard above, so the slots held by proposals that were just thrown away are
         // free for the master classes to move into rather than being obstacles that no longer exist.
         var retimed = await RetimeMasterClassesAsync(eventId, now, eventStartUtc, normalPerDay, ct);
+
+        // §1144 — and now the posts whose slot went by while they were still waiting. Runs in the
+        // same place and for the same reason as the retime above: after the discard, so slots freed
+        // this tick are available rather than phantom obstacles.
+        var pushed = await PushOverduePostsAsync(eventId, now, eventStartUtc, normalPerDay, ct);
+
+        // 🔴 §1183 — the announcement dates, applied to posts that ALREADY EXIST. Operator
+        // 2026-09-12: *"planner must obey to the update date changes, even though they are planned or
+        // approved related to type 1-4"*. Before the blackout pass, so a post this moves is then
+        // checked against the holidays like any other.
+        var (movedIntoWindow, lockedBeforeWindow) = await MoveOutOfWindowAsync(
+            eventId, now, eventStartUtc, normalPerDay,
+            await AnnouncementWindowsAsync(eventId, eventStartUtc, ct), ct);
+
+        // 🔴 §1179 — and off the holidays. Runs in the same place and for the same reason as the two
+        // above: after the discard, so slots freed this tick are real rather than phantom obstacles.
+        // 🔒 LAST of the passes, so a post it moves is placed around the master classes, the pushed
+        // overdue ones and the window moves rather than into a slot one of them is about to take.
+        var (movedOffHoliday, lockedOnHoliday) =
+            await MoveOutOfBlackoutAsync(eventId, now, eventStartUtc, normalPerDay, ct);
 
         // §853 — the subject+occurrences he has DELETED. They are excluded from the plan afterwards
         // rather than reserving a slot: a deleted post must not keep occupying the day it had.
@@ -365,7 +453,8 @@ public sealed class SoMeScheduleService
 
         // §834.4 — Type 5 alongside the other four, so "the engine autobuilds everything" is true
         // for all five types rather than four of five.
-        var eventPostCount = await PlanEventPostsAsync(eventId, editionValues, now, eventStartUtc, ct);
+        var eventPostCount = await PlanEventPostsAsync(
+            eventId, editionValues, now, eventStartUtc, footer?.EventPostWindowEndsOn, ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -386,6 +475,37 @@ public sealed class SoMeScheduleService
         {
             msg += $" {retimed} already-approved master-class announcement(s) were MOVED into your "
                  + "master-class window — their wording and approval are unchanged, only the date.";
+        }
+        // §1144 — say it too. A post moving date is a visible change to the plan he reads, and a
+        // silent count is the §335 trap: it would look identical to a run that pushed nothing.
+        if (pushed.Moved > 0)
+        {
+            msg += $" {pushed.Moved} post(s) had missed their slot while waiting and were pushed to "
+                 + "the next free one";
+            // 🔑 §1205 — the held-back ones are the answer to "what are these 19 waiting on": they
+            // are no longer stranded in the past, they are walking forward until they are ready.
+            if (pushed.HeldBack > 0)
+            {
+                msg += $", {pushed.HeldBack} of them still held back on a missing logo, text or "
+                     + "graphic — they keep moving forward until it arrives";
+            }
+            msg += " (dates you have ACCEPTED are never moved).";
+        }
+
+        // 🛑 §1205 — the two outcomes the push could not deliver, named rather than counted.
+        if (pushed.Locked.Count > 0)
+        {
+            msg += $" ⚠️ {pushed.Locked.Count} overdue post(s) keep a date the planner is not allowed "
+                 + "to change: " + string.Join("; ", pushed.Locked.Take(10))
+                 + ". Withdraw the acceptance, or edit the date yourself, to move them.";
+        }
+
+        if (pushed.Full.Count > 0)
+        {
+            msg += $" 🛑 {pushed.Full.Count} overdue post(s) could NOT be pushed — every remaining "
+                 + "weekday is already at its posts-per-day limit: "
+                 + string.Join("; ", pushed.Full.Take(10))
+                 + ". Raise the posts per day in SoMe settings, or the campaign loses these.";
         }
         if (noRoom.Count > 0) msg += $" {noRoom.Count} could not fit before the event.";
 
@@ -422,12 +542,59 @@ public sealed class SoMeScheduleService
                 sponsorNoRoom.Count, string.Join(", ", sponsorNoRoom));
         }
 
+        // 🔑 §1183 — a post that MOVED must say so. He reads this queue daily; a date changing under
+        // him with no explanation is indistinguishable from a bug, which is §854's rule applied to a
+        // re-time rather than to a refusal.
+        if (movedIntoWindow > 0)
+        {
+            msg += $" 📅 {movedIntoWindow} planned/approved post(s) were moved forward into their "
+                 + "type's announcement window.";
+        }
+
+        if (lockedBeforeWindow.Count > 0)
+        {
+            // 🛑 Named, not counted: these are the ones only he can move, so "3 posts" would be a
+            // dead end. §848.2 — an accepted slot is his decision and the planner does not overrule it.
+            msg += $" ⚠️ {lockedBeforeWindow.Count} post(s) sit BEFORE their window but you accepted "
+                 + "those dates, so they were left alone: "
+                 + string.Join("; ", lockedBeforeWindow.Take(10))
+                 + ". Move them by hand, or withdraw the acceptance to let the planner re-date them.";
+        }
+
+        if (movedOffHoliday > 0)
+        {
+            msg += $" 🎄 {movedOffHoliday} post(s) were moved off the {SoMeBlackout.Description} "
+                 + "blackout.";
+        }
+
+        if (lockedOnHoliday.Count > 0)
+        {
+            msg += $" ⚠️ {lockedOnHoliday.Count} accepted post(s) remain inside the holiday blackout: "
+                 + string.Join("; ", lockedOnHoliday.Take(10)) + ".";
+        }
+
+        if (dupes.Removed > 0)
+        {
+            msg += $" 🧹 {dupes.Removed} duplicate post(s) removed (same subject and round): "
+                 + string.Join("; ", dupes.Reasons.Take(10)) + ".";
+        }
+
+        // §1178 — stated in the message he reads, not only in the log: a post disappearing from the
+        // queue with no explanation is the thing that sends him looking for a bug.
+        if (guard.Removed > 0)
+        {
+            msg += $" 🛡 {guard.Removed} planned post(s) were removed because their subject must not "
+                 + "be announced (test data, or excluded from announcements): "
+                 + string.Join("; ", guard.Reasons.Take(10))
+                 + ". Clear the flag and press Restore in the editor to bring one back.";
+        }
+
         _log?.LogInformation(
             "§824.21 SoMe schedule: created {Created} ({EventPosts} event posts), already planned "
-            + "{Already}, no room {NoRoom}.",
-            created, eventPostCount, already.Count, noRoom.Count);
+            + "{Already}, no room {NoRoom}, guard removed {Removed}.",
+            created, eventPostCount, already.Count, noRoom.Count, guard.Removed);
 
-        return new SoMeScheduleRunResult(created, already.Count, noRoom, msg);
+        return new SoMeScheduleRunResult(created, already.Count, noRoom, msg, guard.Removed);
     }
 
     /// <summary>
@@ -470,14 +637,35 @@ public sealed class SoMeScheduleService
     /// </remarks>
     public IReadOnlyList<string> NotPlannableSponsors { get; private set; } = Array.Empty<string>();
 
-    private static DateTimeOffset EventPostWindowEnd(DateTimeOffset eventStartUtc) =>
-        new DateTimeOffset(eventStartUtc.Year, 2, 1, 23, 59, 59, TimeSpan.Zero);
+    /// <summary>
+    /// §847 — the last moment a Type 5 event post may be scheduled.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 §1181 — <b>THIS WAS A LITERAL 1 FEBRUARY</b>
+    /// (<c>new DateTimeOffset(eventStartUtc.Year, 2, 1, …)</c>), which is §847's instruction for
+    /// ELDK27 frozen as a month and a day. Operator 2026-09-12: <i>"verify code so we dont have any
+    /// static values dateswise"</i> — this was the one that mattered.</para>
+    ///
+    /// <para>⚠️ For an edition not held in February it is silently destructive, not merely wrong: a
+    /// June event computes 1 February of the same year, months BEFORE the event, and every post in
+    /// the deck is dropped by a <c>continue</c> with no message anywhere.</para>
+    ///
+    /// <para>🔒 His setting wins; the fallback is eight days before the event, which reproduces
+    /// 1 February exactly for ELDK27's 9 February start and means something for every other edition.
+    /// </para>
+    /// </remarks>
+    private static DateTimeOffset EventPostWindowEnd(
+        DateTimeOffset eventStartUtc, DateOnly? configured) =>
+        configured is { } d
+            ? SoMeSchedulePlanner.ToUtc(d, new TimeOnly(23, 59, 59))
+            : eventStartUtc.AddDays(-8);
 
     private async Task<int> PlanEventPostsAsync(
         int eventId,
         IReadOnlyDictionary<string, string?> editionValues,
         DateTimeOffset now,
         DateTimeOffset eventStartUtc,
+        DateOnly? eventPostWindowEndsOn,   // §1181 — his setting, or null for the derived fallback
         CancellationToken ct)
     {
         var runs = await _db.EventSoMePostOccurrences
@@ -524,11 +712,14 @@ public sealed class SoMeScheduleService
 
             var scheduled = SoMeSchedulePlanner.ToUtc(run.PostDate, hour);
 
-            // 🔒 §847 — THE TYPE 5 WINDOW CLOSES ON 1 FEBRUARY, not at the event.
+            // 🔒 §847 — THE TYPE 5 WINDOW CLOSES BEFORE THE EVENT, not at it.
             // Operator 2026-08-05: "event post must run fom aug-feb 1". That is 8 days tighter than
             // the eventStartUtc boundary every other type uses, so it is applied here explicitly
             // rather than inherited.
-            if (scheduled <= now || scheduled >= eventStartUtc || scheduled > EventPostWindowEnd(eventStartUtc))
+            // §1181 — the day is now HIS setting, falling back to the derived eight days; it used to
+            // be a literal 1 February, which only happened to be right for this edition.
+            if (scheduled <= now || scheduled >= eventStartUtc
+                || scheduled > EventPostWindowEnd(eventStartUtc, eventPostWindowEndsOn))
             {
                 continue;
             }
@@ -583,8 +774,59 @@ public sealed class SoMeScheduleService
     {
         var subjects = new List<SoMeSubject>();
 
-        // §842.2 — his per-type frequency, or the shipped §824.1 defaults where he has not set one.
-        var cadence = await new SoMeCadenceService(_db).GetAllAsync(eventId, ct);
+        // 🔴 §1207 — the old per-type cadence table is NO LONGER READ HERE. §842.2's row is still
+        // what §1195 SEEDS a new rule from, so an edition that had customised its frequency keeps
+        // that choice — but once the rule exists, the rule is the answer. Reading both was two
+        // sources of truth for "how many rounds", and the stale one silently won.
+
+        // 🔴 §1194 — THE RULES: rounds, start and end, per category, from the one table.
+        // Operator 2026-09-12: *"basically we define the rules like start date, end date, cadence
+        // inside the some settings and the some planner must recalculate if they are changed"*.
+        //
+        // 🔑 Every ad-hoc floor below now comes from here instead of from its own column, so adding
+        // a round on the settings page adds a round to the plan — *"when a some post has more rounds,
+        // it should be added into the planner and planned"* — with nothing else to change.
+        var ruleSvc = new SoMeCategoryRules(_db);
+        var rules = await ruleSvc.GetAllAsync(eventId, ct);
+        // §1195 — the rounds he has dated, so a named round keeps its exact day.
+        var roundStarts = await ruleSvc.RoundStartsAsync(eventId, ct);
+
+        // The rounds a category is set to, and where each of them opens and closes.
+        // 🔴 §1207 — "if i define 3 rounds, we must plan 3 rounds" (operator 2026-09-12). A round he
+        // has DATED counts even when the saved number is lower: §1195 seeded that number from the old
+        // posting-frequency table, so an edition whose frequency page still said 2 got a rule with
+        // Rounds = 2 AND a dated round 3 — a date entered, stored, shown, and never planned.
+        // 🔑 The same function `Windows` uses, so the count and the windows cannot disagree.
+        int RoundsOf(SoMeAnnouncementCategory c) =>
+            rules.TryGetValue(c, out var r)
+                ? SoMeCategoryRules.EffectiveRounds(
+                    r, roundStarts.TryGetValue(c, out var named) ? named : null)
+                : 0;
+
+        IReadOnlyDictionary<int, SoMeRoundWindow> WindowsOf(SoMeAnnouncementCategory c) =>
+            rules.TryGetValue(c, out var r)
+                ? SoMeCategoryRules.Windows(
+                    r, eventStartUtc,
+                    roundStarts.TryGetValue(c, out var named) ? named : null)
+                : new Dictionary<int, SoMeRoundWindow>();
+
+        // The per-round OPENING dates, in the shape SoMeSubject wants. A round with no opening is
+        // omitted: absent means "as soon as the subject is ready", which is not the same as "now".
+        Dictionary<int, DateTimeOffset> OpensOf(SoMeAnnouncementCategory c)
+        {
+            var map = new Dictionary<int, DateTimeOffset>();
+            foreach (var (round, w) in WindowsOf(c))
+            {
+                if (w.OpensUtc is { } o) map[round] = o;
+            }
+            return map;
+        }
+
+        // The category's closing instant — the ceiling §1194 added to the planner.
+        DateTimeOffset? ClosesOf(SoMeAnnouncementCategory c) =>
+            rules.TryGetValue(c, out var r) && r.EndsOn is not null
+                ? SoMeSchedulePlanner.ToUtc(r.EndsOn.Value, new TimeOnly(23, 59, 59))
+                : null;
 
         // 🔴 §920 — THE DEPENDENCY IS THE DATA, NOT A DATE. Operator 2026-08-06: *"remove the 7th
         // sept blocker. we will change the dependency as only active sessions in ceh can be planned.
@@ -615,10 +857,31 @@ public sealed class SoMeScheduleService
                 s.ExcludedSessionTitlePatterns,
                 s.MasterClassAnnouncementFrom,
                 s.CallForSpeakersClosesOn,
+                s.SponsorAnnouncementFrom,   // §1179
+                s.SponsorRound2From,         // §1184
+                s.SponsorCategoryRound1From, // §1181
+                s.SponsorCategoryRound2From,
+                s.SpeakerTracksRound2From,
+                s.SpeakerTracksRound3From,   // §1185
+                s.SessionAnnouncementFrom,   // §1186
+                s.EventPostWindowEndsOn,
             })
             .FirstOrDefaultAsync(ct);
 
         var speakerGateDate = gateSettings?.SpeakerAnnouncementFrom;
+
+        // 🔴 §1179 — the sponsor floor. Operator 2026-09-12: *"i wants sponsors to start from
+        // oct 15"*. A FLOOR like the track one, not a window: he kept §848.1's spread, so this says
+        // "not before" and lets the spread go on choosing the day.
+        DateTimeOffset? sponsorFloor = gateSettings?.SponsorAnnouncementFrom is { } sf
+            ? SoMeSchedulePlanner.ToUtc(sf, SoMeSchedulePlanner.PreferredTimes[0])
+            : null;
+
+        // §1184 — round 2's own date. Null = round 1's floor, so nothing changes for an edition that
+        // has not set it.
+        DateTimeOffset? sponsorRound2 = gateSettings?.SponsorRound2From is { } sr2
+            ? SoMeSchedulePlanner.ToUtc(sr2, SoMeSchedulePlanner.PreferredTimes[0])
+            : null;
 
         DateTimeOffset? speakerGate = speakerGateDate is { } d
             ? SoMeSchedulePlanner.ToUtc(d, SoMeSchedulePlanner.PreferredTimes[0])
@@ -641,56 +904,31 @@ public sealed class SoMeScheduleService
         // page — and a gate a human has to remember is not a control.
         var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
 
-        // 🔴 §909 — THE FLAG FIRST, the inference second. Operator 2026-08-06: *"remove test
-        // sessions"*. §905's derived rule ("has speakers and every one is a test user") caught the
-        // two exhibitor fixtures and missed "Test Master Class" and "Test Session" completely,
-        // because those carry FOUR REAL SPEAKERS each. A session is test because of what it IS.
-        var testSessionIds = (await _db.Sessions
-                .Where(s => s.EventId == eventId && (s.IsTestData || s.SessionSpeakers.Any()))
-                .Select(s => new
-                {
-                    s.Id,
-                    s.IsTestData,
-                    HasSpeakers = s.SessionSpeakers.Any(),
-                    // ⚠️ An unresolvable participant is NOT test — so a session containing one is
-                    // never classified as a fixture and dropped from the campaign.
-                    AllTest = s.SessionSpeakers.All(ss => ss.Participant != null && ss.Participant.IsTestUser),
-                })
-                .ToListAsync(ct))
-            // The derived half still applies, so fixtures seeded before the column keep working
-            // with no data entry — same arrangement as TestDataScope for sponsors.
-            .Where(x => x.IsTestData || (x.HasSpeakers && x.AllTest))
-            .Select(x => x.Id)
-            .ToHashSet();
-
-        // 🔴 §927 — HIS OWN EXCLUSION LIST, matched on the session TITLE. Operator 2026-08-06:
-        // *"exclude option with title filters must be build like ask the experts*"*.
+        // 🔴 §1178 — ONE EXCLUSION RULE, ASKED IN ONE PLACE. Operator 2026-09-12: *"guard needed. no
+        // test sessions or test sponsor or excluded can exist in some planner"*.
         //
-        // 🔑 Test data is decided by the system; this is decided by HIM. The Ask-the-Experts
-        // sessions are a format rather than a talk — no abstract to announce, and he covers them in
-        // one Type 5 post he writes himself. Same treatment either way: not a subject at all, so the
-        // planner never proposes it and no held post accumulates waiting for an abstract that is
-        // never coming (which is exactly what §926 would otherwise do to every one of them).
-        var titlePatterns = SoMeTitleExclusions.Parse(gateSettings?.ExcludedSessionTitlePatterns);
-        if (titlePatterns.Count > 0)
-        {
-            var excludedByTitle = (await _db.Sessions
-                    .Where(s => s.EventId == eventId)
-                    .Select(s => new { s.Id, s.Title })
-                    .ToListAsync(ct))
-                // ⚠️ Matched in memory: the wildcard is his syntax, not SQL's, and translating it
-                // to LIKE would quietly change what `_` and `%` in a real title mean.
-                .Where(s => SoMeTitleExclusions.IsExcluded(s.Title, titlePatterns))
-                .Select(s => s.Id)
-                .ToList();
+        // 🔑 This block used to carry §909's flag+inference and §927's title filter inline, and it was
+        // MISSING two exclusions that other services already enforced:
+        //   • `ExcludeFromSoMeAnnouncements` (§1060(h)) — the gate blocked APPROVAL and auto-approve
+        //     WITHDREW, but the planner went on PROPOSING them, so they piled up in the queue.
+        //   • `UsedForTesting` (§299) — the button on the Sessions page that literally reads
+        //     "Mark as TEST session", which the SoMe engine never read at all.
+        // Four services, four different definitions of "excluded" (see SoMeSubjectScope's table).
+        //
+        // ⇒ SoMeSubjectScope is now the single answer, shared with the GRAPHICS sweep and the §1178
+        // guard, so a session can no longer be out of the campaign and inside its own artwork.
+        var excludedSessions = await new SoMeSubjectScope(_db).ExcludedSessionsAsync(eventId, ct);
+        var testSessionIds = excludedSessions.Select(x => x.SessionId).ToHashSet();
 
-            if (excludedByTitle.Count > 0)
-            {
-                _log?.LogInformation(
-                    "SoMe planner: {Count} session(s) excluded by title filter ({Patterns}).",
-                    excludedByTitle.Count, string.Join(" | ", titlePatterns));
-                testSessionIds.UnionWith(excludedByTitle);
-            }
+        if (excludedSessions.Count > 0)
+        {
+            // NAMED with the reason, not counted — §854: he has to see WHY a session left the
+            // campaign, and "12 sessions excluded" is not something anyone can act on.
+            _log?.LogInformation(
+                "§1178 SoMe planner: {Count} session(s) excluded from the campaign: {Sessions}.",
+                excludedSessions.Count,
+                string.Join(" | ", excludedSessions.Take(30)
+                    .Select(x => $"#{x.SessionId} {x.Title} ({x.Reason})")));
         }
 
         // --- Type 1: one per TRACK, twice --------------------------------------------------
@@ -733,8 +971,13 @@ public sealed class SoMeScheduleService
         //
         // ⚠️ His SpeakerAnnouncementFrom still applies as a FLOOR where he has set one, so this can
         // only ever make a track wait LONGER than he asked, never publish earlier than he allowed.
+        // 🔒 §1178 — the SAME excluded set as everything else in this method. This filtered on
+        // `IsTestData` alone, a column nothing has ever written, so a test session's arrival date
+        // could push a real track's readiness out — a session that is not announceable must not get
+        // a vote on WHEN its track is.
         var trackNewestSession = (await _db.Sessions
-                .Where(s => s.EventId == eventId && !s.IsServiceSession && !s.IsTestData
+                .Where(s => s.EventId == eventId && !s.IsServiceSession
+                            && !testSessionIds.Contains(s.Id)
                             && s.Track != null && s.Track != "")
                 .Select(s => new { s.Track, s.CreatedAt })
                 .ToListAsync(ct))
@@ -777,7 +1020,24 @@ public sealed class SoMeScheduleService
             ? SoMeSchedulePlanner.ToUtc(cfs, SoMeSchedulePlanner.PreferredTimes[0])
             : (DateTimeOffset?)null;
 
-        var round2 = eventStartUtc.AddMonths(-1);
+        // §1181 — HIS SETTING WINS; §908's "one month before the event" is now the fallback rather
+        // than the rule. The derivation is still evergreen, but it was not something he could change
+        // without a deploy — *"make sure that values here wins, so we dont have static values in the
+        // code"*.
+        var round2 = gateSettings?.SpeakerTracksRound2From is { } t2
+            ? SoMeSchedulePlanner.ToUtc(t2, SoMeSchedulePlanner.PreferredTimes[0])
+            : eventStartUtc.AddMonths(-1);
+
+        // 🔴 §1185 — A THIRD ROUND. Operator 2026-09-12: *"speaker tracks must have 3 rounds in the
+        // some post, where the first runs in sept as now. second runs in early dec and third runs
+        // from mid jan 27"*.
+        // ⚠️ The DATE is only half of it: `Times()` reads the edition's saved cadence row first, so a
+        // posting-frequency page still saying 2 means round 3 is never planned and this governs
+        // nothing. The default is raised to 3 to match, which covers an edition that has never saved
+        // one.
+        DateTimeOffset? round3 = gateSettings?.SpeakerTracksRound3From is { } t3
+            ? SoMeSchedulePlanner.ToUtc(t3, SoMeSchedulePlanner.PreferredTimes[0])
+            : null;
 
         subjects.AddRange(tracks.Select(t =>
         {
@@ -798,17 +1058,30 @@ public sealed class SoMeScheduleService
             var round1 = GatedBySpeakers(settled) ?? settled;
             if (round1 < now) round1 = now;
 
+            // 🔴 §1194 — the rounds and their windows come from the RULE now, not from three
+            // columns. A round added on the settings page is planned on the next run.
+            // 🔒 Round 1 still takes the LATER of the rule's opening and the track's own settle
+            // date: a rule may only ever delay, never announce a line-up that has not settled (§925).
+            var opens = OpensOf(SoMeAnnouncementCategory.SpeakerTracks);
+            var byOccurrence = new Dictionary<int, DateTimeOffset>();
+            var floor = round1;
+
+            foreach (var round in opens.Keys.Order())
+            {
+                // Monotonic: a later round can never open before an earlier one (§908's guard,
+                // generalised to however many rounds he has asked for).
+                floor = Later(opens[round], floor);
+                byOccurrence[round] = floor;
+            }
+
+            if (byOccurrence.Count == 0) byOccurrence[1] = round1;
+
             return new SoMeSubject(
                 SoMeTemplateKind.SpeakerTracks, $"track:{t}",
-                Times(cadence, SoMeTemplateKind.SpeakerTracks),
+                RoundsOf(SoMeAnnouncementCategory.SpeakerTracks),
                 EarliestUtc: round1,
-                EarliestByOccurrence: new Dictionary<int, DateTimeOffset>
-                {
-                    [1] = round1,
-                    // Guard the degenerate case: a track that settles inside the final month must
-                    // not have round 2 scheduled BEFORE round 1.
-                    [2] = round2 > round1 ? round2 : round1,
-                });
+                EarliestByOccurrence: byOccurrence,
+                LatestUtc: ClosesOf(SoMeAnnouncementCategory.SpeakerTracks));
         }));
 
         // §846 — when each session's graphic was built: the moment it became announceable.
@@ -835,7 +1108,9 @@ public sealed class SoMeScheduleService
         //                                type 5 (not individual)", i.e. his own event-post deck
         //                                covers it. Its absence here is now a DECISION, not an
         //                                oversight.
-        var sessionTimes = Times(cadence, SoMeTemplateKind.Session);
+        // §1207 — `sessionTimes` is gone with the legacy cadence table: every count in this method
+        // now comes from `RoundsOf`, i.e. from the rules on the SoMe settings page. Two numbers for
+        // "how many rounds" is what this section spent the day being wrong about.
 
         // 🔴 §928 — THE MASTER CLASSES GO OUT TOGETHER, IN ONE NAMED WEEK.
         //
@@ -858,6 +1133,12 @@ public sealed class SoMeScheduleService
             ? Later(SoMeSchedulePlanner.ToUtc(mcFrom, SoMeSchedulePlanner.PreferredTimes[0]), now)
             : (DateTimeOffset?)null;
 
+        // §1186 — the floor for every OTHER session type (keynote, technical session, panel). Master
+        // classes keep their own, earlier window above.
+        DateTimeOffset? sessionFloor = gateSettings?.SessionAnnouncementFrom is { } sFrom
+            ? SoMeSchedulePlanner.ToUtc(sFrom, SoMeSchedulePlanner.PreferredTimes[0])
+            : null;
+
         foreach (var type in new[]
                  {
                      SessionType.Keynote, SessionType.MasterClass,
@@ -866,16 +1147,33 @@ public sealed class SoMeScheduleService
         {
             // 🔒 A disabled type (0) stays disabled for every kind — his on/off switch (§842.2)
             // outranks a per-kind minimum, or turning Type 2 off would leave keynotes posting.
-            var times = type == SessionType.Keynote && sessionTimes > 0
-                ? Math.Max(sessionTimes, 2)
-                : sessionTimes;
+            // 🔴 §1194 — master classes and everything else are two CATEGORIES with two rules, so the
+            // rounds come from whichever one this session type belongs to.
+            var category = type == SessionType.MasterClass
+                ? SoMeAnnouncementCategory.MasterClasses
+                : SoMeAnnouncementCategory.TechnicalSessions;
+
+            var categoryRounds = RoundsOf(category);
+
+            // §912 — a keynote is announced twice where an ordinary session runs once. Kept as a
+            // floor over the category's own number so raising the category still raises the keynote.
+            var times = type == SessionType.Keynote && categoryRounds > 0
+                ? Math.Max(categoryRounds, 2)
+                : categoryRounds;
+
+            var categoryOpens = OpensOf(category);
+            var categoryCloses = ClosesOf(category);
 
             var ids = (await _db.Sessions
                     .Where(s => s.EventId == eventId && !s.IsServiceSession && s.Type == type)
                     .OrderBy(s => s.Id)
                     .Select(s => s.Id)
                     .ToListAsync(ct))
-                // §905 — no announcement for a session whose whole line-up is test accounts.
+                // 🔒 §1178 — the FULL exclusion set, for every session type in this loop (keynote,
+                // master class, TECHNICAL SESSION, panel): marked TEST on the Sessions page
+                // (`UsedForTesting`), excluded from announcements (§1060(h)), matched by one of his
+                // title patterns (§927), flagged `IsTestData`, or a line-up that is entirely test
+                // accounts (§905 — which is all this used to check).
                 .Where(id => !testSessionIds.Contains(id))
                 .ToList();
 
@@ -901,16 +1199,28 @@ public sealed class SoMeScheduleService
                 // they are the people on THAT session, not a track-wide list still being filled.
                 // ⇒ The nine confirmed master classes become schedulable today instead of waiting
                 // for a date that described a CfS deadline rather than their own readiness.
-                EarliestUtc: sessionGraphicReady.TryGetValue(id, out var ready) ? ready : null,
+                // 🔴 §1186 — AND HIS FLOOR FOR NON-MASTER-CLASS SESSIONS. Operator 2026-09-12:
+                // *"master class start date is a category of technical sessions. they runs fist
+                // starting from 14. sept. and other technical sessions (excluding ask the experts)
+                // runs from 28. sept."* Type 2 was treated as one thing and it is two: master classes
+                // had a window and everything else had nothing at all.
+                // 🔒 The LATER of the session's own readiness and the floor — the floor must not
+                // announce a session whose graphic does not exist (§846), and readiness must not jump
+                // the date he set. Master classes are excluded: their own window governs them.
+                EarliestUtc: type == SessionType.MasterClass
+                    ? (sessionGraphicReady.TryGetValue(id, out var mcReady) ? mcReady : null)
+                    : LaterOrNull(
+                        sessionGraphicReady.TryGetValue(id, out var ready) ? ready : null,
+                        sessionFloor),
                 // 🔒 The session's OWN graphic date is the prompt signal — the speaker gate is a
                 // type-wide floor and must not hurry every session at once (§851).
                 PromptFromUtc: sessionGraphicReady.TryGetValue(id, out var sessionReady)
                     ? sessionReady : null,
-                // §928 — master classes only, round 1 only. Null everywhere else, so every other
-                // session type behaves exactly as it did.
-                EarliestByOccurrence: type == SessionType.MasterClass && masterClassWindow is { } w
-                    ? new Dictionary<int, DateTimeOffset> { [1] = w }
-                    : null)));
+                // 🔴 §1194 — every round's opening, from the category's rule. §928's master-class
+                // window is now just this category's round 1, and a second or third round added on
+                // the settings page is planned with no code change.
+                EarliestByOccurrence: categoryOpens.Count > 0 ? categoryOpens : null,
+                LatestUtc: categoryCloses)));
         }
 
         // --- Type 2b: SPONSOR SPEAKER SESSIONS, twice (§824.1, built in §912) -----------------
@@ -923,7 +1233,12 @@ public sealed class SoMeScheduleService
         // §824.1: *"sponsor speaker sessions 2 × — when available (depends on when the sponsor has
         // assigned a person to their session) + 14–21 days before the event"*. Both halves are
         // honoured below.
-        if (sessionTimes > 0)
+        // 🔴 §1207 — GATED ON ITS OWN CATEGORY, not on Type 2's legacy cadence row. Sponsor speaker
+        // sessions are a category with their own switch and their own round count (§1187 Type 2c);
+        // asking the OLD posting-frequency table whether ordinary sessions are enabled meant turning
+        // Type 2 off there silently cancelled a category that has nothing to do with it — and the
+        // category's own Enabled switch governed nothing. Same family as the round-count bug above.
+        if (RoundsOf(SoMeAnnouncementCategory.SponsorSpeakerSessions) > 0)
         {
             var sponsorSessions = await _db.SponsorSessions
                 .Where(x => x.EventId == eventId
@@ -939,15 +1254,30 @@ public sealed class SoMeScheduleService
                 .Select(x => x.Id)
                 .ToListAsync(ct);
 
-            // Round 2 is a WINDOW, not a date: "14–21 days before the event". The window OPENS at
-            // 21 days out and the planner places inside it; 14 days is where it must not slip past,
-            // which the ordinary forward search respects because the event start is its ceiling.
-            var sponsorSessionRound2 = eventStartUtc.AddDays(-21);
+            // 🔴 §1194 — ROUND 2'S WINDOW IS NOW HIS, AND THE 14-DAY LIMIT IS FINALLY REAL.
+            //
+            // This was `eventStartUtc.AddDays(-21)` with a comment claiming the 14-day edge was
+            // "respected because the event start is its ceiling". It was not: the ceiling WAS the
+            // event start, so nothing stopped round 2 landing in the final week. §1194 gave the
+            // planner a real `LatestUtc`, and this category's rule now carries both ends.
+            //
+            // 🔒 The shipped fallbacks reproduce the old behaviour exactly — opens 21 days out,
+            // closes 14 — so an edition that sets nothing keeps what §824.1 asked for, and now
+            // actually gets it.
+            var scOpens = OpensOf(SoMeAnnouncementCategory.SponsorSpeakerSessions);
+            var scCloses = ClosesOf(SoMeAnnouncementCategory.SponsorSpeakerSessions)
+                           ?? eventStartUtc.AddDays(-14);
+
+            if (!scOpens.ContainsKey(2))
+            {
+                var fallback = eventStartUtc.AddDays(-21);
+                scOpens[2] = fallback > now ? fallback : now;
+            }
 
             subjects.AddRange(sponsorSessions.Select(id => new SoMeSubject(
                 SoMeTemplateKind.Session,
                 SoMeSponsorSessionKey.For(id),
-                Math.Max(sessionTimes, 2),
+                RoundsOf(SoMeAnnouncementCategory.SponsorSpeakerSessions),
                 // 🔑 §920 — NO SPEAKER GATE, same as any other session. Its readiness is its OWN
                 // speaker being assigned, which the query above already requires — a CfS deadline
                 // has nothing to do with a sponsor naming someone from their own company.
@@ -955,10 +1285,8 @@ public sealed class SoMeScheduleService
                 // 🔑 §843.6 — the sponsor naming their speaker IS an individual arrival, so round 1
                 // goes PROMPTLY rather than being spread across the campaign.
                 PromptFromUtc: now,
-                EarliestByOccurrence: new Dictionary<int, DateTimeOffset>
-                {
-                    [2] = sponsorSessionRound2 > now ? sponsorSessionRound2 : now,
-                })));
+                EarliestByOccurrence: scOpens,
+                LatestUtc: scCloses)));
         }
 
         // --- Type 3: one per sponsor TIER that actually has sponsors, twice -------------------
@@ -973,8 +1301,38 @@ public sealed class SoMeScheduleService
             .Select(s => s.SponsorPackage)
             .Distinct()
             .ToList();
+        // 🔴 §1181 — THE TIER ROUNDS ARE NAMED, SO THEY ARE §908 WINDOWS AND NOT A FLOOR. Operator
+        // 2026-09-12: *"i would like to run sponsor category some posts, so round 1 runs from dec 15
+        // and round 2 runs from jan 15"*.
+        //
+        // 🔑 A floor lets the spread pick the day, which suits a category that trickles in as sponsors
+        // sign. Tiers are a handful of posts and he is naming WHEN EACH ROUND HAPPENS — so an
+        // occurrence listed here is placed from its own window and is deliberately NOT spread, and the
+        // tier posts land together from the date.
+        //
+        // ⚠️ This splits tiers off from the §1179 sponsor floor, which covered both types. That was
+        // right until he gave tiers their own dates; the more specific instruction wins now. 🔒 The
+        // fallback keeps §1179's promise: with the tier dates blank, a tier still obeys the sponsor
+        // floor exactly as before, so nothing changes for an edition that has not set them.
+        var tierRounds = new Dictionary<int, DateTimeOffset>();
+        if (gateSettings?.SponsorCategoryRound1From is { } r1)
+        {
+            tierRounds[1] = SoMeSchedulePlanner.ToUtc(r1, SoMeSchedulePlanner.PreferredTimes[0]);
+        }
+        if (gateSettings?.SponsorCategoryRound2From is { } r2)
+        {
+            tierRounds[2] = SoMeSchedulePlanner.ToUtc(r2, SoMeSchedulePlanner.PreferredTimes[0]);
+        }
+
+        // 🔴 §1194 — from the rule. Any number of rounds, each with its own opening, plus a real end.
+        var tierOpens = OpensOf(SoMeAnnouncementCategory.SponsorTiers);
+
         subjects.AddRange(tiers.Select(t => new SoMeSubject(
-            SoMeTemplateKind.SponsorCategory, $"tier:{t}", Times(cadence, SoMeTemplateKind.SponsorCategory))));
+            SoMeTemplateKind.SponsorCategory, $"tier:{t}",
+            RoundsOf(SoMeAnnouncementCategory.SponsorTiers),
+            EarliestUtc: sponsorFloor,
+            EarliestByOccurrence: tierOpens.Count > 0 ? tierOpens : null,
+            LatestUtc: ClosesOf(SoMeAnnouncementCategory.SponsorTiers))));
 
         // --- Type 4: one per SPONSOR, twice ---------------------------------------------------
         //
@@ -1001,10 +1359,23 @@ public sealed class SoMeScheduleService
             .ToList();
 
         // When the sponsor's graphic was built — the moment they became announceable.
+        // 🔴 §1143 — A ROW IS NOT A GRAPHIC. `FileName != null` is the difference.
+        //
+        // Operator 2026-08-28, after deleting a file by hand: *"if i delete a sharepoint file, it
+        // must detect it is gone and reset the state"*.
+        //
+        // ⚠️ This gate used to accept ANY row, so a sponsor stayed "announceable" after their
+        // artwork was deleted — the post was planned and would publish with no image, or fail at
+        // dispatch. §854 established that a sponsor with no graphic is not planned at all; that rule
+        // was only ever enforced against the row's EXISTENCE, never against the file still being
+        // there. `SoMeBundleBuildService` clears these fields when it finds the file gone, so the
+        // sponsor drops out of the plan (and into `NotPlannableSponsors`, where he is told) until
+        // the sweep rebuilds it.
         var graphicReady = await _db.GraphicAssets
             .Where(g => g.EventId == eventId
                         && g.Type == Domain.GraphicAssetType.Sponsor
-                        && g.SponsorCompanyId != null)
+                        && g.SponsorCompanyId != null
+                        && g.FileName != null)
             .GroupBy(g => g.SponsorCompanyId!)
             .Select(g => new { CompanyId = g.Key, ReadyAt = g.Min(x => x.CreatedAt) })
             .ToDictionaryAsync(x => x.CompanyId, x => x.ReadyAt, ct);
@@ -1034,14 +1405,32 @@ public sealed class SoMeScheduleService
             .Select(s => s.CompanyId)
             .ToList();
 
+        // 🔴 §1194 — from the rule, like every other category.
+        var sponsorOpens = OpensOf(SoMeAnnouncementCategory.Sponsors);
+
         subjects.AddRange(plannable.Select(s => new SoMeSubject(
             SoMeTemplateKind.Sponsor,
             $"sponsor:{s.CompanyId}",
-            Times(cadence, SoMeTemplateKind.Sponsor),
-            EarliestUtc: graphicReady[s.CompanyId],
+            RoundsOf(SoMeAnnouncementCategory.Sponsors),
+            // 🔴 §1179 — the LATER of the sponsor's own readiness and his floor. Both are "not before
+            // this" and neither excuses the other: the floor must not announce a sponsor whose
+            // artwork does not exist yet (§854), and readiness must not jump the date he set.
+            // Exactly the shape §920 uses for the track floor.
+            EarliestUtc: LaterOrNull(graphicReady[s.CompanyId], sponsorFloor),
             // §851 — a sponsor becoming ready is an INDIVIDUAL arrival, so it is announced promptly
             // (§843.6) rather than spread across the window.
-            PromptFromUtc: graphicReady[s.CompanyId])));
+            //
+            // 🔴 §1179 — THE FLOOR MUST NOT TOUCH THIS, and my first attempt had it raising the
+            // prompt date too. `SoMeSubject.PromptFromUtc` says it in as many words: *"a type-wide
+            // floor spreads; an individual arrival hurries"*. Raising it to 15 October tells the
+            // planner every sponsor "just became ready" that morning, so all of them hurry and the
+            // floor silently becomes a WINDOW — §842.4's clustering, through a different door, and
+            // the exact opposite of *"lets keep the current design"*.
+            // ⚠️ Caught by `Sponsors_still_spread_across_the_run_up_after_the_floor`, which exists
+            // for this and would fail again the moment someone re-applies the floor here.
+            PromptFromUtc: graphicReady[s.CompanyId],
+            EarliestByOccurrence: sponsorOpens.Count > 0 ? sponsorOpens : null,
+            LatestUtc: ClosesOf(SoMeAnnouncementCategory.Sponsors))));
 
         // 🔒 §842.2 — a DISABLED type contributes no subjects, so it plans nothing new. It does NOT
         // remove what that type has already produced: the scheduler adds and never curates
@@ -1051,21 +1440,41 @@ public sealed class SoMeScheduleService
     }
 
     /// <summary>
-    /// §842.2 — how many times this type is announced: his setting when he has one, else the shipped
-    /// §824.1 default. A disabled type returns 0, which drops it from the plan entirely.
-    /// </summary>
-    private static int Times(IReadOnlyList<SoMeCadence> cadence, SoMeTemplateKind kind)
-    {
-        var c = cadence.FirstOrDefault(x => x.Kind == kind);
-        if (c is null) return SoMeCadenceService.DefaultOccurrences(kind);
-        return c.Enabled ? c.Occurrences : 0;
-    }
-
-    /// <summary>
     /// The later of two instants — used wherever a configured date has to be clamped to "not in the
     /// past", because a window whose Monday has already gone by is simply "now".
     /// </summary>
     private static DateTimeOffset Later(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+
+    /// <summary>
+    /// §1185 — the three track rounds, each guaranteed not to precede the one before it.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The monotonic clamp is §908's guard extended: a track that only settles inside the final
+    /// month would otherwise have round 2 dated BEFORE round 1, and now round 3 before round 2. A
+    /// reminder that arrives before the announcement is worse than no reminder.
+    /// <para>⚠️ Round 3 is omitted entirely when he has set no date for it, rather than defaulted to
+    /// something invented — an un-named round spreads like any other occurrence, which is the
+    /// behaviour every other type already has.</para>
+    /// </remarks>
+    private static Dictionary<int, DateTimeOffset> TrackRounds(
+        DateTimeOffset round1, DateTimeOffset round2, DateTimeOffset? round3)
+    {
+        var two = Later(round2, round1);
+        var rounds = new Dictionary<int, DateTimeOffset> { [1] = round1, [2] = two };
+        if (round3 is { } three) rounds[3] = Later(three, two);
+        return rounds;
+    }
+
+    /// <summary>
+    /// §1179 — the later of two "not before" dates, either of which may be absent.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Both arguments are floors, so the answer is the LATER one and a missing floor is simply no
+    /// opinion — never a reason to drop the other. Same rule §920's <c>GatedBySpeakers</c> applies to
+    /// tracks, written once so the two cannot drift.
+    /// </remarks>
+    private static DateTimeOffset? LaterOrNull(DateTimeOffset? a, DateTimeOffset? b) =>
+        a is null ? b : b is null ? a : Later(a.Value, b.Value);
 
     /// <summary>
     /// §928 — move the master-class posts that ALREADY EXIST into his announcement window.
@@ -1102,12 +1511,19 @@ public sealed class SoMeScheduleService
             SoMeSchedulePlanner.ToUtc(from.Value, SoMeSchedulePlanner.PreferredTimes[0]), now);
         if (windowStart >= eventStartUtc) return 0;
 
+        // 🔒 §1178 — the SAME exclusion set as the rest of the engine. This had no test/excluded
+        // filter at all, so a test master class would be gathered into the window with the real ones.
+        // The guard's tombstone already keeps it out of `rows` below; this keeps the two from
+        // disagreeing in the first place, which is the whole point of one shared rule.
+        var excludedSessionIds = await new SoMeSubjectScope(_db).ExcludedSessionIdsAsync(eventId, ct);
+
         var masterClassKeys = (await _db.Sessions
                 .Where(s => s.EventId == eventId
                             && s.Type == SessionType.MasterClass
                             && !s.IsServiceSession)
                 .Select(s => s.Id)
                 .ToListAsync(ct))
+            .Where(id => !excludedSessionIds.Contains(id))
             .Select(id => $"session:{id}")
             .ToHashSet(StringComparer.Ordinal);
 
@@ -1158,6 +1574,463 @@ public sealed class SoMeScheduleService
             moves.Count, windowStart);
 
         return moves.Count;
+    }
+
+    /// <summary>
+    /// §1144 — move a post whose slot has PASSED while it was still waiting, onto the next free one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-28: <i>"planning service must adjust if a pending planned will not be
+    /// met, so it pushes the schedule"</i>.</para>
+    ///
+    /// <para>🔴 <b>The gap this closes.</b> The planner ADDS and never curates (§824.21a), and the
+    /// dispatcher publishes <c>Queued &amp;&amp; ScheduledAtUtc &lt;= now</c>. So a post blocked on
+    /// its artwork simply sat there with a date in the past: it was not rescheduled, it was not
+    /// dropped, and when the blocker finally cleared it published immediately and OUT OF ORDER
+    /// relative to everything planned after it. The campaign's shape silently degraded, and nothing
+    /// in the plan said so.</para>
+    ///
+    /// <para>🔒 <b>PROPOSED ONLY — an accepted post is never moved.</b> Operator's decision
+    /// 2026-08-28, and it is §848.2's rule: once he has accepted a slot the planner does not own it
+    /// any more. An accepted post that slips keeps its date and publishes late; that is his call to
+    /// change, not the engine's.</para>
+    ///
+    /// <para>🔒 <b>Only the slipped post moves.</b> His decision over cascading the whole tail: the
+    /// posts after it keep their dates, so a single missed slot cannot re-date a campaign he has
+    /// been reading all week. `RetimeIntoWindow` treats every other post as an obstacle, so the
+    /// per-day rhythm (§843.3) is still respected — the moved post lands in a genuinely free slot
+    /// rather than doubling one up.</para>
+    ///
+    /// <para>⚠️ Published posts are never touched (§1077 stage 5: a published time never moves), and
+    /// they remain obstacles — their day is spent whether or not anything is still pending on it.</para>
+    ///
+    /// <para>🔴 <b>§1205 — AND THE HELD-BACK POSTS, WHICH ARE THE ONES THIS WAS WRITTEN FOR.</b>
+    /// Operator 2026-09-12: <i>"anyone that is held-back should be planned. if they dont make the
+    /// planned timeslot, then the planner must push to new date until they meet the requirement. but
+    /// i prefer to see them inside the plan, as i can then also see capacity"</i>.</para>
+    ///
+    /// <para>⚠️ <b>The filter was the exact inverse of the paragraph above it.</b> It required
+    /// <c>IsActive</c> — i.e. ALREADY APPROVED — so the only posts it ever moved were the ones the
+    /// dispatcher was about to publish anyway, and <b>"a post blocked on its artwork" was excluded by
+    /// construction</b>: a blocked post never passes <see cref="SoMeApprovalGate"/>, so it is never
+    /// <c>IsActive</c>, so it was never movable. The 19 posts held back on a missing logo or social
+    /// text sat in the past for ever — still in the plan, still holding a seat in a month that had
+    /// already gone. <c>[[a-quiet-fix-must-not-become-a-silent-one]]</c></para>
+    ///
+    /// <para>🔑 <b>Approval is not the question here; capacity is.</b> An overdue post that cannot
+    /// publish has a date that is a lie, and a lie in the plan is a seat mis-sold — which is the
+    /// airplane rule §1199 measures. So the rule is simply: overdue and still the planner's to move
+    /// ⇒ move it. It walks forward one free slot per run until the dependency lands, and then
+    /// publishes at a date he can actually read.</para>
+    ///
+    /// <para>🔒 <b>Still PROPOSED-only, and what it may not move is now NAMED</b> (§854/§1183). Two
+    /// dates are not the planner's: one he ACCEPTED (§848.2), and a Type 5 date, which comes from his
+    /// deck and is used as written (§834.4) — re-dating those here would reintroduce §1201's damage
+    /// through a different door. Both are reported WITH THE REASON, because the remedy differs.
+    /// Same for the ones with nowhere left to go: that is the capacity wall, and it belongs in the
+    /// run message rather than in a silent zero.</para>
+    ///
+    /// <para>⚠️ <b>What this pass actually sees, and why that is not most of the queue.</b> §848.2's
+    /// discard runs FIRST and throws away every un-accepted, un-approved, template-built proposal, so
+    /// those are re-planned from <c>now</c> on the same tick and can never be overdue. What survives
+    /// to reach this pass is the rest: a post he EDITED, a post he APPROVED that then slipped, an
+    /// accepted one, and Type 5. Those had no mechanism at all before — the discard skips them by
+    /// design and the push skipped them by accident.</para>
+    /// </remarks>
+    private async Task<OverduePush> PushOverduePostsAsync(
+        int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
+        CancellationToken ct)
+    {
+        var rows = await _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted && p.SubjectKey != null)
+            .Select(p => new
+            {
+                p.Id, p.SubjectKey, p.ScheduledAtUtc, p.Status, p.PublishedAtUtc, p.PlanState,
+                p.IsActive, p.TemplateKind,
+            })
+            .ToListAsync(ct);
+
+        // Overdue = its moment came and went while it was still sitting in the queue.
+        // 🔴 §1205 — NO `IsActive` CONDITION. Whether he has approved it yet is a different
+        // question from whether its date is still true.
+        var overdue = rows
+            .Where(p => p.Status == SoMePostStatus.Queued
+                        && p.PublishedAtUtc == null
+                        && p.ScheduledAtUtc < now)
+            .ToList();
+
+        if (overdue.Count == 0) return OverduePush.None;
+
+        // 🛑 The two dates the planner is NOT allowed to touch, named with the reason — because
+        // "3 posts were left behind" sends him looking for a bug, and the remedy differs per reason.
+        static string? WhyNotMine(Domain.SoMePostPlanState plan, SoMeTemplateKind? kind) =>
+            // §848.2 — once he accepts a slot, the planner does not own it any more.
+            plan != Domain.SoMePostPlanState.Proposed ? "you accepted this date"
+            // 🔴 §834.4 — an event post's date IS his input. §1201 has just finished undoing the
+            // damage of re-planning these every ten minutes; re-dating them here would reintroduce
+            // it through a different door.
+            : kind == SoMeTemplateKind.EventPost ? "the date comes from your event-post deck"
+            : null;
+
+        var locked = overdue
+            .Select(p => new { Row = p, Why = WhyNotMine(p.PlanState, p.TemplateKind) })
+            .Where(x => x.Why is not null)
+            .Select(x => $"#{x.Row.Id} {x.Row.TemplateKind?.ToString() ?? "ad-hoc"} was due "
+                       + $"{SoMeDisplayTime.ToDanish(x.Row.ScheduledAtUtc):dd-MM-yyyy} ({x.Why})")
+            .ToList();
+
+        var movable = overdue
+            .Where(p => WhyNotMine(p.PlanState, p.TemplateKind) is null)
+            .Select(p => (p.Id, p.SubjectKey!, p.ScheduledAtUtc))
+            .ToList();
+
+        if (movable.Count == 0) return new OverduePush(0, 0, locked, Array.Empty<string>());
+
+        var movableIds = movable.Select(m => m.Id).ToHashSet();
+        var otherOccupied = rows
+            .Where(p => !movableIds.Contains(p.Id))
+            .Select(p => p.ScheduledAtUtc)
+            .ToList();
+
+        // The window opens NOW: the earliest honest slot for something already late.
+        var moves = SoMeSchedulePlanner.RetimeIntoWindow(
+            movable, otherOccupied, now, eventStartUtc, maxPerDay);
+
+        var placed = moves.Select(m => m.PostId).ToHashSet();
+
+        // ⚠️ §1205 — every remaining weekday is full at the current posts-per-day, so there is
+        // nowhere honest to put these. That is the capacity wall, and it must be visible.
+        var full = overdue
+            .Where(p => movableIds.Contains(p.Id) && !placed.Contains(p.Id))
+            .Select(p => $"#{p.Id} {p.TemplateKind?.ToString() ?? "ad-hoc"} (due "
+                       + $"{SoMeDisplayTime.ToDanish(p.ScheduledAtUtc):dd-MM-yyyy})")
+            .ToList();
+
+        if (moves.Count == 0) return new OverduePush(0, 0, locked, full);
+
+        // How many of the moved ones were still WAITING on something — the number his question was
+        // about. Counted before the save, while `IsActive` still describes the row he asked about.
+        var heldBack = overdue.Count(p => placed.Contains(p.Id) && !p.IsActive);
+
+        var byId = moves.ToDictionary(m => m.PostId, m => m.ScheduledAtUtc);
+        var ids = byId.Keys.ToList();
+        var posts = await _db.SoMePosts.Where(p => ids.Contains(p.Id)).ToListAsync(ct);
+        foreach (var p in posts) p.ScheduledAtUtc = byId[p.Id];
+
+        await _db.SaveChangesAsync(ct);
+
+        _log?.LogInformation(
+            "§1144/§1205: pushed {Count} overdue post(s) onto the next free slot ({HeldBack} of them "
+            + "still held back on a dependency); {Locked} accepted and left alone, {Full} with no "
+            + "room left before the event.",
+            moves.Count, heldBack, locked.Count, full.Count);
+
+        return new OverduePush(moves.Count, heldBack, locked, full);
+    }
+
+    /// <summary>
+    /// §1183 — the configured earliest date for each (type, round), read from ONE place.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 The same values <c>CollectSubjectsAsync</c> plans with, so the re-time and the plan
+    /// cannot disagree about when a type opens — which is the whole failure §1178 spent the morning
+    /// on, in a different corner of the same engine.</para>
+    ///
+    /// <para>⚠️ <b>Type 2 is absent on purpose.</b> Master classes already have their own re-time
+    /// (§928's <c>RetimeMasterClassesAsync</c>, which moves accepted posts too, deliberately), and
+    /// ordinary sessions have no date at all — a session is announceable because it EXISTS (§920).
+    /// Adding them here would either duplicate that pass or invent a rule nobody asked for.</para>
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<(SoMeTemplateKind, int), DateTimeOffset>>
+        AnnouncementWindowsAsync(int eventId, DateTimeOffset eventStartUtc, CancellationToken ct)
+    {
+        // 🔴 §1194 — FROM THE RULES, so "the planner must recalculate if they are changed" holds for
+        // every category and every round, including ones he adds later. This used to enumerate the
+        // ten columns by hand, which meant an eleventh date was also an eleventh place to remember.
+        var ruleSvc = new SoMeCategoryRules(_db);
+        var rules = await ruleSvc.GetAllAsync(eventId, ct);
+        // §1195 — the rounds he has dated, so a named round keeps its exact day.
+        var roundStarts = await ruleSvc.RoundStartsAsync(eventId, ct);
+        var map = new Dictionary<(SoMeTemplateKind, int), DateTimeOffset>();
+
+        // ⚠️ The re-time works on the post's TemplateKind, which is coarser than the category — the
+        // three session categories all write Type 2. Sessions are therefore left out here rather than
+        // moved against the wrong category's dates: master classes already have §928's own re-time,
+        // and moving a technical session by a master-class window would be worse than not moving it.
+        var byKind = new (SoMeAnnouncementCategory Category, SoMeTemplateKind Kind)[]
+        {
+            (SoMeAnnouncementCategory.SpeakerTracks, SoMeTemplateKind.SpeakerTracks),
+            (SoMeAnnouncementCategory.SponsorTiers, SoMeTemplateKind.SponsorCategory),
+            (SoMeAnnouncementCategory.Sponsors, SoMeTemplateKind.Sponsor),
+        };
+
+        foreach (var (category, kind) in byKind)
+        {
+            if (!rules.TryGetValue(category, out var rule)) continue;
+
+            var named = roundStarts.TryGetValue(category, out var n) ? n : null;
+
+            foreach (var (round, window) in SoMeCategoryRules.Windows(rule, eventStartUtc, named))
+            {
+                if (window.OpensUtc is { } opens) map[(kind, round)] = opens;
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>
+    /// 🔴 §1183 — THE ANNOUNCEMENT DATES GOVERN THE POSTS THAT ALREADY EXIST, NOT ONLY NEW ONES.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"decission update: planner must obey to the update date changes,
+    /// even though they are planned or approved related to type 1-4. we need to streamline this and
+    /// move the current wrong planned/approved some posts"</i>.</para>
+    ///
+    /// <para>🔑 <b>Until now a new date only steered NEW posts.</b> §848.2's discard re-plans an
+    /// un-approved proposal, so a held post followed a changed date by accident — but an AUTO-APPROVED
+    /// one (§918) is excluded from that discard on the principle that approving is a decision, so it
+    /// kept whatever date it was born with. Setting "sponsors from 15 October" therefore left every
+    /// already-approved sponsor post sitting in September, and the queue disagreed with the rule that
+    /// produced it — DESIGN §928 named that failure for the master-class window and it applies to
+    /// every type.</para>
+    ///
+    /// <para>🔒 <b>Approved posts MOVE; accepted posts do not.</b> He named "planned or approved",
+    /// which is §848.2's <c>Proposed</c> state with and without <c>IsActive</c>. A post he has
+    /// ACCEPTED (<c>PlanState.Scheduled</c>) is the one thing §848.2 makes inviolable — he chose that
+    /// slot — so those are counted and NAMED for him to move, never moved for him. 🛑 Published posts
+    /// are never touched.</para>
+    ///
+    /// <para>⚠️ <b>Only ever FORWARD, out of a window the post is too early for.</b> A post already
+    /// late enough is left alone: the dates are floors, and dragging a December sponsor post back to
+    /// October because "the window opened" would re-plan a schedule he has been reading all week.</para>
+    ///
+    /// <para>🔑 A re-time is not a re-plan: this writes <c>ScheduledAtUtc</c> and nothing else — the
+    /// words, the picture, the approval and the plan state all survive.</para>
+    /// </remarks>
+    /// <remarks>
+    /// 🔴 <b>§1213 — <paramref name="now"/> IS THE FLOOR. The one remaining path that could write a
+    /// date in the past, closed.</b>
+    ///
+    /// <para>⚠️ <b>Honest about what this is and is not.</b> It was found while investigating
+    /// <i>"and it also planned a post in the past"</i> ("Surveil auto-approved for Thu 10 Sep 13:00",
+    /// reported on the 12th) and it is <b>NOT</b> that defect's cause — this pass did not exist when
+    /// that post was dated (§1183 shipped the same day as the report), and a test that removes the
+    /// clamp still passes, because §1144's push runs BEFORE this and re-dates an overdue proposal
+    /// first. What the PROD evidence shows now is <c>"No due posts"</c> on every tick: nothing is
+    /// backdated any more. See REQUIREMENTS §1213 for what is still unexplained.</para>
+    ///
+    /// <para>🔑 <b>The hole is real even though it is not that hole.</b> A category's window can open
+    /// on a day that has already passed — a round he dated last week, or simply the run-up moving on.
+    /// This pass then calls <c>RetimeIntoWindow</c> from the WINDOW's opening day, and that loop packs
+    /// from <c>windowStartUtc</c>: it compares against the window and the event, never against today.
+    /// An accepted-but-unmovable post, or a proposal the push could not place, reaches here and is
+    /// moved BACKWARDS into a day that is gone. ⇒ Clamped, because <b>every other re-time in this
+    /// class takes <c>now</c> — §928's master classes, §1144's overdue push, §1179's blackout — and
+    /// this one was the only one that did not.</b></para>
+    ///
+    /// <para>🔒 A window that has opened is still OPEN; it is not an instruction to publish in the
+    /// past. Clamping keeps "not before the window" true while making "not before today" true as
+    /// well, and a future window is still obeyed exactly.</para>
+    /// </remarks>
+    private async Task<(int Moved, IReadOnlyList<string> Locked)> MoveOutOfWindowAsync(
+        int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
+        IReadOnlyDictionary<(SoMeTemplateKind Kind, int Occurrence), DateTimeOffset> windows,
+        CancellationToken ct)
+    {
+        if (windows.Count == 0) return (0, Array.Empty<string>());
+
+        var rows = await _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted && p.SubjectKey != null
+                        && p.TemplateKind != null && p.Occurrence != null)
+            .Select(p => new
+            {
+                p.Id, p.SubjectKey, p.ScheduledAtUtc, p.Status, p.PublishedAtUtc, p.PlanState,
+                p.TemplateKind, p.Occurrence,
+            })
+            .ToListAsync(ct);
+
+        var tooEarly = rows
+            .Where(p => p.Status == SoMePostStatus.Queued && p.PublishedAtUtc == null)
+            .Select(p => new
+            {
+                Row = p,
+                Window = windows.TryGetValue((p.TemplateKind!.Value, p.Occurrence!.Value), out var w)
+                    ? (DateTimeOffset?)w : null,
+            })
+            .Where(x => x.Window is { } w && x.Row.ScheduledAtUtc < w)
+            .ToList();
+
+        if (tooEarly.Count == 0) return (0, Array.Empty<string>());
+
+        // 🛑 His own accepted slots: reported, never moved.
+        var locked = tooEarly
+            .Where(x => x.Row.PlanState == Domain.SoMePostPlanState.Scheduled)
+            .Select(x => $"#{x.Row.Id} {x.Row.TemplateKind} on "
+                       + $"{SoMeDisplayTime.ToDanish(x.Row.ScheduledAtUtc):dd-MM-yyyy}")
+            .ToList();
+
+        var movableIds = tooEarly
+            .Where(x => x.Row.PlanState == Domain.SoMePostPlanState.Proposed)
+            .Select(x => x.Row.Id)
+            .ToHashSet();
+
+        if (movableIds.Count == 0) return (0, locked);
+
+        var moved = 0;
+
+        // One pass per WINDOW: `RetimeIntoWindow` packs from a single start, so two types opening on
+        // different dates cannot share a call without one of them being placed from the other's date.
+        foreach (var group in tooEarly
+                     .Where(x => movableIds.Contains(x.Row.Id))
+                     .GroupBy(x => x.Window!.Value))
+        {
+            // 🔴 §1213 — NEVER BEFORE TODAY. A window that opened last week is still open; it is not
+            // an instruction to place a post last week. Without this clamp `RetimeIntoWindow` packs
+            // from the window's own opening day and compares only against the window and the event.
+            var windowStart = Later(group.Key, now);
+            if (windowStart >= eventStartUtc) continue;   // no room left before the event
+
+            var movable = group
+                .Select(x => (x.Row.Id, x.Row.SubjectKey!, x.Row.ScheduledAtUtc))
+                .ToList();
+
+            var ids = movable.Select(m => m.Id).ToHashSet();
+
+            // ⚠️ Every OTHER post is an obstacle, including the ones this run has already moved —
+            // otherwise two windows would both pack onto the same free days.
+            var occupied = rows
+                .Where(p => !ids.Contains(p.Id))
+                .Select(p => p.ScheduledAtUtc)
+                .ToList();
+
+            var moves = SoMeSchedulePlanner.RetimeIntoWindow(
+                movable, occupied, windowStart, eventStartUtc, maxPerDay);
+
+            if (moves.Count == 0) continue;
+
+            var byId = moves.ToDictionary(m => m.PostId, m => m.ScheduledAtUtc);
+            var idList = byId.Keys.ToList();
+            var posts = await _db.SoMePosts.Where(p => idList.Contains(p.Id)).ToListAsync(ct);
+            foreach (var p in posts)
+            {
+                p.ScheduledAtUtc = byId[p.Id];
+                // Keep the in-memory obstacle list honest for the next window in this loop.
+                var row = rows.First(r => r.Id == p.Id);
+                rows[rows.IndexOf(row)] = row with { ScheduledAtUtc = byId[p.Id] };
+            }
+
+            await _db.SaveChangesAsync(ct);
+            moved += moves.Count;
+        }
+
+        if (moved > 0 || locked.Count > 0)
+        {
+            _log?.LogInformation(
+                "§1183: moved {Moved} planned/approved post(s) forward into their type's announcement "
+                + "window; {Locked} accepted post(s) left for the operator.", moved, locked.Count);
+        }
+
+        return (moved, locked);
+    }
+
+    /// <summary>
+    /// 🔴 §1179 — MOVE THE POSTS THAT ARE ALREADY SITTING ON THE HOLIDAYS.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-12: <i>"dates are all over the place, even dec 30 and jan 1"</i> ·
+    /// <i>"lets keep the current design, but make blockout between dec 23 - jan 3 due to
+    /// holidays"</i>.</para>
+    ///
+    /// <para>🔑 <b>Teaching the planner about holidays only fixes the NEXT post.</b> The ones he is
+    /// looking at are already placed AND already auto-approved — the mails naming 30 Dec 14:30 and
+    /// 01 Jan 11:00 have been sent — so without this pass they would publish on those days no matter
+    /// what the placement rule now says. This is §928's own lesson, restated: <i>"a window that
+    /// steered only NEW posts would leave the queue disagreeing with the rule that produced it"</i>.</para>
+    ///
+    /// <para>🔒 <b>Forward, to the first free slots after the holiday.</b> Displaced posts pack from
+    /// 4 January at the normal posts-per-day, around whatever already holds a slot. Moving them
+    /// BACKWARDS into the week before Christmas was the alternative and is worse: that week is the
+    /// one people are already checking out of, and it would bunch the posts against the very break
+    /// he is avoiding.</para>
+    ///
+    /// <para>🛑 <b>A post he has ACCEPTED is never moved.</b> §848.2 — a Scheduled slot is his, and a
+    /// holiday is not a good enough reason to overrule a date he chose deliberately. Those are
+    /// COUNTED and named in the run message instead, so he can move them himself. Published posts are
+    /// never touched at all.</para>
+    ///
+    /// <para>⚠️ A re-time is not a re-plan (DESIGN §928): this writes <c>ScheduledAtUtc</c> and
+    /// nothing else — the words, the picture, the approval and the plan state all survive.</para>
+    /// </remarks>
+    private async Task<(int Moved, IReadOnlyList<string> Locked)> MoveOutOfBlackoutAsync(
+        int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
+        CancellationToken ct)
+    {
+        var rows = await _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted && p.SubjectKey != null)
+            .Select(p => new
+            {
+                p.Id, p.SubjectKey, p.ScheduledAtUtc, p.Status, p.PublishedAtUtc, p.PlanState,
+            })
+            .ToListAsync(ct);
+
+        static DateOnly DanishDay(DateTimeOffset utc) => DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(utc, SoMeSchedulePlanner.DanishTime).DateTime);
+
+        var onHoliday = rows
+            .Where(p => p.Status == SoMePostStatus.Queued
+                        && p.PublishedAtUtc == null
+                        && SoMeBlackout.IsBlackedOut(DanishDay(p.ScheduledAtUtc)))
+            .ToList();
+
+        if (onHoliday.Count == 0) return (0, Array.Empty<string>());
+
+        // 🛑 His accepted dates are reported, never moved.
+        var locked = onHoliday
+            .Where(p => p.PlanState == Domain.SoMePostPlanState.Scheduled)
+            .Select(p => $"#{p.Id} on {DanishDay(p.ScheduledAtUtc):dd-MM-yyyy}")
+            .ToList();
+
+        var movable = onHoliday
+            .Where(p => p.PlanState == Domain.SoMePostPlanState.Proposed)
+            .Select(p => (p.Id, p.SubjectKey!, p.ScheduledAtUtc))
+            .ToList();
+
+        if (movable.Count == 0) return (0, locked);
+
+        var movableIds = movable.Select(m => m.Id).ToHashSet();
+        var otherOccupied = rows
+            .Where(p => !movableIds.Contains(p.Id))
+            .Select(p => p.ScheduledAtUtc)
+            .ToList();
+
+        // The window opens on the first day the holiday is over — or now, if the break has already
+        // passed and these posts are simply stale.
+        var reopensOn = SoMeBlackout.NextAllowedDay(DanishDay(now));
+        var windowStart = Later(
+            SoMeSchedulePlanner.ToUtc(reopensOn, SoMeSchedulePlanner.PreferredTimes[0]), now);
+
+        // ⚠️ The whole holiday can sit AFTER the event for a late edition, in which case there is no
+        // window to move into and the posts are left where they are rather than shoved past the event.
+        if (windowStart >= eventStartUtc) return (0, locked);
+
+        var moves = SoMeSchedulePlanner.RetimeIntoWindow(
+            movable, otherOccupied, windowStart, eventStartUtc, maxPerDay);
+
+        if (moves.Count == 0) return (0, locked);
+
+        var byId = moves.ToDictionary(m => m.PostId, m => m.ScheduledAtUtc);
+        var ids = byId.Keys.ToList();
+        var posts = await _db.SoMePosts.Where(p => ids.Contains(p.Id)).ToListAsync(ct);
+        foreach (var p in posts) p.ScheduledAtUtc = byId[p.Id];
+
+        await _db.SaveChangesAsync(ct);
+
+        _log?.LogInformation(
+            "§1179: moved {Count} post(s) off the {Window} blackout; {Locked} accepted post(s) left "
+            + "for the operator.", moves.Count, SoMeBlackout.Description, locked.Count);
+
+        return (moves.Count, locked);
     }
 
     /// <summary>

@@ -1,0 +1,73 @@
+@model string
+@*
+    §1060(e)/(f) — the follow card. Operator 2026-08-11: *"make a button on the page where you give
+    option to follow our linkedin company page if they dont follow it. mention it if your some
+    precheck showed they either follow (say thank for following our page and mention they will be
+    tagged) or tell them it is optional to be mentioned but they must opt-in to follow eldk linkedin
+    company page"*.
+
+    🔴 FIVE STATUSES, THREE MEANINGS, AND ONLY ONE OF THEM IS A CLAIM.
+    `Participant.LinkedInPersonUrnStatus` is Resolved · NotAFollower · Ambiguous · KeywordUnusable ·
+    LookupFailed. Only **Resolved** proves they follow (the mention endpoint resolves followers).
+    **NotAFollower** is a real negative. The other three mean the lookup did not answer — and telling
+    a real follower they do not follow us, because a sweep was throttled, is the exact failure
+    §858.16h shaped that column to prevent. So everything that is not `Resolved` gets the same
+    neutral INVITE, which is true whatever the unknown answer turns out to be.
+
+    🔒 A PARTIAL, shared by the speaker and sponsor pages, so the wording cannot drift between them —
+    the same reason SoMeAnnouncementQuery holds one scoping rule for both.
+*@
+@{
+    var follows = string.Equals(Model, "Resolved", StringComparison.Ordinal);
+    const string CompanyPage = "https://www.linkedin.com/company/experts-live-denmark/";
+}
+
+<div class="follow-card">
+    @if (follows)
+    {
+        <p class="follow-line">
+            <strong>You'll be tagged</strong> in posts about you — thanks for following our LinkedIn
+            page.
+        </p>
+    }
+    else
+    {
+        <p class="follow-line">
+            Being mentioned is <strong>optional</strong>. If you'd like us to tag you in posts about
+            you, follow our LinkedIn company page — we can only tag people who follow it.
+        </p>
+        <a class="follow-btn" href="@CompanyPage" target="_blank" rel="noopener noreferrer">
+            Follow Experts Live Denmark
+        </a>
+    }
+</div>
+
+<style>
+    /* Mobile-first (~360px): the button is full-width on a phone and shrinks to its text on a
+       desktop, so it never becomes a full-width bar on a wide screen. */
+    .follow-card {
+        border: 1px solid #d0d4dd;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: 16px 0;
+        background: #f6f8fc;
+    }
+    .follow-line { margin: 0 0 10px; font-size: 15px; line-height: 1.45; }
+    .follow-card .follow-line:last-child { margin-bottom: 0; }
+    .follow-btn {
+        display: block;
+        text-align: center;
+        background: #0a66c2;            /* LinkedIn blue — this button goes to LinkedIn */
+        color: #fff;
+        text-decoration: none;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 12px 20px;
+        min-height: 44px;               /* a real tap target */
+        box-sizing: border-box;
+    }
+    .follow-btn:hover, .follow-btn:focus { background: #004182; }
+    @@media (min-width: 480px) {
+        .follow-btn { display: inline-block; }
+    }
+</style>

@@ -59,10 +59,59 @@ public static class VolunteerPhotoFileName
 
         if (!bare.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) return false;
 
-        return int.TryParse(bare[Prefix.Length..], out participantId) && participantId > 0;
+        var body = bare[Prefix.Length..];
+
+        // The CURRENT shape — the whole body is the id.
+        if (int.TryParse(body, out participantId) && participantId > 0) return true;
+
+        // 🔴 §1132 — the NAME ALIAS, `volunteer-photo-{Name}-{id}`. This branch is REQUIRED, not a
+        // nicety: ParticipantPhotoCleanupService deletes a volunteer's photos by the id this method
+        // parses, so without it the alias survives the person's deactivation — a photo of someone
+        // who asked to be removed, left in SharePoint. Only the TRAILING segment is tried as the id,
+        // because names legitimately contain digits.
+        participantId = 0;
+        var lastDash = body.LastIndexOf('-');
+        if (lastDash <= 0) return false;
+
+        return int.TryParse(body[(lastDash + 1)..], out participantId) && participantId > 0;
     }
 
-    /// <summary>Is this the CURRENT id-based convention?</summary>
+    /// <summary>
+    /// §1132 — the NAME ALIAS: a SECOND file per volunteer, named after the person, written
+    /// ALONGSIDE the authoritative <see cref="Build"/> file. Null when the name sanitises to nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-25: <i>"same for volunteers that upload pics, could be geat to have 2
+    /// files - one with id and another with name"</i>.</para>
+    ///
+    /// <para>🔒 Same shape and same reasoning as
+    /// <see cref="SpeakerPhotoFileName.BuildAlias"/> — including the trailing id, which keeps two
+    /// volunteers with the same name from overwriting each other. The sanitiser is shared with the
+    /// speaker one so the two folders can never disagree about how a name becomes a file name.</para>
+    /// </remarks>
+    public static string? BuildAlias(int participantId, string? fullName, string? extension)
+    {
+        var name = SpeakerPhotoFileName.SanitiseName(fullName);
+        if (name.Length == 0) return null;
+
+        var ext = (extension ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(ext)) ext = ".jpg";
+        if (!ext.StartsWith('.')) ext = "." + ext;
+
+        return $"{Prefix}{name}-{participantId}{ext}";
+    }
+
+    /// <summary>
+    /// Does this file CARRY AN ID — the current <c>volunteer-photo-{id}</c> file or its §1132
+    /// <c>volunteer-photo-{Name}-{id}</c> alias?
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Since §1132 this is broader than its name suggests, and the ONE caller
+    /// (<c>ParticipantPhotoCleanupService</c>) wants exactly the broader meaning: it uses this to
+    /// exclude files already matched by id from the ambiguous name-keyed branch. An alias belongs in
+    /// the id branch — it is deleted unambiguously — so counting it as "carries an id" is correct
+    /// rather than a convenient coincidence.
+    /// </remarks>
     public static bool IsCurrentConvention(string? fileName) => TryParse(fileName, out _);
 
     /// <summary>

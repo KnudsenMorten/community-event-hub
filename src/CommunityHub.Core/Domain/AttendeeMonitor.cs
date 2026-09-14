@@ -10,6 +10,27 @@ public enum AttendeeMonitorKind
 
     /// <summary>Every attendee on an order carrying the configured coupon / promo code.</summary>
     CouponCode = 1,
+
+    /// <summary>
+    /// §1093 — every attendee who used <b>ANY</b> coupon billed to this e-conomic customer.
+    /// <see cref="AttendeeMonitor.Value"/> holds the customer number.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"it could be great that the monitor is linked per billing
+    /// customer, so arrow gets one link that shows any usage for any coupons they have"*.</para>
+    ///
+    /// <para>🔑 <b>Why this is the right grain and <see cref="CouponCode"/> is not.</b> A partner
+    /// thinks in "my usage", not in promo codes: Arrow may have several codes across ticket classes
+    /// and campaigns, and one link per code means several links, each showing a fragment, none of
+    /// them answering the question they actually have. The billing customer is also exactly what the
+    /// INVOICE is addressed to — so the monitor and the invoice describe the same population, which
+    /// is the property that makes the page usable as a check on the bill.</para>
+    ///
+    /// <para>🔒 Scope is still bounded by construction: a customer's monitor can only ever widen to
+    /// coupons that are billed to that same customer, and adding a coupon to a different customer
+    /// cannot pull rows into this one.</para>
+    /// </remarks>
+    ErpCustomer = 2,
 }
 
 /// <summary>
@@ -91,6 +112,48 @@ public class AttendeeMonitor
 
     /// <summary>Whether the link has passed its expiry at the given moment.</summary>
     public bool IsExpired(DateTimeOffset now) => ExpiresAt is { } e && now >= e;
+
+    /// <summary>
+    /// §1094 — when this customer was last sent their fortnightly usage report, or null for never.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"they must get status per mail every 2 weeks of usage, cap
+    /// (remaining) if set"*.</para>
+    ///
+    /// <para>🔑 <b>The stamp lives on the MONITOR, not on the coupon</b>, because the report is per
+    /// BILLING CUSTOMER — the same grain as the link it carries. On a coupon it would send one mail
+    /// per code, so a partner with three codes would get three reports a fortnight, each showing a
+    /// fragment of the picture the link already shows whole.</para>
+    ///
+    /// <para>🔒 It is the ONLY thing preventing a repeat: a fortnightly job with no memory sends on
+    /// every tick. Stamped after the send, never before.</para>
+    /// </remarks>
+    public DateTimeOffset? UsageReportSentAt { get; set; }
+
+    /// <summary>
+    /// §1094 — when this partner last asked for their cap to be raised, and to what.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-19: *"customer should be able to extend the cap using the status mail
+    /// they get, so they can extend from 50 -> 60 as example. then i must get a email so i can
+    /// extend it in zoho + i can invoice, if it is a prepaid order"*.</para>
+    ///
+    /// <para>🔴 <b>A REQUEST, NEVER A SELF-SERVICE RAISE — and that is forced by where the cap really
+    /// lives.</b> He was explicit that *"cap is controlled / limited by zoho"* and CEH's number
+    /// merely matches it. Backstage has no coupon API (§787.14), so a partner clicking "extend"
+    /// cannot change the limit that actually stops them claiming. If CEH raised its own number
+    /// anyway, our reports would promise 60 while Zoho still refused at 50 — the hub would be lying
+    /// on the partner's own page. ⇒ The click asks; the operator raises it in Zoho and in CEH, and
+    /// invoices it when the agreement is prepaid.</para>
+    ///
+    /// <para>🔒 Stamped so the request is auditable and so a partner refreshing the page cannot mail
+    /// the ops box repeatedly — this endpoint is anonymous, and the only thing between it and an
+    /// inbox is this throttle.</para>
+    /// </remarks>
+    public DateTimeOffset? LastCapRequestAt { get; set; }
+
+    /// <inheritdoc cref="LastCapRequestAt"/>
+    public int? LastCapRequestedTickets { get; set; }
 
     public string? CreatedByEmail { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

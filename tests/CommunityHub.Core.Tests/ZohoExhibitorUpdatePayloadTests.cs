@@ -16,7 +16,11 @@ namespace CommunityHub.Core.Tests;
 /// <list type="bullet">
 ///   <item><c>company_overview</c>, <c>company_short_description</c>, <c>website_url</c> — <b>write
 ///   and read back</b> on every record tested, including the ones the §791 log called failures.</item>
-///   <item><c>company_social_pages</c> — <b>200 and silently discarded</b>, twice measured.</item>
+///   <item><c>company_social_pages</c> — was <b>200 and silently discarded</b> (twice measured,
+///   2026-08-03/04). ✅ <b>Zoho repaired it over the weekend of 2026-08-16</b>; §1087 re-measured on
+///   2026-08-17 and it now writes and reads back, both into a cleared object and over an existing
+///   value. ⚠️ It <b>merges</b>: an omitted key keeps its stored value and <c>{}</c> is a no-op, so
+///   a link can be blanked to <c>""</c> but only the GUI can delete one.</item>
 ///   <item>Caps: short description <b>80</b> (81 → 400), overview <b>1000</b> (1024 → 400), and Zoho
 ///   rejects the WHOLE update — <c>{"message":"`shortDescription` is too long"}</c>.</item>
 /// </list>
@@ -151,15 +155,48 @@ public sealed class ZohoExhibitorUpdatePayloadTests
     }
 
     // ---------------------------------------------------------------------
-    //  §791.4 — social pages ship OFF
+    //  §1087 — social pages ship ON (they shipped OFF from 2026-08-04 to 2026-08-17)
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// 🔴 Measured twice: the PUT returns 200, echoes the field back, and the next GET does not have
-    /// it. Sending it achieves nothing except a log line that says "Updated".
+    /// ✅ §1087 — <b>the shipped default is now ON</b>, and this test pins the DEFAULT rather than an
+    /// explicitly-configured value: nothing in DEV or PROD config sets
+    /// <c>Zoho:PushExhibitorSocialPages</c>, so the property initialiser is what actually decides
+    /// whether a sponsor's LinkedIn reaches Backstage. A test that always passed the flag
+    /// explicitly would have stayed green through the whole fortnight the field was switched off.
     /// </summary>
     [Fact]
-    public async Task Social_pages_are_not_sent_by_default()
+    public async Task Social_pages_are_sent_by_default_because_zoho_fixed_the_endpoint()
+    {
+        // NOT New(pushSocial: true) — deliberately the un-configured ZohoOptions default.
+        var handler = new StubHandler(HttpStatusCode.OK, "{}");
+        var client = new ZohoClient(
+            new HttpClient(handler),
+            new ZohoOptions
+            {
+                Enabled = true, ApiDomain = "https://zoho.test",
+                BackstagePortalId = Portal, BackstageEventId = Event,
+            },
+            NullLogger<ZohoClient>.Instance);
+
+        await client.UpdateExhibitorAsync(
+            "tok", Exhibitor, companyOverview: null, companyShortDescription: null,
+            linkedInUrl: "https://www.linkedin.com/company/example",
+            twitterUrl: "https://x.com/example");
+
+        var social = Body(handler).GetProperty("company_social_pages");
+        Assert.Equal("https://www.linkedin.com/company/example", social.GetProperty("linkedin").GetString());
+        Assert.Equal("https://x.com/example", social.GetProperty("twitter").GetString());
+    }
+
+    /// <summary>
+    /// 🔒 The kill switch still works. §1087: a Zoho regression would be SILENT — 200 with the value
+    /// discarded — and the sync's live-compare would then re-push every pass for ever (§791.3's
+    /// loop). Turning this off is the one-setting, no-deploy way back to the §792 hand-entry mail,
+    /// so it has to keep working even while nobody is using it.
+    /// </summary>
+    [Fact]
+    public async Task Social_pages_are_not_sent_when_the_kill_switch_is_off()
     {
         var (client, handler) = New(pushSocial: false);
 
@@ -169,21 +206,6 @@ public sealed class ZohoExhibitorUpdatePayloadTests
             twitterUrl: "https://x.com/example");
 
         Assert.False(Body(handler).TryGetProperty("company_social_pages", out _));
-    }
-
-    /// <summary>🔒 One config setting re-enables it if Zoho ever repairs the endpoint.</summary>
-    [Fact]
-    public async Task Social_pages_are_sent_when_the_switch_is_on()
-    {
-        var (client, handler) = New(pushSocial: true);
-
-        await client.UpdateExhibitorAsync(
-            "tok", Exhibitor, companyOverview: null, companyShortDescription: null,
-            linkedInUrl: "https://www.linkedin.com/company/example");
-
-        Assert.Equal(
-            "https://www.linkedin.com/company/example",
-            Body(handler).GetProperty("company_social_pages").GetProperty("linkedin").GetString());
     }
 
     // ---------------------------------------------------------------------
@@ -205,7 +227,9 @@ public sealed class ZohoExhibitorUpdatePayloadTests
         var ok = await client.UpdateExhibitorAsync(
             "tok", Exhibitor, companyOverview: null, companyShortDescription: "short enough");
 
-        Assert.False(ok);
+        // §1154 — the call now reports WHICH failure. This handler answers 400, so it is a
+        // REFUSAL (the value will never land by itself), not an unavailable Zoho.
+        Assert.Equal(ZohoClient.ZohoWriteOutcome.Refused, ok);
         Assert.NotNull(handler.LastBody);   // the request was actually made
     }
 

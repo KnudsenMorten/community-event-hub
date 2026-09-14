@@ -5,17 +5,43 @@
     SponsorCompanyModel (and the standalone Company Details section) so the host's empty-prefix
     binding fills them; same fields + limits + helper copy as the standalone page.
 *@
+@* 🔒 §1081 — READ-ONLY. The webshop owns this field; CEH fills it in via the §41b reconcile.
+   The hand-off carries data-webshop-interstitial="1", which the §653 dialog in _Layout picks up
+   through its DOCUMENT-level delegated click handler — so it works here exactly as it does in the
+   nav, with no new dialog, script or style. *@
 <label for="WebsiteUrl">Website URL</label>
-<input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="400" placeholder="https://www.example.com" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Must be a full URL including https://</p>
+<input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="400" readonly
+       style="background-color:#f3f4f6;color:#6b7280;" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your website address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+<p style="margin:2px 0 12px;">
+    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+</p>
 
+@* §1126 — LinkedIn and Twitter are WEBSHOP-OWNED, exactly like the website above (operator
+   2026-08-25: "linkedin + twitter is also coming from webshop … it must also overwrite as webshop
+   is authoritative").
+
+   🔴 Read-only is not cosmetic here — it is REQUIRED by the overwrite. Leaving these editable while
+   the sync overwrites them means a sponsor types a URL, is told it saved, and has it silently
+   reverted on the next sync. Unfixable from their side and invisible while it happens. *@
 <label for="LinkedInUrl">LinkedIn URL</label>
-<input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="400" placeholder="https://www.linkedin.com/company/yourcompany" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Full URL, e.g. https://www.linkedin.com/company/yourcompany</p>
+<input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="400" readonly
+       style="background-color:#f3f4f6;color:#6b7280;" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Your LinkedIn address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+<p style="margin:2px 0 12px;">
+    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+</p>
 
 <label for="TwitterUrl">Twitter / X URL</label>
-<input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="400" placeholder="https://www.twitter.com/yourcompany" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Full URL, e.g. https://www.twitter.com/xyz</p>
+<input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="400" readonly
+       style="background-color:#f3f4f6;color:#6b7280;" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Your Twitter / X address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
+<p style="margin:2px 0 14px;">
+    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
+       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
+</p>
 
 <label for="CompanyOverview">Company Overview</label>
 <textarea id="CompanyOverview" asp-for="CompanyOverview" rows="6" maxlength="1000"></textarea>

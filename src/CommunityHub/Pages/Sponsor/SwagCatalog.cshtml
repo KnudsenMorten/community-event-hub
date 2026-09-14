@@ -1,0 +1,247 @@
+@page
+@model CommunityHub.Pages.Sponsor.SwagCatalogModel
+@{
+    ViewData["Title"] = "Swag catalogue";
+    var money = (decimal? v) => v is null
+        ? null
+        : (Model.CurrencySymbol ?? string.Empty) + v.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+<div class="card">
+    <h1>Swag catalogue</h1>
+
+    @if (Model.NotAvailableYet)
+    {
+        <p>This isn't available yet — we're still putting the catalogue together. You'll hear from us
+           when it opens.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else if (Model.WrongRole)
+    {
+        <p>This page is for sponsor companies.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        @if (Model.IsUnreleasedPreview)
+        {
+            @* 🔒 Not decoration: an organizer looking at this must never be unsure whether sponsors
+               can already see it. It states both facts — not released, and how to release it. *@
+            <p class="info" role="status" style="border-left:4px solid #b45309;background:#fffbeb;">
+                <strong>Preview — not released to sponsors.</strong>
+                No menu entry exists and a sponsor who opens this URL is told it isn't available yet.
+                Turn on <code>@CommunityHub.Pages.Sponsor.SwagCatalogModel.FeatureKey</code> in
+                Settings when you're happy with it.
+            </p>
+        }
+
+        @* §1165 — operator 2026-09-02: "dont forget to include wording about logo is on all items".
+           Stated once at the top AND on every card: a sponsor scrolling the catalogue like a book
+           sees one item at a time, so a promise made only in an intro they scrolled past is a
+           promise they never read. *@
+        <p><strong>Every item in this catalogue is branded with your logo.</strong>
+           Pick one, and it goes into all @(Model.BagQuantity > 0
+               ? Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " "
+               : "")attendee bags with your logo on it.
+           We handle the artwork, the order, the delivery and the packing — you choose the item and
+           give us a logo, and that is the whole job.</p>
+
+        @if (!string.IsNullOrWhiteSpace(Model.ExistingLogoFileName))
+        {
+            <p style="font-size:13.5px;color:#374151;">
+                ✅ We already have your logo (<strong>@Model.ExistingLogoFileName</strong>), so you can
+                reuse it — nothing more to upload unless you want something different for this item.
+            </p>
+        }
+        else
+        {
+            <p style="font-size:13.5px;color:#374151;">
+                We don't have a logo on file for you yet. You can still choose an item — we'll ask for
+                artwork afterwards.
+            </p>
+        }
+
+        @if (Model.Credits.Count > 0)
+        {
+            @* §1165k — a credit is OPTIONAL (operator: "not all sponsors will get one"), so this
+               block is simply absent for most. Never rendered as "you have 0", which would read as
+               something withheld rather than something never given. *@
+            <div style="margin:12px 0;padding:12px 14px;background:#ecfdf5;border:1px solid #a7f3d0;border-left:4px solid #059669;border-radius:8px;">
+                @foreach (var credit in Model.Credits)
+                {
+                    <p style="margin:0 0 4px;">
+                        <strong>You have a @((Model.CurrencySymbol ?? string.Empty) + credit.Amount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)) credit</strong>
+                        towards the catalogue. Use code <code>@credit.Code</code> at checkout.
+                        @if (credit.ExpiresOn is not null)
+                        {
+                            <span style="color:#065f46;">Valid until @credit.ExpiresOn.Value.ToString("d MMMM yyyy").</span>
+                        }
+                    </p>
+                }
+            </div>
+        }
+
+        @if (Model.Diagnostic is not null)
+        {
+            @* Organizer-only: names config keys and counts, which is operator language. *@
+            <p class="info" role="status" style="border-left:4px solid #6b7280;">
+                <strong>Nothing to show yet.</strong> @Model.Diagnostic
+            </p>
+        }
+
+        @if (Model.Items.Count == 0 && Model.Diagnostic is null)
+        {
+            <p>There's nothing in the catalogue right now.</p>
+        }
+        else if (Model.Items.Count > 0)
+        {
+            @* §1165 — "i need to be able to scroll back fort as book in catalog".
+               A scroll-snap track with prev/next buttons: it flips one item at a time like pages,
+               and because the paging is CSS scroll rather than JS state, a swipe on a phone and the
+               keyboard arrows both work with no extra code — which matters, because the mobile-first
+               rule means this is read on a phone as often as a laptop. *@
+            <div style="position:relative;margin-top:16px;">
+                <div id="swagTrack"
+                     style="display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;
+                            scroll-behavior:smooth;padding:4px 2px 12px;
+                            -webkit-overflow-scrolling:touch;">
+                    @foreach (var item in Model.Items)
+                    {
+                        <div class="swag-page"
+                             style="scroll-snap-align:center;flex:0 0 min(100%,340px);
+                                    border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;
+                                    display:flex;flex-direction:column;background:#fff;">
+                            @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+                            {
+                                <img src="@item.ImageUrl" alt="@item.Name" loading="lazy"
+                                     style="width:100%;height:200px;object-fit:cover;display:block;" />
+                            }
+                            <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;flex:1;">
+                                <strong style="font-size:16px;">@item.Name</strong>
+                                <span style="font-size:12px;color:#065f46;font-weight:600;">
+                                    Branded with your logo
+                                </span>
+
+                                @if (!string.IsNullOrWhiteSpace(item.TeaserHtml))
+                                {
+                                    @* ⚠️ Stripped to text. It is our own copy from the webshop, not a
+                                       sponsor's, but a catalogue tile is not worth an HTML seam. *@
+                                    <span style="font-size:13.5px;color:#4b5563;">
+                                        @System.Net.WebUtility.HtmlDecode(
+                                            System.Text.RegularExpressions.Regex.Replace(item.TeaserHtml, "<.*?>", " ")).Trim()
+                                    </span>
+                                }
+
+                                @* §1165 — "where they see unit price and total price x1500". The
+                                   total is the number that actually decides the purchase; a unit
+                                   price alone invites a sponsor to discover the real figure at
+                                   checkout. *@
+                                @if (item.UnitPrice is not null)
+                                {
+                                    <div style="border-top:1px solid #f3f4f6;padding-top:8px;font-size:13.5px;">
+                                        <div style="display:flex;justify-content:space-between;">
+                                            <span style="color:#6b7280;">Per piece</span>
+                                            <span>@money(item.UnitPrice)</span>
+                                        </div>
+                                        @if (Model.BagQuantity > 0 && item.TotalPrice is not null)
+                                        {
+                                            <div style="display:flex;justify-content:space-between;font-weight:600;margin-top:2px;">
+                                                <span>Total &times; @Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+                                                <span>@money(item.TotalPrice)</span>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(item.PriceText))
+                                {
+                                    @* The shop gave a price we could not read as a number — show it
+                                       verbatim rather than inventing a total from it. *@
+                                    <span style="font-size:14px;font-weight:600;">@item.PriceText</span>
+                                }
+
+                                <div style="margin-top:auto;padding-top:10px;">
+                                    @{
+                                        var state = Model.States.TryGetValue(item.ProductId, out var s)
+                                            ? s
+                                            : CommunityHub.Core.Integrations.SwagItemState.Available;
+                                    }
+                                    @switch (state)
+                                    {
+                                        case CommunityHub.Core.Integrations.SwagItemState.Taken:
+                                            <span style="display:inline-block;padding:3px 9px;border-radius:999px;background:#f3f4f6;color:#6b7280;font-size:12px;">
+                                                Taken
+                                            </span>
+                                            break;
+
+                                        case CommunityHub.Core.Integrations.SwagItemState.HeldForSomeoneElse:
+                                            @* Shown, not hidden: "reserved" tells a sponsor something
+                                               true, while an item that silently disappears just looks
+                                               like it never existed. Who it is held for is NOT named —
+                                               that is another sponsor's business. *@
+                                            <span style="display:inline-block;padding:3px 9px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:12px;">
+                                                Reserved
+                                            </span>
+                                            break;
+
+                                        case CommunityHub.Core.Integrations.SwagItemState.HeldForYou:
+                                            <span style="display:inline-block;padding:3px 9px;border-radius:999px;background:#dbeafe;color:#1e40af;font-size:12px;margin-right:8px;">
+                                                Reserved for you
+                                            </span>
+                                            @if (!string.IsNullOrWhiteSpace(item.BuyUrl))
+                                            {
+                                                <a href="@item.BuyUrl" target="_blank" rel="noopener noreferrer">Confirm it</a>
+                                            }
+                                            break;
+
+                                        default:
+                                            @if (item.RemainingCount is int left)
+                                            {
+                                                <span style="display:inline-block;padding:3px 9px;border-radius:999px;background:#ecfdf5;color:#065f46;font-size:12px;margin-right:8px;">
+                                                    @left left
+                                                </span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(item.BuyUrl))
+                                            {
+                                                <a href="@item.BuyUrl" target="_blank" rel="noopener noreferrer">Choose this</a>
+                                            }
+                                            break;
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:6px;">
+                    <button type="button" id="swagPrev" aria-label="Previous item">&larr; Back</button>
+                    <span style="font-size:12.5px;color:#6b7280;">
+                        @Model.Items.Count item@(Model.Items.Count == 1 ? "" : "s")
+                    </span>
+                    <button type="button" id="swagNext" aria-label="Next item">Next &rarr;</button>
+                </div>
+            </div>
+
+            <script>
+                // Page the track by exactly one card, measured from the DOM rather than assumed:
+                // the card width is responsive (min(100%,340px)), so a hard-coded step would flip
+                // by the wrong amount on a phone — which is where most of this is read.
+                (function () {
+                    var track = document.getElementById('swagTrack');
+                    if (!track) return;
+                    function step() {
+                        var card = track.querySelector('.swag-page');
+                        if (!card) return track.clientWidth;
+                        var gap = parseFloat(getComputedStyle(track).columnGap || '16') || 16;
+                        return card.getBoundingClientRect().width + gap;
+                    }
+                    var prev = document.getElementById('swagPrev');
+                    var next = document.getElementById('swagNext');
+                    if (prev) prev.addEventListener('click', function () { track.scrollBy({ left: -step(), behavior: 'smooth' }); });
+                    if (next) next.addEventListener('click', function () { track.scrollBy({ left: step(), behavior: 'smooth' }); });
+                })();
+            </script>
+        }
+
+        <p style="margin-top:18px;"><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>

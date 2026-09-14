@@ -6,8 +6,9 @@
 #  values. This script sets them, AFTER deployment. It prompts for each value
 #  so nothing secret is ever written to a file or to shell history.
 #
-#  The secret-name inventory matches CONTEXT.md section 11 and the names that
-#  integrations.eldk27.json references.
+#  The secret-name inventory matches docs/DESIGN.md section 17 (Key Vault
+#  secret inventory) and the secret NAMES that config-examples/
+#  integrations.example.json references.
 #
 #  Usage:   ./scripts/set-secrets.sh <dev|prod>
 #
@@ -79,7 +80,7 @@ echo
 
 # Secret inventory: name -> human prompt.
 SECRETS=(
-  "sql-admin-password|SQL administrator password (the one used at deploy time)"
+  "sql-admin-password|SQL administrator password (NOT used by the default Entra-only SQL server -- leave blank)"
   "brevo-smtp-username|Brevo SMTP username (the Brevo-issued ID, e.g. 8xxxxxx@smtp-brevo.com)"
   "brevo-smtp-key|Brevo SMTP key (the SMTP password, NOT the account login)"
   "woocommerce-consumer-key|WooCommerce REST API consumer key (read-only)"

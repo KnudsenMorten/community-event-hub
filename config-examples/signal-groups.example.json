@@ -1,0 +1,16 @@
+{
+  "_comment": "EXAMPLE Signal group invite links (operational links, not secrets). Copy to config/signal-groups.<edition>.json. The Broadcast group is shared by everyone in scope; the Chat link differs per role. A role key being present puts that role in scope for the Get-Started 'Join Signal groups' step (it always gets Broadcast); a chatUrl additionally renders a Chat button. Omit the file to hide the step entirely.",
+  "broadcastLabel": "DEMO27 Broadcast",
+  "broadcastUrl": "https://signal.group/#<your-broadcast-group-invite>",
+  "roles": {
+    "Speaker": {
+      "chatLabel": "DEMO27 Speakers - Chat",
+      "chatUrl": "https://signal.group/#<your-speaker-chat-invite>"
+    },
+    "Volunteer": {
+      "chatLabel": "DEMO27 Volunteers - Chat",
+      "chatUrl": "https://signal.group/#<your-volunteer-chat-invite>"
+    },
+    "Media": {}
+  }
+}

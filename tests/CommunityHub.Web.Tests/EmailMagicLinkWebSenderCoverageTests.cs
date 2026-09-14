@@ -37,6 +37,15 @@ public sealed class EmailMagicLinkWebSenderCoverageTests
     private const string Origin = "https://hub.example";
     private static readonly DateTimeOffset Now = new(2026, 6, 28, 9, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// §1077 stage 5 — the page now also owns the timeslots, the planner and the partner exports.
+    /// These tests are about the INVITE mail, so the schedule service is simply supplied.
+    /// </summary>
+    private static CommunityHub.Core.Integrations.GroupPhotoScheduleService NewSchedule(
+        CommunityHub.Core.Data.CommunityHubDbContext db) =>
+        new(db, new CommunityHub.Core.Integrations.VolumePackageGroupPhotoService(
+                db, new CommunityHub.Core.Integrations.VolumePackageQualificationService(db)));
+
     private sealed class FixedClock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => Now;
@@ -211,7 +220,7 @@ public sealed class EmailMagicLinkWebSenderCoverageTests
         var reg = await db.GroupPhotoRegistrations.SingleAsync();
 
         var sender = new CapturingEmailSender();
-        var page = new GroupPhotosModel(db, Accessor(organizer), Templates(sp), sender, new FixedClock())
+        var page = new GroupPhotosModel(db, Accessor(organizer), Templates(sp), sender, new FixedClock(), NewSchedule(db))
         { PageContext = PageCtx() };
 
         await page.OnPostSendInviteAsync(reg.Id, default);
@@ -240,7 +249,7 @@ public sealed class EmailMagicLinkWebSenderCoverageTests
         var reg = await db.GroupPhotoRegistrations.SingleAsync();
 
         var sender = new CapturingEmailSender();
-        var page = new GroupPhotosModel(db, Accessor(organizer), Templates(sp), sender, new FixedClock())
+        var page = new GroupPhotosModel(db, Accessor(organizer), Templates(sp), sender, new FixedClock(), NewSchedule(db))
         { PageContext = PageCtx() };
 
         await page.OnPostSendInviteAsync(reg.Id, default);   // fail-safe: never throws

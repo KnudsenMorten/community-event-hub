@@ -35,7 +35,8 @@ public sealed class SponsorZohoSyncService
         ZohoClient zoho, CommunityHubDbContext db, ZohoOptions options,
         CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         ILogger<SponsorZohoSyncService> log,
-        Email.ZohoChangeNotifier? zohoChanges = null)
+        Email.ZohoChangeNotifier? zohoChanges = null,
+        TimeProvider? clock = null)
     {
         _zoho = zoho;
         _db = db;
@@ -44,7 +45,11 @@ public sealed class SponsorZohoSyncService
         _cmOptions = cmOptions;
         _log = log;
         _zohoChanges = zohoChanges;
+        _clock = clock ?? TimeProvider.System;
     }
+
+    /// <summary>§1221 — the dead-link strike gap is measured in real hours, so tests need to move time.</summary>
+    private readonly TimeProvider _clock;
 
     /// <summary>
     /// §302 (operator 2026-07-24): <see cref="SponsorFields"/>/<see cref="ExhibitorFields"/>
@@ -54,19 +59,44 @@ public sealed class SponsorZohoSyncService
     /// change-only lines in the ops mail (no more a mail line on every pass).
     /// </summary>
     /// <param name="ManualLines">
-    /// 🔴 §792 — the hand-entry lines for this company (blank or different in Zoho, with the CEH
-    /// value to paste). Under Plan B this is where the content lives: <see cref="SponsorFields"/> and
-    /// <see cref="ExhibitorFields"/> are now always empty, because nothing is written.
+    /// §792 — the hand-entry lines for this company (blank or different in Zoho, with the CEH
+    /// value to paste).
+    ///
+    /// <para>⚰️ This used to say *"Under Plan B this is where the content lives:
+    /// <see cref="SponsorFields"/> and <see cref="ExhibitorFields"/> are now always empty, because
+    /// nothing is written."* **No longer true.** §803 restored the sponsor push and §1087 the
+    /// exhibitor social pages, so the Fields lists carry the content again and this list is the
+    /// residue: booth videos/collateral (Backstage has no API — §792.7) and contact changes
+    /// (§791.5 — CEH deliberately never PUTs them). On a healthy run it is usually empty, and an
+    /// empty list sends no mail.</para>
     ///
     /// <para>⚠️ It MUST be returned rather than only mailed in-line: the BULK paths call this with
     /// <c>notifyZohoChange: false</c> and compose ONE batched mail for the whole run. Without this
     /// the scheduled catch-up would have run silently — every line dropped on the floor — which is
     /// exactly the run he is relying on after the stamp flush.</para>
     /// </param>
+    /// <param name="Skipped">
+    /// 🔴 §1088 — <b>this company was DELIBERATELY not synced, and that is not a failure.</b>
+    /// </param>
+    /// <param name="SkipReason">
+    /// Why it was skipped, in words ("marked as test data" / "withdrawn"), for the log and the GUI.
+    /// <para>⚠️ <b>The reason used to travel in <see cref="Error"/>, and every counter downstream
+    /// read a non-null <c>Error</c> as a failure.</b> So the reconcile job's summary has read
+    /// <i>"failed 1"</i> on EVERY pass for as long as one test company has existed — and the
+    /// SponsorAdmin button reported <i>"1 need attention"</i> for something needing no attention.
+    /// A permanent false 1 is worse than a wrong number: it sets the floor a real failure has to
+    /// rise above to be noticed, and nobody looks at a count that is always the same.</para>
+    /// <para>🔑 The fix is a separate outcome, not a smarter counter. "Refused on purpose" and
+    /// "tried and failed" are different facts, and any place that collapses them will mis-report
+    /// one of them — a string-match on the message would have been the same bug with extra steps.</para>
+    /// </param>
     public sealed record SyncResult(
         bool Enabled, bool SponsorSynced, bool ExhibitorSynced, bool IsExhibitor, string? Error,
         IReadOnlyList<string>? SponsorFields = null, IReadOnlyList<string>? ExhibitorFields = null,
-        IReadOnlyList<string>? ManualLines = null);
+        IReadOnlyList<string>? ManualLines = null,
+        bool Skipped = false, string? SkipReason = null,
+        // §1175 — fields sent repeatedly that Zoho still does not return. Reported once, not resent.
+        IReadOnlyList<string>? StuckFields = null);
 
     /// <summary>
     /// Push one company's Company-Details fields to its Zoho sponsor/exhibitor records.
@@ -94,8 +124,12 @@ public sealed class SponsorZohoSyncService
             _log.LogInformation(
                 "Zoho sync: {Co} skipped — {Reason} (§1035).",
                 companyId, SponsorZohoScope.SkipReason(info));
-            return new(true, false, false, info.HasBooth,
-                $"Skipped — this company is {SponsorZohoScope.SkipReason(info)}.");
+
+            // 🔴 §1088 — a SKIP, not an ERROR. This used to return the reason in `Error`, which made
+            // every downstream counter treat a deliberately-excluded test company as a failure.
+            return new(true, false, false, info.HasBooth, Error: null,
+                Skipped: true,
+                SkipReason: $"Skipped — this company is {SponsorZohoScope.SkipReason(info)}.");
         }
 
         // Reuse a caller-supplied token (bulk re-sync fetches ONE token for the whole
@@ -113,21 +147,64 @@ public sealed class SponsorZohoSyncService
         var sponsorSynced = false;
         var exhibitorSynced = false;
         // §302: the Zoho GUI field names this sync actually wrote (change-only mails).
+        // §1175 — fields this company has now been sent the same value too many times without Zoho
+        // taking them, and whether the ledger needs saving. Warned ONCE, then quiet — the push
+        // itself never stops (§784.13).
+        var stuckFields = new List<string>();
+        var ledgerChanged = false;
+
         var sponsorFields = new List<string>();
         var exhibitorFields = new List<string>();
         // §792 — Plan B: the fields to enter BY HAND in Backstage, one line each, with the CEH
         // value to copy. This replaces the API update entirely for sponsors + exhibitors.
         var manualLines = new List<string>();
+        // §1154 — pushes skipped because Zoho was UNAVAILABLE (5xx / 429 / blocked host). Counted
+        // and logged, never turned into hand-entry work: the value is writable and the next run
+        // delivers it.
+        var transientSkips = 0;
         // Declared out here because the hand-entry mail is composed AFTER the try/catch — the mail
         // must still go out on the path where a later Zoho read threw.
         string? desiredEmail = null;
         var emailChanged = false;
 
+        // §1128 — the contact e-mail Backstage actually holds, read from the sponsor GET below.
+        // 🔒 Hoisted out of that block because the Contact hand-entry line is composed AFTER it, and
+        // the whole point of §1128 is that the line must compare against the LIVE value rather than
+        // CEH's own "what I last reported" stamp. Stays null when the sponsor could not be read,
+        // which NeedsManualEntry treats as "needs entry" — failing toward reporting.
+        string? zohoContactEmail = null;
+
+        // §1175 — announce a successful write, unless we have already announced this exact value
+        // enough times to know it is not arriving.
+        //
+        // 🔴 This runs AFTER the push, never instead of it. The value went to Zoho either way; the
+        // only question here is whether saying so again helps him. On the run that crosses the
+        // threshold the ordinary "we wrote this" line is replaced by ONE warning naming the two
+        // likely causes; after that the field is pushed silently until it lands or changes.
+        void Announce(SponsorInfo target, string ledgerKey, string? valueSent, string label,
+            List<string> into)
+        {
+            ledgerChanged = true;
+            switch (ZohoPushLedger.ReportFor(ZohoPushLedger.RecordSent(target, ledgerKey, valueSent)))
+            {
+                case ZohoPushReport.Normal:
+                    into.Add(label);
+                    break;
+                case ZohoPushReport.Warn:
+                    stuckFields.Add(label);
+                    break;
+                // Silent — still written, no longer worth a line.
+            }
+        }
+
         try
         {
-            // FILL-BLANK reconcile (REQUIREMENTS §41b): pull blank CEH social/web fields
-            // from the webshop, and push CEH values back to a blank webshop field. Runs
-            // before the Zoho push so a freshly-pulled WebsiteUrl is sent on this same sync.
+            // Webshop reconcile: the WEBSITE always comes from the webshop (§1125 — it OVERWRITES,
+            // because §1081 made the webshop authoritative for it); LinkedIn/Twitter stay §41b
+            // FILL-BLANK. CEH values are still pushed back to a BLANK webshop field.
+            //
+            // 🔑 Runs BEFORE the Zoho push, so a website corrected in the webshop reaches Backstage
+            // on this same pass rather than a sync later.
             if (await ReconcileWithWebshopAsync(info, ct)) changedIds = true;
 
             // The contact email is sent to Zoho ONLY when it actually CHANGED vs the last
@@ -164,8 +241,31 @@ public sealed class SponsorZohoSyncService
             if (string.IsNullOrWhiteSpace(info.ZohoSponsorId))
             {
                 var sponsors = await _zoho.GetSponsorsAsync(token!, ct);
-                var match = sponsors.FirstOrDefault(s => NameEq(s.CompanyName, companyName));
-                if (match is not null) { info.ZohoSponsorId = match.Id; changedIds = true; }
+
+                // 🔴 §1159 — BY NAME, BUT NEVER A RECORD ANOTHER COMPANY ALREADY HOLDS.
+                //
+                // Operator 2026-08-31 collapsed four separate webshop companies to ONE public name.
+                // A bare name match then points all four at the same Zoho record, and each
+                // reconcile overwrites the previous one's website and description — which reads as
+                // a sync that keeps reverting, not as a linking bug. CEH's stored ids are keyed by
+                // company id and are the identity; the name is only a bootstrap.
+                var claimed = (await _db.SponsorInfos
+                        .IgnoreQueryFilters()
+                        .Where(s => s.EventId == eventId && s.SponsorCompanyId != companyId)
+                        .ToListAsync(ct))
+                    .SelectMany(SponsorZohoLinks.AllSponsorIds)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                var match = ZohoRecordMatch.ByName(
+                    sponsors.Select(s => (s.Id, s.CompanyName)), companyName, claimed);
+
+                if (match.Id is not null) { info.ZohoSponsorId = match.Id; changedIds = true; }
+                else if (match.RefusalReason is not null)
+                {
+                    // 🔒 Reported, not guessed — and NOT a hand-entry line, because the fix is a
+                    // one-off link in Backstage rather than a field somebody has to retype.
+                    _log.LogWarning("Zoho sync: {Co} — {Reason}", companyName, match.RefusalReason);
+                }
             }
             if (!string.IsNullOrWhiteSpace(info.ZohoSponsorId))
             {
@@ -175,6 +275,7 @@ public sealed class SponsorZohoSyncService
                 // old unconditional PUT (always carrying company/contact names) reported
                 // "Updated sponsor record" on every 10-minute pass.
                 var z = await _zoho.GetSponsorByIdAsync(token!, info.ZohoSponsorId!, ct);
+                zohoContactEmail = z?.ContactEmail;   // §1128 — see the declaration above.
 
                 // 🔒 §596 — CHANGE-DRIVEN, NOT FILL-BLANK ONLY. DO NOT REVERT TO `BlankInZoho &&`.
                 //
@@ -192,7 +293,8 @@ public sealed class SponsorZohoSyncService
                 //
                 // FILL-BLANK is KEPT as a second trigger so a value that never reached Zoho still
                 // lands even when the stamp already matches.
-                // 🔴🔴 §792 — PLAN B: CEH NO LONGER UPDATES SPONSORS OR EXHIBITORS OVER THE API.
+                // ⚰️ §792 — PLAN B WAS "CEH NO LONGER UPDATES SPONSORS OR EXHIBITORS OVER THE API".
+                // 🟢 IT IS UNWOUND. Read this block as history; the code below PUTs again.
                 //
                 // Operator 2026-08-04, after §791.3 proved the exhibitor endpoint accepts and
                 // discards `company_social_pages`: *"then we need to change to plan B for updates in
@@ -200,8 +302,13 @@ public sealed class SponsorZohoSyncService
                 // info@expertslive.dk as mail, so I manually can update the records"* …
                 // *"we will not spend more time on api UPDATES in zoho anymore until they fix it"*.
                 //
-                // ⇒ Every field that differs is REPORTED for hand-entry, exactly like the
-                // create-only speakers area (§763). Nothing is PUT.
+                // 🔑 THE CONDITION HE SET — *"until they fix it"* — WAS MET. It came back in two
+                // steps, and both were measurements, not opinions:
+                //   §803  (2026-08-04) sponsor description + website proved writable → pushed again
+                //   §1087 (2026-08-17) Zoho repaired `company_social_pages`          → pushed again
+                // ⇒ Nothing on either record is hand-entry because of an API limitation now. What
+                // still reaches him by mail is booth videos/collateral (no endpoint exists, §792.7)
+                // and contact details (§791.5 — a deliberate refusal, not a failure).
                 //
                 // 🔑 CREATE IS UNAFFECTED — `CreateSponsorAsync` / `CreateExhibitorAsync` still run,
                 // contact details and all. He scoped this to UPDATES: *"this limitation is for both
@@ -223,6 +330,89 @@ public sealed class SponsorZohoSyncService
                 // have deployed this so i tomorrow can catch up via manual cut/paste"*. Clearing the
                 // stamp makes the next pass report EVERYTHING, which is the complete catch-up list.
                 // Without the stamp there would be nothing to flush and no way to ask for a resend.
+                // 🔴 §1160 — THE COMPANY NAME IS RECONCILED ON EVERY PASS, OUTSIDE THE STAMP.
+                //
+                // Operator 2026-08-31, after the public-name cleanup reached the webshop:
+                // *"when can i expect the webshop public name changes to be synced to ceh and then
+                // to zoho"* … *"i still dont see the changes"*. The honest answer was: never.
+                //
+                // ⚠️ §1153 made the name SUFFICIENT — inside this block. But the block is gated by
+                // `reportChanged`, a hash of description / website / social / coordinator, and the
+                // NAME IS NOT IN THAT HASH. So a rename changed nothing the stamp could see, the
+                // gate stayed shut, and the comparison §1153 added never ran. It is §1153's own bug
+                // one level up: the name was made sufficient inside a room nothing opened.
+                //
+                // 🔑 Fixed by hoisting the name OUT rather than by adding the name to the hash.
+                // The hash decides what to MAIL a human; the name is an API write that needs no
+                // human. Putting it in the hash would mail him on every rename instead.
+                //
+                // 🔒 Costs no extra call: `z` was already read above, outside the gate. When the
+                // gate IS open the existing push carries the name, so this runs only when it is shut.
+                var nameNeedsPush = ShouldPushName(z?.CompanyName, companyName);
+                if (nameNeedsPush && !reportChanged)
+                {
+                    var nameOutcome = await _zoho.UpdateSponsorAsync(
+                        token!, info.ZohoSponsorId!,
+                        description: null, websiteUrl: null, companyName: companyName, ct);
+
+                    if (nameOutcome == ZohoClient.ZohoWriteOutcome.Written)
+                    {
+                        sponsorFields.Add("Company name");
+                        sponsorSynced = true;
+                    }
+                    else
+                    {
+                        // Not a hand-entry line: a name is writable through the API, so a failure
+                        // here is a fault to retry next pass, not work to hand to a person.
+                        _log.LogWarning(
+                            "Zoho sync: sponsor name push for {Co} returned {Outcome}; will retry.",
+                            companyName, nameOutcome);
+                    }
+                }
+
+                // 🔴 §1160 — AND EVERY OTHER RECORD THIS COMPANY HOLDS.
+                //
+                // Operator 2026-08-31: *"it must be updated into both sponsor + exhibitor inclu
+                // multiple entries under sponsor (if more is found)"*.
+                //
+                // ⚠️ §1157's fan-out lives INSIDE the report gate, so the extra category records
+                // had the same defect as the primary — worse, in fact: a company under two public
+                // headings would have had one heading renamed and the other left, which is the
+                // §1157 complaint ("the same company reading differently under two headings")
+                // reappearing through the back door.
+                //
+                // 🔒 Each record is still compared on its OWN read before any write — a blind
+                // fan-out would PUT to every category on every pass (§1153's write storm).
+                if (!reportChanged)
+                {
+                    foreach (var extraId in SponsorZohoLinks.AllSponsorIds(info)
+                                 .Where(id => !string.Equals(id, info.ZohoSponsorId, StringComparison.Ordinal)))
+                    {
+                        var extraNow = await _zoho.GetSponsorByIdAsync(token!, extraId, ct);
+                        if (!ShouldPushName(extraNow?.CompanyName, companyName)) continue;
+
+                        var xNameOutcome = await _zoho.UpdateSponsorAsync(
+                            token!, extraId,
+                            description: null, websiteUrl: null, companyName: companyName, ct);
+
+                        if (xNameOutcome == ZohoClient.ZohoWriteOutcome.Written)
+                        {
+                            sponsorSynced = true;
+                            _log.LogInformation(
+                                "Sponsor {Co}: name corrected on additional Zoho record {Id}.",
+                                companyName, extraId);
+                        }
+                        else
+                        {
+                            // Named with its id — "the sponsor record" is ambiguous once a company
+                            // has several, and he has to know WHICH one to open in Backstage.
+                            _log.LogWarning(
+                                "Zoho sync: name push for {Co} record {Id} returned {Outcome}; will retry.",
+                                companyName, extraId, xNameOutcome);
+                        }
+                    }
+                }
+
                 if (reportChanged)
                 {
                     // 🔴 §803 — THE SPONSOR RECORD IS PUSHED AGAIN. Operator 2026-08-04: *"now i need
@@ -235,32 +425,173 @@ public sealed class SponsorZohoSyncService
                     // ⚠️ The sponsor record has NO social-pages field, so unlike the exhibitor there
                     // is nothing left here that the API cannot do — every remaining hand-entry line
                     // for a sponsor is the CONTACT (§791.5), which is a decision, not a limitation.
-                    var wantsDescription = NeedsManualEntry(z?.Description, info.CompanyDescription);
-                    var wantsWebsite = NeedsManualEntry(z?.WebsiteUrl, info.WebsiteUrl);
-
-                    if (wantsDescription || wantsWebsite)
+                    // 🔴 §1220 — A RECORD WE COULD NOT READ IS NOT A RECORD WITH BLANK FIELDS.
+                    //
+                    // Operator 2026-09-14: *"this mail keeps coming … the fields ARE already set so
+                    // the before/after compare is not working"*. Proven in PROD telemetry: Zoho
+                    // answers the sponsor GET with bursts of HTTP 400 (2026-09-10 13:50, 09-12 14:30,
+                    // 09-13 15:25), `GetSponsorByIdAsync` returns null, NeedsManualEntry scored null
+                    // as blank — and every one of the 8 PUTs that day followed a failed read of that
+                    // same record by milliseconds, each announced as "Pushed … Website". The next
+                    // good read then CLEARED the §1175 ledger, so the announcement never went quiet.
+                    //
+                    // 🔒 §1153's rule for the name, applied to every field: unknown is not different.
+                    // Nothing is pushed, announced or cleared for an unread record; the next run
+                    // ten minutes later compares for real.
+                    var sponsorRead = z is not null;
+                    if (!sponsorRead)
                     {
-                        var pushed = await _zoho.UpdateSponsorAsync(
+                        transientSkips++;
+                        _log.LogWarning(
+                            "Sponsor {Co}: Zoho sponsor record {Id} could not be read; nothing compared "
+                            + "or pushed this run.", companyName, info.ZohoSponsorId);
+                    }
+                    var wantsDescription = sponsorRead && NeedsManualEntry(z?.Description, info.CompanyDescription);
+                    var wantsWebsite = sponsorRead && NeedsManualEntry(z?.WebsiteUrl, info.WebsiteUrl);
+
+                    // §1153 — the sponsor had the SAME latent gap as the exhibitor, one step milder.
+                    // It always PASSED the name, so a correction rode along on somebody else's
+                    // change — but a record whose only difference was the name triggered no push at
+                    // all, so it was never corrected either. Comparing it makes the name sufficient
+                    // on its own, on both records, at every run.
+                    // 🔒 §1153 — A NAME WE COULD NOT READ IS NOT A NAME THAT DIFFERS.
+                    // See the exhibitor block below for why this guard is not optional.
+                    var wantsName = ShouldPushName(z?.CompanyName, companyName);
+
+                    // 🔴 §1175 — SAY IT ONCE WHEN A WRITE KEEPS NOT LANDING.
+                    //
+                    // Operator 2026-09-03, on the same sponsors in the ops mail run after run:
+                    // *"the reconsile must verify the existing value and only change it different"*.
+                    // It does — the comparison above is correct and the read/write keys match, so
+                    // this is not the §1140 shape. The fault is one level up: CEH ANNOUNCED the
+                    // same write for ever without noticing it was the same write.
+                    //
+                    // 🔑 Zoho returning blank after a 200 has two causes that look identical here —
+                    // an unpublished draft, or a silently discarded field (§791.3 measured four
+                    // writes, four 200s, gone on the next GET). Neither is fixed by comparing
+                    // harder, and both are worth ONE sentence to a human.
+                    //
+                    // 🔴 THE PUSH ITSELF IS UNTOUCHED, DELIBERATELY. See the §784.13 block below:
+                    // a "push once" memo is exactly what cost him ten sponsors' LinkedIn URLs, and
+                    // capping the retry here would have made §1087's endpoint repair heal nothing.
+                    // The push is idempotent and fires only while Zoho is blank; the MAIL was the
+                    // cost. So only `Announce` is gated — see `ZohoPushLedger`.
+                    //
+                    // 🔒 A field that ARRIVES clears its entry, so a healthy field leaves no trace
+                    // and a later relapse is reported afresh.
+                    // §1220 — an unread record proves nothing arrived, so it clears nothing either.
+                    if (sponsorRead && !wantsDescription)
+                        ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.SponsorKey("description"));
+                    if (sponsorRead && !wantsWebsite)
+                        ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.SponsorKey("website_url"));
+                    if (sponsorRead && !wantsName)
+                        ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.SponsorKey("company_name"));
+
+                    if (wantsName || wantsDescription || wantsWebsite)
+                    {
+                        var outcome = await _zoho.UpdateSponsorAsync(
                             token!, info.ZohoSponsorId!,
                             description: wantsDescription ? info.CompanyDescription : null,
                             websiteUrl: wantsWebsite ? info.WebsiteUrl : null,
                             companyName: companyName,
                             ct);
 
-                        if (pushed)
+                        if (outcome == ZohoClient.ZohoWriteOutcome.Written)
                         {
-                            if (wantsDescription) sponsorFields.Add("Description");
-                            if (wantsWebsite) sponsorFields.Add("Website");
+                            // §1175 — recorded as SENT, not as arrived. Whether it arrived is only
+                            // knowable on the NEXT run's read, which is the whole point.
+                            if (wantsName)
+                                Announce(info, ZohoPushLedger.SponsorKey("company_name"),
+                                    companyName, "Company name", sponsorFields);
+                            if (wantsDescription)
+                                Announce(info, ZohoPushLedger.SponsorKey("description"),
+                                    info.CompanyDescription, "Description", sponsorFields);
+                            if (wantsWebsite)
+                                Announce(info, ZohoPushLedger.SponsorKey("website_url"),
+                                    info.WebsiteUrl, "Website", sponsorFields);
                             sponsorSynced = true;
+                        }
+                        else if (outcome == ZohoClient.ZohoWriteOutcome.Refused)
+                        {
+                            // 🔴 §1225 — A REFUSED PUSH OF AN API-WRITABLE FIELD IS NOT HAND-ENTRY WORK.
+                            // Operator 2026-09-14, on "Exhibitor · Pinksky · Company Social Pages →
+                            // LinkedIn": *"this email is wrong, as we have api, remove this email"*.
+                            // Proven: that "refusal" was Zoho's generic 400 ("An unexpected error
+                            // occurred") inside one of its read-failure bursts, and the value was
+                            // already in Backstage. Zoho's 400 is not a reliable verdict on the
+                            // payload, so a writable field is retried next run (loud in the log, where
+                            // UpdateSponsorAsync already records Zoho's body) instead of mailed.
+                            // Hand-entry mail stays for what has NO API: booth media, contact details.
+                            transientSkips++;
+                            _log.LogWarning(
+                                "Sponsor {Co}: Zoho refused the sponsor push; not reported as "
+                                + "hand-entry (the fields are API-writable), will retry next run.", companyName);
                         }
                         else
                         {
-                            // A refused push still has to reach Backstage, so it falls back to a
-                            // hand-entry line — with Zoho's own reason now in the log (§802.4(2)).
-                            if (wantsDescription)
-                                manualLines.Add(ManualField("Sponsor", companyName, "Description", info.CompanyDescription));
-                            if (wantsWebsite)
-                                manualLines.Add(ManualField("Sponsor", companyName, "Website", info.WebsiteUrl));
+                            // 🔒 §1154 — UNAVAILABLE (5xx / 429 / blocked host) is NOT human work.
+                            // The value is writable and this run simply could not deliver it; the
+                            // next run, ten minutes away, will. Telling him to type it in by hand
+                            // is worse than silence — it invents work and teaches him to distrust
+                            // the mail. Loud in the log, absent from his inbox (§1140b).
+                            transientSkips++;
+                            _log.LogWarning(
+                                "Sponsor {Co}: Zoho was unavailable for the sponsor push; not "
+                                + "reported as hand-entry, will retry next run.", companyName);
+                        }
+                    }
+
+                    // 🔴 §1157 — AND THE SAME VALUES REACH EVERY OTHER RECORD THIS COMPANY HAS.
+                    //
+                    // Operator 2026-08-31: *"it is important, that ceh stored multiple ids in the
+                    // sponsor field (array), so any updates happens to all entries … like company
+                    // name, company description, company website"*.
+                    //
+                    // 🔑 A company can hold SEVERAL Zoho sponsor records — one per sponsorship
+                    // category — and last year's event proves it: ARROW sits under both COMMUNITY &
+                    // APPRECIATION and CONTENT & PROGRAM. Name, description and website belong to
+                    // the COMPANY, not to a category, so updating one record and not the others
+                    // leaves the same company reading differently under two public headings.
+                    //
+                    // 🔒 Each record is compared on its OWN read before being written — a blind
+                    // fan-out would PUT to every category on every run, which is the write storm
+                    // §1153 had to be guarded against. Same three-outcome handling as the primary.
+                    foreach (var extraId in SponsorZohoLinks.AllSponsorIds(info)
+                                 .Where(id => !string.Equals(id, info.ZohoSponsorId, StringComparison.Ordinal)))
+                    {
+                        var extra = await _zoho.GetSponsorByIdAsync(token!, extraId, ct);
+
+                        // §1220 — unread is unknown, not blank; see the primary record above.
+                        if (extra is null) { transientSkips++; continue; }
+
+                        var xName = ShouldPushName(extra?.CompanyName, companyName);
+                        var xDescription = NeedsManualEntry(extra?.Description, info.CompanyDescription);
+                        var xWebsite = NeedsManualEntry(extra?.WebsiteUrl, info.WebsiteUrl);
+                        if (!xName && !xDescription && !xWebsite) continue;
+
+                        var xOutcome = await _zoho.UpdateSponsorAsync(
+                            token!, extraId,
+                            description: xDescription ? info.CompanyDescription : null,
+                            websiteUrl: xWebsite ? info.WebsiteUrl : null,
+                            companyName: companyName,
+                            ct);
+
+                        if (xOutcome == ZohoClient.ZohoWriteOutcome.Written)
+                        {
+                            sponsorSynced = true;
+                            _log.LogInformation(
+                                "Sponsor {Co}: additional Zoho record {Id} brought in step.",
+                                companyName, extraId);
+                        }
+                        else
+                        {
+                            // §1225 — refused or unavailable alike: writable fields retry next run and
+                            // are never mailed as hand-entry (see the primary record above).
+                            transientSkips++;
+                            if (xOutcome == ZohoClient.ZohoWriteOutcome.Refused)
+                                _log.LogWarning(
+                                    "Sponsor {Co}: Zoho refused the push to additional record {Id}; "
+                                    + "will retry next run.", companyName, extraId);
                         }
                     }
                 }
@@ -301,100 +632,256 @@ public sealed class SponsorZohoSyncService
                     // ⚠️ Do NOT reintroduce a "push once" memo to reduce chatter. The re-push is
                     // idempotent and only fires while Zoho is actually blank; the moment it lands,
                     // the live comparison stops it. Chattiness was never the real cost here.
-                    // 🔴🔴 §791.3 — AND THEN THE LIVE API SETTLED IT: `company_social_pages` CANNOT BE
-                    // WRITTEN OVER v3 AT ALL. Four controlled PUTs against PROD on 2026-08-04:
-                    //   1. social alone            → 200, the RESPONSE BODY ECHOES IT, read-back absent
-                    //   2. social + website + name → 200, read-back absent
-                    //   3. social with "facebook", the exact key from Zoho's own doc sample
-                    //                              → 200, read-back absent
-                    //   4. add "twitter" to 2linkIT, a record whose "linkedin" IS set
-                    //                              → 200, read-back STILL only {"linkedin":…}
-                    // Test 4 is the clincher: even on a record that HAS social, the API cannot add to
-                    // it. The field is accepted, echoed and silently discarded — it behaves READ-ONLY.
-                    // ⇒ The three exhibitors that show social got it from the Backstage GUI, never
-                    // from CEH. He set Admin By Request's LinkedIn by hand, and the sync's X/Twitter
-                    // push on the same record in the same window did NOT land — one record proving
-                    // both halves.
+                    // ⚰️ §791.3 → ✅ §1087 — THE READ-ONLY FINDING IS DEAD. ZOHO FIXED THE ENDPOINT.
                     //
-                    // 🔒 SO THE PUSH IS SWITCHED OFF, and live-comparing made that necessary rather
-                    // than optional: "re-send whenever Zoho reads back blank" against a field that
-                    // can never read back non-blank means EVERY sponsor, EVERY pass, for ever. That
-                    // is the log he pasted. The right answer to an unwritable field is not a better
-                    // retry.
+                    // For a fortnight this block explained why `company_social_pages` could not be
+                    // written: four controlled PUTs on 2026-08-04 returned 200, echoed the field back
+                    // and vanished on the next GET — including Zoho's own documented `facebook` key,
+                    // and including an attempt to ADD to a record whose `linkedin` was already set.
+                    // That measurement was real and it is why the push was switched off.
                     //
-                    // 🔴🔴 §792 — PLAN B. Nothing below is PUT to Zoho; every difference becomes a
-                    // line in the hand-entry mail. See the sponsor block above for his wording.
+                    // ✅ Zoho repaired it over the weekend of 2026-08-16. §1087 re-ran the SAME probe
+                    // on the SAME record (2linkIT) on 2026-08-17: a write into the cleared social
+                    // object reads back on the next GET, and so does an overwrite of an existing
+                    // value — 791.3's test 4, the one whose failure was the clincher. Everything
+                    // above the endpoint was always correct; the payload shape never changed.
                     //
-                    // ⚠️ Note what this costs and why he accepted it: `website_url` and
-                    // `company_overview` DO write correctly over the API. They are reported rather
-                    // than pushed anyway, because he asked for ONE rule — *"Any api UPDATES related
-                    // to sponsors and exhibitors"* — and a half-manual field set is worse than a
-                    // fully manual one: he would have to remember which half the hub still handles.
+                    // 🔒 §1087 — `company_social_pages` MERGES rather than replaces: a key left out
+                    // of the payload keeps its stored value, and `{}` is a no-op. A key can be
+                    // blanked to "" but only the Backstage GUI can delete one. ⇒ CEH can set and
+                    // change a social link, never remove one. Safe only because `NeedsManualEntry`
+                    // returns false for a CEH-blank, so the hub never attempts a clear it would fail.
+                    //
+                    // ⚠️ A REGRESSION WOULD BE SILENT (200, value discarded) and the live-compare
+                    // below would then re-push every pass for ever — §791.3's loop. The kill switch
+                    // is `Zoho:PushExhibitorSocialPages=false`, which restores the hand-entry mail
+                    // with no deploy.
+                    //
+                    // 🟢 §792's PLAN B IS NOW FULLY UNWOUND FOR THIS RECORD. It once routed every
+                    // exhibitor field to the hand-entry mail; §801.2 gave website/overview/short
+                    // description back to the API when they proved writable, and §1087 gives back the
+                    // social pages — the one field Plan B was ever genuinely right about. Nothing on
+                    // the exhibitor record is hand-entry because of an API limitation any more.
+                    // 🔴 §1160 — the EXHIBITOR name, same fix as the sponsor record above.
+                    //
+                    // ⚠️ Unlike the sponsor, this record's detail read lives INSIDE the gate, so a
+                    // name-only reconcile has to fetch it. That is one extra GET per exhibitor per
+                    // pass when nothing else changed — accepted deliberately: the alternative is
+                    // that a renamed company stays wrong in Backstage for ever, which is the exact
+                    // complaint §1153 was raised for and did not actually fix.
+                    if (!reportChanged)
+                    {
+                        var exNow = await _zoho.GetExhibitorByIdAsync(token!, info.ZohoExhibitorId!, ct);
+                        if (ShouldPushName(exNow?.CompanyName, companyName))
+                        {
+                            var exNameOutcome = await _zoho.UpdateExhibitorAsync(
+                                token!, info.ZohoExhibitorId!,
+                                companyOverview: null, companyShortDescription: null,
+                                ct: ct, companyName: companyName);
+
+                            if (exNameOutcome == ZohoClient.ZohoWriteOutcome.Written)
+                            {
+                                exhibitorFields.Add("Company name");
+                                exhibitorSynced = true;
+                            }
+                            else
+                            {
+                                _log.LogWarning(
+                                    "Zoho sync: exhibitor name push for {Co} returned {Outcome}; will retry.",
+                                    companyName, exNameOutcome);
+                            }
+                        }
+                    }
+
                     if (reportChanged)
                     {
                         var z = await _zoho.GetExhibitorByIdAsync(token!, info.ZohoExhibitorId!, ct);
+
+                        // 🔴 §1220 — unread is unknown, not blank (see the sponsor record). Every
+                        // field below scored a null read as "blank in Zoho" and re-pushed it.
+                        if (z is null)
+                        {
+                            transientSkips++;
+                            _log.LogWarning(
+                                "Sponsor {Co}: Zoho exhibitor record {Id} could not be read; nothing "
+                                + "compared or pushed this run.", companyName, info.ZohoExhibitorId);
+                        }
+                        else
+                        {
 
                         // 🔴🔴 §801.2/§802.4(1) — PLAN B IS NARROWED TO THE FIELD THAT IS ACTUALLY
                         // BROKEN. Operator 2026-08-04: *"i am still not convinced that the zoho
                         // backend api is broken for all scenarios, like company description fields"*
                         // … *"it has been working for 2linkit before"*. He was right.
                         //
-                        // Re-measured against live PROD, one field per call, originals restored:
+                        // Re-measured against live PROD, one field per call, originals restored
+                        // (2026-08-04, then EVERY field again on 2026-08-17 for §1087):
                         //   company_overview          → 200, read back CHANGED   ✅ writable
                         //   company_short_description → 200, read back CHANGED   ✅ writable
                         //   website_url               → 200, read back CHANGED   ✅ writable
-                        //   company_social_pages      → 200, silently DISCARDED  🔴 unwritable
+                        //   company_name              → 200, read back CHANGED   ✅ writable (§1087)
+                        //   company_social_pages      → ⚰️ was "silently DISCARDED 🔴 unwritable";
+                        //                               ✅ WRITABLE since Zoho's 2026-08-16 fix (§1087)
+                        //   …and on the SPONSOR record: description + website_url ✅ writable (§803)
                         //
                         // The single 400 seen anywhere was `shortDescription` is too long — a LENGTH
                         // limit Zoho names in the body (§802), not a per-record failure. So the three
-                        // writable fields go back to being PUSHED, and only the social pages become
-                        // hand-entry. Reporting a field CEH can set itself is asking him to do the
-                        // hub's job.
+                        // writable fields went back to being PUSHED, and only the social pages stayed
+                        // hand-entry — ⚰️ and since §1087 not even those. Reporting a field CEH can
+                        // set itself is asking him to do the hub's job.
                         var wantsWebsite = NeedsManualEntry(z?.WebsiteUrl, info.WebsiteUrl);
                         var wantsOverview = NeedsManualEntry(z?.Description, info.CompanyDescription);
                         // §801.2 — the GET DOES return the short description, so it is now compared
                         // on its own instead of riding on the overview's difference.
                         var wantsShort = NeedsManualEntry(z?.ShortDescription, info.CompanyDescriptionShort);
 
-                        if (wantsWebsite || wantsOverview || wantsShort)
+                        // ✅ §1087 — AND THE SOCIAL PAGES JOIN THEM. Zoho fixed the endpoint over the
+                        // weekend of 2026-08-16; re-measured on 2linkIT with the §791.3 method, a PUT
+                        // into a cleared social object AND an overwrite of an existing value both read
+                        // back on the next GET. Operator 2026-08-17: *"enable the switch and unwind
+                        // 792 for the fields that write. the email which is sent saying we need to
+                        // manually add this can now be disabled"*.
+                        //
+                        // ⇒ These were the LAST two hand-entry lines that existed because of an API
+                        // limitation. What remains in the mail is there by choice or by absence of an
+                        // endpoint, not because a write was refused.
+                        var wantsLinkedIn = NeedsManualEntry(z?.LinkedInUrl, info.LinkedInUrl);
+                        var wantsTwitter = NeedsManualEntry(z?.TwitterUrl, info.TwitterUrl);
+
+                        // 🔴 §1153 — THE EXHIBITOR'S COMPANY NAME WAS NEVER RECONCILED.
+                        //
+                        // Operator 2026-08-29: *"the wrong company name appears under exhibitor in
+                        // zoho. under sponsors it is the correct name … it was their billing name …
+                        // zoho company name comes from ceh and should be the public name originally
+                        // from the webshop; not billing name"* · *"it is the service that doesnt
+                        // reconsile correctly, as this is due to a change"* · *"so it must check at
+                        // every service run"*.
+                        //
+                        // 🔑 THE SPONSOR PATH ONLY LOOKED RIGHT BY ACCIDENT. It passes
+                        // `companyName:` on every push, so a name correction RODE ALONG whenever
+                        // some other field happened to differ. The exhibitor push never passed the
+                        // name at all — so a record created under the wrong name (a billing name,
+                        // from before the public-name rule) stayed wrong for ever.
+                        //
+                        // ⚠️ Riding along is not reconciling. A record whose ONLY difference is the
+                        // name triggered no push on either side, which is exactly the case he hit.
+                        // So the name is now COMPARED, and a difference is sufficient on its own —
+                        // "it must check at every service run", in his words.
+                        //
+                        // 🔒 `companyName` is the public name resolved for this run (CM public name,
+                        // falling back to the legal name) — the same value the sponsor record and
+                        // the exhibitor MATCHER already use, so the three cannot disagree.
+                        // 🔴 §1153 — A NAME WE COULD NOT READ IS NOT A NAME THAT DIFFERS.
+                        //
+                        // ⚠️ Caught by `SponsorZohoProvisionLinkedReconcileTests` on the first run of
+                        // this change: with no name in the response, every company looked wrong and
+                        // took a PUT — on every sync, for ever. That is a write storm against a live
+                        // Zoho, and it is the §1140 shape exactly (read a field wrong ⇒ rewrite
+                        // everything on every run), which this codebase has now met three times.
+                        //
+                        // 🔒 So a blank read is UNKNOWN, not different — §1140b's rule that
+                        // "I cannot check" must never be scored as "it is wrong". The cost is that a
+                        // genuinely empty name in Zoho is not corrected; Zoho requires one to create
+                        // a record, so that case is close to unreachable, and it is far cheaper than
+                        // a PUT per company per run.
+                        var wantsName = ShouldPushName(z?.CompanyName, companyName);
+
+                        // §1175 — the same announcement gate as the sponsor record, and this is the
+                        // record it was really written for: the social pages are the fields §791.3
+                        // measured being SILENTLY DISCARDED (200, echoed back, gone on the next
+                        // GET), and the §1087 comment above says in as many words that a silent
+                        // discard "is the case this cannot catch". It still cannot be caught — but
+                        // it can now be NAMED, once, instead of announced on every run.
+                        //
+                        // 🔒 Keys are exhibitor-prefixed. Both records live on ONE SponsorInfo row
+                        // and both have a `website_url`; unprefixed, the exhibitor's website
+                        // arriving would clear the sponsor's entry and the two would silence each
+                        // other.
+                        if (!wantsName)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("company_name"));
+                        if (!wantsWebsite)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("website_url"));
+                        if (!wantsOverview)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("company_overview"));
+                        if (!wantsShort)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("company_short_description"));
+                        if (!wantsLinkedIn)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("social_linkedin"));
+                        if (!wantsTwitter)
+                            ledgerChanged |= ZohoPushLedger.Clear(info, ZohoPushLedger.ExhibitorKey("social_twitter"));
+
+                        if (wantsName || wantsWebsite || wantsOverview || wantsShort || wantsLinkedIn || wantsTwitter)
                         {
-                            var pushed = await _zoho.UpdateExhibitorAsync(
+                            var exOutcome = await _zoho.UpdateExhibitorAsync(
                                 token!, info.ZohoExhibitorId!,
                                 companyOverview: wantsOverview ? info.CompanyDescription : null,
                                 companyShortDescription: wantsShort ? info.CompanyDescriptionShort : null,
                                 ct,
-                                websiteUrl: wantsWebsite ? info.WebsiteUrl : null);
+                                // Always sent, like the sponsor push: a correction must not depend on
+                                // which other field happened to differ this run.
+                                companyName: companyName,
+                                websiteUrl: wantsWebsite ? info.WebsiteUrl : null,
+                                linkedInUrl: wantsLinkedIn ? info.LinkedInUrl : null,
+                                twitterUrl: wantsTwitter ? info.TwitterUrl : null);
 
-                            if (pushed)
+                            if (exOutcome == ZohoClient.ZohoWriteOutcome.Written)
                             {
-                                if (wantsWebsite) exhibitorFields.Add("Website");
-                                if (wantsOverview) exhibitorFields.Add("Company Overview");
-                                if (wantsShort) exhibitorFields.Add("Company Short Description");
+                                if (wantsName)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("company_name"),
+                                        companyName, "Company name", exhibitorFields);
+                                if (wantsWebsite)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("website_url"),
+                                        info.WebsiteUrl, "Website", exhibitorFields);
+                                if (wantsOverview)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("company_overview"),
+                                        info.CompanyDescription, "Company Overview", exhibitorFields);
+                                if (wantsShort)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("company_short_description"),
+                                        info.CompanyDescriptionShort, "Company Short Description", exhibitorFields);
+                                if (wantsLinkedIn)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("social_linkedin"),
+                                        info.LinkedInUrl, "Social Pages (LinkedIn)", exhibitorFields);
+                                if (wantsTwitter)
+                                    Announce(info, ZohoPushLedger.ExhibitorKey("social_twitter"),
+                                        info.TwitterUrl, "Social Pages (X/Twitter)", exhibitorFields);
                                 exhibitorSynced = true;
+                            }
+                            else if (exOutcome == ZohoClient.ZohoWriteOutcome.Refused)
+                            {
+                                // 🔴 §1225 — NOT HAND-ENTRY. This branch produced the reported mail:
+                                // "Exhibitor · Pinksky · Company Social Pages → LinkedIn" from Zoho's
+                                // generic 400 during a read-failure burst, for a LinkedIn Backstage
+                                // already held. Every field here is API-writable (§1087), so a refusal
+                                // is retried next run; Zoho's body is in the log via
+                                // UpdateExhibitorAsync (§802.4(2)) for the rare genuine case.
+                                transientSkips++;
+                                _log.LogWarning(
+                                    "Exhibitor {Co}: Zoho refused the exhibitor push; not reported as "
+                                    + "hand-entry (the fields are API-writable), will retry next run.", companyName);
                             }
                             else
                             {
-                                // ⚠️ A refused push becomes a hand-entry line rather than vanishing:
-                                // the value still has to reach Backstage, and now he is told. The
-                                // REASON is in the log — `UpdateExhibitorAsync` reads Zoho's body
-                                // (§802.4(2)), which is where "`shortDescription` is too long" lives.
-                                if (wantsWebsite)
-                                    manualLines.Add(ManualField("Exhibitor", companyName, "Website", info.WebsiteUrl));
-                                if (wantsOverview)
-                                    manualLines.Add(ManualField("Exhibitor", companyName, "Company Overview", info.CompanyDescription));
-                                if (wantsShort)
-                                    manualLines.Add(ManualField("Exhibitor", companyName, "Company Short Description", info.CompanyDescriptionShort));
+                                // 🔴 §1154 — THIS IS THE CASE HE REPORTED.
+                                //
+                                // Operator 2026-08-31, on a mail listing LENOVO's website and both
+                                // social pages as hand-entry: *"this mail is not relevant for the
+                                // mentioned fields, as all fields are covered by api"*.
+                                //
+                                // He was right, and the fields were never the problem: the PUT came
+                                // back **502** — a Zoho gateway page. A bool collapsed that into the
+                                // same "could not write" a real refusal produces, so §1087's
+                                // perfectly writable fields were reported as work for a human.
+                                //
+                                // ⚠️ Measured before changing anything: ONE such failure in the 7
+                                // days before the §1153 deploy and ONE after — a rare transient, not
+                                // a regression and not a pattern.
+                                transientSkips++;
+                                _log.LogWarning(
+                                    "Exhibitor {Co}: Zoho was unavailable for the exhibitor push; "
+                                    + "not reported as hand-entry, will retry next run.", companyName);
                             }
                         }
-
-                        // 🔴 The social pages stay hand-entry: Zoho accepts the PUT and keeps
-                        // nothing (§791.3, re-measured §801.2). This is the ONE field Plan B was
-                        // ever right about — and the one every company has a value for, which is
-                        // why the whole list looked broken.
-                        if (NeedsManualEntry(z?.LinkedInUrl, info.LinkedInUrl))
-                            manualLines.Add(ManualField("Exhibitor", companyName, "Company Social Pages → LinkedIn", info.LinkedInUrl));
-                        if (NeedsManualEntry(z?.TwitterUrl, info.TwitterUrl))
-                            manualLines.Add(ManualField("Exhibitor", companyName, "Company Social Pages → X/Twitter", info.TwitterUrl));
+                        } // §1220 — end of "exhibitor record was read"
                     }
                 }
             }
@@ -419,7 +906,39 @@ public sealed class SponsorZohoSyncService
             // ⚠️ Reported only when the e-mail actually CHANGED vs the last known value: Zoho's
             // 3-update cap is what made this field special, and re-listing an unchanged contact on
             // every catch-up would train him to skip the line that matters.
-            if (emailChanged && reportChanged)
+            //
+            // 🔴 §1128 — AND ONLY WHEN BACKSTAGE ACTUALLY DIFFERS.
+            //
+            // Operator 2026-08-25, on a contact differing ONLY in capitalisation: *"this is not
+            // relevant to wan about as it is only letters (capital vs small) … this is from zoho
+            // already correct"*.
+            //
+            // 🔑 The case difference was the TELL, not the cause. Every other line here asks
+            // `NeedsManualEntry(z?.Field, info.Field)` — *"does the LIVE Zoho value differ?"*,
+            // trimmed and case-insensitive. This one asked a different question entirely: *"has
+            // CEH's value changed since CEH last TOLD him?"*, against its own `ZohoContactEmail`
+            // stamp. It never looked at Zoho, so on the FIRST report for a company (stamp null) it
+            // fired no matter what Backstage already held.
+            //
+            // ⇒ `emailChanged` stays as the CHEAP gate (it is what respects Zoho's 3-update cap and
+            // keeps an unchanged contact off every catch-up), and the live comparison is now the
+            // SECOND gate — so the line survives only when both "CEH moved" and "Zoho really
+            // differs" are true.
+            //
+            // 🔒 `z?.ContactEmail` is null for a company we could not read, and NeedsManualEntry
+            // treats a blank Zoho side as "needs entry" — the pre-§1128 behaviour. Failing toward
+            // reporting is right: a line he can ignore beats a contact that silently never syncs.
+            //
+            // 🔴 READ ONLY — §1128 ADDS A **GET**, NEVER A WRITE. Operator 2026-08-25, confirming
+            // the fix while restating the standing rule: *"remember that we dont write to the
+            // contact email field once it is applied/filed out. but you are ok in using a get"*.
+            //
+            // ⚠️ Zoho HARD-CAPS contact e-mail updates at THREE (§792/§798), which is the entire
+            // reason this field is reported for hand-entry instead of pushed. The live value is used
+            // here ONLY to SUPPRESS a mail — nothing on this path may ever become a PUT, or the cap
+            // is spent on a value somebody already typed in by hand.
+            var contactDiffers = NeedsManualEntry(zohoContactEmail, desiredEmail);
+            if (emailChanged && reportChanged && contactDiffers)
             {
                 var who = string.Join(" ", new[]
                 {
@@ -433,13 +952,15 @@ public sealed class SponsorZohoSyncService
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Zoho sync failed for company {Co}.", companyId);
-            if (changedIds) { try { await _db.SaveChangesAsync(ct); } catch { /* best-effort */ } }
+            if (changedIds || ledgerChanged) { try { await _db.SaveChangesAsync(ct); } catch { /* best-effort */ } }
             return new(true, sponsorSynced, exhibitorSynced, info.HasBooth,
                 "Zoho sync hit an error — your details are saved; please try Sync again.",
-                sponsorFields, exhibitorFields, manualLines);
+                sponsorFields, exhibitorFields, manualLines, StuckFields: stuckFields);
         }
 
-        if (changedIds) await _db.SaveChangesAsync(ct);
+        // §1175 — the ledger must be saved even when nothing else changed: its whole job is to
+        // remember across runs, and a count that never persists can never reach the limit.
+        if (changedIds || ledgerChanged) await _db.SaveChangesAsync(ct);
 
         // 🔴 §792 — PLAN B: ONE ops mail per sync listing what to enter BY HAND, because CEH no
         // longer updates sponsors or exhibitors over the API at all.
@@ -454,6 +975,17 @@ public sealed class SponsorZohoSyncService
         //
         // ⚠️ Empty list ⇒ no mail (the notifier skips silently). So a sync where Zoho already
         // matches CEH stays quiet — the §302 "70-mail night" rule is unchanged.
+        // §1154 — a run that could not reach Zoho says so ONCE, in the log. §335: a silent zero
+        // reads exactly like a clean run, and "nothing to report" and "I could not reach it" must
+        // not look the same to whoever reads this afterwards.
+        if (transientSkips > 0)
+        {
+            _log.LogWarning(
+                "Sponsor/exhibitor sync: {Count} push(es) skipped because Zoho was unavailable "
+                + "(5xx / rate-limited / this host may not write). NOT reported as hand-entry — "
+                + "the values are writable and the next run retries them.", transientSkips);
+        }
+
         if (notifyZohoChange && _zohoChanges is not null && manualLines.Count > 0)
         {
             await _zohoChanges.NotifyAsync(
@@ -487,7 +1019,7 @@ public sealed class SponsorZohoSyncService
             error = "Synced your sponsor record, but couldn't find a matching exhibitor in Zoho by company name.";
 
         return new(true, sponsorSynced, exhibitorSynced, info.HasBooth, error,
-            sponsorFields, exhibitorFields, manualLines);
+            sponsorFields, exhibitorFields, manualLines, StuckFields: stuckFields);
     }
 
     /// <summary>§302d: the stamp of the non-echoing exhibitor fields (overview, short
@@ -902,9 +1434,20 @@ public sealed class SponsorZohoSyncService
         }
     }
 
+    /// <param name="Notes">Things that went WRONG and may need a human. Callers log these loudly.</param>
+    /// <param name="Skipped">
+    /// §1088 — companies deliberately out of scope (test data / withdrawn, §1035). Counted and
+    /// reported SEPARATELY from <paramref name="Failed"/>, which is now only things that went wrong.
+    /// </param>
+    /// <param name="SkipNotes">
+    /// 🔒 §1088 — the skip lines, kept OUT of <paramref name="Notes"/> on purpose. They used to land
+    /// there and every caller logs `Notes` at <b>Warning</b> — so a company excluded exactly as
+    /// intended produced a warning on every pass, for ever. Routine, expected, and shouted about is
+    /// how a log stops being read.
+    /// </param>
     public sealed record BulkResult(
         int Companies, int CoordinatorsFilled, int SponsorsSynced, int ExhibitorsSynced,
-        int Failed, List<string> Notes);
+        int Failed, List<string> Notes, int Skipped = 0, List<string>? SkipNotes = null);
 
     /// <summary>
     /// One-time migration + full re-sync (operator 2026-06-24): for every sponsor
@@ -928,8 +1471,10 @@ public sealed class SponsorZohoSyncService
             catch (Exception ex) { _log.LogWarning(ex, "Bulk re-sync: token request threw."); }
         }
 
-        int filled = 0, sponsorsSynced = 0, exhibitorsSynced = 0, failed = 0;
+        int filled = 0, sponsorsSynced = 0, exhibitorsSynced = 0, failed = 0, skipped = 0;
         var notes = new List<string>();
+        // §1088 — skip lines live apart from `notes`, which callers log at Warning.
+        var skipNotes = new List<string>();
         // Operator 2026-07-23: collect every SUCCESSFUL Zoho write for ONE batched ops mail
         // (per-company notify is suppressed below — batch-per-run, never per item).
         var zohoWrites = new List<string>();
@@ -970,17 +1515,44 @@ public sealed class SponsorZohoSyncService
             // meant SENT. One honest word would have made that thread one run long instead of three.
             if (r.SponsorSynced && r.SponsorFields is { Count: > 0 })
             { sponsorsSynced++; zohoWrites.Add($"Pushed to sponsor '{name}' — Zoho GUI fields: {string.Join(", ", r.SponsorFields)}"); }
+
+            // 🔴 §1175 — SAID ONCE, STILL SENT. After three consecutive sends of the same value that
+            // Zoho never returns, this line REPLACES the ordinary "Pushed to …" line for those
+            // fields, and afterwards they are pushed silently. It names what to do, because the two
+            // causes need different actions from a human and CEH cannot tell them apart from the
+            // outside.
+            //
+            // ⚠️ It says "still sending" because it IS still sending — §784.13's memo stopped the
+            // push and cost him ten sponsors' LinkedIn URLs. A line claiming CEH had given up would
+            // be both untrue and an invitation to rebuild that bug.
+            if (r.StuckFields is { Count: > 0 })
+            {
+                zohoWrites.Add(
+                    $"⚠️ '{name}' — {string.Join(" and ", r.StuckFields)} have now been sent to Zoho "
+                    + $"{ZohoPushLedger.ReportAfterAttempts} times and Zoho still does not return "
+                    + "them. Either the change is waiting to be PUBLISHED in Backstage, or Zoho is "
+                    + "discarding the field — open the record in Backstage and check. CEH keeps "
+                    + "sending, but will not mention these again until they land or change.");
+            }
             if (r.ExhibitorSynced && r.ExhibitorFields is { Count: > 0 })
             { exhibitorsSynced++; zohoWrites.Add($"Pushed to exhibitor '{name}' — Zoho GUI fields: {string.Join(", ", r.ExhibitorFields)}"); }
-            // 🔴 §792 — collect the hand-entry lines. Plan B writes nothing, so the two branches
-            // above no longer fire for sponsors/exhibitors; without this the bulk re-sync would be
-            // silent and the catch-up mail would never arrive.
+            // §792 — collect the hand-entry lines.
+            // ⚠️ This used to say *"Plan B writes nothing, so the two branches above no longer fire"*.
+            // They fire again: §803 restored the sponsor push and §1087 the social pages, so a normal
+            // run now produces "Pushed to …" lines AND, usually, no hand-entry lines at all. This
+            // list is no longer the main output of a re-sync — it is the residue Backstage has no API
+            // for (§792.7) plus contact changes (§791.5).
             if (r.ManualLines is { Count: > 0 })
             {
                 runManualLines.AddRange(r.ManualLines);
                 reportedCompanyIds.Add(info.SponsorCompanyId);
             }
-            if (r.Error is not null) { failed++; notes.Add($"{name}: {r.Error}"); }
+            // 🔴 §1088 — a deliberate SKIP is counted as a skip, never as a failure, and its line
+            // goes in a separate list because `notes` is logged at Warning. Before this the summary
+            // read "failed 1" on every single pass because one company is marked test data, which is
+            // how a real failure would have hidden: the count never changed, so nobody read it.
+            if (r.Skipped) { skipped++; skipNotes.Add($"{name}: {r.SkipReason}"); }
+            else if (r.Error is not null) { failed++; notes.Add($"{name}: {r.Error}"); }
         }
 
         // Operator 2026-07-23: ONE batched ops mail for the whole re-sync run.
@@ -993,9 +1565,30 @@ public sealed class SponsorZohoSyncService
             await _zohoChanges.NotifyAsync(
                 "Sponsors / exhibitors", runManualLines, ct,
                 actionable: true, actionUrl: null, actionText: null,
-                intro: "Zoho Backstage <strong>ignores API updates</strong> for these fields "
-                       + "(measured 2026-08-04, §791.3), so CEH no longer tries. Copy each value "
-                       + "below into the matching field in Backstage so Zoho matches CEH.",
+                // ✅ §1087 — THE INTRO NO LONGER BLAMES THE API, BECAUSE THE API WORKS NOW.
+                // It used to read *"Zoho Backstage ignores API updates for these fields (measured
+                // 2026-08-04, §791.3), so CEH no longer tries"*. Zoho fixed the endpoint on
+                // 2026-08-16 and CEH pushes every field it can again, so that sentence would now be
+                // a false excuse attached to a shorter list — and it would teach him to expect
+                // social-page lines that no longer appear.
+                //
+                // 🔑 What is left in this mail is left for two HONEST reasons, and the intro says
+                // which: Backstage has NO API for booth videos and collateral (§792.7), and CEH
+                // deliberately never PUTs contact details because Zoho hard-caps them at three
+                // updates (§791.5). Neither is a failure the hub could retry away.
+                // ⚰️ §1154 — the old copy claimed EVERY line here was a field with "no API" or one
+                // CEH deliberately never writes. Operator 2026-08-31, on a mail listing LENOVO's
+                // website and both social pages: *"this mail is not relevant for the mentioned
+                // fields, as all fields are covered by api"*. He was right — §1087 made those
+                // writable, and they only appeared because a PUT was REFUSED. The intro was written
+                // when the claim was true and never revisited: the §730 stale-copy trap, in the one
+                // place that tells him what to do about it.
+                intro: "These values did not reach Backstage. Most are fields Backstage has "
+                       + "<strong>no API for</strong> (booth videos and collateral) or that CEH "
+                       + "deliberately never writes (contact details — Zoho caps those at three "
+                       + "updates). The rest are fields CEH normally writes but Zoho <strong>"
+                       + "refused</strong> on this run — the reason is in the sync log. Copy each "
+                       + "one into the matching field in Backstage so Zoho matches CEH.",
                 manualOnly: true);
 
             // 🔒 §792.5 (operator 2026-08-04: *"stamp on the batched path too"*) — STAMP AFTER THE
@@ -1009,7 +1602,7 @@ public sealed class SponsorZohoSyncService
                 runManualLines.Count, reportedCompanyIds.Count, stamped);
         }
 
-        return new BulkResult(infos.Count, filled, sponsorsSynced, exhibitorsSynced, failed, notes);
+        return new BulkResult(infos.Count, filled, sponsorsSynced, exhibitorsSynced, failed, notes, skipped, skipNotes);
     }
 
     /// <summary>
@@ -1036,13 +1629,19 @@ public sealed class SponsorZohoSyncService
         // one-time migrate, because he changes the default in CM and CEH has to notice.
         if (await SyncDefaultCoordinatorAsync(info, company, cid, ct)) cehChanged = true;
 
-        // CEH ← webshop: fill a blank CEH field from the webshop company.
-        if (string.IsNullOrWhiteSpace(info.WebsiteUrl) && !string.IsNullOrWhiteSpace(company.WebsiteUrl))
-        { info.WebsiteUrl = company.WebsiteUrl.Trim(); cehChanged = true; }
-        if (string.IsNullOrWhiteSpace(info.LinkedInUrl) && !string.IsNullOrWhiteSpace(company.LinkedInUrl))
-        { info.LinkedInUrl = company.LinkedInUrl.Trim(); cehChanged = true; }
-        if (string.IsNullOrWhiteSpace(info.TwitterUrl) && !string.IsNullOrWhiteSpace(company.TwitterUrl))
-        { info.TwitterUrl = company.TwitterUrl.Trim(); cehChanged = true; }
+        // CEH ← webshop.
+        //
+        // 🔴 §1125 — THE WEBSITE OVERWRITES; the other two stay §41b fill-blank.
+        //
+        // The webshop is AUTHORITATIVE for the website (§1081) and the CEH input is read-only, so a
+        // fill-blank rule here meant CEH took the value once and then ignored every correction —
+        // while the page told the sponsor it would sync automatically. See WebshopOwnedFields for
+        // the full reasoning, including why a BLANK webshop value does not blank CEH.
+        // §1126 — all THREE overwrite now (operator: *"linkedin + twitter is also coming from
+        // webshop … it must also overwrite as webshop is authoritative"*).
+        if (WebshopOwnedFields.ApplyAll(
+                info, company.WebsiteUrl, company.LinkedInUrl, company.TwitterUrl))
+            cehChanged = true;
 
         // webshop ← CEH: push a CEH value to a blank webshop field (only the keys we fill).
         var push = new Dictionary<string, object?>();
@@ -1241,6 +1840,60 @@ public sealed class SponsorZohoSyncService
             }
         }
 
+        // 🔴 §1221 — THE EXTRA CATEGORY RECORDS (§1157) HAD NO SELF-HEAL AT ALL.
+        //
+        // Measured 2026-09-14: three companies each held a second Zoho sponsor id that had been
+        // deleted in Backstage. Zoho answers those with 400 "Sponsor not found" rather than 404, so
+        // they were read and failed every ten minutes (~480 failed GETs a day) for as long as CEH
+        // kept them. The primary id has the provisioner's list check; the extras had nothing.
+        //
+        // 🔒 Removed only after ZohoDeadLinkStrikes says so — operator: "5 times with min 12 hr apart
+        // before removing to rule out api issues". A 404 would be definite, but it is counted the
+        // same way here: one rule for the extras is easier to trust than two.
+        //
+        // 🔑 Operator chose REMOVE AND RE-CREATE: dropping the link un-covers the category, and the
+        // provisioner creates a fresh record under it on its next pass (and says so in its mail).
+        var extras = SponsorZohoLinks.Read(info)
+            .Where(l => !string.Equals(l.ZohoSponsorId, info.ZohoSponsorId, StringComparison.Ordinal))
+            .ToList();
+        if (extras.Count > 0)
+        {
+            var now = _clock.GetUtcNow();
+            var remove = new List<SponsorZohoLink>();
+            foreach (var extra in extras)
+            {
+                var (_, link) = await _zoho.ProbeSponsorAsync(token, extra.ZohoSponsorId, ct);
+                if (link.State == ExternalLinkState.Exists)
+                {
+                    healed |= ZohoDeadLinkStrikes.Clear(info, extra.ZohoSponsorId);
+                }
+                else if (link.IsGone || link.NotFoundReported)
+                {
+                    healed = true;   // the strike itself is a change to persist
+                    if (ZohoDeadLinkStrikes.RecordNotFound(info, extra.ZohoSponsorId, now))
+                        remove.Add(extra);
+                }
+                // Any other failure says nothing either way: not counted, not cleared.
+            }
+
+            if (remove.Count > 0)
+            {
+                foreach (var dead in remove)
+                {
+                    _log.LogWarning(
+                        "§1221 self-heal: company {Co} held Zoho sponsor {Id} (category '{Cat}'), reported "
+                        + "not found {N} times at least {Gap}h apart. Link REMOVED — the category will be "
+                        + "re-created on the next provision pass.",
+                        info.SponsorCompanyId, dead.ZohoSponsorId, dead.CategoryName,
+                        ZohoDeadLinkStrikes.StrikesToRemove, ZohoDeadLinkStrikes.MinimumGap.TotalHours);
+                    ZohoDeadLinkStrikes.Clear(info, dead.ZohoSponsorId);
+                }
+
+                var deadIds = remove.Select(r => r.ZohoSponsorId).ToHashSet(StringComparer.Ordinal);
+                SponsorZohoLinks.Write(info, SponsorZohoLinks.Read(info).Where(l => !deadIds.Contains(l.ZohoSponsorId)));
+            }
+        }
+
         return healed;
     }
 
@@ -1257,4 +1910,28 @@ public sealed class SponsorZohoSyncService
 
     private static bool NameEq(string a, string b) =>
         string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// §1153 — should this run push the company name to Zoho?
+    /// </summary>
+    /// <param name="inZoho">The name as it currently stands in Zoho (null when it could not be read).</param>
+    /// <param name="ours">The public name CEH resolved for this run.</param>
+    /// <remarks>
+    /// <para>Operator 2026-08-29: the exhibitor record carried a BILLING name while the sponsor
+    /// record carried the right one. The exhibitor push never sent the name at all, and the sponsor
+    /// push only sent it as a passenger on somebody else's change — so a record whose ONLY
+    /// difference was the name was never corrected on either side. <i>"it must check at every
+    /// service run."</i></para>
+    ///
+    /// <para>🔴 <b>The blank guard is the dangerous half, and a test caught it.</b> Without it, a
+    /// response that carries no name makes EVERY company look wrong and take a PUT — on every run,
+    /// for ever. That is a write storm against a live Zoho, and it is §1140's shape exactly: read a
+    /// field wrong, rewrite everything. An unread name is UNKNOWN, never "differs" (§1140b).</para>
+    ///
+    /// <para>Pure and public so the rule and its tests are the same rule.</para>
+    /// </remarks>
+    public static bool ShouldPushName(string? inZoho, string? ours) =>
+        !string.IsNullOrWhiteSpace(ours)
+        && !string.IsNullOrWhiteSpace(inZoho)
+        && !NameEq(inZoho!, ours!);
 }

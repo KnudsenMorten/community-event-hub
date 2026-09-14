@@ -19,10 +19,14 @@ namespace CommunityHub.Core.Volunteers;
 public static class VolunteerDayOptions
 {
     // ELDK27 dates (kept in sync with config/event.eldk27.json "dates").
+    // 🔒 §1134 — the day NAMES here were wrong and are corrected against config `crewDays`, which is
+    // the authority: 02-08 setup, 02-09 PRE-DAY (master class), 02-10 MAIN conference day. The old
+    // comments read "setup / pre-day", "main day 1" and "main day 2", which would have put the
+    // main-day check-in on the pre-day — the exact mistake this edit had to avoid.
     private static readonly DateOnly PackingDay = new(2027, 2, 7);  // Sun — packing 9–14
-    private static readonly DateOnly MonSetup   = new(2027, 2, 8);  // Mon — setup / pre-day
-    private static readonly DateOnly TueDay1    = new(2027, 2, 9);  // Tue — main day 1 (conference)
-    private static readonly DateOnly WedDay2    = new(2027, 2, 10); // Wed — main day 2 (conference)
+    private static readonly DateOnly MonSetup   = new(2027, 2, 8);  // Mon — SETUP day,   starts 09:00
+    private static readonly DateOnly PreDay     = new(2027, 2, 9);  // Tue — PRE-DAY,     check-in 07:00
+    private static readonly DateOnly MainDay    = new(2027, 2, 10); // Wed — MAIN day,    check-in 06:40
 
     /// <summary>
     /// One selectable availability option for a day. <see cref="Slot"/> is the
@@ -39,11 +43,36 @@ public static class VolunteerDayOptions
         bool IsExclusive);
 
     // --- Reusable option fragments -----------------------------------------
-    private static Option Full() =>
-        new("Full day", "Full day", "whole day available", VolunteerAvailabilityLevel.Full, true);
+    /// <summary>
+    /// §1134 — <paramref name="startsAt"/> is the day's START TIME, shown so a volunteer choosing
+    /// "Full day" knows what they are committing to. 🔒 The <c>Slot</c> stays the constant
+    /// <c>"Full day"</c>: it is the stored identity, so only the DISPLAY carries the hour.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <paramref name="startsAt"/> is OPTIONAL and omitted by the generic fallback set, which
+    /// serves other editions and test fixtures. Those days have no known check-in time, and printing
+    /// an invented one on a form a volunteer commits against is worse than printing none.
+    /// </remarks>
+    private static Option Full(string? startsAt = null) =>
+        new("Full day", "Full day",
+            startsAt is null ? "whole day available" : $"whole day available — from {startsAt}",
+            VolunteerAvailabilityLevel.Full, true);
 
-    private static Option Morning() =>
-        new("Morning 9–12", "Morning", "9–12", VolunteerAvailabilityLevel.Half, false);
+    /// <summary>
+    /// §1134 — the morning window now differs PER DAY (operator 2026-08-25: setup 09:00, pre-day
+    /// check-in 07:00, main-day check-in 06:40), so the hours are a parameter rather than a
+    /// hard-coded 9–12.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ The <c>Slot</c> embeds the hours, so it CHANGES for the pre-day and the main day — and the
+    /// Slot is the stored identity. That is safe here, and deliberately so: <see cref="Resolve"/>
+    /// falls back to <i>the first option whose Level matches</i> when a stored slot no longer
+    /// exists, and Morning is the first <c>Half</c> option on every one of these days. So a
+    /// volunteer who saved <c>[Morning 9–12]</c> still re-selects Morning, and their next save
+    /// re-tags the note with the new window. Nothing is lost and nothing has to be migrated.
+    /// </remarks>
+    private static Option Morning(string hours) =>
+        new($"Morning {hours}", "Morning", hours, VolunteerAvailabilityLevel.Half, false);
 
     private static Option Afternoon(string hours) =>
         new($"Afternoon {hours}", "Afternoon", hours, VolunteerAvailabilityLevel.Half, false);
@@ -54,6 +83,40 @@ public static class VolunteerDayOptions
     private static Option Attending() =>
         new("Attending conference", "Attending conference", "attending only — not working", VolunteerAvailabilityLevel.Blocked, false);
 
+    /// <summary>
+    /// §1138 — the MAIN-DAY "attending, but I can help afterwards" option.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-26: <i>"Rename Attending conference-box to 'Attending conference full
+    /// day - I can help pack down after event from 17:00'"</i>.</para>
+    ///
+    /// <para>🔑 <b>This one, not <see cref="Attending"/>.</b> Both render the title "Attending
+    /// conference", so the page shows two boxes with the same heading. His wording decides it: the
+    /// MAIN day's afternoon window ends at 17:00, so "pack down after event from 17:00" is this box.
+    /// The pre-day one is "attending only — not working" and cannot help with anything.</para>
+    ///
+    /// <para>🔒 <b>The Slot is deliberately UNCHANGED</b> — it is the stored identity (see the class
+    /// remarks: <i>"keep it constant even if the display Title/Sub changes"</i>). Every volunteer who
+    /// already picked this option keeps matching it exactly; only what they read changes.</para>
+    ///
+    /// <para>⚠️ Still <c>Half</c>, not <c>Blocked</c>: they ARE giving time. Changing the level would
+    /// alter what <c>AvailabilityAutoAssignEngine</c> scores them at, which is a scheduling change
+    /// he did not ask for.</para>
+    /// </remarks>
+    /// <remarks>
+    /// <para>⚰️ §1138 → §1138a → §1138b, all on 2026-08-26, ending exactly where it started:
+    /// <i>"Rename Attending conference-box to 'Attending conference full day - I can help pack down
+    /// after event from 17:00'"</i> → <i>"remove the 'full day'"</i> → <i>"change the wording 'I can
+    /// help pack down after event from 17:00' to 'can help in the evening'"</i>.</para>
+    ///
+    /// <para>🔑 The wording is back to the original. The longer sentence read as a COMMITMENT to a
+    /// specific job at a specific hour; "can help in the evening" states availability and leaves what
+    /// the help is to the schedule — which is what an availability form is for.</para>
+    ///
+    /// <para>🔒 <c>Slot</c> was never touched across any of the three, so no volunteer's saved answer
+    /// moved at any point. That is the whole reason the display could be changed three times in an
+    /// afternoon on a live form without consequence.</para>
+    /// </remarks>
     private static Option AttendingCanHelpEvening() =>
         new("Attending conference — can help evening", "Attending conference",
             "can help in the evening", VolunteerAvailabilityLevel.Half, false);
@@ -72,14 +135,20 @@ public static class VolunteerDayOptions
                 new Option("No, I cannot help", "No, I cannot help", null, VolunteerAvailabilityLevel.Unavailable, true),
             };
 
+        // §1134 — per-day START TIMES (operator 2026-08-25, in his words): "Setup day kan godt være
+        // 09:00 / Check-in pre-day: 07:00 / Check-in mainday day: 06:40".
         if (day == MonSetup)
-            return new[] { Full(), Morning(), Afternoon("12–17"), NotAble() };
+            return new[] { Full("09:00"), Morning("9–12"), Afternoon("12–17"), NotAble() };
 
-        if (day == TueDay1)
-            return new[] { Full(), Morning(), Afternoon("12–18"), Attending(), NotAble() };
+        if (day == PreDay)
+            return new[] { Full("07:00"), Morning("7–12"), Afternoon("12–18"), Attending(), NotAble() };
 
-        if (day == WedDay2)
-            return new[] { Full(), Morning(), Afternoon("12–17"), AttendingCanHelpEvening(), NotAble() };
+        if (day == MainDay)
+            return new[]
+            {
+                Full("06:40"), Morning("6:40–12"), Afternoon("12–17"),
+                AttendingCanHelpEvening(), NotAble(),
+            };
 
         // Generic fallback (non-ELDK27 days / other editions / tests).
         return new[]

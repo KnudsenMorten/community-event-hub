@@ -155,6 +155,10 @@ public sealed class RoleChangeAndCalendarLinkTests
 
         var keys = await db.Tasks
             .Where(t => t.EventId == eventId && t.AssignedParticipantId == p.Id)
+            // §1082 — pruned tasks are RETIRED, not deleted, so this projects LIVE rows only:
+            // "the ex-speaker no longer holds this task" means it is not open to them, which is the
+            // property that stops the reminders. The row itself survives for audit.
+            .Where(CommunityHub.Core.Tasks.TaskClosure.NotSystemClosed)
             .Select(t => t.SourceKey)
             .ToListAsync();
         // Speaker-only tasks are GONE (the ex-speaker's speakerdl reminders stop firing).
@@ -201,6 +205,8 @@ public sealed class RoleChangeAndCalendarLinkTests
 
         var keys = await db.Tasks
             .Where(t => t.EventId == eventId && t.AssignedParticipantId == p.Id)
+            // §1082 — live rows only; a pruned task is retired rather than deleted.
+            .Where(CommunityHub.Core.Tasks.TaskClosure.NotSystemClosed)
             .Select(t => t.SourceKey!)
             .ToListAsync();
         // The volunteer-only availability step task is pruned; the party task (every
@@ -257,9 +263,12 @@ public sealed class RoleChangeAndCalendarLinkTests
 
         var reloaded = await db.Participants.FindAsync(target.Id);
         Assert.Equal(ParticipantRole.Media, reloaded!.Role);
-        // The ex-speaker's dated speakerdl task is pruned by the save itself.
-        Assert.False(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == target.Id
-            && t.SourceKey!.StartsWith("speakerdl:")));
+        // The ex-speaker's dated speakerdl task is retired by the save itself (§1082 — closed, not
+        // deleted): it is no longer live for them, and the row survives for audit.
+        Assert.False(await db.Tasks
+            .Where(CommunityHub.Core.Tasks.TaskClosure.NotSystemClosed)
+            .AnyAsync(t => t.AssignedParticipantId == target.Id
+                && t.SourceKey!.StartsWith("speakerdl:")));
         // The new role's wizard steps were seeded.
         Assert.True(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == target.Id
             && t.SourceKey == WizardStepTaskKeys.Profile(target.Id)));

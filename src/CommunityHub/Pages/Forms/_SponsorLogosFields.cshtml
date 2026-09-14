@@ -56,6 +56,17 @@
 </div>
 
 <label for="SoMeLogo">Logo for Web <span style="color:#6b7280;font-weight:400;">(PNG, max 5 MB)</span></label>
+@* 🔴 §1143b — SAME REQUIREMENT AS /Sponsor/CompanyDetails, AND IT MUST BE ON BOTH.
+   This wizard step and the company page are two doors onto ONE upload; stating the rule on only
+   one of them is the §730 stale-copy trap — the sponsor who used the other door would still send
+   a knockout logo and still vanish from the promotion graphic. *@
+<p style="color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;
+          padding:9px 12px;font-size:12.5px;margin:2px 0 8px;">
+    <strong>Please upload the POSITIVE version</strong> — the one made for <strong>light
+    backgrounds</strong> (dark or full-colour artwork). We place it on a <strong>white panel</strong>,
+    so a white / reversed “knockout” logo becomes <strong>invisible</strong>. A transparent
+    background is fine — it is the <em>colour of the logo itself</em> that matters.
+</p>
 <input type="file" id="SoMeLogo" name="SoMeLogo" accept=".png,image/png" />
 <p style="font-size:12px;color:@CurrentColor(Model.CurrentSoMeFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentSoMeFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentSoMeFileName)</p>
 <span asp-validation-for="SoMeLogo" class="error"></span>

@@ -28,7 +28,18 @@ public sealed class EmailMagicLinkOnlyTests
         // Anchors / template tokens that are themselves magic links.
         || href.StartsWith("#", StringComparison.Ordinal)
         || href.StartsWith("{{magicLink}}", StringComparison.Ordinal)
-        || href.StartsWith("{{hubUrl}}", StringComparison.Ordinal);
+        || href.StartsWith("{{hubUrl}}", StringComparison.Ordinal)
+        // §1127 — an EXTERNAL destination supplied as a token rather than a literal URL.
+        //
+        // 🔑 The allowlist above already permits any literal `http…` outside the hub; it simply had
+        // no way to recognise the same thing when the address is configurable. `{{webshopUrl}}` is
+        // the sponsor webshop (a different product, on a different domain), so a magic link there
+        // would be meaningless — the same reason `expertslive.dk` is allowed two lines up.
+        //
+        // 🔒 Deliberately an EXACT-NAME exemption, not a blanket "any {{token}}". A wildcard would
+        // let the next `{{somePageUrl}}` pointing INTO the hub slip past silently, which is the drift
+        // §351-6 found and this test exists to stop.
+        || href.StartsWith("{{webshopUrl}}", StringComparison.Ordinal);
 
     [Fact]
     public void Every_in_hub_email_link_uses_the_magic_link()

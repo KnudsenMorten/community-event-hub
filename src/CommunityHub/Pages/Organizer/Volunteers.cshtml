@@ -22,6 +22,19 @@
 {
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>
     {
+        // §1146b (operator 2026-08-28) — the Pre-Selection Queue, which lived only on the People
+        // hub. It is a VOLUNTEER surface (§756 made the queue volunteers-only), so its absence
+        // here meant the one page you preselect volunteers from was not reachable from the
+        // volunteer hub. Same page, second door — not a copy.
+        new("/Organizer/PreselectionQueue", "Pre-Selection Queue",
+            "Prospective volunteers waiting for review. Validate the data, then preselect or onboard — with their availability, contact details and public-profile consent on the page.",
+            "volunteer-allocation"),
+        // §1146e (operator 2026-08-28) — the availability overview is a DESTINATION, not hub
+        // furniture. Printed under the tiles it made the page you scan to choose where to go into
+        // the longest page in the area; it gets a door like everything else.
+        new("/Organizer/VolunteerAvailability", "Volunteer availability",
+            "Every volunteer's half-day availability, green/red per morning and afternoon, with a head-count per shift.",
+            "volunteer-allocation"),
         new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value, "volunteer-tasks"),
         new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value, "volunteer-allocation"),
         new("/Organizer/AllocationScenarios", "Allocation scenarios", "Stage a bulk reshuffle, simulate the coverage impact, then commit it — or auto-seed a drop-out backfill.", "volunteer-allocation"),

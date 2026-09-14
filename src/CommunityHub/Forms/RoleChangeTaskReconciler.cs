@@ -67,7 +67,15 @@ public sealed class RoleChangeTaskReconciler
             .ToList();
         if (toRemove.Count > 0)
         {
-            _db.Tasks.RemoveRange(toRemove);
+            // 🔴 §1082 — RETIRED, NOT DELETED (operator 2026-08-13). A role change is the case where
+            // deletion is most obviously wrong: the person may have COMPLETED several of the old
+            // role's tasks, and erasing the rows erases that they did. Closing removes them from the
+            // person's open list exactly as before, keeps the history, and is reversible if the role
+            // was changed by mistake — the same shape as §502's leaver rule.
+            var now = DateTimeOffset.UtcNow;
+            foreach (var t in toRemove)
+                CommunityHub.Core.Tasks.TaskClosure.Retire(
+                    t, CommunityHub.Core.Domain.TaskClosedReason.RetiredFromCatalog, now);
             await _db.SaveChangesAsync(ct);
         }
 

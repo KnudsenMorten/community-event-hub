@@ -262,8 +262,8 @@ public sealed class LogisticsRecipientsTests
         var r = new LogisticsRecipients { VenueOperations = "venue@example.test" };
 
         Assert.False(r.ApprovedForRealRecipients);          // the shipped default
-        Assert.Equal("mok@expertslive.dk", r.Resolve("venue@example.test"));
-        Assert.Equal("mok@expertslive.dk", r.Resolve("some.hotel@example.test"));
+        Assert.Equal(LogisticsRecipients.DefaultReviewMailbox, r.Resolve("venue@example.test"));
+        Assert.Equal(LogisticsRecipients.DefaultReviewMailbox, r.Resolve("some.hotel@example.test"));
         Assert.Contains("not approved yet", r.ExplainFor("venue@example.test"));
     }
 
@@ -285,8 +285,8 @@ public sealed class LogisticsRecipientsTests
     {
         var r = new LogisticsRecipients { ApprovedForRealRecipients = true };
 
-        Assert.Equal("mok@expertslive.dk", r.Resolve(null));
-        Assert.Equal("mok@expertslive.dk", r.Resolve("   "));
+        Assert.Equal(LogisticsRecipients.DefaultReviewMailbox, r.Resolve(null));
+        Assert.Equal(LogisticsRecipients.DefaultReviewMailbox, r.Resolve("   "));
         Assert.Contains("No recipient configured", r.ExplainFor(null));
     }
 }

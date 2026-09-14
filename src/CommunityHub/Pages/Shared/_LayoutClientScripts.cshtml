@@ -113,9 +113,38 @@
                     }
                 };
             }
+            // §1146f — the TYPED gate. When the modal carries one, Confirm stays disabled until
+            // the exact word is typed. Wired on open (not once at load) so the field is cleared
+            // every time: a value left over from the previous row would let the next Delete through
+            // with no typing at all, which is worse than having no gate.
+            var typed = modal.querySelector('[data-ceh-modal-typed]');
+            if (typed && confirmBtn) {
+                var want = typed.getAttribute('data-ceh-modal-word') || '';
+                typed.value = '';
+                confirmBtn.disabled = true;
+                var sync = function () {
+                    // Exact match, trimmed. Case-insensitive would accept "delete", which is close
+                    // enough to reflex to defeat the point of asking.
+                    confirmBtn.disabled = (typed.value.trim() !== want);
+                };
+                typed.oninput = sync;
+                typed.onkeydown = function (e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!confirmBtn.disabled) confirmBtn.click();
+                    }
+                };
+                sync();
+            } else if (confirmBtn) {
+                confirmBtn.disabled = false;
+            }
+
             modal.setAttribute('data-open', '');
             document.addEventListener('keydown', onKey, true);
-            var firstFocus = modal.querySelector('[data-ceh-modal-confirm]') ||
+            // With a typed gate the FIELD is what needs focus — landing on a disabled Confirm
+            // leaves the keyboard user with nowhere to go.
+            var firstFocus = typed ||
+                             modal.querySelector('[data-ceh-modal-confirm]') ||
                              modal.querySelector(FOCUSABLE);
             if (firstFocus) firstFocus.focus();
         }

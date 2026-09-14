@@ -377,7 +377,11 @@ public sealed class CouponDraftInvoiceService
                 var converted = Math.Round(dkk * r, 2, MidpointRounding.AwayFromZero);
                 return (converted,
                     CouponInvoiceLineComposer.ComposeConversionNote(invoiceCurrency, dkk, converted));
-            });
+            },
+            // §1091 — the split. Both null on every coupon predating this, which bills the whole
+            // ticket at what it actually cost: exactly the old behaviour, stated rather than implied.
+            agreedUnitPriceDkk: rule.AgreedUnitPriceDkk,
+            invoicedSharePercent: rule.InvoicedSharePercent);
 
         var layout = await _invoices.FindLayoutAsync(_options.InvoiceLayoutNameLike, ct);
         if (layout is null)

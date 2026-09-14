@@ -1,0 +1,193 @@
+@using CommunityHub.Core.Volunteers
+@model CommunityHub.Core.Volunteers.VolunteerAvailabilityOverviewService.Overview
+@*
+    §1146 — the volunteer availability overview (operator 2026-08-28: "i need to have an overview
+    view … primarely to preselect people based on their availability … with colos like GREEN, RED
+    … and show the amount below so we have a number").
+
+    🔒 ONE partial, rendered by /Organizer/PreselectionQueue (under the list) and
+    /Organizer/Volunteers. Two copies of this markup would drift the moment either page is touched,
+    and the whole point is that the two views agree.
+
+    ⚠️ Columns are Morning / AFTERNOON — what the sign-up form actually asks. A column labelled
+    "evening" over afternoon data would be a quiet lie on the page shifts are staffed from. The one
+    real evening commitment (§1138's main-day "can help in the evening") is its own amber state.
+*@
+@if (Model is null || Model.IsEmpty)
+{
+    <p class="info" style="margin:0;">
+        No volunteer availability has been submitted yet — the overview appears once sign-ups
+        arrive.
+    </p>
+}
+else
+{
+    <style>
+        .vg-wrap { overflow-x: auto; }
+        .vg { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 520px; }
+        .vg th, .vg td { border: 1px solid #e5e7eb; padding: 5px 7px; text-align: left; }
+        .vg thead th { background: #f9fafb; font-weight: 600; white-space: nowrap; }
+        .vg th.vg-day { text-align: center; }
+        .vg td.vg-cell { text-align: center; font-weight: 600; width: 44px; white-space: nowrap; }
+        .vg .vg-yes     { background: #dcfce7; color: #14532d; }
+        .vg .vg-no      { background: #fee2e2; color: #7f1d1d; }
+        .vg .vg-eve     { background: #fef3c7; color: #78350f; }
+        .vg .vg-unknown { background: #f3f4f6; color: #6b7280; }
+        .vg tfoot td { background: #f9fafb; font-weight: 700; text-align: center; }
+        /* §1156 — the group blocks. "Tight": a compact band, not a card with its own padding,
+           so the eye still reads one continuous grid down the day columns. */
+        .vg th.vg-group { background: #eef2ff; color: #1e293b; text-align: left; font-size: 12px;
+                          letter-spacing: .02em; text-transform: uppercase; padding: 6px 7px; }
+        .vg tr.vg-subtotal td { background: #f3f4f6; font-weight: 700; text-align: center;
+                                border-top: 2px solid #d1d5db; }
+        .vg tr.vg-subtotal td.vg-label { text-align: right; font-weight: 600; color: #4b5563; }
+        .vg tfoot td.vg-label { text-align: right; font-weight: 600; }
+        .vg .vg-name { white-space: nowrap; }
+        .vg .vg-note { color: #6b7280; font-size: 12px; }
+        .vg-legend { margin: 8px 0 0; font-size: 12px; color: #4b5563; }
+        .vg-legend span { display: inline-block; padding: 1px 7px; border-radius: 4px; margin-right: 4px; }
+        /* Mobile-first: the grid scrolls sideways rather than reflowing — a half-day cell that
+           wraps under its day is unreadable, and this table is scanned by column. */
+        @@media (max-width: 640px) {
+            .vg { font-size: 12px; }
+            .vg th, .vg td { padding: 4px 5px; }
+        }
+    </style>
+
+    <div class="vg-wrap">
+        <table class="vg">
+            <thead>
+                <tr>
+                    <th rowspan="2">Volunteer</th>
+                    @foreach (var day in Model.Days)
+                    {
+                        <th class="vg-day" colspan="2">@day.ToString("ddd d MMM")</th>
+                    }
+                    <th rowspan="2" title="How many half-days this person is available for">Slots</th>
+                </tr>
+                <tr>
+                    @foreach (var _ in Model.Days)
+                    {
+                        <th class="vg-day">Morning</th>
+                        <th class="vg-day">Afternoon</th>
+                    }
+                </tr>
+            </thead>
+            @* §1156 (operator 2026-08-31: "i need to have all preselected grouped together and then
+               not preselected … We still need to see total at the button"). Each group is its own
+               tbody with its own subtotal, so the shortlist's coverage can be read on its own —
+               which is the question this page is used to answer. The grand total stays in tfoot. *@
+            @foreach (var group in (Model.Groups ?? new List<VolunteerAvailabilityOverviewService.Group>()))
+            {
+                <tbody>
+                    <tr>
+                        <th class="vg-group" colspan="@(2 + Model.Days.Count * 2)">@group.Label</th>
+                    </tr>
+                    @foreach (var row in group.Rows)
+                    {
+                        <tr>
+                            <td class="vg-name">
+                                @row.FullName
+                                @{
+                                    var gNote = row.Notes.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+                                }
+                                @if (!string.IsNullOrWhiteSpace(gNote))
+                                {
+                                    <br /><span class="vg-note">@gNote</span>
+                                }
+                            </td>
+                            @foreach (var cells in row.Days)
+                            {
+                                <td class="vg-cell @VolunteerAvailabilityGrid.CssClass(cells.Morning)">
+                                    @VolunteerAvailabilityGrid.Label(cells.Morning)
+                                </td>
+                                <td class="vg-cell @VolunteerAvailabilityGrid.CssClass(cells.Afternoon)">
+                                    @VolunteerAvailabilityGrid.Label(cells.Afternoon)
+                                </td>
+                            }
+                            <td class="vg-cell">@row.AvailableHalves</td>
+                        </tr>
+                    }
+                    <tr class="vg-subtotal">
+                        <td class="vg-label">Available in this group</td>
+                        @foreach (var t in group.Totals)
+                        {
+                            <td>@t.Morning</td>
+                            <td>
+                                @t.Afternoon
+                                @if (t.EveningOnly > 0)
+                                {
+                                    <span class="vg-note"> (+@t.EveningOnly eve)</span>
+                                }
+                            </td>
+                        }
+                        <td></td>
+                    </tr>
+                </tbody>
+            }
+            @* ⚰️ The ungrouped body is kept ONLY for a caller that predates §1156 and passes no
+               groups — otherwise the page would render a header and nothing else. *@
+            <tbody style="@(Model.Groups is { Count: > 0 } ? "display:none;" : "")">
+                @foreach (var row in (Model.Groups is { Count: > 0 } ? new List<VolunteerAvailabilityOverviewService.Row>() : Model.Rows))
+                {
+                    <tr>
+                        <td class="vg-name">
+                            @row.FullName
+                            @if (row.LifecycleState == CommunityHub.Core.Domain.ParticipantLifecycleState.Preselected)
+                            {
+                                <span class="vg-note"> · preselected</span>
+                            }
+                            @{
+                                var note = row.Notes.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+                            }
+                            @if (!string.IsNullOrWhiteSpace(note))
+                            {
+                                <br /><span class="vg-note">@note</span>
+                            }
+                        </td>
+                        @foreach (var cells in row.Days)
+                        {
+                            <td class="vg-cell @VolunteerAvailabilityGrid.CssClass(cells.Morning)">
+                                @VolunteerAvailabilityGrid.Label(cells.Morning)
+                            </td>
+                            <td class="vg-cell @VolunteerAvailabilityGrid.CssClass(cells.Afternoon)">
+                                @VolunteerAvailabilityGrid.Label(cells.Afternoon)
+                            </td>
+                        }
+                        <td class="vg-cell">@row.AvailableHalves</td>
+                    </tr>
+                }
+            </tbody>
+            @* 🔑 "show the amount below so we have a number" — the head-count per half-day, which is
+               what a shift is staffed against. *@
+            <tfoot>
+                <tr>
+                    <td class="vg-label">Available — ALL volunteers</td>
+                    @foreach (var t in Model.Totals)
+                    {
+                        <td>@t.Morning</td>
+                        <td>
+                            @t.Afternoon
+                            @if (t.EveningOnly > 0)
+                            {
+                                @* Counted separately, never added in: they declined the 12–17 shift. *@
+                                <span class="vg-note"> (+@t.EveningOnly eve)</span>
+                            }
+                        </td>
+                    }
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <p class="vg-legend">
+        <span class="vg-yes">Yes</span> available &nbsp;
+        <span class="vg-no">No</span> not available &nbsp;
+        <span class="vg-eve">Eve</span> attending, can help in the evening &nbsp;
+        <span class="vg-unknown">–</span> not answered
+        <br />
+        <strong>@Model.Rows.Count</strong> volunteer(s) shown. The evening offer is counted
+        separately and is never added to the afternoon total — they declined that shift.
+    </p>
+}

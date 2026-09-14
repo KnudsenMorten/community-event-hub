@@ -245,11 +245,6 @@ public static class JobCatalog
             // §869.3 — converted. It polls the webshop; no hop downstream is anchored to a clock.
             FeatureKey: "sponsor-order-pull", DefaultIntervalMinutes: 10, System: JobSystem.WebshopAndErp),
 
-        // 🔑 §869.3 — converted. HE NAMED THIS ONE: it was in the screenshot showing "fixed time —
-        // set in code" with no input beside neighbours that had a box.
-        new JobDescriptor("SponsorUploadWatchJob", "Sponsor upload watch", "Every 15 minutes", "0 */5 * * * *",
-            "SharePoint → CEH: watches the sponsor upload folders and notifies when a company uploads a file.",
-            FeatureKey: "sponsor-upload-watch", DefaultIntervalMinutes: 10, System: JobSystem.SharePoint),
 
         // §545 — NOT FeatureKey-gated and deliberately so: this is the watchdog that notices when
         // something ELSE has gone quiet, so it must not be silenceable by the same class of switch.
@@ -265,6 +260,79 @@ public static class JobCatalog
             "CEH → e-mail (Brevo): mails the organizers which speaker details CEH holds that Zoho "
             + "Backstage is missing, since the speakers API cannot be updated.",
             FeatureKey: "speaker-gap-report", DefaultIntervalMinutes: 1440, System: JobSystem.Zoho),  // §878.5
+
+        // §1060(l) — asks the model whether each active session's description is a real description
+        // and stores the 0/1 on the session row. 🔒 The ONLY caller of the judge: the approval gate
+        // reads the stored verdict, so eligibility cannot flicker between runs.
+        // ⚠️ No FeatureKey ON PURPOSE — see SoMeTextEligibilityJob for why a switch here would make
+        // unjudged sessions pass rather than stopping anything.
+        new JobDescriptor("SoMeTextEligibilityJob", "Session description review (AI)", "Daily", "0 */5 * * * *",
+            "CEH → Azure OpenAI: judges each session description as real content or a placeholder "
+            + "and records the verdict, which the social-media approval gate then reads.",
+            // 🔑 Social, not Platform: an outage here does not hurt the hub, it stalls the social
+            // campaign — which is where an organizer would go looking when announcements stop.
+            // (There is no JobSystem for the model itself, and inventing one would give a single
+            // job its own category on the Jobs page.)
+            DefaultIntervalMinutes: 1440, System: JobSystem.Social),
+
+        // §1060(b) — tells the speaker/sponsor a post about them is scheduled, and again the day
+        // before. 🔒 Both stages are offered every pass and the ReminderEngine ledger decides, so the
+        // job holds no state and a missed run cannot skip or repeat a stage.
+        new JobDescriptor("SoMeAnnouncementNoticeJob", "Announcement notices (speakers/sponsors)", "Every 15 min", "0 */5 * * * *",
+            "CEH → e-mail (Brevo): e-mails the speaker or sponsor a scheduled social-media post is "
+            + "about — once when it is scheduled, once the day before it publishes — with a "
+            + "one-click link to their announcements page.",
+            FeatureKey: "some-scheduling", DefaultIntervalMinutes: 15, System: JobSystem.Email),
+
+        // §1060(j) — the daily forecast to the organizer mailbox. 🔑 Distinct from the per-post
+        // auto-approval notice: that is an EVENT, this is "here is what goes out today".
+        // 🔒 A run with nothing due sends nothing, so a mis-set interval repeats a mail rather than
+        // producing a wrong one.
+        // ⚠️ NOT the word "digest" — §879.2 bans it in anything the operator reads (*"hate that word
+        // digest, dont use it and dont understand it"*), and a test enforces it. The class behind
+        // this keeps its code name; only what he READS is governed.
+        // 🔴 §1190 — EVERY 10 MINUTES, NOT DAILY. Operator 2026-09-12: *"it comes way to late … today
+        // i have one 1 hr to react on the mail. i need close to 24 hr to react"*. A daily run means
+        // the warning lands somewhere between 24 and 0 hours before the post, depending only on when
+        // the post happens to sit relative to the run — so it was a lottery, not a notice period.
+        // 🔒 Survivable at this cadence ONLY because `SoMePost.Next24NoticeSentAt` makes each post
+        // announced once; the same query on a ten-minute tick would send 144 identical mails a day.
+        new JobDescriptor("SoMeNext24HoursDigestJob", "Publishing in the next 24 hours", "Every 10 minutes", "0 */5 * * * *",
+            "CEH → e-mail (Brevo): alerts the organizer mailbox the moment an approved social-media "
+            + "post enters its last 24 hours, each with a link to change it. Each post is announced "
+            + "once, so you get close to a full day to react rather than whatever is left when a "
+            + "daily run happens to fire.",
+            DefaultIntervalMinutes: 10, System: JobSystem.Email),
+
+        // §1077 — the daily volume-package re-check. 🔒 Computes and records ONLY: no mail, no
+        // external call, nothing outside its own two tables. Deliberately not FeatureKey-gated —
+        // there is nothing to protect against, and a switch would only let the organizer page show a
+        // stale answer with nothing saying why.
+        new JobDescriptor("VolumePackageQualificationJob", "Volume package qualification", "Daily", "0 */5 * * * *",
+            "CEH internal: recomputes which companies have 10 or more active attendees (orders, "
+            + "coupons and e-mail domains combined, each person counted once) and records the result.",
+            DefaultIntervalMinutes: 1440, System: JobSystem.Platform),
+
+        // §1077 stage 4 — the weekly chase. 🔒 FeatureKey-gated (default OFF) because it is the one
+        // thing in this feature that mails a customer on a SCHEDULE rather than when a human decides.
+        // ⚠️ The daily tick is deliberate: the SERVICE decides who is a week overdue, so one missed
+        // run costs hours rather than a fortnight.
+        // §1080 — the campaign batch sender. 🔴 FeatureKey-gated (default OFF): the only job that
+        // can write to thousands. Turning the switch off stops a campaign mid-flight, and the
+        // per-recipient ledger means it resumes where it stopped rather than starting again.
+        // §878 — the cron is a BASE TICK; this is the cadence the operator can edit on /Organizer/Jobs.
+        // ⚠️ 5 minutes is a floor on how often a batch CAN go, not how fast a campaign drains: the
+        // real pacing is each campaign's own batch size and interval.
+        new JobDescriptor("MailCampaignJob", "Mass mail (campaigns)", "Every 5 minutes", "0 */5 * * * *",
+            "Sends one batch of each running campaign. The pacing is the campaign's own batch size "
+            + "and interval, so a mailing goes out gradually rather than all at once.",
+            FeatureKey: "mail-campaigns", DefaultIntervalMinutes: 5, System: JobSystem.Platform),
+
+        new JobDescriptor("VolumePackageReminderJob", "Volume package reminders", "Daily", "0 */5 * * * *",
+            "Reminds a qualifying company that was invited and has not yet chosen its volume-package "
+            + "benefits. Stops the moment they finish or decline; never writes to their attendees.",
+            DefaultIntervalMinutes: 1440, System: JobSystem.Platform,
+            FeatureKey: "volume-package-reminders"),
 
         // §598 — deliberately NOT FeatureKey-gated: a file that has vanished must surface whether or
         // not any sponsor feature is switched on. Daily is the right cadence — files rarely vanish,
@@ -395,6 +463,14 @@ public static class JobCatalog
         // costs one string comparison per already-archived speaker.
         new JobDescriptor("SpeakerPhotoArchiveJob", "Speaker photos to SharePoint", "Daily", "0 */5 * * * *",
             "CEH → SharePoint: copies each community/guest speaker's photo into the shared speakers folder, alongside the sponsor-uploaded ones.",
+            DefaultIntervalMinutes: 10, System: JobSystem.SharePoint),
+
+        // §1145 (operator 2026-08-28: "same frequency as the speaker, think every 10 min") — the
+        // VOLUNTEER counterpart of the speaker archive's alias back-fill. §1132 wrote the
+        // name alias only at signup, so anyone who uploaded before 2026-08-25 stayed id-only.
+        // Converges to no work once that backlog is cleared: one listing plus a string compare.
+        new JobDescriptor("VolunteerPhotoAliasBackfillJob", "Volunteer photo name aliases", "Daily", "0 */5 * * * *",
+            "SharePoint: writes the missing volunteer-photo-{Name}-{id} copy for volunteers who uploaded before the two-file convention.",
             DefaultIntervalMinutes: 10, System: JobSystem.SharePoint),
 
         // §6.4 / §770.12 — rebuilds every §3.5 logistics file and mails what is due (food and expo
@@ -537,6 +613,15 @@ public static class JobCatalog
         // §825 — HOURLY (operator 2026-08-04). This is the other source of the `[CEH→Zoho]` queue
         // mails: at 10 minutes the pair of them delivered five near-identical notices in half an
         // hour on 3 Aug. The cron is only the base tick; DefaultIntervalMinutes below is the cadence.
+        // §1165b — the sweep that makes a swag-catalogue reservation's expiry real. It is listed
+        // here for the reason the guard test exists: an hourly job that quietly puts items back on
+        // sale is exactly the kind an organizer must be able to see running.
+        new JobDescriptor("SwagHoldExpiryJob", "Swag catalogue: expiring reservations", "Hourly", "0 */5 * * * *",
+            "Warns three days before a swag-catalogue reservation lapses, then releases it when it "
+            + "does so the item goes back on sale. A hold is only a promise — nothing in the webshop "
+            + "is cancelled, and an order already placed is unaffected.",
+            DefaultIntervalMinutes: 60, System: JobSystem.WebshopAndErp),
+
         new JobDescriptor("SponsorZohoReconcileJob", "Zoho sync: sponsors + exhibitors", "Hourly", "0 */5 * * * *",
             "CEH → Zoho Backstage: sends changed sponsor + exhibitor details (description, website, "
             + "social links), sets the event coordinator from Company Manager, and clears a dead "

@@ -14,11 +14,18 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Pages.Volunteer;
 
 /// <summary>
-/// PUBLIC (anonymous) volunteer sign-up — a 3-step wizard (operator 2026-06-23):
-///   1. About you: name, email, mobile, LinkedIn + a photo (uploaded to SharePoint).
+/// PUBLIC (anonymous) volunteer sign-up — a FOUR-step wizard (operator 2026-06-23):
+///   1. About you: name, email, mobile.
 ///   2. My availability: per-day Full / Half / Blocked / Not-able-to-help (incl. any
 ///      configured extra days such as the packing day).
-///   3. Collaboration agreement: the volunteer must accept it to submit.
+///   3. Public profile: LinkedIn + photo, and the consent to be featured on the public
+///      volunteer page. §1148 — ticking that consent makes the photo REQUIRED.
+///   4. Collaboration agreement: the volunteer must accept it to submit.
+///
+/// ⚰️ This said "3-step" and listed the agreement as step 3, which stopped being true when the
+/// public-profile step was added — the same drift that left the agreement error message pointing at
+/// step 3 (§1150). A wizard's step numbers appear in the UI and in error text, so a stale count here
+/// is a stale instruction there.
 /// The submission creates a pending <see cref="Participant"/>
 /// (<c>Role = Volunteer, IsActive = false, QueueSource = VolunteerInterestForm</c>)
 /// plus the per-day availability + a <see cref="VolunteerAvailability"/> row holding
@@ -170,9 +177,70 @@ public class SignupModel : PageModel
         if (phone is null || phone.Length < 4) { ErrorMessage = "Please enter your mobile number."; return Page(); }
         if (!AgreementAccepted)
         {
-            ErrorMessage = "Please accept the volunteer collaboration agreement (step 3) to submit.";
+            // ⚰️ §1150 — this said "(step 3)". The agreement is STEP 4; it moved when the public-
+            // profile step was added and the message was left behind. A wrong step number on the one
+            // error that blocks submission sends people to the wrong page to fix it.
+            ErrorMessage = "Please accept the volunteer collaboration agreement (step 4) to submit.";
             return Page();
         }
+        // 🔴 §1148 — CONSENTING TO BE SHOWN WITH A PHOTO REQUIRES A PHOTO.
+        //
+        // Operator 2026-08-28: *"people have completed the form but not uploaded the picture"* — with
+        // a queue showing rows consented to the public wall and "none" under Photo.
+        //
+        // 🔑 The checkbox promises exactly this: *"feature me on the public volunteer page (name,
+        // photo & LinkedIn)"*. Accepting that with no photo creates a promise the wall cannot keep,
+        // and the gap only surfaces weeks later when somebody builds the page.
+        //
+        // 🔒 CONDITIONAL, not blanket (his decision, 2026-08-28). A volunteer who does NOT opt in is
+        // never blocked for want of a headshot — this is a public recruitment form, and turning
+        // somebody away over a picture they did not offer to give costs a volunteer.
+        //
+        // ⚠️ Enforced HERE as well as in the browser: the client-side gate is a courtesy, and a
+        // form that can be posted without JavaScript would otherwise sail straight past it.
+        if (ProfileConsent)
+        {
+            // §1151 — BOTH fields, because the consent names both: "feature me on the public
+            // volunteer page (name, photo & LinkedIn)". Requiring only the photo let somebody
+            // opt into a listing we then could not build — the same half-kept promise, one field
+            // over.
+            var missingPhoto = Photo is null || Photo.Length == 0;
+            var missingLinkedIn = string.IsNullOrWhiteSpace(linkedIn);
+
+            if (missingPhoto || missingLinkedIn)
+            {
+                // 🔑 Name WHICH one is missing. "Fill in the required fields" on a step with two
+                // of them is a puzzle, and this is a public form where a puzzle costs a volunteer.
+                var what = missingPhoto && missingLinkedIn ? "a photo and your LinkedIn URL"
+                    : missingPhoto ? "a photo"
+                    : "your LinkedIn URL";
+                ErrorMessage =
+                    $"You ticked \"feature me on the public volunteer page\", which shows your name, "
+                    + $"photo and LinkedIn — please add {what}, or untick that box if you would "
+                    + "rather not be featured.";
+                return Page();
+            }
+
+            // ⚠️ The form is `novalidate`, so the browser does NOT check `type="url"`. Without this
+            // a typo (or a `javascript:` string) reaches the organizer queue as the applicant's
+            // profile link — §1149 refuses to make such a value clickable, but the honest place to
+            // catch it is here, where the person who typed it can still fix it.
+            //
+            // §1152 — a MISSING "https://" is not a typo. "www.linkedin.com/in/…" is how people
+            // write a web address and every browser accepts it, so it is normalised rather than
+            // rejected; only a value carrying a non-http(s) scheme is refused. Stored normalised so
+            // the row is right at the source, not repaired at every render.
+            var normalized = CommunityHub.Core.Volunteers.ExternalProfileUrl.TryNormalize(linkedIn);
+            if (normalized is null)
+            {
+                ErrorMessage =
+                    "That LinkedIn address does not look like a web address — please use something "
+                    + "like https://www.linkedin.com/in/you.";
+                return Page();
+            }
+            linkedIn = normalized;
+        }
+
         if (Photo is not null)
         {
             if (Photo.Length > MaxPhotoBytes)
@@ -345,11 +413,42 @@ public class SignupModel : PageModel
             var name = CommunityHub.Core.Integrations.Graphics.VolunteerPhotoFileName.Build(
                 participantId, Path.GetExtension(Photo.FileName));
 
+            var contentType = string.IsNullOrWhiteSpace(Photo.ContentType)
+                ? "application/octet-stream"
+                : Photo.ContentType;
+            var bytes = ms.ToArray();
+
             var (_, webUrl, _) = await _sp.UploadFileAsync(
-                sp.SiteUrl, sp.DriveName, photoFolder, name,
-                ms.ToArray(),
-                string.IsNullOrWhiteSpace(Photo.ContentType) ? "application/octet-stream" : Photo.ContentType,
-                ct);
+                sp.SiteUrl, sp.DriveName, photoFolder, name, bytes, contentType, ct);
+
+            // §1132 (operator 2026-08-25: *"same for volunteers that upload pics, could be geat to
+            // have 2 files - one with id and another with name"*) — a SECOND copy named after the
+            // person, so the folder can be searched by name instead of by id.
+            //
+            // 🔒 The id file above stays authoritative and is what `webUrl` points at. The alias is
+            // written afterwards and best-effort: a failure here must never cost the volunteer their
+            // photo, which the outer catch would otherwise do by returning null.
+            // 🔒 It carries the trailing id, so two volunteers with the same name cannot overwrite
+            // each other — the exact defect §769.9 removed when it dropped `{Full Name}.ext` — and
+            // VolunteerPhotoFileName.TryParse recognises it, so deactivation cleanup deletes it too.
+            var aliasName = CommunityHub.Core.Integrations.Graphics.VolunteerPhotoFileName.BuildAlias(
+                participantId, FullName, Path.GetExtension(Photo.FileName));
+            if (aliasName is not null)
+            {
+                try
+                {
+                    await _sp.UploadFileAsync(
+                        sp.SiteUrl, sp.DriveName, photoFolder, aliasName, bytes, contentType, ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex,
+                        "§1132: the volunteer name alias '{Alias}' could not be written for "
+                        + "participant {ParticipantId}; the id-named photo is stored.",
+                        aliasName, participantId);
+                }
+            }
+
             return string.IsNullOrWhiteSpace(webUrl) ? null : webUrl;
         }
         catch (Exception ex)

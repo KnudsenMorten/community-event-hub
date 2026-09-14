@@ -28,8 +28,9 @@
 
         <!-- Server-side search over name + email. Submitting resets to page 1 and
              keeps the active sort (carried as hidden fields). -->
-        <form method="get" style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
-            <span style="display:flex;flex-direction:column;gap:2px;">
+        <form method="get" class="ceh-filterbar">
+            @* §1129 — wider than the dropdowns: it holds a name OR an e-mail address. *@
+            <span class="ceh-filterbar__field ceh-filterbar__field--wide">
                 <label for="Search">@Localizer["OrgGrid.Search"]</label>
                 <input type="search" id="Search" name="Search" value="@Model.Search"
                        placeholder="@Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]" />

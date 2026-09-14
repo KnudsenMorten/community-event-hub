@@ -37,6 +37,7 @@ public sealed class WebshopInvoiceJob
     private readonly FeatureGateService _gate;
     private readonly ILogger<WebshopInvoiceJob> _log;
     private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+    private readonly CommunityHub.Core.Integrations.TestModeOptions? _testMode;
 
     public WebshopInvoiceJob(
         CommunityHubDbContext db,
@@ -45,8 +46,11 @@ public sealed class WebshopInvoiceJob
         InvoiceProblemNotifier problems,
         FeatureGateService gate,
         ILogger<WebshopInvoiceJob> log,
-        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null,
+        // 🔴 §1119 — the host's own answer to "can I create an invoice at all?".
+        CommunityHub.Core.Integrations.TestModeOptions? testMode = null)
     {
+        _testMode = testMode;
         _db = db;
         _invoicing = invoicing;
         _draftNotices = draftNotices;
@@ -68,6 +72,19 @@ public sealed class WebshopInvoiceJob
         if (eventId is null)
         {
             _activity?.ReportInactive("No active edition, so there are no webshop orders to invoice.");
+            return;
+        }
+
+        // 🔴 §1119 — see CouponInvoiceJob: a host that cannot create an invoice must not run the
+        // sweep and must not mail about it. This is the job that sent him
+        // *"[DEV] ACTION REQUIRED: 1 item(s) cannot be invoiced (Webshop orders)"*.
+        if (_testMode?.Enabled == true)
+        {
+            _activity?.ReportInactive(
+                "TestMode is on, so this host cannot create e-conomic invoices — the webshop "
+                + "invoicing sweep does not run and reports nothing. Invoicing happens on PROD only.");
+            _log.LogInformation(
+                "§1119 WebshopInvoiceJob: TestMode is on — invoicing sweep skipped, no problem mail.");
             return;
         }
 

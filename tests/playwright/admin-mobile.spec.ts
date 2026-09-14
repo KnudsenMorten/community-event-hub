@@ -246,6 +246,8 @@ test.describe('DEV organizer admin (mobile)', () => {
             '/Organizer/SpeakerReminders', '/Organizer/SessionizeImport',
             '/Organizer/SponsorAdmin/Index', '/Organizer/SponsorAdmin/Dashboard',
             '/Organizer/SponsorAdmin/Tasks', '/Organizer/SponsorAdmin/Leads',
+            // §1085 — the one all-roles status board, unfiltered and role-filtered.
+            '/Organizer/ParticipantStatus', '/Organizer/ParticipantStatus?role=Sponsor',
         ];
         const failures: string[] = [];
         for (const path of pages) {

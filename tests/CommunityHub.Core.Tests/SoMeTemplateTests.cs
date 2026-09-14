@@ -68,7 +68,8 @@ public sealed class SoMeTemplateTests
                 ("TrackName", "AI"),
                 ("IntroText", "📣 Calling all tech wizards!"),
                 ("EventSystemUrl", "https://eldk27.expertslive.dk"),
-                ("SpeakerNames", "Andreas Sobczyk | Sherry List"),
+                // §1224 — the track template tags: {Speakers} carries the mentions.
+                ("Speakers", "Andreas Sobczyk | Sherry List"),
                 ("EventTags", "#ELDK27 #ExpertsLiveDK"),
                 ("EventNameShort", "ELDK27"),
                 ("Organizers", "Organizer One | Organizer Two")));
@@ -152,5 +153,47 @@ public sealed class SoMeTemplateTests
         Assert.Equal(3, (int)SoMeTemplateKind.SponsorCategory);
         Assert.Equal(4, (int)SoMeTemplateKind.Sponsor);
         Assert.Equal(5, (int)SoMeTemplateKind.EventPost);
+    }
+
+    /// <summary>
+    /// 🔴 §1224 — a session announcement TAGS its speakers. Operator 2026-09-14: <i>"the {speakers}
+    /// were not included, so none of the speakers were tagged"</i> — two master class posts went out
+    /// naming nobody, because this body had no speaker token.
+    /// </summary>
+    [Fact]
+    public void A_session_announcement_tags_its_speakers_under_the_intro()
+    {
+        var body = SoMeTemplateCatalog.DefaultBody(SoMeTemplateKind.Session);
+
+        // {Speakers} (mentions), not {SpeakerNames} (plain text) — tagging is the point.
+        Assert.Contains("{Speakers}", body, StringComparison.Ordinal);
+        Assert.True(body.IndexOf("{IntroText}", StringComparison.Ordinal)
+                    < body.IndexOf(SoMeTemplateCatalog.SessionSpeakersLine, StringComparison.Ordinal));
+
+        var rendered = SoMeTemplateRenderer.Render(body, Values(
+            ("SessionTitle", "Identity Master Class"), ("IntroText", "A day on identity."),
+            ("Speakers", "@[Alex Example](urn:li:person:1) | Sam Sample")));
+        Assert.Contains("🎤 With @[Alex Example](urn:li:person:1) | Sam Sample", rendered, StringComparison.Ordinal);
+    }
+
+    /// <summary>🔴 §1224 — track posts tag their speakers too ("yes, tag speakers in track posts too").</summary>
+    [Fact]
+    public void A_track_post_tags_its_speakers_not_plain_names()
+    {
+        var body = SoMeTemplateCatalog.DefaultBody(SoMeTemplateKind.SpeakerTracks);
+        Assert.Contains("{Speakers}", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("{SpeakerNames}", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 🔒 §1224 — the tag line is never published bare: {Speakers} is REQUIRED, so a session whose
+    /// speakers cannot be resolved is held by the empty-variable gate instead of saying "With".
+    /// </summary>
+    [Fact]
+    public void A_session_with_no_resolvable_speaker_is_held_not_published_with_a_bare_line()
+    {
+        Assert.DoesNotContain("Speakers", SoMeEmptyVariableGate.Optional);
+        Assert.Contains("Speakers", SoMeEmptyVariableGate.MissingRequired(
+            SoMeTemplateCatalog.SessionSpeakersLine, Values(("Speakers", null))));
     }
 }

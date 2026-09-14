@@ -21,15 +21,42 @@ public sealed record SponsorWizardStep(string Key, string Anchor, bool? Done);
 public sealed record SponsorWizardView(IReadOnlyList<SponsorWizardStep> Steps)
 {
     /// <summary>
-    /// Every step is numbered + counted (the list shows 1..<see cref="TotalSteps"/>), so the
-    /// "Continue — step X of Y" line and the numbered list always share the SAME base. A step
-    /// whose completion can't be determined right now (<c>Done == null</c>, e.g. e-conomic
-    /// briefly unavailable) is shown but never counted as done and never the "Continue" target.
+    /// Every step is numbered + LISTED (the list shows 1..<see cref="TotalSteps"/>), so the
+    /// "Continue — step X of Y" line and the numbered list always share the SAME base.
+    /// <para>⚠️ This is the DISPLAY base only. A step whose completion can't be determined
+    /// (<c>Done == null</c>) is still shown and still numbered — it is a guided link the sponsor
+    /// may well need — but since §1081 it is NOT the base the percentage divides by. See
+    /// <see cref="EvaluableSteps"/> for why those had to become two different numbers.</para>
     /// </summary>
     public int TotalSteps => Steps.Count;
     public int DoneCount => Steps.Count(s => s.Done == true);
-    public bool AllDone => TotalSteps > 0 && DoneCount >= TotalSteps;
-    public int Percent => TotalSteps == 0 ? 0 : (int)Math.Round(100.0 * DoneCount / TotalSteps);
+
+    /// <summary>
+    /// 🔴 §1081 — THE DENOMINATOR COUNTS ONLY STEPS WE CAN ACTUALLY EVALUATE.
+    /// </summary>
+    /// <remarks>
+    /// <para>It used to be <see cref="TotalSteps"/>, and that made 100% UNREACHABLE for any company
+    /// whose contacts step could not be determined: <c>Done == null</c> is counted in the denominator
+    /// and never in the numerator, so the bar sat at (say) 6 of 7 for ever and
+    /// <see cref="AllDone"/> could never become true.</para>
+    ///
+    /// <para>⚠️ <b>And it is not only a transient outage.</b> <c>ContactsDoneAsync</c> returns null
+    /// when Company Manager is disabled, when the ERP client cannot write, when the company id will
+    /// not parse, <b>or when the company has no ERP customer number at all</b> — the last of which is
+    /// permanent. The doc-comment's *"e-conomic briefly unavailable"* undersold it.</para>
+    ///
+    /// <para>🔑 It also makes the three surfaces AGREE. <c>GetStartedDigestBuilder</c> already treated
+    /// a null step as not-open (<c>s.Done == false</c>), so the chase correctly stopped while the
+    /// progress bar and the completion notice insisted the sponsor was unfinished. The digest was
+    /// right; this is the other two catching up. Consistent with his rule that a step nobody can be
+    /// required to finish must not gate the bar (§400 / §680 / §732).</para>
+    /// </remarks>
+    public int EvaluableSteps => Steps.Count(s => s.Done != null);
+
+    public bool AllDone => EvaluableSteps > 0 && DoneCount >= EvaluableSteps;
+
+    public int Percent =>
+        EvaluableSteps == 0 ? 0 : (int)Math.Round(100.0 * DoneCount / EvaluableSteps);
 
     /// <summary>The next not-completed step (the "Continue" target): the first step that is
     /// NOT done. A step with an undeterminable state (null) is skipped so "Continue" never
@@ -104,13 +131,24 @@ public sealed class SponsorWizardService
                 Core.Content.WelcomeCopyStore.StepKey, Core.Content.WelcomeCopyStore.StepKey, true));
         }
 
-        // 1. Company Details — basic info filled (website or company description).
-        var detailsDone = info is not null &&
-            (!string.IsNullOrWhiteSpace(info.WebsiteUrl) || !string.IsNullOrWhiteSpace(info.CompanyDescription));
+        // 1. Company Details — §1081: EVERY CEH-owned content field must carry text.
+        //
+        // 🔴 This used to be `WebsiteUrl OR CompanyDescription`, and the OR was the bug. Operator
+        // 2026-08-13: *"we need all fields like company description, short description, some branding
+        // description to be filled out … so the OR here is wrong"*. A sponsor with a website and no
+        // description read as DONE, was never chased, and was meanwhile the reason a SoMe post could
+        // not be approved — `SoMeApprovalGate` blocks on `SocialMediaIntro`, which nothing asked for.
+        //
+        // 🔒 WebsiteUrl is deliberately NOT part of it: the WEBSHOP owns that field and
+        // `ReconcileWithWebshopAsync` (§41b) fills it in automatically, so chasing a sponsor here
+        // would send them to a form that cannot fix it. The short description is exhibitor-only.
+        // Both rules live in SponsorCompanyContent so this step, the SoMe gate and the digest cannot
+        // drift apart again.
+        var content = Core.Sponsors.SponsorCompanyContent.StatusOf(info);
+        steps.Add(new("company", "company", content.AllDelivered));
         // Key MUST be "company" (NOT "details") — "details" is the SPEAKER step's global handler
         // key and wizard handlers share one key→handler map across all roles; a "details" collision
         // let the sponsor company partial hijack the speaker details step in Release.
-        steps.Add(new("company", "company", detailsDone));
 
         // §292 registered the sponsor's speaking session (title + abstract + speakers) as a WIZARD
         // STEP, gated on HasSponsorSession.

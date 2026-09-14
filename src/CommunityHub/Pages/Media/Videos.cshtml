@@ -1,0 +1,6 @@
+@page
+@model CommunityHub.Pages.Media.VideosModel
+@{
+    ViewData["Title"] = Model.Heading;
+}
+@await Html.PartialAsync("_Library", (CommunityHub.Pages.Media.MediaLibraryPageModel)Model)

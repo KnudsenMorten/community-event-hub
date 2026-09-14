@@ -26,6 +26,9 @@
     .som-on { background:#dcfce7; color:#166534; }
     .som-off { background:#fee2e2; color:#991b1b; }
     .som-status { background:#e0e7ff; color:#3730a3; }
+    /* §1206 — amber, not red: a post waiting on someone else's logo is not a failure, and a queue
+       of red chips reads as a broken campaign rather than a chase list. */
+    .som-warn { background:#fef3c7; color:#92400e; }
     .som-grid { display:grid; grid-template-columns:1fr; gap:8px; max-width:640px; }
     .som-grid label { font-weight:600; }
     .som-grid input, .som-grid textarea { width:100%; box-sizing:border-box; }
@@ -71,7 +74,25 @@
 
 @if (Model.Message is not null)
 {
-    <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
+    @* 🔒 §1193 — kept, but it is no longer the ONLY place the outcome appears. A page-level message
+       is right for a page you are at the top of; this list is fifty rows long. *@
+    <div class="card">
+        <p role="@(Model.ActionFailed ? "alert" : "status")"
+           style="color:@(Model.ActionFailed ? "#b91c1c" : "#0a6");">@Model.Message</p>
+    </div>
+}
+
+@if (Model.ActionedPostId is not null)
+{
+    @* The POST returns to the top of the page, so without this the row he pressed — and the answer
+       printed on it — is wherever it was, off screen. Scrolled rather than an #anchor redirect: the
+       filters live in the query string and an anchor would have to be threaded through every one. *@
+    <script>
+        (function () {
+            var row = document.getElementById('acted');
+            if (row) { row.scrollIntoView({ block: 'center' }); }
+        })();
+    </script>
 }
 
 @* §889.4 — the heading SAYS what the page is. The nav called it "SoMe queue", the heading called it
@@ -184,13 +205,17 @@
             }
         </select>
 
-        <label for="kind" class="sr-only">Type</label>
-        <select id="kind" name="Kind">
+        @* 🔴 §1209 — THE FILTER OFFERS THE SAME NAMES THE COLUMN PRINTS. Operator 2026-09-12:
+           *"remember to include it in filter as well"*. A column that says 2a beside a filter that
+           only offers "Type 2" is worse than either alone: the one thing you want after reading a
+           category is to see the rest of it. *@
+        <label for="cat" class="sr-only">Type</label>
+        <select id="cat" name="Category">
             <option value="">All types</option>
-            @foreach (var k in Enum.GetValues<CommunityHub.Core.Integrations.SoMeTemplateKind>())
+            @foreach (var c in CommunityHub.Core.Integrations.SoMeCategoryRules.All)
             {
-                <option value="@((int)k)" selected="@(Model.Kind == k)">
-                    @CommunityHub.Core.Integrations.SoMeTemplateCatalog.Title(k)
+                <option value="@((int)c)" selected="@(Model.Category == c)">
+                    @CommunityHub.Core.Integrations.SoMeCategoryRules.Label(c)
                 </option>
             }
         </select>
@@ -219,12 +244,26 @@
             <a asp-page="/Organizer/SoMeQueue" asp-route-Q="@Model.Q" asp-route-State="all">Show all states</a>.</span>
         }
     </p>
+    @* 🔴 §1206 — the count IS in the plan, said where the plan is. The reason lives on each row's
+       chip; the grouped version (who owes what) is on the settings page. *@
+    @if (Model.NotReadyCount > 0)
+    {
+        <p class="som-meta" role="status" style="margin:6px 0 0;">
+            <span class="som-badge som-warn">⏳ @Model.NotReadyCount not ready</span>
+            These are planned and keep their place in the calendar — the planner moves them to the next
+            free slot if their date passes before what they are waiting for arrives.
+            <a asp-page="/Organizer/SoMeSettings">See what they are waiting on, grouped</a>.
+        </p>
+    }
 </div>
 
 @if (Model.Posts.Count == 0)
 {
     <div class="card">
+        @* §1209 — Category counts as a filter here too, or an empty 2c view reads as "nothing is
+           scheduled yet" and hides the way back. *@
         <p>No posts match. @if (!string.IsNullOrWhiteSpace(Model.Q) || Model.Kind is not null
+             || Model.Category is not null
              || (!string.IsNullOrWhiteSpace(Model.State) && Model.State != "all"))
            { <a asp-page="/Organizer/SoMeQueue">Clear the filters</a> } else { <text>Nothing is scheduled yet.</text> }</p>
     </div>
@@ -253,14 +292,28 @@ else
                     <td data-label="#" class="som-id">@p.Id</td>
                     <td data-label="When">@CommunityHub.Core.Integrations.SoMeDisplayTime.DateTime(p.ScheduledAtUtc)</td>
                     <td data-label="Type">
-                        @(p.TemplateKind is null
-                            ? "—"
-                            : CommunityHub.Core.Integrations.SoMeTemplateCatalog.Title(p.TemplateKind.Value))
+                        @* 🔴 §1209 — the CATEGORY, so a Type 2 row says 2a / 2b / 2c. Operator
+                           2026-09-12: *"can you update the type column to reflect the 2a, 2b, 2c
+                           names instead if type = 2"*. One template kind, three schedules: printing
+                           "Type 2" on all of them made the queue unreadable against the settings page
+                           that governs their dates. *@
+                        @Model.TypeLabel(p)
                     </td>
                     <td data-label="State">
                         <span class="som-badge @(state == "published" ? "som-status" : state == "scheduled" ? "som-on" : "som-off")">@state</span>
-                        @if (p.IsAwaitingApprovedGraphic)
+                        @* 🔴 §1206 — NOT READY, AND WHAT IS MISSING. Operator 2026-09-12: *"show then
+                           as not ready, like some graphics missing"*. The chip carries the category,
+                           the tooltip the gate's full sentence — so the row is scannable and the
+                           detail is one hover away. *@
+                        @if (Model.NotReadyReasons.TryGetValue(p.Id, out var why))
                         {
+                            <span class="som-badge som-warn" role="status" title="@why">⏳ @CommunityHub.Core.Integrations.SoMeReadiness.Chip(why)</span>
+                        }
+                        else if (Model.AwaitingGraphicPostIds.Contains(p.Id))
+                        {
+                            @* 🔑 Only when the post is otherwise READY — a graphic-blocked post says
+                               so above, and §887 ("why show it twice") applies to badges too. This
+                               one means something different: it WILL publish, text-only. *@
                             <span class="som-badge som-off" role="status" title="No released graphic yet — publishes text-only until there is one.">no graphic</span>
                         }
                     </td>
@@ -288,6 +341,26 @@ else
                         </form>
                     </td>
                 </tr>
+                @* 🔴 §1193 — THE OUTCOME, ON THE ROW THE BUTTON IS ON. Operator 2026-09-12: *"when i
+                   click activate nothing happens"*. It did happen: the refusal rendered in the
+                   page-level message at the very top, and he was six rows into fifty-four. §887.2
+                   fixed exactly this in the editor; the lesson had not reached the queue, where the
+                   distance between the control and the message is larger still. *@
+                @if (Model.ActionedPostId == p.Id && Model.Message is not null)
+                {
+                    <tr class="som-errrow" id="acted">
+                        <td colspan="7">
+                            @if (Model.ActionFailed)
+                            {
+                                <span class="error" role="alert"><strong>Not activated.</strong> @Model.Message</span>
+                            }
+                            else
+                            {
+                                <span role="status" style="color:#0a6;">@Model.Message</span>
+                            }
+                        </td>
+                    </tr>
+                }
                 @if (!string.IsNullOrWhiteSpace(p.LastError))
                 {
                     <tr class="som-errrow">

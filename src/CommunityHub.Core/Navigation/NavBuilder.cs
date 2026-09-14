@@ -188,6 +188,20 @@ public static class NavBuilder
             items.Add(new("/Forms/Dinner", "Nav.Dinner", SectionKey: "Nav.SectionRegister"));
         }
 
+        // §1078 (operator 2026-08-11: "i would like to have menu addition for media participants in
+        // the hub. Add 'Media Management' in main menu with 2 menu-items") — the two libraries the
+        // press/photo crew manages IN THE HUB.
+        // 🔑 Media AND Organizer. He named the media team; organizers are staff and manage the same
+        // material, and every other document surface in the hub is reachable by them.
+        // 🔒 The items point at HUB pages, not at the two SharePoint URLs he pasted: a SharePoint
+        // link opens in the visitor's OWN session, which is the one thing he ruled out ("it should
+        // not run in their user context, but through the app context").
+        if (role is ParticipantRole.Media or ParticipantRole.Organizer)
+        {
+            items.Add(new("/Media/Pictures", "Nav.MediaPictures", SectionKey: "Nav.SectionMedia"));
+            items.Add(new("/Media/Videos", "Nav.MediaVideos", SectionKey: "Nav.SectionMedia"));
+        }
+
         // Lunch + Swag: organizer + media crew + event partners — all entitled per
         // OrderEntitlements (mirrors the Hotel/Dinner crew block above). Speakers +
         // volunteers get these in their Event logistics fold-out below.
@@ -803,6 +817,13 @@ public static class NavBuilder
             // name/email. The page stays reachable by URL; it's no longer a redundant menu entry.
 
             new("/Organizer/People", "Nav.OrgPeople"),
+            // 🔴 §1086 — A DIRECT ENTRY, because a hub tile was not findable. The operator, the day
+            // after it shipped: *"i cannot find the status dashboard with role filter option where
+            // i can see completion fx of all get started + tasks for all sponsors, where is it"*.
+            // It was two clicks in, on the People hub. This is the §646 precedent exactly (Platform
+            // Health + Jobs promoted to the menu because they are what he opens when asking "is
+            // anything broken?") — "who still owes me something?" is asked just as often.
+            new("/Organizer/ParticipantStatus", "Nav.OrgParticipantStatus"),
             new("/Organizer/Content", "Nav.OrgSessionsHub"),
             new("/Organizer/Comms", "Nav.OrgComms"),
             new("/Organizer/SoMe", "Nav.OrgSoMe"),
@@ -826,6 +847,20 @@ public static class NavBuilder
             // (calls, failures, timings); Jobs is the INSIDE one (what ran, and Run now).
             new("/Organizer/PlatformHealth", "Nav.OrgPlatformHealth"),
             new("/Organizer/Jobs", "Nav.OrgJobs"),
+
+            // 🔴 §1120 — COUPON INVOICING GETS ITS OWN ENTRY (operator 2026-08-21: *"add coupon
+            // invoicing to the main menu of the organizer"*).
+            //
+            // 🔑 Same argument as §1086 and §646 before it: the menu is hub-level by design, and the
+            // exception is a page opened OFTEN and by URL. This one is opened every time a partner
+            // buys, extends, asks for a cap, or queries an invoice — and it was two clicks in under
+            // Setup, which is where things go that you configure once. Coupon invoicing is not
+            // configured once; it is worked.
+            //
+            // ⚠️ The page stays where it is (§167/§652: a menu entry is added, nothing is moved), so
+            // every existing link and every mail that says *"Organizer → Setup → Coupon invoicing"*
+            // still lands correctly.
+            new("/Organizer/CouponInvoicing", "Nav.OrgCouponInvoicing"),
 
             // §741 (operator 2026-07-31: "replace this with audit log instead on the main menu for
             // organizer"). The slot held "Switch User Log", which is ONE Category inside the audit

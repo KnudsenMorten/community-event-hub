@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Integrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -25,6 +26,7 @@ public class GroupPhotosModel : PageModel
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
     private readonly IEmailContextAccessor? _context;
+    private readonly CommunityHub.Core.Integrations.GroupPhotoScheduleService _schedule;
 
     public GroupPhotosModel(
         CommunityHubDbContext db,
@@ -32,6 +34,7 @@ public class GroupPhotosModel : PageModel
         EmailTemplateProvider templates,
         IEmailSender emailSender,
         TimeProvider clock,
+        CommunityHub.Core.Integrations.GroupPhotoScheduleService schedule,
         IEmailContextAccessor? context = null)
     {
         _db = db;
@@ -39,6 +42,7 @@ public class GroupPhotosModel : PageModel
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
+        _schedule = schedule;
         _context = context;
     }
 
@@ -47,6 +51,11 @@ public class GroupPhotosModel : PageModel
     public List<GroupPhotoRegistration> Registrations { get; private set; } = new();
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
+    // ---- §1077 stage 5: the slots, the plan, the publish -------------------
+    public IReadOnlyList<GroupPhotoSlot> Slots { get; private set; } = Array.Empty<GroupPhotoSlot>();
+    public GroupPhotoPlan? Plan { get; private set; }
+    [BindProperty] public string? SlotText { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -54,13 +63,167 @@ public class GroupPhotosModel : PageModel
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    private async Task LoadAsync(int eventId, CancellationToken ct)
+    {
         Registrations = await _db.GroupPhotoRegistrations
-            .Where(r => r.EventId == me.EventId)
+            .Where(r => r.EventId == eventId)
             .OrderBy(r => r.ScheduledAtUtc == null)   // unscheduled last
             .ThenBy(r => r.ScheduledAtUtc)
             .ThenBy(r => r.CompanyName)
             .ToListAsync(ct);
+
+        Slots = await _schedule.SlotsAsync(eventId, ct);
+    }
+
+    /// <summary>
+    /// §1077 stage 5 — paste the operator's timeslots, one per line
+    /// (<c>2027-02-09 11:30</c>). ⚠️ Unreadable lines are REPORTED, never skipped.
+    /// </summary>
+    public async Task<IActionResult> OnPostAddSlotsAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        // 🔴 The LAST day is the "main day" — anything before it is a pre-day slot. Operator
+        // 2026-08-11: *"it is 2 days - preday 9 feb 2027 … and main day 10 feb 2027"*, and
+        // *"attendees are there 2 days only"*. Event.PreDayDate is the 8th (master class / setup),
+        // which is NOT one of the photo days.
+        var mainDay = await _db.Events.Where(e => e.Id == me.EventId)
+            .Select(e => (DateOnly?)e.EndDate).FirstOrDefaultAsync(ct);
+
+        var (added, rejected) = await _schedule.AddSlotsFromTextAsync(me.EventId, SlotText, mainDay, ct: ct);
+
+        var msg = $"Added {added} slot(s).";
+        if (rejected.Count > 0) msg += " Not added: " + string.Join(" · ", rejected);
+        return RedirectToPage(new { Msg = msg });
+    }
+
+    /// <summary>A starter set for testing — 25 slots the operator then edits or replaces.</summary>
+    public async Task<IActionResult> OnPostStarterSlotsAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var added = await _schedule.AddStarterSetAsync(me.EventId, ct);
+        return RedirectToPage(new { Msg = added > 0
+            ? $"Added a starter set of {added} slots. Edit or delete them and paste your real times."
+            : "Slots already exist — the starter set only fills an empty schedule, so it cannot "
+              + "double a real one." });
+    }
+
+    public async Task<IActionResult> OnPostDeleteSlotAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var problem = await _schedule.DeleteSlotAsync(id, ct);
+        return RedirectToPage(new { Msg = problem ?? "Slot removed." });
+    }
+
+    /// <summary>Propose a plan and SAVE it as planned times. Tells nobody.</summary>
+    public async Task<IActionResult> OnPostProposeAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var plan = await _schedule.ProposeAsync(me.EventId, ct);
+        var saved = await _schedule.SaveProposalAsync(me.EventId, plan, ct);
+
+        Notice = $"Proposed {plan.Assignments.Count} slot(s) — {saved} new, "
+               + $"{plan.Assignments.Count - saved} already published and left alone. "
+               + $"{plan.UnusedSlots.Count} slot(s) unused."
+               + (plan.Unplaced.Count > 0
+                   ? " ⚠️ No slot for: " + string.Join(" · ", plan.Unplaced.Select(u => $"{u.CompanyName} ({u.Reason})"))
+                   : string.Empty);
+
+        Plan = plan;
+        await LoadAsync(me.EventId, ct);
         return Page();
+    }
+
+    /// <summary>
+    /// 🔴 PUBLISH — the moment the plan becomes a promise: the time appears on each company's own
+    /// page and the planner treats it as pinned from then on.
+    /// </summary>
+    public async Task<IActionResult> OnPostPublishAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var result = await _schedule.PublishAsync(me.EventId, ct);
+        return RedirectToPage(new { Msg = $"Published: {result}. Each company now sees its time on "
+                                        + "its own page." });
+    }
+
+    /// <summary>The running order as Excel, for the partner coordinating the photos from our side.</summary>
+    public async Task<IActionResult> OnGetPartnerExcelAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var rows = await _schedule.ScheduleAsync(me.EventId, ct);
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add("Group photos");
+        var headers = new[]
+        {
+            "Time (UTC)", "Day", "Company", "People", "Contact", "E-mail", "Mobile", "Location", "State",
+        };
+        for (var i = 0; i < headers.Length; i++)
+        {
+            ws.Cell(1, i + 1).Value = headers[i];
+            ws.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            // ⚠️ A real date cell, not text: a running order people sort by time is the whole point,
+            // and text sorts 9:45 after 14:30.
+            if (row.StartUtc is { } when)
+            {
+                ws.Cell(r, 1).Value = when.UtcDateTime;
+                ws.Cell(r, 1).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
+            }
+            ws.Cell(r, 2).Value = row.Day;
+            ws.Cell(r, 3).Value = row.CompanyName;
+            ws.Cell(r, 4).Value = row.People;
+            ws.Cell(r, 5).Value = row.ContactName;
+            ws.Cell(r, 6).Value = row.ContactEmail;
+            ws.Cell(r, 7).Value = row.ContactMobile;
+            ws.Cell(r, 8).Value = row.Location;
+            ws.Cell(r, 9).Value = row.State;
+            r++;
+        }
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"group-photos-{_clock.GetUtcNow():yyyyMMdd}.xlsx");
+    }
+
+    /// <summary>Every scheduled photo as ONE calendar file — the partner imports it once.</summary>
+    public async Task<IActionResult> OnGetPartnerCalendarAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var ics = await _schedule.ScheduleIcsAsync(me.EventId, ct);
+        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar",
+            $"group-photos-{_clock.GetUtcNow():yyyyMMdd}.ics");
     }
 
     public async Task<IActionResult> OnPostCreateAsync(
@@ -187,7 +350,11 @@ public class GroupPhotosModel : PageModel
         var ics = IcsCalendarBuilder.BuildVEvent(
             uid: $"group-photo-{row.EventId}-{row.Id}@communityhub",
             summary: $"Group photo - {row.CompanyName} ({row.Event.DisplayName})",
-            description: row.Notes ?? "Group photo session",
+            // §1077.8 — the operator's own invitation wording, shared with the coordinator's own
+            // download so the two calendar entries in circulation say the same thing.
+            description: string.IsNullOrWhiteSpace(row.Notes)
+                ? GroupPhotoInviteText.Build(row.Event.DisplayName, row.Event.CommunityName)
+                : row.Notes,
             location: string.IsNullOrWhiteSpace(row.Location) ? row.Event.VenueName ?? "" : row.Location!,
             startUtc: startUtc,
             endUtc: endUtc,

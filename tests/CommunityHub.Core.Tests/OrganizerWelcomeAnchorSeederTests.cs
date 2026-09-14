@@ -71,9 +71,11 @@ public sealed class OrganizerWelcomeAnchorSeederTests
     }
 
     /// <summary>
-    /// 🔒 ORGANIZERS ONLY. Every other role has a real welcome mail that stamps this field when it
-    /// is actually sent; seeding one here would fake a welcome that never went out and start
-    /// chasing somebody who has never been given their sign-in link.
+    /// 🔒 ORGANIZERS ONLY from CreatedAt. Seeding any other role without a welcome would fake a
+    /// welcome that never went out and start chasing somebody who has never been given their sign-in
+    /// link. ⚠️ §1222 corrected the premise this used to state ("every other role's welcome stamps
+    /// this field") — the reconcile welcome did not; those are now anchored from their welcome LEDGER
+    /// row (WelcomeStampForDigestTests). With no ledger row, as here, nothing is seeded.
     /// </summary>
     [Theory]
     [InlineData(ParticipantRole.Speaker)]

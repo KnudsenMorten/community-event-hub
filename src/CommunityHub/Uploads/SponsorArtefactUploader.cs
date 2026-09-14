@@ -41,15 +41,19 @@ public sealed class SponsorArtefactUploader
     private readonly EventConfigOptions _cfgOptions;
     private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorArtefactUploader> _log;
+    private readonly IEmailContextAccessor? _ctx;
 
     public SponsorArtefactUploader(
         CommunityHubDbContext db, SharePointUploadClient sp, IEmailSender email,
         EventEditionConfigLoader cfg, EventConfigOptions cfgOptions,
         Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
-        ILogger<SponsorArtefactUploader> log)
+        ILogger<SponsorArtefactUploader> log,
+        // §1072 — needed so the designer notice declares itself ops mail; without it the ring gate
+        // drops every recipient as an unknown address and the mail vanishes silently.
+        IEmailContextAccessor? ctx = null)
     {
         _db = db; _sp = sp; _email = email; _cfg = cfg; _cfgOptions = cfgOptions;
-        _paths = paths; _log = log;
+        _paths = paths; _log = log; _ctx = ctx;
     }
 
     /// <summary>The outcome of one upload. <paramref name="Error"/> is null on success.</summary>
@@ -98,7 +102,7 @@ public sealed class SponsorArtefactUploader
             await SponsorUploadKinds.RecordAsync(
                 _db, kind, eventId, companyId, fileName, webUrl, byEmail, DateTimeOffset.UtcNow, ct);
             await SponsorUploadKinds.NotifyAsync(
-                _email, spec, sponsorName, fileName, webUrl, byEmail, _log, ct);
+                _email, spec, sponsorName, fileName, webUrl, byEmail, _log, ct, _ctx);
 
             return new Result(true, fileName, webUrl, null);
         }

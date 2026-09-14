@@ -89,6 +89,7 @@ public sealed class SyncDeltaQueueService
     // that reports "no push service wired" rather than throwing.
     private readonly SessionBackstagePushService? _sessionPush;
     private readonly SpeakerBackstagePushService? _speakerPush;
+    private readonly EmailOptions? _emailOptions;
 
     public SyncDeltaQueueService(
         CommunityHubDbContext db,
@@ -99,7 +100,9 @@ public sealed class SyncDeltaQueueService
         IEmailContextAccessor? context = null,
         EmailTemplateProvider? templates = null,
         SessionBackstagePushService? sessionPush = null,
-        SpeakerBackstagePushService? speakerPush = null)
+        SpeakerBackstagePushService? speakerPush = null,
+        // §1124 — the shared speaker/session audience.
+        Microsoft.Extensions.Options.IOptions<EmailOptions>? emailOptions = null)
     {
         _db = db;
         _clock = clock ?? TimeProvider.System;
@@ -110,6 +113,7 @@ public sealed class SyncDeltaQueueService
         _templates = templates;
         _sessionPush = sessionPush;
         _speakerPush = speakerPush;
+        _emailOptions = emailOptions?.Value;
     }
 
     // -------------------------------------------------------------------------
@@ -376,7 +380,21 @@ public sealed class SyncDeltaQueueService
         // §752.9 — DEV-silent: an approval queue over test sync deltas asks for work that does not
         // exist. The queue itself still fills and is still visible in the organiser UI either way —
         // what is suppressed is the mail, not the state (§707.42's rule).
-        await _alerts.AlertAsync(subject, html, ct, throttleKey: $"sync-queue-{eventId}",
+        // 🔴 §1124 — THIS USED TO GO TO mok@ ALONE, and that was the misroute.
+        //
+        // Operator 2026-08-25: *"add info@expertslive.dk to the missing one as well and remove
+        // mok@expertslive.dk. make it consitent"*.
+        //
+        // 🔑 It passed no `recipient`, so it fell through to EngineAlertSender's DEFAULT — the
+        // DEVELOPER mailbox. But this is the literal pending-task list for speakers and sessions:
+        // "N sync change(s) need your approval". §493 reserves mok@ for SYSTEM alerts, and §874
+        // already settled the principle for the held-speaker mail — *"one person on holiday must not
+        // stall a speaker's Zoho flow"*. A queue of approvals routed to one person is exactly that
+        // failure, and it was invisible because nothing was broken: the mail sent fine, to the wrong
+        // audience.
+        await _alerts.AlertToAsync(
+            _emailOptions?.SpeakerSessionRecipients(),
+            subject, html, ct, throttleKey: $"sync-queue-{eventId}",
             devSilent: true);
         return true;
     }

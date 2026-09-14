@@ -91,7 +91,12 @@
                         <tr>
                             <td>@a.Name</td>
                             <td>@a.Email</td>
-                            <td>@a.TicketStatus@(string.IsNullOrWhiteSpace(a.TicketClass) ? "" : $" ({a.TicketClass})")</td>
+                            @* §1077 — the SAME cell §380 already fixed on /Organizer/Attendees
+                               ("remove the word TwoDay - just show the ticket in no parantes") had
+                               survived here untouched: "TwoDay (2-day ticket incl. Master Class)".
+                               Show the ticket's own name; fall back to the label ("2-day" / "1-day"),
+                               never the enum name, so the column is never blank either. *@
+                            <td>@(string.IsNullOrWhiteSpace(a.TicketClass) ? a.TicketStatusLabel : a.TicketClass)</td>
                             <td>@a.MasterClass</td>
                         </tr>
                     }

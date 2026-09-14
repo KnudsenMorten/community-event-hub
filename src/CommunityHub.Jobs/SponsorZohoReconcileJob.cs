@@ -115,10 +115,20 @@ public sealed class SponsorZohoReconcileJob
         // the reconcile ran but had nothing to look at, which is a data problem rather than a switch.
         _activity?.ReportExamined(r.Companies, "sponsor companies to reconcile");
 
+        // 🔴 §1088 — SKIPPED IS ITS OWN NUMBER. This line read "failed 1" on every pass for as long
+        // as one company has been marked test data, because the deliberate skip came back in `Error`.
+        // A count that is permanently 1 is not a warning, it is the new zero — and a second, real
+        // failure would have moved it to 2 with nobody watching the difference.
         _log.LogInformation(
             "SponsorZohoReconcileJob: {Companies} company(ies) — coordinators filled {Filled}, "
-            + "sponsors synced {Sponsors}, exhibitors synced {Exhibitors}, failed {Failed}.",
-            r.Companies, r.CoordinatorsFilled, r.SponsorsSynced, r.ExhibitorsSynced, r.Failed);
+            + "sponsors synced {Sponsors}, exhibitors synced {Exhibitors}, skipped {Skipped}, "
+            + "failed {Failed}.",
+            r.Companies, r.CoordinatorsFilled, r.SponsorsSynced, r.ExhibitorsSynced,
+            r.Skipped, r.Failed);
+
+        // Skips are expected, so they are INFORMATION. Only real problems get a warning.
+        foreach (var note in r.SkipNotes ?? new List<string>())
+            _log.LogInformation("SponsorZohoReconcileJob: {Note}", note);
 
         foreach (var note in r.Notes)
             _log.LogWarning("SponsorZohoReconcileJob: {Note}", note);

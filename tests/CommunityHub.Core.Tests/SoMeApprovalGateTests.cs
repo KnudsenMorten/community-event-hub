@@ -51,6 +51,17 @@ public sealed class SoMeApprovalGateTests
             LogoRasterFileName = logoFileName,
         });
 
+        // 🔴 §1060(g) — a subject with no RELEASED graphic is now blocked outright ("hard block").
+        // ⚠️ This is a fixture completion, not a weakening: the sponsor-deliverable tests still get
+        // their own blocker, because the graphic is asked LAST precisely so a chaseable problem
+        // (missing text/logo) is never hidden behind one the sponsor cannot act on.
+        db.GraphicAssets.Add(new GraphicAsset
+        {
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Sponsor,
+            SponsorCompanyId = CompanyId, StableKey = $"sponsor:{CompanyId}",
+            FileName = "robopack-some.png",
+        });
+
         await db.SaveChangesAsync();
     }
 
@@ -168,6 +179,17 @@ public sealed class SoMeApprovalGateTests
             Id = 5, EventId = EventId, Title = "Deep Dive: Entra ID",
             Abstract = "What we cover, and who it is for.",
         });
+
+        // 🔴 §1060(g) — AND NOW IT NEEDS A GRAPHIC TOO, for exactly the reason the comment above
+        // gives about the abstract: without one, the graphic rule blocks the post and this test
+        // would pass for the wrong reason (or fail for one). The test's claim is unchanged — no
+        // SPONSOR deliverable gates a session post — but "never blocked by this gate" is no longer
+        // true in general, and the fixture has to say which rule it is holding still.
+        db.GraphicAssets.Add(new GraphicAsset
+        {
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Session,
+            SessionId = 5, StableKey = "session:5", FileName = "session-5.png",
+        });
         await db.SaveChangesAsync();
 
         var sessionPost = new SoMePost
@@ -204,6 +226,15 @@ public sealed class SoMeApprovalGateTests
         {
             Id = 7, EventId = EventId, Title = "Master Class: Identity", Abstract = text,
         });
+
+        // §1060(g) — a released graphic, so the `blocked: false` case measures the DESCRIPTION rule
+        // and not the graphic one. The blocked cases are unaffected either way: the description is
+        // asked first, because it is the blocker a human can clear.
+        db.GraphicAssets.Add(new GraphicAsset
+        {
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Session,
+            SessionId = 7, StableKey = "session:7", FileName = "session-7.png",
+        });
         await db.SaveChangesAsync();
 
         var post = new SoMePost
@@ -224,6 +255,167 @@ public sealed class SoMeApprovalGateTests
         {
             Assert.Null(reason);
         }
+    }
+
+    // ---- §1060(m) — session types whose SHAPE decides eligibility -----------
+
+    /// <summary>
+    /// 🔴 ONE linked speaker on a co-presented format is the dangerous case — not zero.
+    /// Zero fails loudly elsewhere; exactly one looks complete on every screen and would announce a
+    /// co-taught session as a solo talk, publicly, naming the wrong people.
+    /// </summary>
+    [Theory]
+    [InlineData(SessionType.MasterClass, 1, true)]
+    [InlineData(SessionType.PanelDiscussion, 1, true)]
+    [InlineData(SessionType.MasterClass, 2, false)]
+    [InlineData(SessionType.PanelDiscussion, 3, false)]
+    // ⚠️ The control cases. One speaker is entirely normal here, and a rule applied to every type
+    // would block most of the campaign — so the gate has to be measured against a type it must
+    // NOT touch, or "blocks a solo master class" and "blocks everything" look identical.
+    [InlineData(SessionType.TechnicalSession, 1, false)]
+    [InlineData(SessionType.Keynote, 1, false)]
+    public async Task A_co_presented_format_needs_more_than_one_linked_speaker(
+        SessionType type, int speakers, bool blocked)
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: null);
+        await SeedSessionAsync(db, id: 21, type: type, speakerCount: speakers);
+
+        var reason = await new SoMeApprovalGate(db).BlockedReasonAsync(SessionPost(21));
+
+        if (blocked)
+        {
+            Assert.NotNull(reason);
+            Assert.Contains("speaker", reason, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.Null(reason);
+        }
+    }
+
+    /// <summary>
+    /// §1218 — the organizer's one-speaker override lifts the co-presented block, but only for
+    /// exactly ONE linked speaker: zero still has nobody to announce, confirmed or not. And the
+    /// override is offered (SingleSpeakerOverrideAsync) on exactly the sessions the rule applies to.
+    /// </summary>
+    [Theory]
+    [InlineData(SessionType.MasterClass, 1, true, false, true)]
+    [InlineData(SessionType.PanelDiscussion, 1, true, false, true)]
+    [InlineData(SessionType.MasterClass, 1, false, true, true)]
+    [InlineData(SessionType.MasterClass, 0, true, true, false)]
+    [InlineData(SessionType.MasterClass, 2, false, false, false)]
+    [InlineData(SessionType.TechnicalSession, 1, true, false, false)]
+    public async Task The_one_speaker_override_lifts_the_co_presented_block_for_exactly_one_speaker(
+        SessionType type, int speakers, bool confirmed, bool blocked, bool offered)
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: null);
+        await SeedSessionAsync(db, id: 24, type: type, speakerCount: speakers);
+
+        var session = await db.Sessions.FindAsync(24);
+        session!.SoMeSingleSpeakerConfirmed = confirmed;
+        await db.SaveChangesAsync();
+
+        var gate = new SoMeApprovalGate(db);
+        var reason = await gate.BlockedReasonAsync(SessionPost(24));
+        var offer = await gate.SingleSpeakerOverrideAsync(SessionPost(24));
+
+        if (blocked) Assert.NotNull(reason); else Assert.Null(reason);
+        Assert.Equal(offered, offer is not null);
+        if (offer is not null) Assert.Equal(confirmed, offer.Confirmed);
+    }
+
+    /// <summary>
+    /// 🛑 Ask-the-Experts is never announced — and the SENTENCE matters as much as the refusal.
+    /// Every other blocker here ends "…becomes approvable", because every other one is clearable.
+    /// This one is permanent, so it must not read as a to-do that sends someone hunting for a fix.
+    /// </summary>
+    [Fact]
+    public async Task Ask_the_experts_is_refused_permanently_and_does_not_read_as_a_to_do()
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: null);
+        await SeedSessionAsync(db, id: 22, type: SessionType.AskTheExperts, speakerCount: 3);
+
+        var reason = await new SoMeApprovalGate(db).BlockedReasonAsync(SessionPost(22));
+
+        Assert.NotNull(reason);
+        Assert.Contains("never announced", reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("becomes approvable", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- §1060(l) — the AI's STORED verdict ---------------------------------
+
+    /// <summary>
+    /// 🔴 The fail-direction, and the most important test in this file.
+    /// <c>null</c> means NEVER JUDGED, and must not block: on a host with no model configured — DEV,
+    /// or PROD before the first daily sweep — a blocking null would silently stop the whole campaign.
+    /// A <c>false</c> blocks and quotes the model's reason; a <c>true</c> passes.
+    /// </summary>
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task The_stored_AI_verdict_blocks_only_on_an_explicit_no(bool? verdict, bool blocked)
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: null);
+        await SeedSessionAsync(db, id: 23, type: SessionType.TechnicalSession, speakerCount: 1);
+
+        var session = await db.Sessions.FindAsync(23);
+        session!.SoMeTextEligible = verdict;
+        session.SoMeTextEligibleReason = "says the abstract will follow later";
+        await db.SaveChangesAsync();
+
+        var reason = await new SoMeApprovalGate(db).BlockedReasonAsync(SessionPost(23));
+
+        if (blocked)
+        {
+            Assert.NotNull(reason);
+            // The model's own words reach the person who has to act (§854).
+            Assert.Contains("abstract will follow later", reason, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.Null(reason);
+        }
+    }
+
+    private static SoMePost SessionPost(int sessionId) => new()
+    {
+        Id = 100 + sessionId, EventId = EventId, Type = SoMePostType.Speaker,
+        TemplateKind = SoMeTemplateKind.Session, SubjectKey = $"session:{sessionId}", Occurrence = 1,
+    };
+
+    /// <summary>A session with a real abstract, a released graphic, and N linked speakers — so the
+    /// ONLY thing the calling test varies is the rule it names.</summary>
+    private static async Task SeedSessionAsync(
+        CommunityHub.Core.Data.CommunityHubDbContext db, int id, SessionType type, int speakerCount)
+    {
+        db.Sessions.Add(new Session
+        {
+            Id = id, EventId = EventId, Title = $"Session {id}", Type = type,
+            Abstract = "A practical hour on Kubernetes cost control, with live demos.",
+        });
+        db.GraphicAssets.Add(new GraphicAsset
+        {
+            EventId = EventId, Status = GraphicAssetStatus.Released, Type = GraphicAssetType.Session,
+            SessionId = id, StableKey = $"session:{id}", FileName = $"session-{id}.png",
+        });
+
+        for (var i = 0; i < speakerCount; i++)
+        {
+            var pid = id * 100 + i;
+            db.Participants.Add(new Participant
+            {
+                Id = pid, EventId = EventId, Email = $"s{pid}@test.dk", FullName = $"Speaker {pid}",
+                Role = ParticipantRole.Speaker,
+            });
+            db.SessionSpeakers.Add(new SessionSpeaker { SessionId = id, ParticipantId = pid });
+        }
+
+        await db.SaveChangesAsync();
     }
 
     [Fact]

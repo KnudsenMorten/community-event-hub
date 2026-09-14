@@ -232,25 +232,34 @@ public sealed class ZohoOptions
     // not.
 
     /// <summary>
-    /// 🔴 §791.4 — push <c>company_social_pages</c> on an exhibitor UPDATE. <b>Defaults OFF, and the
-    /// reason is measured, not assumed.</b>
+    /// ✅ §1087 — push <c>company_social_pages</c> on an exhibitor UPDATE. <b>Defaults ON since
+    /// 2026-08-17, because Zoho fixed the endpoint and it was measured, not assumed.</b>
     /// </summary>
     /// <remarks>
-    /// <para>§791.3, four controlled calls against PROD 2026-08-04: the v3 exhibitor PUT returns
-    /// <b>200 and echoes the field back</b>, and a subsequent GET shows it <b>absent</b> — including
-    /// with Zoho's own documented sample key (<c>facebook</c>), and including on a record whose
-    /// <c>linkedin</c> was already set. <b>The field is not writable over v3.</b> CEH's payload was
-    /// correct the whole time (§791.3), which is why this is a switch and not a bug fix.</para>
+    /// <para>⚰️ <b>It defaulted OFF from 2026-08-04 to 2026-08-17, and that was correct then.</b>
+    /// §791.3 measured four controlled PUTs against PROD: 200, the field echoed back, and the next
+    /// GET showed it absent — including with Zoho's documented sample key (<c>facebook</c>) and on a
+    /// record whose <c>linkedin</c> was already set. The field behaved read-only.</para>
     ///
-    /// <para>⚠️ Leaving it ON cost three sessions: every pass re-sent it, the log said *"Updated
-    /// exhibitor"*, and Zoho kept nothing (§784.13 → §791). The values now reach Backstage as the
-    /// §792 hand-entry mail instead — a list somebody can act on beats a sync that reports success
-    /// for ever.</para>
+    /// <para>✅ Zoho repaired it over the weekend of 2026-08-16 and §1087 re-measured on the same
+    /// record with the same method: writing into a cleared social object reads back on the very next
+    /// GET, and so does <b>overwriting an existing value</b> — the §791.3 test-4 case whose failure
+    /// was the whole basis for "read-only". CEH's payload shape never changed and was correct
+    /// throughout, so turning this on is the entire fix.</para>
     ///
-    /// <para>🔒 Flip this to <c>true</c> if Zoho ever fixes the endpoint — one config setting, no
-    /// deploy. Do NOT delete the code path: the measurement above is what makes re-testing cheap.</para>
+    /// <para>🔒 <b><c>company_social_pages</c> MERGES; it does not replace.</b> Measured §1087:
+    /// omitting a key leaves the stored key untouched, and <c>{}</c> is a no-op. A key can be blanked
+    /// to <c>""</c> but never deleted over the API — only the Backstage GUI removes one. ⇒ CEH can
+    /// SET and CHANGE a social link and can never REMOVE one. That is survivable only because
+    /// <c>NeedsManualEntry</c> refuses to push a CEH-blank, so the hub never tries to clear a field
+    /// it would fail to clear.</para>
+    ///
+    /// <para>⚠️ If Zoho ever regresses, the failure is SILENT — 200 with the value discarded — and
+    /// the live-compare in <c>SponsorZohoSyncService</c> then re-sends every pass for ever (§791.3's
+    /// for-ever loop). The switch is kept for exactly that: turn it off and the values fall back to
+    /// the §792 hand-entry mail in one setting, no deploy.</para>
     /// </remarks>
-    public bool PushExhibitorSocialPages { get; set; }
+    public bool PushExhibitorSocialPages { get; set; } = true;
 
     /// <summary>
     /// The PUBLIC Zoho Backstage event-site base URL (REQUIREMENTS §52). The "View
@@ -555,7 +564,51 @@ public sealed class ZohoClient
     /// fields are sent. Scope: <c>ZohoBackstage.exhibitor.UPDATE</c>. Returns
     /// whether the update succeeded.
     /// </summary>
-    public async Task<bool> UpdateExhibitorAsync(
+    /// <summary>
+    /// §1154 — the THREE outcomes of a Zoho write. A bool could only say "not written".
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-31, on a hand-entry mail listing LENOVO's website and social pages:
+    /// <i>"this mail is not relevant for the mentioned fields, as all fields are covered by
+    /// api"</i>. He was right, and the cause was not the fields: the PUT had come back
+    /// <b>502</b> — a Zoho gateway page, not a rejection — and a bool collapsed that into the same
+    /// "could not write" that a real refusal produces. The fallback then told him to type in values
+    /// CEH can write and would retry ten minutes later.</para>
+    ///
+    /// <para>🔑 The same distinction §1140b drew for the ERP read-back: <b>"it refused me" and "I
+    /// could not reach it" are different facts, and only one of them is work for a human.</b></para>
+    /// </remarks>
+    public enum ZohoWriteOutcome
+    {
+        /// <summary>Zoho accepted the write.</summary>
+        Written,
+
+        /// <summary>Zoho REFUSED it (4xx) — the value will never land by itself. Human work.</summary>
+        Refused,
+
+        /// <summary>
+        /// Zoho could not be reached or failed on its own side (5xx / 408 / 429), or this host may
+        /// not write. 🔒 NOT human work: the next run retries it.
+        /// </summary>
+        Unavailable,
+    }
+
+    /// <summary>
+    /// §1154 — which outcome a non-success status represents.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 5xx is Zoho's own failure, 408/429 are "try later" — none of them is a verdict on the
+    /// payload. Everything else (400, 401, 403, 404, 422 …) is a refusal we must not silently retry
+    /// for ever, because it will not fix itself.
+    /// </remarks>
+    private static ZohoWriteOutcome Classify(System.Net.HttpStatusCode status) =>
+        (int)status >= 500
+        || status == System.Net.HttpStatusCode.RequestTimeout
+        || status == System.Net.HttpStatusCode.TooManyRequests
+            ? ZohoWriteOutcome.Unavailable
+            : ZohoWriteOutcome.Refused;
+
+    public async Task<ZohoWriteOutcome> UpdateExhibitorAsync(
         string accessToken, string exhibitorId,
         string? companyOverview, string? companyShortDescription,
         CancellationToken ct = default,
@@ -563,7 +616,9 @@ public sealed class ZohoClient
         string? websiteUrl = null, string? linkedInUrl = null, string? twitterUrl = null,
         string? contactEmail = null, string? contactMobile = null)
     {
-        if (!await MayWriteAsync(nameof(UpdateExhibitorAsync), ct)) return false;
+        // 🔒 §1154 — a blocked host is UNAVAILABLE, not refused: §1041b — a guard that stops a write
+        // must never produce hand-entry work for a human.
+        if (!await MayWriteAsync(nameof(UpdateExhibitorAsync), ct)) return ZohoWriteOutcome.Unavailable;
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}";
         var payload = new Dictionary<string, object?>();
@@ -605,14 +660,25 @@ public sealed class ZohoClient
 
         if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
 
-        // 🔴 §791.3/§791.4 — company_social_pages is SILENTLY DISCARDED by the v3 exhibitor PUT.
-        // Measured twice: four controlled calls on 2026-08-03 (including Zoho's own documented
-        // `facebook` sample key) and again on 2026-08-04 — 200 every time, echoed back in the
-        // response, and absent from the very next GET. CEH's payload shape is correct (§791.3), so
-        // this is a switch and not a fix, and it ships OFF: the values reach Backstage as the §792
-        // hand-entry mail instead.
+        // ✅ §1087 — company_social_pages WRITES. Ships ON. (It shipped OFF 2026-08-04 → 2026-08-17.)
         //
-        // 🔒 The code path stays so re-testing is one config setting away if Zoho ever repairs it.
+        // ⚰️ This comment used to open "SILENTLY DISCARDED by the v3 exhibitor PUT", and that was
+        // measured twice: four controlled calls on 2026-08-03 (including Zoho's own documented
+        // `facebook` sample key) and again on 2026-08-04 — 200 every time, echoed back in the
+        // response, absent from the very next GET.
+        //
+        // ✅ Zoho repaired the endpoint over the weekend of 2026-08-16. Re-measured 2026-08-17 on the
+        // same record: a write into a cleared social object reads back on the next GET, and so does
+        // an overwrite of an existing value (§791.3's test 4, the clincher for "read-only"). Proven
+        // in production the same day — all 13 exhibitors carry their LinkedIn (§1087.1). CEH's
+        // payload shape never changed and was correct throughout.
+        //
+        // 🔒 company_social_pages MERGES: an omitted key keeps its stored value, `{}` is a no-op, a
+        // key can be blanked to "" but only the Backstage GUI can delete one. So this can set and
+        // change a link, never remove one — fine only because the caller refuses to push a blank.
+        //
+        // ⚠️ A regression here would be SILENT (200, value dropped). The switch is the kill switch:
+        // `Zoho:PushExhibitorSocialPages=false` restores the §792 hand-entry mail with no deploy.
         if (_options.PushExhibitorSocialPages
             && (!string.IsNullOrWhiteSpace(linkedInUrl) || !string.IsNullOrWhiteSpace(twitterUrl)))
         {
@@ -658,10 +724,10 @@ public sealed class ZohoClient
             _log.LogWarning(
                 "Zoho exhibitor UPDATE {Id} failed: {Status}. Zoho said: {Detail}",
                 exhibitorId, (int)resp.StatusCode, detail);
-            return false;
+            return Classify(resp.StatusCode);
         }
 
-        return true;
+        return ZohoWriteOutcome.Written;
     }
 
     /// <summary>
@@ -732,8 +798,16 @@ public sealed class ZohoClient
         return resp.IsSuccessStatusCode;
     }
 
-    /// <summary>One Backstage sponsor — its system id + company name (for matching by name).</summary>
-    public sealed record BackstageSponsor(string Id, string CompanyName);
+    /// <summary>One Backstage sponsor — its system id, company name, and the sponsorship
+    /// category it sits under (null when Zoho does not return one on the list endpoint).</summary>
+    /// <remarks>
+    /// 🔑 §1157 — the category is what makes "does this company already have a record HERE?" an
+    /// answerable question. A company legitimately holds several records under the SAME name now,
+    /// so matching on name alone can neither adopt the right one nor tell whether one is missing.
+    /// ⚠️ A null category is UNKNOWN, not "no category": the provisioner must not read it as a
+    /// mismatch and create a duplicate — §1140b, unreadable ≠ different.
+    /// </remarks>
+    public sealed record BackstageSponsor(string Id, string CompanyName, string? SponsorshipTypeId = null);
 
     /// <summary>
     /// List every sponsor in the configured Backstage event (id + company_name) so a
@@ -749,9 +823,45 @@ public sealed class ZohoClient
             var id = el.TryGetProperty("id", out var i) ? i.GetString() : null;
             var name = el.TryGetProperty("company_name", out var n) ? n.GetString() : null;
             if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name))
-                list.Add(new BackstageSponsor(id!, name!));
+                list.Add(new BackstageSponsor(id!, name!, ReadSponsorshipTypeId(el)));
         }
         return list;
+    }
+
+    /// <summary>
+    /// §1157 — read the sponsorship-category id off a sponsor list element, tolerating the several
+    /// shapes Zoho uses for it (a flat id, or a nested object with an <c>id</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Returns null when NONE of the shapes is present, and null means UNKNOWN. The caller must
+    /// treat that as "cannot tell" and decline to create, never as "this record has no category" —
+    /// the latter reading would create a second record for a company on every single run.
+    /// </remarks>
+    private static string? ReadSponsorshipTypeId(JsonElement el)
+    {
+        foreach (var key in new[] { "sponsorship_type_id", "sponsorship_type", "sponsor_category_id", "sponsor_category", "category_id" })
+        {
+            if (!el.TryGetProperty(key, out var v)) continue;
+
+            switch (v.ValueKind)
+            {
+                case JsonValueKind.String:
+                    var s = v.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) return s;
+                    break;
+                case JsonValueKind.Number:
+                    return v.GetRawText();
+                case JsonValueKind.Object:
+                    if (v.TryGetProperty("id", out var inner))
+                    {
+                        if (inner.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(inner.GetString()))
+                            return inner.GetString();
+                        if (inner.ValueKind == JsonValueKind.Number) return inner.GetRawText();
+                    }
+                    break;
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -759,13 +869,14 @@ public sealed class ZohoClient
     /// fields are sent. Scope: <c>ZohoBackstage.sponsor.UPDATE</c>. Returns whether
     /// the update succeeded.
     /// </summary>
-    public async Task<bool> UpdateSponsorAsync(
+    public async Task<ZohoWriteOutcome> UpdateSponsorAsync(
         string accessToken, string sponsorId,
         string? description, string? websiteUrl, string? companyName,
         CancellationToken ct = default,
         string? contactFirstName = null, string? contactLastName = null, string? contactEmail = null)
     {
-        if (!await MayWriteAsync(nameof(UpdateSponsorAsync), ct)) return false;
+        // 🔒 §1154 — a blocked host is UNAVAILABLE, not refused (§1041b).
+        if (!await MayWriteAsync(nameof(UpdateSponsorAsync), ct)) return ZohoWriteOutcome.Unavailable;
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/sponsors/{sponsorId}";
         var payload = new Dictionary<string, object?>();
@@ -788,7 +899,18 @@ public sealed class ZohoClient
         };
         req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
         using var resp = await _http.SendAsync(req, ct);
-        return resp.IsSuccessStatusCode;
+        // §1154 — a 5xx from Zoho is not a verdict on the payload; the next run retries it.
+        if (!resp.IsSuccessStatusCode)
+        {
+            string detail;
+            try { detail = await resp.Content.ReadAsStringAsync(ct); }
+            catch { detail = "<body unreadable>"; }
+            _log.LogWarning(
+                "Zoho sponsor UPDATE {Id} failed: {Status}. Zoho said: {Detail}",
+                sponsorId, (int)resp.StatusCode, detail);
+            return Classify(resp.StatusCode);
+        }
+        return ZohoWriteOutcome.Written;
     }
 
     /// <summary>
@@ -804,9 +926,43 @@ public sealed class ZohoClient
     /// false — the same shape as the phantom read-scope (§754.5). Null for a sponsor (that record
     /// has no such field) and for an exhibitor that has none.
     /// </param>
+    /// <param name="ContactEmail">
+    /// §1128 — the CONTACT e-mail Backstage currently holds, so the hand-entry report can ask the
+    /// same question about the contact that it already asks about every other field: <i>"does the
+    /// LIVE Zoho value differ?"</i>
+    ///
+    /// <para>🔴 Before this, the Contact line compared CEH's value against <c>ZohoContactEmail</c> —
+    /// CEH's own record of what it last REPORTED — and so never looked at Zoho at all. On the first
+    /// report for a company that stamp is null, so the line fired regardless of what Backstage
+    /// already had (operator 2026-08-25, on a contact that differed only in capitalisation:
+    /// <i>"this is not relevant to wan about … this is from zoho already correct"</i>).</para>
+    ///
+    /// <para>🔒 <b>Field names VERIFIED against a live sponsor GET</b> (2026-08-25, Robopack), not
+    /// guessed — §767 shipped a sweep that matched nothing for four production runs because a
+    /// convention was assumed. The payload is
+    /// <c>"contact": {"first_name":"…","last_name":"…","email":"…"}</c>, at the ROOT of the sponsor
+    /// response (there is no <c>sponsor</c> wrapper).</para>
+    ///
+    /// <para>⚠️ Null for an EXHIBITOR read: the exhibitor GET has no such property. The Contact
+    /// hand-entry line is sponsor-driven, so that is correct rather than a gap — but a caller must
+    /// not read "null" as "Backstage has no contact" for an exhibitor.</para>
+    /// </param>
     public sealed record BackstageSponsorDetail(
         string? WebsiteUrl, string? Description, string? LinkedInUrl, string? TwitterUrl,
-        string? ShortDescription = null);
+        string? ShortDescription = null,
+        string? ContactEmail = null,
+        string? ContactFirstName = null,
+        string? ContactLastName = null,
+
+        /// <summary>
+        /// §1153 — the company name AS IT STANDS IN ZOHO, so the sync can notice it has drifted.
+        /// </summary>
+        /// <remarks>
+        /// Without this the reconcile could push a name but never <b>compare</b> one, so a record
+        /// created under the wrong name stayed wrong for ever: nothing else about it differed, so no
+        /// push was ever triggered to carry a correction along.
+        /// </remarks>
+        string? CompanyName = null);
 
     /// <summary>
     /// GET a single Backstage SPONSOR by id and read its current website /
@@ -879,12 +1035,28 @@ public sealed class ZohoClient
         {
             // A 404 for a specific id is the ONE definite answer: Zoho looked and it is not there.
             var gone = resp.StatusCode == System.Net.HttpStatusCode.NotFound;
+
+            // 🔑 §1221 — Zoho answers a DELETED sponsor id with 400 {"message":"Sponsor not found"},
+            // not 404 (measured 2026-09-14 on three extra category records). That is still not a
+            // definite answer on its own — the same endpoint returns bursts of bare 400s for records
+            // that exist — so it stays Unknown here and is only flagged. The caller decides, with
+            // ZohoDeadLinkStrikes, whether it has been said often enough and far enough apart.
+            var reportedMissing = false;
+            if (!gone && resp.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                var body = await resp.Content.ReadAsStringAsync(ct);
+                reportedMissing = body.Contains("not found", StringComparison.OrdinalIgnoreCase);
+            }
+
             return (null, ExternalLinkProbe.ProbeOne(
                 foundExplicitly: false,
                 notFoundExplicitly: gone,
                 detail: gone
                     ? $"Zoho answered 404 for this {rootProp} id — it was deleted there."
-                    : $"Zoho answered {(int)resp.StatusCode} reading this {rootProp} — no conclusion drawn."));
+                    : reportedMissing
+                        ? $"Zoho answered 400 '{rootProp} not found' for this id — counted, not yet trusted."
+                        : $"Zoho answered {(int)resp.StatusCode} reading this {rootProp} — no conclusion drawn.")
+                with { NotFoundReported = reportedMissing });
         }
 
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
@@ -901,6 +1073,17 @@ public sealed class ZohoClient
         linkedIn ??= NullIf(GetString(root, "linkedin_url"));
         twitter ??= NullIf(GetString(root, "twitter_url"));
 
+        // §1128 — the CONTACT object, verified against a live sponsor GET (2026-08-25):
+        //   "contact": { "first_name": "…", "last_name": "…", "email": "…" }
+        // 🔒 Absent on an exhibitor read, which leaves all three null — see the record's remarks.
+        string? contactEmail = null, contactFirst = null, contactLast = null;
+        if (root.TryGetProperty("contact", out var contact) && contact.ValueKind == JsonValueKind.Object)
+        {
+            contactEmail = NullIf(GetString(contact, "email"));
+            contactFirst = NullIf(GetString(contact, "first_name"));
+            contactLast = NullIf(GetString(contact, "last_name"));
+        }
+
         return (new BackstageSponsorDetail(
                 WebsiteUrl: NullIf(GetString(root, "website_url")),
                 Description: NullIf(GetString(root, descriptionProp)),
@@ -908,7 +1091,14 @@ public sealed class ZohoClient
                 TwitterUrl: twitter,
                 // §801.2 — measured: the exhibitor GET returns this whenever it is set. A sponsor
                 // record simply has no such property, so it reads null there.
-                ShortDescription: NullIf(GetString(root, "company_short_description"))),
+                ShortDescription: NullIf(GetString(root, "company_short_description")),
+                ContactEmail: contactEmail,
+                ContactFirstName: contactFirst,
+                ContactLastName: contactLast,
+                // §1153 — both records expose it as `company_name`; `name` is accepted as a
+                // fallback so a shape difference between the two endpoints cannot silently make
+                // every name look blank (which would read as "no drift" and fix nothing).
+                CompanyName: NullIf(GetString(root, "company_name")) ?? NullIf(GetString(root, "name"))),
             ExternalLinkProbe.ProbeOne(foundExplicitly: true, notFoundExplicitly: false,
                 detail: $"Zoho returned this {rootProp} — the link is good."));
     }
@@ -1095,18 +1285,25 @@ public sealed class ZohoClient
     /// that it worked — which is why the caller <b>reads the record back</b> and reports only what
     /// Zoho actually kept (§791.2: say <i>pushed</i>, never <i>updated</i>, for anything unread).</para>
     ///
-    /// <para>🔒 Deliberately NOT behind <see cref="ZohoOptions.PushExhibitorSocialPages"/>. That
-    /// switch is off because re-pushing on every update pass mailed a false success for ever; a
-    /// create happens once per company, sends one extra key on a request already being made, and
-    /// cannot loop. Gating it on the update switch would keep the one path that might work switched
-    /// off for the reason the other one failed.</para>
+    /// <para>🔒 Deliberately NOT behind <see cref="ZohoOptions.PushExhibitorSocialPages"/>, and it
+    /// must stay ungated. ⚰️ <i>This used to read "that switch is off because re-pushing on every
+    /// update pass mailed a false success for ever" — the switch <b>defaults ON since §1087</b>
+    /// (Zoho repaired the endpoint 2026-08-16).</i> The switch is the UPDATE path's kill switch now:
+    /// if Zoho regresses it goes back to <c>false</c>, and the create — once per company, one extra
+    /// key on a request already being made, cannot loop, never the broken path — must keep sending
+    /// social pages when it does.</para>
     /// </remarks>
     public async Task<ZohoCreateResult> CreateExhibitorAsync(
         string accessToken, string companyName, string? websiteUrl, string? description,
         string? exhibitorCategoryId, string? contactFirstName, string? contactLastName, string? contactEmail,
+        // ⚠️ §1163 — boothLabel is ACCEPTED AND DELIBERATELY NOT SENT. The exhibitor's booth field
+        // is `booth_id`, and the label is resolved to one by AssignExhibitorBoothAsync AFTER the
+        // create. The parameter stays so every caller keeps compiling and keeps passing the slot it
+        // knows; dropping it from the signature would only move the mistake to the call sites.
         string? boothLabel = null, string? linkedInUrl = null, string? twitterUrl = null,
         CancellationToken ct = default)
     {
+        _ = boothLabel;
         if (!await MayWriteAsync(nameof(CreateExhibitorAsync), ct))
             return new(null, ExternalWritesDisabledError);
         if (string.IsNullOrWhiteSpace(exhibitorCategoryId))
@@ -1120,10 +1317,24 @@ public sealed class ZohoClient
             ["company_name"] = companyName,
             ["exhibitor_category_id"] = exhibitorCategoryId,
         };
-        // Assign the physical booth slot (e.g. "E-26") so Zoho doesn't show "No booth selected".
-        if (!string.IsNullOrWhiteSpace(boothLabel)) payload["booth_label"] = boothLabel;
+        // 🔴 §1163 — TWO KEYS THIS PAYLOAD HAD WRONG, AND THIS FILE ALREADY KNEW BOTH.
+        //
+        // Zoho answered the create with HTTP 400 {"message":"Extra key found"} — it names no key, so
+        // the payload has to be read against what the rest of the client has already MEASURED:
+        //
+        //   • `description` — the exhibitor's text field is `company_overview`, not `description`.
+        //     UpdateExhibitorAsync writes `company_overview` and GetExhibitorByIdAsync reads it;
+        //     only the CREATE used the sponsor record's key.
+        //   • `booth_label` — AssignExhibitorBoothAsync says it outright: "The exhibitor field is
+        //     booth_id (NOT booth_label)". The slot is assigned there, after the create, by
+        //     resolving the label to its booth id — so sending a label here was both wrong and
+        //     redundant.
+        //
+        // 🔑 The lesson is the recurring one in this codebase: a fact measured in one method is not
+        // knowledge until every method that needs it uses it. Both keys were documented a few
+        // hundred lines away while this payload kept sending the versions Zoho rejects.
         if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
-        if (!string.IsNullOrWhiteSpace(description)) payload["description"] = description;
+        if (!string.IsNullOrWhiteSpace(description)) payload["company_overview"] = description;
 
         // 🔴 §1033 — the social pages, on CREATE. Zoho's create doc lists the field and CEH has
         // never sent it here, so §791.3's "not writable" verdict does not cover this path: it was
@@ -2216,8 +2427,40 @@ public sealed class ZohoClient
             {
                 var custom = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (var prop in contact.EnumerateObject())
-                    if (!known.Contains(prop.Name) && prop.Value.ValueKind == JsonValueKind.String)
+                {
+                    if (known.Contains(prop.Name)) continue;
+
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                    {
                         custom[prop.Name] = prop.Value.GetString() ?? "";
+                    }
+                    // 🔴 §1062 — A MULTI-SELECT ANSWER ARRIVES AS AN ARRAY, AND USED TO BE DROPPED.
+                    //
+                    // This loop tested `ValueKind == String` only, so a question the attendee could
+                    // tick several boxes on was skipped ENTIRELY — the field never reached
+                    // CustomFieldsJson, and the telemetry panel that reads it was aggregating data
+                    // discarded two layers earlier.
+                    //
+                    // ⚠️ MEASURED on PROD 2026-08-11: every panel totalled 8 attendees except *"Have
+                    // you attended ELDK before?"*, which totalled 5. Every other field is
+                    // single-select, so every other field is a string — the one question that can
+                    // hold several answers was the one losing them.
+                    // 🔑 And it was SILENT: a dropped field is indistinguishable from an unanswered
+                    // question, which is why it survived. "Three people didn't answer" reads fine.
+                    else if (prop.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        var picks = prop.Value.EnumerateArray()
+                            .Where(e => e.ValueKind == JsonValueKind.String)
+                            .Select(e => e.GetString() ?? "")
+                            .Where(s => s.Length > 0)
+                            .ToArray();
+
+                        // 🔒 Joined with MultiSelectAnswer.Separator, NEVER a comma: the option
+                        // labels contain commas ("Yes, I attended ELDK26 (Feb 2026)"), so a
+                        // comma-joined value could not be split back without shredding real labels.
+                        if (picks.Length > 0) custom[prop.Name] = MultiSelectAnswer.Join(picks);
+                    }
+                }
                 if (custom.Count > 0) customJson = JsonSerializer.Serialize(custom);
             }
 
@@ -2735,12 +2978,61 @@ public sealed class ZohoClient
         // Verified live against PROD 2026-07-28.
         var supportsPaging = !RejectsPageParam(resource);
 
+        // 🔴 §1141 — A 401 MID-LIFE IS RECOVERABLE, AND WE WERE NOT RECOVERING FROM IT.
+        //
+        // Operator 2026-08-27, on three "[PROD] Signage agenda sync failed" mails in one day:
+        // *"make retries before throwing errors in my face"* · *"are you reusing the token"*.
+        //
+        // 🔑 We ARE reusing it — correctly (§525: one token, ~55 minutes, instead of a refresh per
+        // call). What was missing is the other half: an access token can stop being valid BEFORE it
+        // expires. DEV and PROD share ONE refresh token (§783.12b), so a refresh anywhere can retire
+        // the token another host is still holding. `ZohoAccessTokenCache.Invalidate` was written for
+        // exactly this and had ZERO callers, so the cache went on serving a token Zoho had already
+        // rejected for the rest of its nominal hour — and the strict pager turned each rejection
+        // straight into a mail.
+        //
+        // ⚠️ RETRYING WITHOUT RE-AUTHENTICATING IS USELESS, which is why the retry lives here and
+        // not only in the jobs. `SessionBackstagePushService` already retried the agenda read three
+        // times — with the same dead token each time — and logged "after 3 attempts". Three
+        // identical 401s is not resilience.
+        //
+        // 🔒 ONE re-auth per enumeration. If the fresh token is rejected too, the credential is
+        // genuinely bad and that is worth telling him about.
+        var token = accessToken;
+        var reauthorized = false;
+
         while (page <= MaxV3Pages)
         {
             var url = supportsPaging ? $"{baseUrl}{joiner}page={page}" : baseUrl;
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+            req.Headers.Add("Authorization", $"Zoho-oauthtoken {token}");
             using var resp = await _http.SendAsync(req, ct);
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                && !reauthorized && _tokenCache is not null)
+            {
+                reauthorized = true;
+
+                // Storm-safe: only the caller still holding the rejected token clears it; the rest
+                // find it already replaced and simply collect the new one. One refresh, not ~21.
+                _tokenCache.InvalidateIfCurrent(token);
+
+                var fresh = await GetAccessTokenAsync(ct);
+                if (!string.IsNullOrWhiteSpace(fresh) && !string.Equals(fresh, token, StringComparison.Ordinal))
+                {
+                    _log?.LogInformation(
+                        "Zoho GET {Resource} page {Page} returned 401 on a cached token; "
+                        + "re-authenticated and retrying once.", resource, page);
+                    token = fresh!;
+                    continue;   // same page, new token
+                }
+
+                _log?.LogWarning(
+                    "Zoho GET {Resource} page {Page} returned 401 and no NEW token could be "
+                    + "obtained (cooldown in force, or the refresh token itself is rejected).",
+                    resource, page);
+            }
+
             if (!resp.IsSuccessStatusCode)
             {
                 if (strict)
