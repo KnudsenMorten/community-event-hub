@@ -2,7 +2,7 @@
 //  main.bicep  -  Community Hub : full Azure infrastructure (Stage 1)
 // ===========================================================================
 //  Deploys, into one resource group, the complete environment for the
-//  evergreen "community-hub" application (see CONTEXT.md):
+//  evergreen "community-hub" application (see docs/DESIGN.md §11):
 //      - Log Analytics + Application Insights        (monitoring.bicep)
 //      - Key Vault                                   (keyvault.bicep)
 //      - Azure SQL server + database                 (sql.bicep)
@@ -16,7 +16,7 @@
 //  per edition); the year never appears in infrastructure, only in the DNS
 //  hostname and user-facing labels.
 //
-//  Deploy:  see scripts/deploy.sh and docs/RUNBOOK.md
+//  Deploy:  see scripts/deploy.sh and README.md "Getting started"
 //  Scope:   resource group (create the RG first - deploy.sh does this).
 // ===========================================================================
 
@@ -51,10 +51,10 @@ param sqlAadAdminLogin string
 @description('Object id (sid) of the Entra group named in sqlAadAdminLogin.')
 param sqlAadAdminObjectId string
 
-@description('Zoho Backstage origin allowed to embed the hub in an iframe (e.g. https://eldk27.expertslive.dk). Empty until confirmed - see CONTEXT.md 5a / open question 13.')
+@description('Zoho Backstage origin allowed to embed the hub in an iframe (e.g. https://your-event-portal.example). Empty = the hub cannot be framed.')
 param backstageEmbedOrigin string = ''
 
-@description('Custom hostname this environment will be reached at after the post-deploy DNS + binding step (e.g. test.hub.eldk27.expertslive.dk for dev, hub.eldk27.expertslive.dk for prod). Informational only -- the binding itself is a post-deploy step in docs/RUNBOOK.md §4.2 because the DNS CNAME must exist + be verified before Azure can attach the hostname. Surfaced as an output so the operator sees the exact target without grepping the parameter file.')
+@description('Custom hostname this environment will be reached at after the post-deploy DNS + binding step (e.g. dev.hub.your-event.example for dev, hub.your-event.example for prod). Informational only -- the binding itself is a post-deploy step (README.md "Getting started") because the DNS CNAME must exist + be verified before Azure can attach the hostname. Surfaced as an output so the operator sees the exact target without grepping the parameter file.')
 param customDomain string = ''
 
 @description('TEST MODE master switch (CommunityHub.Core.Integrations.TestModeOptions.Enabled). When true the integrations perform NO real outbound writes: no Zoho Backstage / Booking calls, no WooCommerce writes, coordinator notifications routed to the test address only. Both dev + prod share the SAME upstream services (Zoho Backstage, Zoho Booking, WooCommerce store) -- TestMode is the safety latch that lets dev READ live data without WRITING. Defaults to true for dev, false for prod.')
@@ -220,11 +220,11 @@ output sqlServerFqdn string = sql.outputs.sqlServerFqdn
 output storageBlobEndpoint string = storage.outputs.blobEndpoint
 output appInsightsName string = monitoring.outputs.appInsightsName
 
-// NOTE - custom domain (hub.eldk27.expertslive.dk / test.hub.eldk27.expertslive.dk):
+// NOTE - custom domain (e.g. hub.your-event.example / dev.hub.your-event.example):
 //  The custom-domain binding + managed certificate is intentionally NOT in
 //  this template. It requires a DNS record (CNAME -> webAppHostname) to exist
 //  and be verified FIRST, which cannot happen inside the same deployment.
-//  It is a documented post-deploy step in docs/RUNBOOK.md §4.2. The
+//  It is a documented post-deploy step (README.md "Getting started"). The
 //  customDomain parameter is informational + exported as an output so the
 //  operator sees the exact hostname they need to bind without grepping the
 //  parameter file.
@@ -234,4 +234,4 @@ output appInsightsName string = monitoring.outputs.appInsightsName
 //  WooCommerce store, Brevo, Company Manager). Only the CEH itself (web app,
 //  SQL, storage, custom hostname) is duplicated per env. dev defaults to
 //  TestMode (no real outbound writes) so live data can be read for testing
-//  without polluting prod-side state. See docs/RUNBOOK.md §1.1.
+//  without polluting prod-side state. See docs/DESIGN.md §11.

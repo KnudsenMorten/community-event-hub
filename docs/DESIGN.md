@@ -4715,9 +4715,9 @@ CLI), and `jq` (reads `baseName` from the param file).
 
 **Deploy infra:**
 ```bash
-./scripts/deploy.sh dev --whatif     # preview, deploys nothing
-./scripts/deploy.sh dev              # deploy dev
-./scripts/deploy.sh prod             # deploy prod
+bash scripts/deploy.sh dev --whatif     # creates the empty RG, then previews: deploys nothing
+bash scripts/deploy.sh dev              # deploy dev
+bash scripts/deploy.sh prod             # deploy prod
 ```
 `deploy.sh` creates the RG (`rg-<baseName>-<env>`, where `baseName` comes from the per-env parameter
 file — `communityhub` in the public template) and deploys `main.bicep`. **No SQL admin password is
@@ -4728,7 +4728,7 @@ blob endpoint). Bicep deployments are **incremental** — re-run after any Bicep
 first.
 
 **Post-deploy steps the Bicep deliberately leaves:**
-1. **Store secret values** — `./scripts/set-secrets.sh <env>` prompts for each secret and writes it
+1. **Store secret values** — `bash scripts/set-secrets.sh <env>` prompts for each secret and writes it
    straight to Key Vault (the Bicep provisions the vault but stores no values). Skip any unused
    integration (leave blank; keep its `enabled` flag false).
 2. **Bind the custom domain** — not in Bicep on purpose (needs a verified DNS record first). Create
@@ -4752,13 +4752,15 @@ first.
    (The maintainers' `tools/deploy-app.ps1 -Env <env>` wraps these build → zip → deploy →
    health-check steps; it is not in the public template.)
 4. **Database access + schema.** The web app applies EF migrations itself at startup, so it needs to
-   be a database user: connect to the database as a member of the Entra SQL admin group and run
-   `CREATE USER [<webAppName>] FROM EXTERNAL PROVIDER;` then `ALTER ROLE db_datareader / db_datawriter /
-   db_ddladmin ADD MEMBER [<webAppName>];` — and the same for the Functions app (and a prod staging slot,
-   `<webAppName>/slots/staging`, if you add one). Alternatively apply them from your machine with
-   `dotnet ef database update` as an Entra principal that is a database user; if a firewall rule is
-   needed for your client IP, add it temporarily and remove it afterwards.
-5. **Seed** the env's `Events` row and a first organizer — the README's *Getting started* has the SQL.
+   be a database user. The public template's `scripts/grant-db-access.sh <env> [--staging-slot]`
+   (az CLI + go-sqlcmd, signed in as a member of the Entra SQL admin group) resolves the server and app
+   names in `rg-<baseName>-<env>`, opens a temporary firewall rule for the caller's IP, and idempotently
+   runs `CREATE USER [<app>] FROM EXTERNAL PROVIDER` + `ALTER ROLE db_datareader / db_datawriter
+   (/ db_ddladmin for the web app) ADD MEMBER` for the web app, the Functions app and optionally the
+   prod staging slot (`<webAppName>/slots/staging`).
+5. **Seed** the env's `Events` row and a first organizer — `scripts/first-organizer.sql` (idempotent;
+   edit its values), run with `grant-db-access.sh <env> --sql-file scripts/first-organizer.sql` after
+   the app has started once.
 
 **Zero-downtime prod:** S1 plan + a staging slot — deploy to the slot, warm it up, then swap. A bad
 deploy is rolled back by swapping the slot back.
@@ -4821,8 +4823,16 @@ No runtime code changed and the private repository (and every deployment built f
 `config/` exactly as before. A template may only replace a file the mirror does not otherwise ship —
 the publish stops if a template target collides with a published private file. Derived event-specific
 images (organizer portraits, venue floor plans, A/V photos, the feedback poster and a social-post
-screenshot under `wwwroot/content/<edition>/`) are denylisted; the synthetic product screenshots in
+screenshot under `wwwroot/content/<edition>/`) are denylisted; the product screenshots in
 `content/<edition>/img/` still publish.
+
+**Public-only install files (2026-09-15).** The same overlay carries files that exist only in the public
+edition: `scripts/grant-db-access.sh`, `scripts/first-organizer.sql` and a `.gitattributes` that keeps
+`*.sh` on LF line endings in Windows checkouts. The maintainers' own suites and runbooks that a fork
+cannot use — `scripts/Export-SqlBacpac.ps1`, `tests/Features.Tests.ps1`, `tests/Survey-Mobile.Tests.ps1`
+(hard-wired to the upstream hostnames) and `tests/playwright/audit-out/` (real audit screenshots) — are
+denylisted. Values that remain wired to the upstream conference in runtime code are listed in the
+README's *Known limitations of the public edition*.
 
 Two mechanisms keep the copy honest. `PublicTemplateConfigTests` (private repo and mirror) runs the
 defaults through the real loaders, requires a default body for every shipped task definition and a
@@ -5005,7 +5015,7 @@ string. Keep dev↔prod schema in sync by applying this migration to both enviro
     Bash, prefix `MSYS_NO_PATHCONV=1` so the resource id isn't path-mangled). To repair a blank/invalid
     runtime: `az resource update --ids <fnResourceId> --set properties.functionAppConfig.runtime.name=dotnet-isolated properties.functionAppConfig.runtime.version=10.0`.
 - **Inspect what's deployed** — `az resource list --resource-group rg-<baseName>-<env> --output table`.
-- **Redeploy after a Bicep change** — `./scripts/deploy.sh <env>` (incremental; `--whatif` first).
+- **Redeploy after a Bicep change** — `bash scripts/deploy.sh <env>` (incremental; `--whatif` first).
 - **Tear down an environment** — `az group delete --name rg-<baseName>-<env> --yes` (KV recoverable
   90 days).
 - **Rotate compromised secrets** — any credential ever shared in PowerShell scripts/exports is

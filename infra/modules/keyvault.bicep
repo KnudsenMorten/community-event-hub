@@ -3,13 +3,13 @@
 // ---------------------------------------------------------------------------
 //  Holds every secret the app and the Functions job need. NOTHING secret is
 //  ever placed in the repo or in the JSON config - only the secret *names*.
-//  The inventory of expected secrets is in CONTEXT.md section 11:
+//  The inventory of expected secrets is in docs/DESIGN.md §17:
 //      brevo-smtp-username, brevo-smtp-key,
 //      woocommerce-consumer-key, woocommerce-consumer-secret,
 //      company-manager-wp-user, company-manager-wp-app-password,
 //      sql-admin-password
 //  Secret VALUES are set after deployment (see scripts/set-secrets.sh /
-//  RUNBOOK.md §4.1); this module only provisions the vault + RBAC access.
+//  README.md "Getting started"); this module only provisions the vault + RBAC access.
 //
 //  Auth model: RBAC (enableRbacAuthorization = true). Modern + audit-friendly.
 //  Access policies are NOT used. The web app + Functions app managed
@@ -37,13 +37,13 @@ param tenantId string = subscription().tenantId
 // Built-in "Key Vault Secrets User" role -- GET + LIST on secrets only.
 // What the web app + Functions app MIs need.
 //
-// IMPORTANT: built-in role definition GUIDs are NOT consistent across
-// tenants -- the public Microsoft docs list 4633458b-17de-406a-b8b4-
-// 9d9067a51068 but the ExpertsLive Denmark tenant has the same role
-// registered under 4633458b-17de-408a-b874-0445c86b69e6 (verified via
-// `az role definition list --name "Key Vault Secrets User"` --
-// same permissions, same description, different GUID). If you redeploy
-// this template to a different tenant, look up the actual GUID with:
+// Built-in role definition GUIDs are the same in every tenant; this is the
+// documented id of "Key Vault Secrets User". An earlier note here claimed the
+// id differs per tenant -- that came from a mistyped docs value. To confirm
+// it in your tenant, compare with the output of
+// `az role definition list --name "Key Vault Secrets User"`, e.g.
+// (the query below prints just the id). If it ever differs, use
+// the value it prints:
 //     az role definition list --name "Key Vault Secrets User" \
 //       --query "[0].name" -o tsv
 // and update the value below (or parameterize -- a future cleanup).

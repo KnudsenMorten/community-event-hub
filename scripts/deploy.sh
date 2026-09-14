@@ -65,8 +65,8 @@ TEMPLATE="${INFRA_DIR}/main.bicep"
 PARAM_FILE="${INFRA_DIR}/main.${ENVIRONMENT}.parameters.json"
 
 # Derive baseName + RG from the parameter file so naming follows whatever the
-# operator set there (eldkhub in this private repo -> rg-eldkhub-dev,
-# communityhub in the public template -> rg-communityhub-dev). Falls back to
+# operator set there (e.g. baseName "communityhub" -> rg-communityhub-dev).
+# Falls back to
 # 'communityhub' if jq missing -- the per-file pre-flight check below catches
 # a truly absent parameter file. RG name is what determines where the
 # resources land; getting it wrong silently provisions into the wrong place.

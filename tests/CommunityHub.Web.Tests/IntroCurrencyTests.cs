@@ -386,6 +386,8 @@ public sealed class IntroCurrencyTests
               + "their own copy; nothing an organizer, speaker, sponsor or attendee of this event sees changes.",
         [222] = "A fresh install comes with default content. Neutral default texts shipped only in the "
               + "open-source template for other communities; this event's own content and hub are unchanged.",
+        [223] = "Installing your own copy step by step. Install scripts and docs for the open-source "
+              + "template only; nothing in this event's hub changes.",
         [206] = "Email export on the participant status board. An ORGANIZER-only convenience over "
               + "addresses the organizer already holds; nothing a participant sees, sets or receives "
               + "differently.",

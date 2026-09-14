@@ -21,7 +21,7 @@ Hosting & Reliability.
 
 ## Feature index
 
-The complete delivered set — **223 entries** (chapters 1–12 summarise an area; every later entry is
+The complete delivered set — **224 entries** (chapters 1–12 summarise an area; every later entry is
 one dated delivery), in the order they shipped. Nothing here is planned or partial; the few
 capabilities retired since they shipped are marked *(retired)*, here and where they appear.
 
@@ -250,6 +250,7 @@ capabilities retired since they shipped are marked *(retired)*, here and where t
 | 220 | [Sponsor contacts with a shared mailbox name are added to the webshop](#220-sponsor-contacts-with-a-shared-mailbox-name-are-added-to-the-webshop--2026-09-14) | 2026-09-14 |
 | 221 | [The public edition builds, and its setup guide matches what it ships](#221-the-public-edition-builds-and-its-setup-guide-matches-what-it-ships--2026-09-14) | 2026-09-14 |
 | 222 | [A fresh install comes with default content](#222-a-fresh-install-comes-with-default-content--2026-09-14) | 2026-09-14 |
+| 223 | [Installing your own copy, step by step, without surprises](#223-installing-your-own-copy-step-by-step-without-surprises--2026-09-15) | 2026-09-15 |
 
 ---
 
@@ -5734,3 +5735,21 @@ configuration.
   default set, that the settings parse, and that nothing specific to another event slips in; the test
   suite passes on a fresh clone, skipping — with a stated reason — only the few checks that belong to the
   original event's own content.
+
+## 223. Installing your own copy, step by step, without surprises *(✅ 2026-09-15)*
+
+The getting-started guide for the open-source edition was walked through as a newcomer would, against
+exactly what the public repository contains, and every rough edge on the way was fixed.
+
+- **Commands that run as written.** Scripts are started with `bash`, so a fresh clone works without
+  changing file permissions; shell scripts keep Unix line endings even in a Windows checkout; and the
+  guide says what the infrastructure preview really does.
+- **Database access in one command.** A new script makes the web app and the scheduled-jobs app users of
+  the database — finding the names itself, opening a temporary firewall rule for your machine and closing
+  it again — and the first organizer account is a small, re-runnable SQL file you fill in.
+- **Every setting you must set, in one place.** The app settings the hub needs are listed with ready-to-run
+  commands, including the ones whose built-in values still name the original community.
+- **Honest about what is left.** A short list of the things still tied to the original event in code —
+  some menu links, a page title, the logos and the content folder name — with what a community changes.
+- **Only what a community can use.** The original event's own backup runbook, live-environment test
+  scripts and audit screenshots are no longer part of the public copy.

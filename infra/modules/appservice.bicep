@@ -43,11 +43,11 @@ param appInsightsResourceId string = ''
 @description('The Zoho Backstage origin allowed to embed the hub in an iframe (frame-ancestors CSP). Empty = embedding disabled until set.')
 param backstageEmbedOrigin string = ''
 
-@description('Custom hostname the operator will bind post-deploy (e.g. test.hub.eldk27.expertslive.dk). Surfaced as the Hub__CustomDomain app setting so the running app can emit it in absolute URLs / cookie domain hints. Binding itself is manual -- see docs/RUNBOOK.md §4.2.')
+@description('Custom hostname the operator will bind post-deploy (e.g. dev.hub.your-event.example). Surfaced as the Hub__CustomDomain app setting so the running app can emit it in absolute URLs / cookie domain hints. Binding itself is manual -- see README.md "Getting started".')
 param customDomain string = ''
 
 @description('RETIRED (§330) — the old outbound-email allowlist floor. SUPERSEDED by §234: audience control is RINGS ONLY and nothing in the app reads Email__OnlySendTo any more, so this module no longer emits it. The parameter is kept (unused) so existing parameter files and pipelines that still pass it do not fail; remove it once none do.')
-param emailOnlySendTo string = '@expertslive.dk'
+param emailOnlySendTo string = ''
 
 @description('TEST MODE master switch -- when true, integrations perform NO real outbound writes (no Zoho Backstage / Booking calls, no WooCommerce writes, coordinator notifications routed to TestCoordinatorEmail). Surfaced as the TestMode__Enabled app setting; the .NET app binds this via TestModeOptions. Defaults are set in main.bicep based on environmentName (true for dev, false for prod).')
 param testModeEnabled bool
@@ -141,7 +141,7 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         // The Backstage origin allowed to embed the hub. The app uses this to
         // emit `Content-Security-Policy: frame-ancestors <origin>` and to
         // issue the session cookie as SameSite=None inside that embed. See
-        // CONTEXT.md section 5a. Empty until the real Backstage domain is set.
+        // docs/DESIGN.md §4. Empty until the embedding origin is set.
         {
           name: 'Embedding__BackstageOrigin'
           value: backstageEmbedOrigin

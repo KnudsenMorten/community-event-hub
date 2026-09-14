@@ -24,8 +24,8 @@ if [[ "$ENVIRONMENT" != "dev" && "$ENVIRONMENT" != "prod" ]]; then
 fi
 
 # Derive baseName + RG from the matching parameter file so naming follows
-# whatever the operator set there (eldkhub in this private repo ->
-# rg-eldkhub-dev, communityhub in the public template -> rg-communityhub-dev).
+# whatever the operator set there (e.g. baseName "communityhub" ->
+# rg-communityhub-dev).
 # Falls back to 'communityhub' if jq missing.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PARAM_FILE="${SCRIPT_DIR}/../infra/main.${ENVIRONMENT}.parameters.json"

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Tasks.Definitions;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace CommunityHub.Core.Tests;
@@ -204,6 +205,81 @@ public class PublicTemplateConfigTests
         }
 
         Assert.True(hits.Count == 0, "upstream-specific content in the public default set:\n  " + string.Join("\n  ", hits));
+    }
+
+    /// <summary>
+    /// 2026-09-15 — <c>scripts/first-organizer.sql</c> (public-only) inserts into exactly the columns the
+    /// REAL EF model maps, and supplies every column that is required and has no database default — so
+    /// the one SQL step of the README install cannot fail on a renamed or newly required column. Checked
+    /// against the SQL Server model offline; no database is opened.
+    /// </summary>
+    [Fact]
+    public void The_first_organizer_sql_matches_the_database_model()
+    {
+        var sql = File.ReadAllText(TemplateFile("scripts/first-organizer.sql"));
+        TemplateFile("scripts/grant-db-access.sh");
+
+        // The real schema is whatever the migrations create, so read it from the migrations script EF
+        // generates for SQL Server — produced in-process, no database connection.
+        var options = new DbContextOptionsBuilder<CommunityHub.Core.Data.CommunityHubDbContext>()
+            .UseSqlServer("Server=offline;Database=none;").Options;
+        using var db = new CommunityHub.Core.Data.CommunityHubDbContext(options);
+        var migrations = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+            .GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db).GenerateScript();
+
+        var inserts = Regex.Matches(sql, @"INSERT INTO \[(?<table>\w+)\]\s*\((?<cols>[^)]*)\)");
+        Assert.Equal(2, inserts.Count);
+        foreach (Match insert in inserts)
+        {
+            var table = insert.Groups["table"].Value;
+            var columns = SchemaFromMigrations(migrations, table);
+            Assert.NotEmpty(columns);
+            var supplied = Regex.Matches(insert.Groups["cols"].Value, @"\[(\w+)\]").Select(m => m.Groups[1].Value).ToList();
+
+            foreach (var column in supplied)
+                Assert.True(columns.ContainsKey(column), $"first-organizer.sql inserts [{table}].[{column}], which the migrations do not create.");
+
+            // A NOT NULL column with no DEFAULT and no IDENTITY must be in the INSERT, or the statement fails.
+            var required = columns.Where(kv => kv.Value).Select(kv => kv.Key).Where(c => !supplied.Contains(c)).ToList();
+            Assert.True(required.Count == 0,
+                $"first-organizer.sql does not supply required column(s) of [{table}]: {string.Join(", ", required)}");
+        }
+    }
+
+    /// <summary>
+    /// Column name → "required with no default" for <paramref name="table"/>, replaying the CREATE TABLE,
+    /// ADD, DROP COLUMN, ALTER COLUMN and sp_rename statements of a migrations script in order.
+    /// </summary>
+    private static Dictionary<string, bool> SchemaFromMigrations(string script, string table)
+    {
+        var cols = new Dictionary<string, bool>(StringComparer.Ordinal);
+        static bool Required(string definition) =>
+            Regex.IsMatch(definition, @"\bNOT NULL\b") && !Regex.IsMatch(definition, @"\b(DEFAULT|IDENTITY)\b");
+
+        var create = Regex.Match(script, @"CREATE TABLE \[" + Regex.Escape(table) + @"\] \((?<body>.*?)\n\);", RegexOptions.Singleline);
+        if (create.Success)
+        {
+            foreach (Match m in Regex.Matches(create.Groups["body"].Value, @"^\s*\[(?<name>\w+)\] (?<def>[^\r\n]*?),?\r?$", RegexOptions.Multiline))
+                cols[m.Groups["name"].Value] = Required(m.Groups["def"].Value);
+        }
+        var t = Regex.Escape(table);
+        var statements = new Regex(
+            @"ALTER TABLE \[" + t + @"\] ADD \[(?<add>\w+)\] (?<adddef>[^;]*);"
+            + @"|ALTER TABLE \[" + t + @"\] DROP COLUMN \[(?<drop>\w+)\];"
+            + @"|ALTER TABLE \[" + t + @"\] ALTER COLUMN \[(?<alter>\w+)\] (?<alterdef>[^;]*);"
+            + @"|sp_rename N'\[" + t + @"\]\.\[(?<from>\w+)\]', N'(?<to>\w+)', 'COLUMN'");
+        foreach (Match m in statements.Matches(script))
+        {
+            if (m.Groups["add"].Success) cols[m.Groups["add"].Value] = Required(m.Groups["adddef"].Value);
+            else if (m.Groups["drop"].Success) cols.Remove(m.Groups["drop"].Value);
+            else if (m.Groups["alter"].Success && cols.ContainsKey(m.Groups["alter"].Value))
+            {
+                // ALTER COLUMN keeps an existing default constraint; only a change to NULL relaxes it.
+                if (!Regex.IsMatch(m.Groups["alterdef"].Value, @"\bNOT NULL\b")) cols[m.Groups["alter"].Value] = false;
+            }
+            else if (m.Groups["from"].Success && cols.Remove(m.Groups["from"].Value, out var req)) cols[m.Groups["to"].Value] = req;
+        }
+        return cols;
     }
 
     /// <summary>

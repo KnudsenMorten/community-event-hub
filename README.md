@@ -63,7 +63,7 @@ Measured on this repository on 2026-09-14.
 
 | | |
 |---|---|
-| Delivered features in the catalog | **223** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
+| Delivered features in the catalog | **224** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
 | Application code (C#, excluding migrations) | **211,770** lines in 1,053 files |
 | Razor views | **43,076** lines in 261 files (203 pages) |
 | Scheduled background jobs | **43** timer-triggered functions, plus an order webhook |
@@ -76,7 +76,7 @@ Measured on this repository on 2026-09-14.
 
 ## See it in action
 
-Every screenshot is the real product, captured automatically by a headless test that signs in and photographs each page at desktop **and** phone width. **Names, e-mail addresses, companies and photographs are synthetic** — the capture replaces every one before the picture is taken.
+Every screenshot is the real product, captured automatically by a headless test that signs in and photographs each page at desktop **and** phone width. The participants' **names, e-mail addresses, companies and photographs are synthetic** — the capture replaces them before the picture is taken; the signed-in account and the branding are the upstream conference's own.
 
 | Organizer command center | Speaker hub (mobile) |
 |---|---|
@@ -364,14 +364,19 @@ tools. It deploys one environment; repeat with `prod` for a second one.
 
 **You need**
 
-- An Azure subscription where you can create resource groups, and an **Entra (Azure AD) group** that
-  will administer the SQL server (you should be a member of it).
+- An Azure subscription where you are **Owner** (or Contributor + User Access Administrator) — the
+  templates create role assignments for the apps' managed identities — and an **Entra (Azure AD)
+  group** that will administer the SQL server, with you as a member.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) (`global.json` pins 10.0.x), Azure CLI ≥ 2.60
-  with Bicep (`az bicep install`), `jq`, `bash`, and `zip`.
+  with Bicep (`az bicep install`), [go-sqlcmd](https://aka.ms/go-sqlcmd), and `bash`, `jq`, `curl`
+  and `zip` (on Windows: WSL or Git Bash).
 - An SMTP relay account for transactional e-mail (the code is built around Brevo, but any relay with
   a username + key works) and a verified sender address.
 - A DNS zone you can add a CNAME and TXT record to (optional — the default `*.azurewebsites.net`
   hostname works without one).
+
+Run every command from the repository root. The scripts are invoked with `bash` so they work in a
+fresh clone without setting the executable bit.
 
 ### 1. Clone and build
 
@@ -396,57 +401,92 @@ resource name), `sqlAadAdminLogin` + `sqlAadAdminObjectId` (your Entra SQL admin
 ```bash
 az login
 export AZURE_SUBSCRIPTION_ID=<your-subscription-id>   # required: the script refuses to guess
-./scripts/deploy.sh dev --whatif                      # preview, changes nothing
-./scripts/deploy.sh dev
+bash scripts/deploy.sh dev --whatif   # creates the empty resource group, then previews: deploys nothing
+bash scripts/deploy.sh dev
 ```
 
 This creates `rg-<baseName>-dev` with Log Analytics + Application Insights, Key Vault, an Entra-only
 Azure SQL server + serverless database, storage, a Linux App Service plan + web app and a Functions app
-— all with managed identities, no SQL password. The outputs print the web app hostname, Functions app
-name, Key Vault name and SQL server name; you need them below.
-
-### 4. Secrets
+— all with managed identities, no SQL password. The outputs print the web app hostname
+(`webAppHostname`), `functionsAppName`, `keyVaultName` and `sqlServerFqdn`. Keep the names at hand:
 
 ```bash
-./scripts/set-secrets.sh dev
+RG=rg-<baseName>-dev
+WEB_APP=$(az webapp list -g $RG --query "[?!contains(kind, 'functionapp')] | [0].name" -o tsv)
+FN_APP=$(az functionapp list -g $RG --query "[0].name" -o tsv)
+KV=$(az keyvault list -g $RG --query "[0].name" -o tsv)
 ```
 
-It prompts for each secret and writes it straight to Key Vault; leave anything you do not use blank.
-Then point the apps at them. On **both** the web app and the Functions app set (Azure portal →
-*Environment variables*, or `az webapp config appsettings set` / `az functionapp config appsettings set`):
+### 4. Secrets and app settings
 
-| App setting | Value |
+```bash
+bash scripts/set-secrets.sh dev
+```
+
+It prompts for each secret and writes it straight to Key Vault; leave anything you do not use blank
+(including `sql-admin-password`, which the Entra-only server does not use). The infrastructure already
+sets `Sql__ConnectionStringTemplate`, `KeyVault__Uri`, `TestMode__Enabled`, the Application Insights
+settings and `Hub__CustomDomain`. Add the e-mail settings to **both** apps — the scheduled jobs send
+mail too:
+
+```bash
+SETTINGS=(
+  Email__SmtpHost=smtp-relay.brevo.com Email__SmtpPort=587
+  "Email__SmtpUsername=@Microsoft.KeyVault(VaultName=$KV;SecretName=brevo-smtp-username)"
+  "Email__SmtpKey=@Microsoft.KeyVault(VaultName=$KV;SecretName=brevo-smtp-key)"
+  Email__FromAddress=noreply@your-event.example "Email__FromDisplayName=Demo Community"
+  Email__OrganizerInbox=organizers@your-event.example
+  Email__SpeakerSessionAlsoTo=organizers@your-event.example
+  Email__EventCode=DEMO27
+  EmailTemplates__SupportEmail=support@your-event.example
+  Feedback__OrganizerEmailTo=organizers@your-event.example
+  Feedback__BugFeatureEmailTo=organizers@your-event.example
+  "Feedback__SubjectPrefix=[DEMO27]"
+)
+az webapp config appsettings set      -g $RG -n $WEB_APP --output none --settings "${SETTINGS[@]}"
+az functionapp config appsettings set -g $RG -n $FN_APP  --output none --settings "${SETTINGS[@]}"
+```
+
+| App setting | Why it matters |
 |---|---|
-| `Email__SmtpHost` / `Email__SmtpPort` | your relay, e.g. `smtp-relay.brevo.com` / `587` |
-| `Email__SmtpUsername` | `@Microsoft.KeyVault(VaultName=<keyVaultName>;SecretName=brevo-smtp-username)` |
-| `Email__SmtpKey` | `@Microsoft.KeyVault(VaultName=<keyVaultName>;SecretName=brevo-smtp-key)` |
-| `Email__FromAddress` / `Email__FromDisplayName` | your verified sender and community name |
-| `Email__OrganizerInbox` | your organizers' mailbox |
-| `Email__SpeakerSessionAlsoTo` | who is copied on speaker session changes (can be your organizer inbox) |
+| `Email__SmtpHost` / `Email__SmtpPort` / `Email__SmtpUsername` / `Email__SmtpKey` | **Required** — sign-in codes are e-mailed |
+| `Email__FromAddress` / `Email__FromDisplayName` | **Required** — must be a sender your relay has verified |
+| `Email__OrganizerInbox`, `Email__SpeakerSessionAlsoTo`, `EmailTemplates__SupportEmail`, `Feedback__OrganizerEmailTo`, `Feedback__BugFeatureEmailTo` | **Set them** — the defaults in code are the upstream community's own mailboxes |
+| `Email__EventCode`, `Feedback__SubjectPrefix` | **Set them** — the defaults tag subjects with the upstream edition code |
+| `Email__RedirectAllTo` | Optional, dev only — every mail goes to this one inbox |
+| `Email__UnsubscribeSecret` | Optional — a long random string; without it, mass mails carry no unsubscribe link |
+| `Embedding__BackstageOrigin` | Optional — set by the infrastructure from `backstageEmbedOrigin`; see [Embedding](#embedding) |
 
-⚠️ Several `Email` defaults in code still name the upstream community's own mailboxes. Set these before
-the first mail goes out. Every other integration (webshop, Zoho, SharePoint, LinkedIn, Sessionize, …) is
-optional and stays off until you configure its section — see [`config/README.md`](config/README.md)
-and [`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference).
+Every integration (Sessionize, Zoho, webshop, finance system, SharePoint, LinkedIn, AI) is optional and
+stays off until you configure its section. If you enable one, also override its upstream defaults:
+`ContentStudio__EventName`, `ContentStudio__TicketsUrl`, `ContentStudio__AgendaUrl` (social posts),
+`Zoho__BackstagePublicBaseUrl` (Zoho Backstage) and `EconomicErp__InvoiceHeading` (e-conomic). See
+[`config/README.md`](config/README.md) and [`docs/DESIGN.md` §17](docs/DESIGN.md#17-configuration--key-vault-reference).
 
 ### 5. Give the apps access to the database
 
 The web app creates and upgrades the schema itself at startup (EF Core migrations), using its managed
-identity. Connect to the database **as a member of your Entra SQL admin group** (Azure portal → the
-database → *Query editor*, or `sqlcmd` with Entra authentication) and run, with your own resource names:
+identity, so both apps must be users in the database. Logged in with `az` as a member of your Entra SQL
+admin group:
+
+```bash
+bash scripts/grant-db-access.sh dev
+```
+
+The script finds the SQL server, web app and Functions app in `rg-<baseName>-dev`, opens a temporary
+firewall rule for your IP (removed when it finishes), and runs — idempotently — for each app:
 
 ```sql
-CREATE USER [<webAppName>] FROM EXTERNAL PROVIDER;
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'<webAppName>')
+    CREATE USER [<webAppName>] FROM EXTERNAL PROVIDER;
 ALTER ROLE db_datareader ADD MEMBER [<webAppName>];
 ALTER ROLE db_datawriter ADD MEMBER [<webAppName>];
 ALTER ROLE db_ddladmin   ADD MEMBER [<webAppName>];
-
-CREATE USER [<functionsAppName>] FROM EXTERNAL PROVIDER;
-ALTER ROLE db_datareader ADD MEMBER [<functionsAppName>];
-ALTER ROLE db_datawriter ADD MEMBER [<functionsAppName>];
+-- and the same for <functionsAppName>, without db_ddladmin
 ```
 
-`<webAppName>` is the first label of the web app hostname from step 3.
+Prefer not to use the script? Run that SQL yourself in the Azure portal (the database → *Query editor*,
+signed in with Entra) with your two app names.
 
 ### 6. Make the content yours
 
@@ -476,9 +516,9 @@ dotnet publish src/CommunityHub.Jobs/CommunityHub.Jobs.csproj -c Release -o publ
 (cd publish-out/web  && zip -qr ../web.zip  .)
 (cd publish-out/jobs && zip -qr ../jobs.zip .)
 
-az webapp deploy --resource-group rg-<baseName>-dev --name <webAppName> --src-path publish-out/web.zip --type zip
-az functionapp deployment source config-zip --resource-group rg-<baseName>-dev --name <functionsAppName> --src publish-out/jobs.zip
-curl -fsS https://<webAppName>.azurewebsites.net/health
+az webapp deploy --resource-group $RG --name $WEB_APP --src-path publish-out/web.zip --type zip
+az functionapp deployment source config-zip --resource-group $RG --name $FN_APP --src publish-out/jobs.zip
+curl -fsS https://$WEB_APP.azurewebsites.net/health
 ```
 
 The first start applies all migrations, which can take a minute on a paused serverless database.
@@ -487,24 +527,17 @@ Build the zip with forward-slash entry names (`zip`, or `tar -a -cf` on Windows)
 
 ### 8. Create your edition and first organizer
 
-Run once against the database (as in step 5). Use your own values; `Code` should match `edition.code`
-in `config/event.eldk27.json`.
+Edit the values marked `EDIT` at the top of [`scripts/first-organizer.sql`](scripts/first-organizer.sql)
+(the edition code should match `edition.code` in `config/event.eldk27.json`; the e-mail address is the
+one you will sign in with), then — after step 7 has started the app once, so the schema exists:
 
-```sql
-DECLARE @now datetimeoffset = SYSDATETIMEOFFSET();
-
-INSERT INTO [Events] ([CommunityName], [Code], [DisplayName], [StartDate], [EndDate], [PreDayDate],
-                      [VenueName], [HubHostname], [IsActive], [LockDate], [CreatedAt])
-VALUES (N'Demo Community', N'DEMO27', N'Demo Community Conference 2027', '2027-03-02', '2027-03-03',
-        '2027-03-01', N'Riverside Convention Center', N'hub.your-event.example', 1, NULL, @now);
-
--- Role 0 = Organizer. LifecycleState 2 = Active (sign-in needs IsActive AND Active).
--- Ring 0 = the earliest release ring, so your own account receives mail from day one.
-INSERT INTO [Participants] ([EventId], [Email], [FullName], [Role], [IsActive], [LifecycleState], [Ring], [CreatedAt])
-VALUES (SCOPE_IDENTITY(), N'you@your-event.example', N'Your Name', 0, 1, 2, 0, @now);
+```bash
+bash scripts/grant-db-access.sh dev --sql-file scripts/first-organizer.sql
 ```
 
-Open `https://<webAppName>.azurewebsites.net/Login`, enter that address, and sign in with the PIN it
+It creates the active `Events` row and an active organizer (role 0, lifecycle state 2, release ring 0 so
+your own account receives mail from day one), and is safe to re-run. Open
+`https://<webAppName>.azurewebsites.net/Login`, enter that address, and sign in with the PIN it
 mails you. Everything else — people, sessions, sponsors, feature switches and release rings — is managed
 from the organizer area from here on.
 
@@ -514,14 +547,15 @@ Create a CNAME from your hostname to `<webAppName>.azurewebsites.net` and the `a
 record Azure shows you, then:
 
 ```bash
-az webapp config hostname add --resource-group rg-<baseName>-dev --webapp-name <webAppName> --hostname hub.your-event.example
-az webapp config ssl create  --resource-group rg-<baseName>-dev --name <webAppName> --hostname hub.your-event.example
+az webapp config hostname add --resource-group $RG --webapp-name $WEB_APP --hostname hub.your-event.example
+az webapp config ssl create  --resource-group $RG --name $WEB_APP --hostname hub.your-event.example
 ```
 
 ### Going further
 
 - **Production with zero downtime.** Scale the prod plan to Standard, add a `staging` slot, give the
-  slot's managed identity (`<webAppName>/slots/staging`) the same Key Vault and database access, deploy to
+  slot's managed identity the same Key Vault access and database access
+  (`bash scripts/grant-db-access.sh prod --staging-slot`), deploy to
   the slot (`--slot staging`), check `/health` there, then `az webapp deployment slot swap`. Swap back to
   roll back. Details in [`docs/DESIGN.md` §12](docs/DESIGN.md#12-deploy-rollback--zero-downtime).
 - **Dev safety.** `testModeEnabled` in the dev parameters keeps integrations read-only, and setting
@@ -531,7 +565,25 @@ az webapp config ssl create  --resource-group rg-<baseName>-dev --name <webAppNa
 - **Tests.** `dotnet test CommunityHub.sln` runs offline and needs nothing external; the structural
   checks run against whatever is in `config/`, so they tell you when an edited file no longer parses.
   While `config/PUBLIC-TEMPLATE.md` exists, the 19 tests that pin the upstream conference's own values
-  or its maintainers' internal documents are skipped, with that reason shown.
+  or its maintainers' internal documents are skipped, with that reason shown. The Playwright suites in
+  `tests/playwright/` run against a live instance: set `CEH_BASE_URL` and the `*_EMAIL` / `*_PIN`
+  (`ORGANIZER_EMAIL`, `ADMIN_PIN`, `SPEAKER_EMAIL`, `SPEAKER_PIN`, …) described in
+  `tests/playwright/support/hub.ts` — **always set `CEH_BASE_URL`**, because the defaults point at the
+  upstream project's own environments.
+
+### Known limitations of the public edition
+
+A few things are still wired to the conference this project came from **in code**. A fresh install
+works, but these need a change under `src/` in your fork (or are shown as-is):
+
+| Where | What | What to change |
+|---|---|---|
+| `TaskBodyStore`, `WelcomeCopyStore`, `ContentMarkdownRenderer` | The content folder name `eldk27` is fixed | Keep the folder names in `config/`, or change the constants |
+| Default config paths (`EventConfigOptions`, `SponsorConfigOptions`, …) | Default file names end in `.eldk27.json` | Keep the names, or set `EventConfig__EventConfigPath`, `SponsorConfig__SponsorConfigPath`, `SpeakerDeadlines__ConfigPath`, `SignalGroups__ConfigPath` |
+| `src/CommunityHub.Core/Navigation/NavBuilder.cs` | The sponsor menu's Zoho leads/inquiries links, the sponsor webshop link, the Code of Conduct and Privacy Policy links, and the survey-results link point at the upstream event's websites | Replace the URLs (the Zoho items stay hidden while the `sponsor-leads` feature is off, its default) |
+| `src/CommunityHub/Pages/{Speaker,Sponsor}/Announcements.cshtml` | The page title reads "Social Media Announcements (managed by ELDK)" | Edit the title |
+| `src/CommunityHub/wwwroot/img/logo*.png`, `src/CommunityHub.Core/Evaluation/Fonts/logo-eldk.png` | The upstream community's logos | Replace the image files |
+| Options classes listed in step 4 | Code defaults name upstream mailboxes, URLs and the edition code | Override with the app settings in step 4 |
 
 ---
 
@@ -588,15 +640,15 @@ src/
 tests/
   CommunityHub.Core.Tests/  xUnit — services, scenarios, config
   CommunityHub.Web.Tests/   xUnit — page models, routing, markup rules
-  playwright/               Browser suites (need a running instance and planted sign-in PINs)
-  *.Tests.ps1               Pester feature and smoke suites
+  playwright/               Browser suites (need a running instance, CEH_BASE_URL and sign-in PINs)
 infra/
   main.bicep, modules/      The whole Azure environment as code
   main.{dev,prod}.parameters.example.json   Copy to main.<env>.parameters.json and fill in
 scripts/
   deploy.sh                 Create the resource group and deploy infra/main.bicep
   set-secrets.sh            Write secret values into Key Vault from prompts
-  Export-SqlBacpac.ps1      Export the database to a .bacpac
+  grant-db-access.sh        Make the apps' managed identities database users; optionally run a SQL file
+  first-organizer.sql       Your edition row and first organizer account (edit, then run with the script)
 config/                     Per-edition settings, task/welcome/info-page texts and field maps — ships a neutral default set
 config-examples/            Historical copies of early e-mail templates (reference only)
 templates/emails/           The branded e-mail templates the apps render (layout + one file per mail)

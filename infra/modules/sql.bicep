@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 //  Stores all structured data: crew profiles, roles, hotel bookings, dinner
 //  signups, volunteer shifts, tasks, sponsor task assignments, the Events
-//  table (one row per edition - ELDK27, ELDK28...) and SentReminders.
+//  table (one row per edition) and SentReminders.
 //  GDPR-relevant: the server is private-by-default (no public Azure access),
 //  TLS 1.2 enforced. The web app and Functions reach it over a firewall rule
 //  that allows Azure services only.
@@ -65,7 +65,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
     minimalTlsVersion: '1.2'
     // No public endpoint exposure beyond the explicit firewall rule below.
     publicNetworkAccess: 'Enabled'
-    // Entra (Azure AD) admin: the ELDK SQL Admins group. Set inline so the
+    // Entra (Azure AD) admin: the group passed as aadAdminLogin. Set inline so the
     // admin exists at create time (avoids a separate apply ordering issue).
     administrators: {
       administratorType: 'ActiveDirectory'
@@ -93,7 +93,7 @@ resource sqlAadOnly 'Microsoft.Sql/servers/azureADOnlyAuthentications@2023-08-01
 //   Azure SQL Database creates every new database with READ_COMMITTED_SNAPSHOT = ON by
 //   default (unlike SQL Server / SQL Express, which default it OFF). There is no RCSI
 //   property on the `databases` ARM resource, so it cannot be set declaratively here — the
-//   Azure default already gives us RCSI ON for any NEW environment (ELDK28+), which is what
+//   Azure default already gives us RCSI ON for any NEW environment, which is what
 //   we want. The master-class oversell bug (§222) surfaced ONLY on prod precisely because
 //   prod had RCSI ON: a plain READ COMMITTED count-subquery reads a pre-statement row-version
 //   snapshot under RCSI and missed just-committed seats. The fix is in the APPLICATION code,
@@ -103,8 +103,8 @@ resource sqlAadOnly 'Microsoft.Sql/servers/azureADOnlyAuthentications@2023-08-01
 //   keep RCSI ON by default and (b) rely on the locking-correct code rather than toggling
 //   RCSI. If a future deploymentScript/post-deploy SQL step is ever added, an idempotent
 //   `ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON` could assert it explicitly, but
-//   it is not required for correctness today. The load-sim harness
-//   (tools/CommunityHub.MasterClassLoadSim) turns RCSI ON on its local SQL Express throwaway
+//   it is not required for correctness today. The maintainers' load-sim harness
+//   (not part of the public template) turns RCSI ON on its local SQL Express throwaway
 //   DB so local runs reproduce this prod isolation behaviour.
 resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
   parent: sqlServer
