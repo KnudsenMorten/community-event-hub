@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -40,6 +41,7 @@ public class SwagCatalogModel : PageModel
     private readonly SwagCatalogHoldService _holds;
     private readonly SwagCatalogCreditService _credits;
     private readonly TimeProvider _clock;
+    private readonly SponsorActingCompanyService _acting;
 
     public SwagCatalogModel(
         CommunityHubDbContext db,
@@ -48,7 +50,8 @@ public class SwagCatalogModel : PageModel
         FeatureGateService gate,
         SwagCatalogHoldService holds,
         SwagCatalogCreditService credits,
-        TimeProvider clock)
+        TimeProvider clock,
+        SponsorActingCompanyService acting)
     {
         _db = db;
         _participant = participant;
@@ -57,6 +60,7 @@ public class SwagCatalogModel : PageModel
         _holds = holds;
         _credits = credits;
         _clock = clock;
+        _acting = acting;
     }
 
     public bool WrongRole { get; private set; }
@@ -134,10 +138,8 @@ public class SwagCatalogModel : PageModel
         // §1165 — "sponsor can choose to upload logo or reuse already uploaded options". This is
         // the REUSE side, and it needs no new storage: the logo the company has already given us
         // is on SponsorInfo. Upload comes with the next slice.
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
         if (!string.IsNullOrWhiteSpace(companyId))
         {
             var info = await _db.SponsorInfos

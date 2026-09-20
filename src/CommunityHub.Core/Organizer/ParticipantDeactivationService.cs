@@ -1,6 +1,7 @@
 using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Volunteers;
 using Microsoft.EntityFrameworkCore;
 
@@ -461,11 +462,18 @@ public sealed class ParticipantDeactivationService
             await _db.SaveChangesAsync(ct);
         }
 
+        // §1237 — the company's NAME for every human-readable string below (reason + audit summary).
+        // `info` is already loaded above; a company with no record or no captured name falls back to
+        // the honest "(name not synced …)" label rather than to a bare number.
+        var companyLabel = string.IsNullOrWhiteSpace(info?.CompanyName)
+            ? SponsorCompanyName.UnresolvedName(sponsorCompanyId)
+            : info!.CompanyName!;
+
         var deactivated = 0;
         foreach (var c in contactIds.Where(c => c.IsActive))
         {
             var r = await DeactivateAsync(
-                eventId, c.Id, $"company {sponsorCompanyId} withdrew", actorEmail, ct);
+                eventId, c.Id, $"company {companyLabel} withdrew", actorEmail, ct);
             if (r.Found && !r.AlreadyInactive) deactivated++;
         }
 
@@ -495,7 +503,8 @@ public sealed class ParticipantDeactivationService
             ActorEmail = actorEmail ?? "system",
             TargetType = "SponsorCompany",
             TargetId = sponsorCompanyId,
-            Summary = $"Sponsor company {sponsorCompanyId} withdrawn: "
+            // §1237 — name first; TargetId above still carries the id for machine lookup.
+            Summary = $"Sponsor company {companyLabel} ({sponsorCompanyId}) withdrawn: "
                       + $"{deactivated} contact(s) deactivated, "
                       + $"{strayRsvps.Count} lingering party RSVP row(s) cancelled. "
                       + "Zoho/ERP records untouched (§56).",

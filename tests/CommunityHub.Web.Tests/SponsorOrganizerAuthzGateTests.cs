@@ -89,7 +89,10 @@ public sealed class SponsorOrganizerAuthzGateTests
             cache: new MemoryCache(new MemoryCacheOptions()),
             eventConfigLoader: new EventEditionConfigLoader(),
             eventConfigOptions: new EventConfigOptions(),
-            log: NullLogger<CommunityHub.Pages.Sponsor.IndexModel>.Instance)
+            log: NullLogger<CommunityHub.Pages.Sponsor.IndexModel>.Instance,
+            // §1236 — real instance: the gate under test returns before it is used, but a null would
+            // hide a future ordering change that touches it first.
+            acting: new CommunityHub.Sponsors.SponsorActingCompanyService(db, new HttpContextAccessorOver(http)))
         {
             PageContext = new PageContext { HttpContext = http },
         };

@@ -178,7 +178,14 @@ public sealed class SponsorZohoProvisionService
                 || !string.IsNullOrWhiteSpace(info.ZohoExhibitorId);
 
             // Resolve the public company name (the key Zoho matches on).
-            string name = info.SponsorCompanyId;
+            // 🔴 §1237 — from CEH's OWN data first; the id is NOT a name. This value is written to
+            // Zoho as the company name, so defaulting it to the id published a number on the public
+            // agenda whenever Company Manager was off or unreachable.
+            var localNames = await SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, eventId, new[] { info.SponsorCompanyId }, ct);
+            string name = localNames.TryGetValue(info.SponsorCompanyId, out var localName)
+                ? localName
+                : SponsorCompanyName.UnresolvedName(info.SponsorCompanyId);
             if (_cmOptions.Enabled && int.TryParse(info.SponsorCompanyId, out var cid))
             {
                 CompanyManagerCompany? company = null;

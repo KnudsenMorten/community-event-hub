@@ -64,6 +64,42 @@ public sealed class ErpWebshopContactSyncService
     private readonly Data.CommunityHubDbContext? _db;
     private readonly Organizer.ParticipantDeactivationService? _deactivate;
 
+    /// <summary>
+    /// §1235b — the webshop user id the hub already holds for this address, linked to one more company.
+    /// Returns the user id when the link succeeded, 0 when there is nothing to link by or the webshop
+    /// refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 The id comes from the hub's OWN record (<see cref="Domain.Participant.CmUserId"/>, written
+    /// by the contact sync from <c>/companies/{id}/users</c>). Company Manager exposes no
+    /// users-by-e-mail search, so an address the hub has never synced cannot be resolved here — that case
+    /// still reports NOT LINKED, honestly, rather than pretending.</para>
+    ///
+    /// <para>🔒 The write goes through <c>LinkUserToCompanyAsync</c>, which carries the same
+    /// external-write guard as the create, so a host that may not write to the webshop still cannot.</para>
+    /// </remarks>
+    private async Task<int> TryLinkExistingWebshopUserAsync(
+        int companyId, string email, CancellationToken ct)
+    {
+        // The id CEH already captured, when it has one.
+        var userId = _db is null
+            ? 0
+            : await _db.Participants
+                .Where(p => p.Email == email && p.CmUserId != null && p.CmUserId > 0)
+                .Select(p => p.CmUserId!.Value)
+                .FirstOrDefaultAsync(ct);
+
+        // 🔴 §1235c — …AND OTHERWISE ASK THE WEBSHOP. Relying on CEH's own record meant a contact
+        // belonging to a company the hub has never synced could not be linked at all — which is
+        // exactly a NEW company's contacts. Measured live 2026-09-17: Truesec A/S (company 108) was
+        // created by §1238 and its contacts stayed unlinked, because CEH held no ids for them.
+        if (userId <= 0) userId = await _cm.FindUserIdByEmailAsync(email, ct);
+
+        if (userId <= 0) return 0;
+
+        return await _cm.LinkUserToCompanyAsync(companyId, userId, ct) ? userId : 0;
+    }
+
     public ErpWebshopContactSyncService(
         EconomicContactAdminService erp, CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         IEmailSender email, ILogger<ErpWebshopContactSyncService> log,
@@ -265,8 +301,59 @@ public sealed class ErpWebshopContactSyncService
             var key = cu.CustomerNumber.ToString();
             if (!byErp.TryGetValue(key, out var company))
             {
-                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): no matching webshop company (erp_customer_number).");
-                continue;
+                // 🔴 §1238 — A SPONSOR IN THE ERP NOW GETS A WEBSHOP COMPANY, instead of this note
+                // repeating for ever. Operator 2026-09-17, after creating Truesec Sweden
+                // (e-conomic #341409358) and finding nothing in Company Manager: *"i dont see that
+                // it was created in CM module in wordpress yet even though it was synced"* ·
+                // *"if the company does not exist in CM, create it"* · *"using CM api"*.
+                //
+                // 🔑 ADOPT BEFORE CREATE. A company may already exist in CM under the same name with
+                // no erp_customer_number on it — created by hand, or by the shop. Creating a second
+                // one would be a duplicate in a LIVE webshop, and there is no delete route (§505),
+                // so the cheap check comes first: link the existing one instead.
+                var adoptable = companies
+                    .Where(c => string.IsNullOrWhiteSpace(c.ErpCustomerNumber)
+                                && !string.IsNullOrWhiteSpace(c.Name)
+                                && string.Equals(c.Name.Trim(), (cu.Name ?? string.Empty).Trim(),
+                                                 StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (adoptable.Count == 1)
+                {
+                    var adopt = adoptable[0];
+                    var linked = await _cm.UpdateCompanyAsync(
+                        adopt.Id,
+                        new Dictionary<string, object?> { ["erp_customer_number"] = key }, ct);
+                    if (!linked)
+                    {
+                        notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): a webshop company "
+                                  + $"#{adopt.Id} has the same name but no ERP number, and linking it "
+                                  + "failed. <b>Your action:</b> set its ERP customer number by hand.");
+                        continue;
+                    }
+                    company = adopt with { ErpCustomerNumber = key };
+                    byErp[key] = company;
+                    notes.Add($"LINKED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the existing "
+                              + $"webshop company #{adopt.Id} now carries this ERP customer number. "
+                              + "<i>No action needed.</i>");
+                }
+                else
+                {
+                    var newId = await _cm.CreateCompanyAsync(cu.Name ?? string.Empty, key, ct);
+                    if (newId <= 0)
+                    {
+                        // ⚠️ Unchanged wording for the genuine failure: the guard refused (DEV), the
+                        // name was blank, or the webshop rejected the create.
+                        notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): no matching webshop "
+                                  + "company (erp_customer_number), and it could not be created.");
+                        continue;
+                    }
+                    company = new CompanyManagerCompanyRef(newId, key, 0, 0, cu.Name ?? string.Empty);
+                    byErp[key] = company;
+                    notes.Add($"CREATED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}) was created in "
+                              + $"the webshop as company #{newId}. Its contacts are added below; the "
+                              + "package, billing and public name are still set in Company Manager.");
+                }
             }
 
             // 🔴 §891 — PROPAGATE A RENAME. Operator renamed CVR 32559735 from "SoftwareCentral A/S"
@@ -676,6 +763,29 @@ public sealed class ErpWebshopContactSyncService
                 {
                     var uid = await _cm.CreateUserAsync(c.Email.Trim(), first, last, company.Id, ct);
                     if (uid > 0) { emailToUserId[em] = uid; usersCreated++; }
+                    else if (await TryLinkExistingWebshopUserAsync(company.Id, em, ct) is int linkedId
+                             && linkedId > 0)
+                    {
+                        // 🔑 §1235b — THE ADDRESS ALREADY EXISTS AS A WEBSHOP USER, AND THAT IS NO
+                        // LONGER A DEAD END.
+                        //
+                        // A sponsor group's global CMO is a contact under EVERY division's ERP account
+                        // (operator 2026-09-16: *"in my erp they will exist with 2 contacts under each
+                        // account. contacts are the same"*). The create is refused for the second
+                        // division because the user exists — so LINK that user to this company instead
+                        // of reporting a failure and leaving the division without its contact.
+                        //
+                        // ⚠️ `LinkUserToCompanyAsync` has existed since the client was written and was
+                        // called by NOTHING; the note below used to state as fact that "a person can
+                        // belong to only ONE company", which was true of this sync, not of the webshop.
+                        emailToUserId[em] = linkedId;
+                        usersCreated++;
+                        notes.Add(
+                            $"LINKED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
+                            + $"<b>{E(c.Name)}</b> &lt;{E(c.Email)}&gt; already existed as a webshop user "
+                            + "and was linked to this company as well (the same person may serve several "
+                            + "companies). <i>No action needed.</i>");
+                    }
                     else
                     {
                         // 🔴 §891.5 — THIS USED TO BE SILENT, AND THAT IS THE BUG HE HIT.
@@ -693,10 +803,11 @@ public sealed class ErpWebshopContactSyncService
                             c.Email, cu.Name);
                         notes.Add(
                             $"NOT LINKED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
-                            + $"<b>{E(c.Name)}</b> &lt;{E(c.Email)}&gt; could not be added to the webshop. "
-                            + "Either that address already exists as a user (a person can belong to "
-                            + "only ONE company), or the address was recently CHANGED in e-conomic and "
-                            + "the old user still holds the seat. "
+                            + $"<b>{E(c.Name)}</b> &lt;{E(c.Email)}&gt; could not be added to the webshop, "
+                            + "and could not be linked to an existing user either. "
+                            + "Either the address was recently CHANGED in e-conomic and the old user "
+                            + "still holds the seat, or that address exists as a webshop user the hub "
+                            + "has never seen (so it holds no user id to link by). "
                             + "<b>Your action:</b> delete or re-link the old user in WordPress, then "
                             + "re-run — the new address will be created and linked. "
                             + "<i>Until then this contact holds no role here.</i>");

@@ -5460,6 +5460,60 @@ namespace CommunityHub.Core.Migrations
                     b.ToTable("SponsorBoothMembers");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorCompanyContact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ErpContactNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsBoothMember")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEventCoordinator")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSigner")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SponsorCompanyId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParticipantId");
+
+                    b.HasIndex("EventId", "SponsorCompanyId");
+
+                    b.HasIndex("EventId", "ParticipantId", "SponsorCompanyId")
+                        .IsUnique();
+
+                    b.HasIndex("EventId", "SponsorCompanyId", "ErpContactNumber");
+
+                    b.ToTable("SponsorCompanyContacts");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.SponsorInfo", b =>
                 {
                     b.Property<int>("Id")
@@ -8770,6 +8824,25 @@ namespace CommunityHub.Core.Migrations
                         .IsRequired();
 
                     b.Navigation("Event");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorCompanyContact", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "Participant")
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+
+                    b.Navigation("Participant");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.SponsorInfo", b =>

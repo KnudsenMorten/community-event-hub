@@ -119,7 +119,11 @@ public sealed class SponsorTasksDeliverablesPageTests
             // resolve simply omits the allowance line.
             new CommunityHub.Core.Config.SponsorConfigLoader(),
             new CommunityHub.Core.Config.SponsorConfigOptions(),
-            NullLogger<TasksModel>.Instance);
+            NullLogger<TasksModel>.Instance,
+            // §1236 — the page resolves its company through the acting-company service. REAL
+            // instance: LoadAsync asks it on every load, and with no cookie it answers exactly what
+            // the old inline lookup did (the contact's primary company), so these tests are unchanged.
+            new CommunityHub.Sponsors.SponsorActingCompanyService(db, new HttpContextAccessorOver(http)));
 
         var actionContext = new ActionContext(
             http, new RouteData(), new PageActionDescriptor(), new ModelStateDictionary());

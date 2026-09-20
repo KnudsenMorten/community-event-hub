@@ -726,7 +726,12 @@ public sealed class SessionizeApiClient
             // Format label's "(NN min)" hint.
             LengthMinutes:    SessionDefaultsMapper.MapLengthMinutes(startsAt, endsAt, formatLabel),
             // §299.8/b7: comma-joined "Tags" group labels; null when the payload has none.
-            Tags:             tagLabels.Count > 0 ? string.Join(", ", tagLabels) : null);
+            Tags:             tagLabels.Count > 0 ? string.Join(", ", tagLabels) : null,
+            // 🔴 §1241 — the speaker's own confirmation. Read ONLY when the key is actually
+            // present: `GetBool` cannot tell "false" from "absent", and the importer refuses an
+            // unconfirmed session, so an absent key must fall back to the record's `true` default
+            // rather than silently blocking every session in a payload that never carried it.
+            IsConfirmed:      !sess.TryGetProperty("isConfirmed", out _) || GetBool(sess, "isConfirmed"));
     }
 
     /// <summary>

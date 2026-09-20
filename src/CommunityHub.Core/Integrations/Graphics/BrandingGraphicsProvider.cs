@@ -88,9 +88,20 @@ public sealed class BrandingGraphicsProvider : IBrandingGraphicsProvider
             .FirstOrDefaultAsync(ct);
         if (asset is null) return null;
 
+        // 🔴 §1237 — THE SPONSOR'S NAME, NEVER THEIR ID. This string is DRAFT SOCIAL-POST TEXT: an id
+        // here reads "our sponsor 36" to the public. CEH holds the name locally (SponsorInfo →
+        // upload location → ERP link), so the resolver answers with no network call; when nothing is
+        // known it says "(name not synced …)", which is visibly wrong in a draft a human approves
+        // rather than quietly wrong on a published post.
+        var names = await SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, new[] { sponsorCompanyId }, ct);
+        var sponsorName = names.TryGetValue(sponsorCompanyId, out var n)
+            ? n
+            : SponsorCompanyName.UnresolvedName(sponsorCompanyId);
+
         var draft = _graphics.BuildSessionShareDraft(
             Context.EventDisplayName, Context.TicketUrl,
-            sessionTitle: $"our sponsor {sponsorCompanyId}", graphicUrl: ImageRefOf(asset));
+            sessionTitle: $"our sponsor {sponsorName}", graphicUrl: ImageRefOf(asset));
 
         return ToRef(asset, draft.Text);
     }

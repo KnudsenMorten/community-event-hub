@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Sponsors;
 using CommunityHub.Core.Resources;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -38,19 +39,22 @@ public class LeadsModel : PageModel
     private readonly ISponsorApiKeyService _keys;
     private readonly IDeterministicSponsorTokenService _detTokens;
     private readonly IStringLocalizer<SharedResource> _loc;
+    private readonly SponsorActingCompanyService _acting;
 
     public LeadsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         ISponsorApiKeyService keys,
         IDeterministicSponsorTokenService detTokens,
-        IStringLocalizer<SharedResource> loc)
+        IStringLocalizer<SharedResource> loc,
+        SponsorActingCompanyService acting)
     {
         _db = db;
         _participant = participant;
         _keys = keys;
         _detTokens = detTokens;
         _loc = loc;
+        _acting = acting;
     }
 
     public bool AccessDenied { get; private set; }
@@ -88,10 +92,8 @@ public class LeadsModel : PageModel
         // CurrentParticipant doesn't carry SponsorCompanyId; resolve it
         // from the Participants table using the same pattern as
         // /Sponsor/Index.cshtml.cs.
-        SponsorCompanyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        SponsorCompanyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
         if (string.IsNullOrWhiteSpace(SponsorCompanyId))
         {
             NoCompanyLink = true;

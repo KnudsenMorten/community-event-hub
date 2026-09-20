@@ -3,6 +3,7 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -30,6 +31,7 @@ public class IndexModel : PageModel
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
     private readonly ILogger<IndexModel> _log;
+    private readonly SponsorActingCompanyService _acting;
 
     public IndexModel(
         CommunityHubDbContext db,
@@ -41,7 +43,8 @@ public class IndexModel : PageModel
         IMemoryCache cache,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
-        ILogger<IndexModel> log)
+        ILogger<IndexModel> log,
+        SponsorActingCompanyService acting)
     {
         _db = db;
         _participant = participant;
@@ -53,6 +56,7 @@ public class IndexModel : PageModel
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
         _log = log;
+        _acting = acting;
     }
 
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
@@ -115,10 +119,8 @@ public class IndexModel : PageModel
             _log.LogWarning(ex, "Sponsor/Index: failed to load event-edition config for configuratorUrl.");
         }
 
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null)
         {
             NoCompanyLink = true;

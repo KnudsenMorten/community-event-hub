@@ -162,7 +162,12 @@ public sealed class SessionBackstagePushService
     ///     "Master Class: AI low code" with no speaker at all, and he was told none of it.
     /// </remarks>
     public static string DescribeCreateGaps(
-        Session s, string? venueId, IReadOnlyList<string>? speakerEmails)
+        Session s, string? venueId, IReadOnlyList<string>? speakerEmails,
+        // 🔴 §1240d — whether a track was actually SENT on the create. A common-for-all-tracks
+        // session now goes over BARE, so telling him to clear a Track field that was never set is
+        // an instruction already satisfied before he reads it — the §594 failure that teaches him
+        // to skim the list. Defaults to "a track was sent" so every existing call is unchanged.
+        bool trackSent = true)
     {
         var manual = new List<string>();
         var missing = new List<string>();
@@ -183,7 +188,7 @@ public sealed class SessionBackstagePushService
         // 2026-08-09: create-with-track-then-report, rather than risk a refused create on an API
         // that cannot delete). So the track is wrong the moment it lands, and this is the §574
         // moment to say so — the cheapest one, since the sessions API can never update it.
-        if (s.IsCommonForAllTracks)
+        if (s.IsCommonForAllTracks && trackSent)
         {
             manual.Add("CLEAR the Track field — this session is Common for All Tracks "
                 + "(Backstage shows a track-less session that way)");
@@ -578,20 +583,58 @@ public sealed class SessionBackstagePushService
                 // 2026-07-23, the same contract as the live-verified CreateOneAsync pilot):
                 // the TRACK is REQUIRED — a blank CEH track or a failed track create fails
                 // THIS session with NO session POST; venue + speakers ride along.
-                if (string.IsNullOrWhiteSpace(s.Track))
+                // 🔴 §1240d — A COMMON-FOR-ALL-TRACKS SESSION IS CREATED WITH NO TRACK AT ALL.
+                //
+                // Operator 2026-09-20, on being told these two would be skipped: *"these 2 should
+                // be created as well, why would you skip them"*. He is right, and the reasoning
+                // that said otherwise does not survive being checked:
+                //   • "Zoho's create requires a track" is HIS OWN SENTENCE from §569 (*"you can NOT
+                //     create a session without a track"*) — it was never a verified API rejection.
+                //   • `BuildSessionPayload` OMITS the `track` key entirely when the id is null, so
+                //     the payload is well-formed without one.
+                //   • §1011 live-verified that 16 of 25 live Backstage sessions carry `track: null`
+                //     — track-less is a legitimate state over there, and it is exactly the state a
+                //     common session is supposed to be in.
+                //
+                // ⚠️ And the downside of TRYING is small, which is what makes this the right way
+                // round: a refused create returns HTTP 400 and writes NOTHING, so that one session
+                // is reported Failed with Zoho's own message and we learn the answer. Skipping, by
+                // contrast, is a permanent manual chore bought with an assumption.
+                string? trackId = null;
+                if (!s.IsCommonForAllTracks)
                 {
-                    failed++;
-                    items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null,
-                        "The session has no track — the Zoho create requires one."));
-                    continue;
+                    if (string.IsNullOrWhiteSpace(s.Track))
+                    {
+                        failed++;
+                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null,
+                            "The session has no track — the Zoho create requires one."));
+                        continue;
+                    }
+                    string? trackError;
+                    (trackId, trackError) =
+                        await ResolveOrCreateTrackAsync(token, s.Track, trackCache, zohoWrites, ct);
+                    if (trackId is null)
+                    {
+                        failed++;
+                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null, trackError));
+                        continue;
+                    }
                 }
-                var (trackId, trackError) =
-                    await ResolveOrCreateTrackAsync(token, s.Track, trackCache, zohoWrites, ct);
-                if (trackId is null)
+                else if (!string.IsNullOrWhiteSpace(s.Track))
                 {
-                    failed++;
-                    items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null, trackError));
-                    continue;
+                    // 🔒 Ticked in the hub but still carrying a real track: that is §1011's original
+                    // case, and its decision stands — create WITH the track and tell him to clear it
+                    // in Backstage (`DescribeCreateGaps`). Only the track-LESS common session, which
+                    // is what the Sessionize `Common` marker now produces, goes over bare.
+                    string? trackError;
+                    (trackId, trackError) =
+                        await ResolveOrCreateTrackAsync(token, s.Track, trackCache, zohoWrites, ct);
+                    if (trackId is null)
+                    {
+                        failed++;
+                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null, trackError));
+                        continue;
+                    }
                 }
 
                 string? venueId = null;
@@ -614,7 +657,7 @@ public sealed class SessionBackstagePushService
                     items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Created, res.Id));
                     zohoWrites.Add($"Created session '{s.Title}' (Backstage id {res.Id})"
                         + healedSessionNotes.GetValueOrDefault(s.Id)
-                        + DescribeCreateGaps(s, venueId, speakerEmails));
+                        + DescribeCreateGaps(s, venueId, speakerEmails, trackSent: trackId is not null));
                 }
                 else if (string.Equals(res.Error, ZohoClient.ExternalWritesDisabledError, StringComparison.Ordinal))
                 {
@@ -860,19 +903,30 @@ public sealed class SessionBackstagePushService
             .FirstOrDefaultAsync(ct);
         var firstDay = ev?.PreDayDate ?? ev?.StartDate;
 
-        // TRACK — the live create REQUIRES one. Operator 2026-07-23: reuse an exact
-        // (case-insensitive) Backstage match on the TARGET name — the Sessionize label, or
-        // its TrackNameMap entry (the two AI tracks carry shorter names in Zoho) — else
-        // CREATE the track under the target name (the operator prunes unwanted tracks in
-        // the UI; every create is reported via the change mail). A BLANK track still fails.
-        if (string.IsNullOrWhiteSpace(session.Track))
+        // TRACK — Operator 2026-07-23: reuse an exact (case-insensitive) Backstage match on the
+        // TARGET name — the Sessionize label, or its TrackNameMap entry (the two AI tracks carry
+        // shorter names in Zoho) — else CREATE the track under the target name (the operator prunes
+        // unwanted tracks in the UI; every create is reported via the change mail).
+        //
+        // 🔴 §1240d — EXCEPT for a COMMON-FOR-ALL-TRACKS session with no track, which is created
+        // BARE. Track-less is the correct Backstage state for it (§1011 live-verified: 16 of 25
+        // live sessions carry `track: null`), and `BuildSessionPayload` omits the key entirely when
+        // the id is null. A BLANK track on an ORDINARY session is still a real gap and still fails.
+        string? trackId = null;
+        if (!string.IsNullOrWhiteSpace(session.Track))
+        {
+            var trackCache = ToNameIdCache(
+                (await _zoho.GetTracksAsync(token, ct)).Select(t => (t.Id, t.Name)));
+            string? trackError;
+            (trackId, trackError) =
+                await ResolveOrCreateTrackAsync(token, session.Track, trackCache, changes, ct);
+            if (trackId is null)
+                return (false, trackError!, changes);
+        }
+        else if (!session.IsCommonForAllTracks)
+        {
             return (false, "The session has no track — the Zoho create requires one.", changes);
-        var trackCache = ToNameIdCache(
-            (await _zoho.GetTracksAsync(token, ct)).Select(t => (t.Id, t.Name)));
-        var (trackId, trackError) =
-            await ResolveOrCreateTrackAsync(token, session.Track, trackCache, changes, ct);
-        if (trackId is null)
-            return (false, trackError!, changes);
+        }
 
         // VENUE — resolve the room name against the Backstage halls; create the hall on
         // demand when the room registry knows it WITH a capacity (capacity is REQUIRED on
@@ -952,6 +1006,14 @@ public sealed class SessionBackstagePushService
     {
         var targetName = TargetTrackName(cehTrack);
         if (trackIdsByName.TryGetValue(targetName, out var existing)) return (existing, null);
+
+        // 🔴 §1240 — NEVER CREATE THE "Common" TRACK. Operator 2026-09-20: *"i have created Common
+        // in the event track, but dont create that in zoho"*. The importer already maps that
+        // Sessionize item onto the per-session tick box instead of a track, so reaching here means
+        // somebody typed it into the hub by hand — and create-if-missing would put a track into the
+        // live agenda that cannot be deleted through the API. Fail this ONE session, loudly.
+        if (SessionizeConventions.IsCommonTrack(targetName))
+            return (null, SessionizeConventions.CommonTrackTypedAsTrackError);
 
         var newTrack = await _zoho.CreateTrackAsync(token, targetName, ct);
         if (!newTrack.Ok)

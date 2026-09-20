@@ -116,17 +116,20 @@ public class WelcomeModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
+        // §1237 — the banner names the company; the CM id stays as a secondary.
+        var companyLabel = await CompanyLabelAsync(me.EventId, companyId, ct);
+
         var r = await _welcome.SendForCompanyAsync(me.EventId, companyId, ct);
         if (r.Blocked)
         {
-            Message = $"Company {companyId}: {r.Reason}";
+            Message = $"Company {companyLabel}: {r.Reason}";
             IsError = true;
         }
         else
         {
             Message = r.CoordinatorsResolved == 0
-                ? $"Company {companyId} has no event-coordinator contacts, so nothing was sent. Add a coordinator (or set the coordinator flag) first."
-                : $"Company {companyId}: sent {r.Sent} welcome email(s) to {r.CoordinatorsResolved} coordinator(s)."
+                ? $"Company {companyLabel} has no event-coordinator contacts, so nothing was sent. Add a coordinator (or set the coordinator flag) first."
+                : $"Company {companyLabel}: sent {r.Sent} welcome email(s) to {r.CoordinatorsResolved} coordinator(s)."
                   + (r.Skipped > 0 ? $" {r.Skipped} already-welcomed (Reset first to force a resend)." : string.Empty);
             IsError = r.CoordinatorsResolved == 0;
         }
@@ -141,7 +144,9 @@ public class WelcomeModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var deleted = await _welcome.ResetForCompanyAsync(me.EventId, companyId, ct);
-        Message = $"Company {companyId}: cleared {deleted} welcome flag(s). A resend will now go out.";
+        // §1237 — name the company, not its CM id.
+        Message = $"Company {await CompanyLabelAsync(me.EventId, companyId, ct)}: "
+                  + $"cleared {deleted} welcome flag(s). A resend will now go out.";
         await LoadRowsAsync(me.EventId, ct);
         return Page();
     }
@@ -187,6 +192,21 @@ public class WelcomeModel : PageModel
         Message = $"Cleared {deleted} welcome flag(s) across all sponsor companies. Resends will now go out.";
         await LoadRowsAsync(me.EventId, ct);
         return Page();
+    }
+
+    /// <summary>
+    /// §1237 — one company rendered for a human: <c>"Name (36)"</c>, through the same local
+    /// resolve chain the grid uses. The "(name not synced — CM id 36)" fallback is returned as-is
+    /// because it already carries the id.
+    /// </summary>
+    private async Task<string> CompanyLabelAsync(int eventId, string companyId, CancellationToken ct)
+    {
+        var map = await Core.Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, new[] { companyId }, ct);
+        var name = map.TryGetValue(companyId, out var nm)
+            ? nm : Core.Integrations.SponsorCompanyName.UnresolvedName(companyId);
+        return Core.Integrations.SponsorCompanyName.IsUnresolved(name, companyId)
+            ? name : $"{name} ({companyId})";
     }
 
     private async Task LoadRowsAsync(int eventId, CancellationToken ct)

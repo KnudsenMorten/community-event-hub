@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Sponsors;
 using CommunityHub.Venue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,15 +25,18 @@ public class BoothModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly CommunityHubDbContext _db;
     private readonly VenueImageProvider _venue;
+    private readonly SponsorActingCompanyService _acting;
 
     public BoothModel(
         ICurrentParticipantAccessor participant,
         CommunityHubDbContext db,
-        VenueImageProvider venue)
+        VenueImageProvider venue,
+        SponsorActingCompanyService acting)
     {
         _participant = participant;
         _db = db;
         _venue = venue;
+        _acting = acting;
     }
 
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
@@ -61,10 +65,8 @@ public class BoothModel : PageModel
         }
 
         // Resolve the booth number from the sponsor's company SponsorInfo (booth label).
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
 
         if (!string.IsNullOrWhiteSpace(companyId))
         {

@@ -66,6 +66,16 @@ public class SponsorWebshopCompanyModel : PageModel
     public int DefaultCoordinatorUserId { get; private set; }
     public IReadOnlyList<CompanyManagerUser> Users { get; private set; } = Array.Empty<CompanyManagerUser>();
 
+    /// <summary>
+    /// §1237 — the name a human recognises for the selected company (public → legal), so the
+    /// header line never reads as a bare Company Manager id. Falls back to the honest
+    /// "(name not synced — CM id N)" label when Company Manager served neither.
+    /// </summary>
+    public string DisplayName =>
+        !string.IsNullOrWhiteSpace(PublicName) ? PublicName!.Trim()
+        : !string.IsNullOrWhiteSpace(CompanyName) ? CompanyName.Trim()
+        : SponsorCompanyName.UnresolvedName(SelectedCompanyId?.ToString() ?? "?");
+
     private CurrentParticipant? Guard()
     {
         var me = _participant.Current;

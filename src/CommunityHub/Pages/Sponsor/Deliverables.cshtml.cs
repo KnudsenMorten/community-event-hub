@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Sponsors;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -31,6 +32,7 @@ public class DeliverablesModel : PageModel
     private readonly CompanyManagerClient _cm;
     private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<DeliverablesModel> _logger;
+    private readonly SponsorActingCompanyService _acting;
 
     public DeliverablesModel(
         CommunityHubDbContext db,
@@ -39,7 +41,8 @@ public class DeliverablesModel : PageModel
         TimeProvider clock,
         CompanyManagerClient cm,
         CompanyManagerOptions cmOptions,
-        ILogger<DeliverablesModel> logger)
+        ILogger<DeliverablesModel> logger,
+        SponsorActingCompanyService acting)
     {
         _db = db;
         _participant = participant;
@@ -48,6 +51,7 @@ public class DeliverablesModel : PageModel
         _cm = cm;
         _cmOptions = cmOptions;
         _logger = logger;
+        _acting = acting;
     }
 
     /// <summary>Non-sponsor reached the page — render a friendly notice.</summary>
@@ -70,10 +74,8 @@ public class DeliverablesModel : PageModel
         FirstName = me.FirstName;
         if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
 
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
         if (string.IsNullOrEmpty(companyId)) { NoCompanyLink = true; return Page(); }
 
         var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);

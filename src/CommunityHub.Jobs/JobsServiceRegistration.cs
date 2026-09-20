@@ -342,6 +342,10 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Settings.FeatureSettingsService>();
         services.AddScoped<SessionizeImportService>();
         // Sessions are pulled from the same v2 view API and linked to speakers.
+        // §1240 — the delete authority must be registered in THIS host too: the scheduled import
+        // runs here, and it is the one that removes a CEH session whose Sessionize row is marked
+        // [NoImport]. Without it the importer falls back to warning and the duplicate stands.
+        services.AddScoped<CommunityHub.Core.Organizer.SessionDeletionService>();
         services.AddScoped<SessionImportService>();
         // Pluggable SESSION source (default Sessionize; Zoho Backstage when enabled).
         services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSource,
@@ -368,6 +372,8 @@ public static class JobsServiceRegistration
         services.AddHttpClient<CompanyManagerClient>()
             .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
             .AddCredentialFailureAlert("Company Manager");
+        // §1235 — the person↔sponsor-company links (one contact may serve several companies).
+        services.AddScoped<SponsorCompanyMembershipService>();
         services.AddScoped<SponsorContactSyncService>();
         // "Alert only on 2 consecutive failures" gate for background jobs.
         services.AddScoped<CommunityHub.Core.Diagnostics.JobFailureTracker>();

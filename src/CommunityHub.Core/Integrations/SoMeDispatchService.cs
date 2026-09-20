@@ -553,12 +553,20 @@ public sealed class SoMeDispatchService
             var company = await _db.SponsorInfos.AsNoTracking()
                 .Where(s => s.EventId == post.EventId
                             && s.SponsorCompanyId == post.SponsorCompanyId)
-                .Select(s => new { s.Status })
+                // §1237 — carry the NAME, so the skip reason a human reads names the sponsor.
+                .Select(s => new { s.Status, s.CompanyName })
                 .FirstOrDefaultAsync(ct);
 
+            // ⚠️ "no longer exists" is the one case with no name to show: the row is gone, so the id
+            // is all that is left and printing it is honest rather than lazy.
             if (company is null) return $"sponsor company '{post.SponsorCompanyId}' no longer exists";
             if (company.Status != SponsorStatus.Active)
-                return $"sponsor company '{post.SponsorCompanyId}' is {company.Status} (withdrawn)";
+            {
+                var who = string.IsNullOrWhiteSpace(company.CompanyName)
+                    ? SponsorCompanyName.UnresolvedName(post.SponsorCompanyId!)
+                    : company.CompanyName!;
+                return $"sponsor company '{who}' is {company.Status} (withdrawn)";
+            }
         }
 
         return null;

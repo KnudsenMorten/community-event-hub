@@ -44,7 +44,11 @@ public sealed class SponsorContactSyncService
         CompanyManagerOptions options,
         TimeProvider clock,
         ILogger<SponsorContactSyncService> log,
-        Erp.EconomicContactAdminService? erpContacts = null)
+        Erp.EconomicContactAdminService? erpContacts = null,
+        // §1235 — OPTIONAL so every existing construction site (and test) still compiles; when it is
+        // absent the service builds its own over the same DbContext, so the links are never silently
+        // skipped. A missing link is not a cosmetic loss: it is the multi-company support itself.
+        SponsorCompanyMembershipService? membership = null)
     {
         _db = db;
         _cm = cm;
@@ -52,7 +56,10 @@ public sealed class SponsorContactSyncService
         _clock = clock;
         _log = log;
         _erpContacts = erpContacts;
+        _membership = membership ?? new SponsorCompanyMembershipService(db, clock);
     }
+
+    private readonly SponsorCompanyMembershipService _membership;
 
     /// <summary>
     /// Sync one company's users into Participants for the given edition.
@@ -116,16 +123,34 @@ public sealed class SponsorContactSyncService
             if (email.Length == 0) continue;
             seen.Add(c.ContactNumber);
 
-            var row = await _db.Participants
-                .FirstOrDefaultAsync(p => p.EventId == eventId && p.ErpContactNumber == c.ContactNumber, ct);
+            // 🔴 §1235 — MATCH THE CONTACT NUMBER **WITHIN THIS COMPANY'S ACCOUNT**.
+            //
+            // e-conomic contact numbers are per-CUSTOMER sequences, so two accounts both have a
+            // contact 6. The old event-wide `p.ErpContactNumber == c.ContactNumber` therefore
+            // matched the wrong person the moment two accounts were both synced — and the operator's
+            // case makes that certain: *"in my erp they will exist with 2 contacts under each
+            // account. contacts are the same"*.
+            var linkedId = await _membership.ParticipantIdByErpContactAsync(
+                eventId, companyIdStr, c.ContactNumber, ct);
 
-            // Adoption: an existing row that predates this column, found once by e-mail.
+            var row = linkedId is int pid
+                ? await _db.Participants.FirstOrDefaultAsync(p => p.Id == pid, ct)
+                : null;
+
+            // Legacy adoption: a row keyed by the number before links existed, but ONLY when it is
+            // this company's own contact — never one belonging to another division.
+            row ??= await _db.Participants.FirstOrDefaultAsync(
+                p => p.EventId == eventId && p.ErpContactNumber == c.ContactNumber
+                     && p.SponsorCompanyId == companyIdStr, ct);
+
+            // E-mail is the person's identity across companies: the same human under a second
+            // account is the SAME row, gaining a second link below.
             row ??= await _db.Participants
                 .FirstOrDefaultAsync(p => p.EventId == eventId && p.Email == email, ct);
 
             if (row is null)
             {
-                _db.Participants.Add(new Participant
+                var fresh = new Participant
                 {
                     EventId = eventId,
                     Email = email,
@@ -138,7 +163,14 @@ public sealed class SponsorContactSyncService
                     IsActive = true,
                     LifecycleState = ParticipantLifecycleState.Active,
                     CreatedAt = now,
-                });
+                };
+                _db.Participants.Add(fresh);
+                // Save so the link has an id to point at; this pass is per company and small.
+                await _db.SaveChangesAsync(ct);
+                await _membership.LinkAsync(
+                    eventId, fresh.Id, companyIdStr,
+                    isSigner: c.IsSigner, isEventCoordinator: c.IsEventCoordinator,
+                    erpContactNumber: c.ContactNumber, isPrimary: true, ct: ct);
                 continue;
             }
 
@@ -146,12 +178,33 @@ public sealed class SponsorContactSyncService
             if (row.Role != ParticipantRole.Sponsor) continue;
 
             // 🔑 THE RENAME, IN PLACE. Same CEH id, new address — tasks, links and history survive.
-            row.ErpContactNumber = c.ContactNumber;
             if (!string.Equals(row.Email, email, StringComparison.Ordinal)) row.Email = email;
             if (!string.IsNullOrWhiteSpace(c.Name)) row.FullName = c.Name.Trim();
-            row.SponsorCompanyId = companyIdStr;
-            row.IsSigner = c.IsSigner;
-            row.IsEventCoordinator = c.IsEventCoordinator;
+
+            // 🔴 §1235 — THE COMPANY IS NO LONGER STOLEN. A person already serving another division
+            // keeps their primary company and simply GAINS a link; only a person with no company yet
+            // adopts this one as primary. This is what ends the 15-minute flap between divisions.
+            var isPrimaryCompany = string.IsNullOrWhiteSpace(row.SponsorCompanyId)
+                                   || row.SponsorCompanyId == companyIdStr;
+            if (string.IsNullOrWhiteSpace(row.SponsorCompanyId))
+            {
+                row.SponsorCompanyId = companyIdStr;
+                row.ErpContactNumber = c.ContactNumber;
+            }
+
+            // The person-level flags describe the PRIMARY company, so they move only for it; every
+            // company's own flags live on its link.
+            if (isPrimaryCompany)
+            {
+                row.ErpContactNumber = c.ContactNumber;
+                row.IsSigner = c.IsSigner;
+                row.IsEventCoordinator = c.IsEventCoordinator;
+            }
+
+            await _membership.LinkAsync(
+                eventId, row.Id, companyIdStr,
+                isSigner: c.IsSigner, isEventCoordinator: c.IsEventCoordinator,
+                erpContactNumber: c.ContactNumber, isPrimary: isPrimaryCompany, ct: ct);
         }
 
         // §502 — gone from e-conomic ⇒ switched off here. Only rows we have already keyed by id,
@@ -166,6 +219,33 @@ public sealed class SponsorContactSyncService
 
         foreach (var p in stale.Where(p => !seen.Contains(p.ErpContactNumber!.Value)))
         {
+            // 🔴 §1235 — GONE FROM **THIS** ACCOUNT IS NOT GONE. Drop the link to this company first;
+            // switch the PERSON off only when no company is left. Deactivating a shared contact
+            // because one division's roster dropped them would take the global coordinator away from
+            // every other division — the mirror image of the flap this feature removes.
+            await _membership.UnlinkAsync(eventId, p.Id, companyIdStr, ct);
+            var remaining = await _membership.ForParticipantAsync(eventId, p.Id, ct);
+
+            if (remaining.Count > 0)
+            {
+                // Still serving someone else: hand the primary company to a surviving link so the
+                // portal and every existing reader keep pointing somewhere real.
+                if (p.SponsorCompanyId == companyIdStr)
+                {
+                    var next = remaining[0];
+                    next.IsPrimary = true;
+                    p.SponsorCompanyId = next.SponsorCompanyId;
+                    p.ErpContactNumber = next.ErpContactNumber;
+                    p.IsSigner = next.IsSigner;
+                    p.IsEventCoordinator = next.IsEventCoordinator;
+                }
+                _log.LogInformation(
+                    "SponsorContactSync: {Email} removed from company {Co} — e-conomic contact {No} "
+                    + "no longer exists there; still linked to {Count} other company/companies.",
+                    p.Email, companyIdStr, p.ErpContactNumber, remaining.Count);
+                continue;
+            }
+
             p.IsActive = false;
             _log.LogInformation(
                 "SponsorContactSync: {Email} deactivated — e-conomic contact {No} no longer exists.",
@@ -283,7 +363,7 @@ public sealed class SponsorContactSyncService
 
             if (existing is null)
             {
-                _db.Participants.Add(new Participant
+                var fresh = new Participant
                 {
                     EventId = eventId,
                     Email = email,
@@ -304,7 +384,14 @@ public sealed class SponsorContactSyncService
                     // active rule) and was hidden by the active-only filter.
                     LifecycleState = ParticipantLifecycleState.Active,
                     CreatedAt = now,
-                });
+                };
+                _db.Participants.Add(fresh);
+                // §1235 — save so the link has an id to point at, then record this as their primary
+                // (and so far only) company.
+                await _db.SaveChangesAsync(ct);
+                await _membership.LinkAsync(
+                    eventId, fresh.Id, companyIdStr,
+                    isSigner: isSigner, isEventCoordinator: isCoordinator, isPrimary: true, ct: ct);
                 created++;
                 continue;
             }
@@ -328,9 +415,17 @@ public sealed class SponsorContactSyncService
                 existing.Email = email;
                 changed = true;
             }
-            if (existing.SponsorCompanyId != companyIdStr)
+            // 🔴 §1235 — A SECOND COMPANY ADDS A LINK; IT DOES NOT MOVE THE PERSON.
+            //
+            // This line used to read `existing.SponsorCompanyId = companyIdStr`, with the lookup above
+            // being company-blind. With the roster pulled every ~15 minutes per company, a contact
+            // listed under two companies therefore ping-ponged between them — last-synced-company
+            // wins — and the division that lost the race silently had no coordinator for its tasks
+            // and mail. Company Manager supports the same person under several companies, so the
+            // hub has to as well.
+            if (string.IsNullOrWhiteSpace(existing.SponsorCompanyId))
             {
-                existing.SponsorCompanyId = companyIdStr;
+                existing.SponsorCompanyId = companyIdStr;   // first company ⇒ primary
                 changed = true;
             }
             // Unique-identifier contact link (REQUIREMENTS §7c): write/refresh the
@@ -366,20 +461,43 @@ public sealed class SponsorContactSyncService
             // would wipe an organizer's manually-added coordinator. A contact that
             // is the CM default signer/coordinator is flagged here; everyone else's
             // flags are left exactly as the organizer set them (REQUIREMENTS §7c).
-            if (isSigner && !existing.IsSigner)
+            // §1235 — the person-level flags describe the PRIMARY company only. For a contact serving
+            // several companies, "is a signer" is answered per company by the link below: ARROW's case
+            // exactly — *"they share event coordinator, but different signers"*.
+            var isPrimaryCompany = existing.SponsorCompanyId == companyIdStr;
+            if (isPrimaryCompany)
             {
-                existing.IsSigner = true;
-                changed = true;
+                if (isSigner && !existing.IsSigner)
+                {
+                    existing.IsSigner = true;
+                    changed = true;
+                }
+                if (isCoordinator && !existing.IsEventCoordinator)
+                {
+                    existing.IsEventCoordinator = true;
+                    changed = true;
+                }
             }
-            if (isCoordinator && !existing.IsEventCoordinator)
-            {
-                existing.IsEventCoordinator = true;
-                changed = true;
-            }
+
+            // The link for THIS company, whether or not it is the primary one. Set-only on the flags,
+            // for the same reason as above: CM knows only its two default pointers.
+            await _membership.LinkAsync(
+                eventId, existing.Id, companyIdStr,
+                isSigner: isSigner ? true : null,
+                isEventCoordinator: isCoordinator ? true : null,
+                isPrimary: isPrimaryCompany ? true : null,
+                ct: ct);
+
             if (changed) updated++;
         }
 
-        if (created > 0 || updated > 0)
+        // 🔴 §1235 — SAVE ON ANY TRACKED CHANGE, not only on a created/updated PERSON.
+        //
+        // A second company's sync often changes nothing about the human (same name, same e-mail, and
+        // the company is no longer stolen) — its only effect is the new LINK. Under the old
+        // `created > 0 || updated > 0` guard that link was built, tracked and then silently dropped
+        // when the scope ended, so multi-company support existed everywhere except in the database.
+        if (created > 0 || updated > 0 || _db.ChangeTracker.HasChanges())
         {
             await _db.SaveChangesAsync(ct);
         }

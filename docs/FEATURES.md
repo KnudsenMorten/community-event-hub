@@ -940,6 +940,31 @@ follow-up automatically.
   sessions are refreshed in place, nothing is duplicated and nothing is deleted.
   Sessions stay **inside the hub** (they are not pushed to speakers' public profiles
   or to Backstage). *(✅ 2026-06-15)*
+- **A session only enters the hub once its speaker has confirmed.** The
+  call-for-speakers tool tracks whether a speaker has actually confirmed they will
+  deliver an accepted session. Until they do, the hub **leaves the session alone** — it
+  is not imported, so it never appears on your agenda, in the speaker portal, in the
+  graphics queue or on the public event platform looking settled. There is nothing to
+  switch back: the moment they confirm, the next import brings the session in on its
+  own. A session that is **already in the hub** and then goes un-confirmed is **kept and
+  reported**, never deleted — it may already be published and already collecting
+  attendee questions, so that call stays yours. *(✅ 2026-09-20)*
+- **Planning slots in the call-for-speakers tool stay out of the hub.** Some slots are
+  blocked out in the call-for-speakers planner purely to hold the time — the real
+  session is created in the hub itself (a sponsor session, for example). Put
+  `[NoImport]` in the title there and the hub **never imports that row**, so you can
+  plan the grid where the grid lives without ending up with two sessions in one slot.
+  If such a row was already imported, the next import **removes the duplicate** and
+  tells you — unless it has collected attendee questions, ratings or bookings, which an
+  import will never destroy; then you're told and you decide. *(✅ 2026-09-20)*
+- **A session that belongs to every track.** Tag a session as **Common for all tracks**
+  — a welcome keynote, a closing keynote — and the hub keeps it out of the track
+  filters rather than filing it under one. You can set it per session in the hub, or
+  simply put those sessions on a **`Common`** track in the call-for-speakers tool and
+  the import sets the flag for you. The session is then **published with no track at
+  all**, which is exactly how an event platform shows a session that belongs to
+  everyone. `Common` is a marker, not a track — it is **never created as a track** on
+  your public event platform. *(✅ 2026-09-20)*
 - **Add your own sessions in the hub.** Not everything comes from Sessionize — add a
   **sponsor session** (or any other session) directly in the hub, alongside the
   imported ones. Hub-added sessions are clearly marked and are **safe across
@@ -5753,3 +5778,76 @@ exactly what the public repository contains, and every rough edge on the way was
   some menu links, a page title, the logos and the content folder name — with what a community changes.
 - **Only what a community can use.** The original event's own backup runbook, live-environment test
   scripts and audit screenshots are no longer part of the public copy.
+
+## 224. The Get Started reminder speaks to the person it is sent to *(✅ 2026-09-15)*
+
+The regular "Get Started still unfinished" reminder opened with wording meant for sponsor companies —
+"this is the whole team's checklist, anyone can finish an open step" — and that sentence reached
+speakers, volunteers, attendees, media, partners and organizers too, whose Get Started is personal. It now
+reads "You have a few steps left to complete in Get Started for …" for everyone except sponsor contacts.
+Sponsors read "Your Get Started checklist for … still has open tasks. It's shared across your company, so a
+colleague can pick up any step — each one only needs completing once," because their steps really are
+shared across the company.
+
+## 225. Sponsor upload alerts name the sponsor *(✅ 2026-09-15)*
+
+The alert organizers receive when a sponsor uploads booth material now shows the sponsor's name instead of
+an internal company number, matching the alerts for logos and other uploads. Newly uploaded booth files are
+named after the sponsor too, so they are easy to recognise in the shared document library.
+
+## 226. No "add by hand" line for booth brochures *(✅ 2026-09-15)*
+
+The event-platform hand-entry mail no longer lists booth brochures and other collateral. Their link points
+into the organizers' own document library, which the event platform cannot use, so the line asked for
+something that could not be done. Booth videos are still listed, and organizers are still alerted when a
+sponsor uploads collateral.
+
+## 227. Editing a session keeps its type *(✅ 2026-09-15)*
+
+The session edit form now shows each session's current type. Before, it always showed the first type in the
+list (Keynote), so saving a session to change its speakers, room or title could quietly turn a Master Class
+into a Keynote — and the event platform was then asked to change it too.
+
+## 228. The "disappeared from Sessionize" alert stops once you have acted *(✅ 2026-09-15)*
+
+A speaker removed from Sessionize is no longer reported again and again after an organizer has deactivated
+them in the hub — deactivating is exactly the decision the alert asks for. The alert also names the person's
+participant number, the one shown on the Participants page.
+
+## 234. A sponsor added in the finance system appears in the webshop *(✅ 2026-09-17)*
+
+When a sponsor exists in the finance system but has no company in the webshop yet, the hub creates it —
+or links an existing company of the same name that was never connected — and then adds that company's
+contacts. Previously the run simply reported the mismatch and did nothing.
+
+## 233. Sponsors are named, not numbered *(✅ 2026-09-17)*
+
+Organizer pages, alerts and draft social posts now name a sponsor company instead of showing its internal
+number. The hub also never sends that number to the event platform as a company name: if the name is not
+known yet it says so plainly rather than publishing a number on the public event site.
+
+## 232. Switch between the sponsor companies you look after *(✅ 2026-09-16)*
+
+A contact who looks after more than one sponsor company picks which one they are working on from a chooser
+at the top of the sponsor pages. Tasks, leads, booth details and uploads all follow that choice, and the
+menu changes with it. Anyone who looks after a single company sees no chooser and no change.
+
+## 231. One person can look after several sponsor companies *(✅ 2026-09-16)*
+
+A sponsor group whose divisions are separate companies can name the same person — a group marketing lead or
+event coordinator — on each of them. They keep one login, and each company records what that person is for
+it, so someone can coordinate every division while signing for only one. Each company's mail reaches its own
+coordinators, including a shared one. *(Their task list currently shows their main company; a company
+switcher is coming.)*
+
+## 230. Tagged people always publish as real mentions *(✅ 2026-09-16)*
+
+When a post tags speakers or organizers, the tag now publishes as a real, clickable mention whatever the
+person's social profile id contains. Previously a profile id with certain characters could make the whole
+post publish as raw text, showing the tag markup to readers instead of the names.
+
+## 229. Who receives the speaker and session to-do mails is one setting *(✅ 2026-09-15)*
+
+All seven organizer mails about speakers and sessions awaiting a decision go to one shared list: the
+organizer inbox first, then any extra people you name. Adding or removing someone changes every one of those
+mails at once, and nobody is quietly left off.

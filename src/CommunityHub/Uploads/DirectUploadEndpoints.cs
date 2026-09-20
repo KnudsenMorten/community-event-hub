@@ -61,6 +61,8 @@ public static class DirectUploadEndpoints
         app.MapPost("/sponsor/uploads/collateral/begin", async (
                 BeginRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHubDbContext db,
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
@@ -73,10 +75,11 @@ public static class DirectUploadEndpoints
             if (me is null) return Results.Unauthorized();
 
             // The company comes from the SIGNED-IN row, never from the request body.
-            var companyId = await db.Participants
-                .Where(p => p.Id == me.ParticipantId && p.Role == ParticipantRole.Sponsor)
-                .Select(p => p.SponsorCompanyId)
-                .FirstOrDefaultAsync(ct);
+            // §1236 — the company they are ACTING for (their switcher choice, re-validated against
+            // their own links), not merely their primary one. 🔒 The role gate that used to live
+            // inside this query is now explicit, so it cannot be lost with the query.
+            if (me.Role != ParticipantRole.Sponsor) return Results.Forbid();
+            var companyId = await acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             if (req.SizeBytes <= 0 || req.SizeBytes > MaxBytes)
@@ -130,6 +133,8 @@ public static class DirectUploadEndpoints
         app.MapPost("/sponsor/uploads/collateral/complete", async (
                 CompleteRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHubDbContext db,
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
@@ -140,10 +145,11 @@ public static class DirectUploadEndpoints
             var me = participant.Current;
             if (me is null) return Results.Unauthorized();
 
-            var companyId = await db.Participants
-                .Where(p => p.Id == me.ParticipantId && p.Role == ParticipantRole.Sponsor)
-                .Select(p => p.SponsorCompanyId)
-                .FirstOrDefaultAsync(ct);
+            // §1236 — the company they are ACTING for (their switcher choice, re-validated against
+            // their own links), not merely their primary one. 🔒 The role gate that used to live
+            // inside this query is now explicit, so it cannot be lost with the query.
+            if (me.Role != ParticipantRole.Sponsor) return Results.Forbid();
+            var companyId = await acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
@@ -212,6 +218,8 @@ public static class DirectUploadEndpoints
                 string kind,
                 BeginRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHubDbContext db,
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
@@ -223,10 +231,11 @@ public static class DirectUploadEndpoints
             var me = participant.Current;
             if (me is null) return Results.Unauthorized();
 
-            var companyId = await db.Participants
-                .Where(p => p.Id == me.ParticipantId && p.Role == ParticipantRole.Sponsor)
-                .Select(p => p.SponsorCompanyId)
-                .FirstOrDefaultAsync(ct);
+            // §1236 — the company they are ACTING for (their switcher choice, re-validated against
+            // their own links), not merely their primary one. 🔒 The role gate that used to live
+            // inside this query is now explicit, so it cannot be lost with the query.
+            if (me.Role != ParticipantRole.Sponsor) return Results.Forbid();
+            var companyId = await acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
@@ -272,6 +281,8 @@ public static class DirectUploadEndpoints
                 string kind,
                 CompleteRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHubDbContext db,
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
@@ -287,10 +298,11 @@ public static class DirectUploadEndpoints
             var me = participant.Current;
             if (me is null) return Results.Unauthorized();
 
-            var companyId = await db.Participants
-                .Where(p => p.Id == me.ParticipantId && p.Role == ParticipantRole.Sponsor)
-                .Select(p => p.SponsorCompanyId)
-                .FirstOrDefaultAsync(ct);
+            // §1236 — the company they are ACTING for (their switcher choice, re-validated against
+            // their own links), not merely their primary one. 🔒 The role gate that used to live
+            // inside this query is now explicit, so it cannot be lost with the query.
+            if (me.Role != ParticipantRole.Sponsor) return Results.Forbid();
+            var companyId = await acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
@@ -342,6 +354,8 @@ public static class DirectUploadEndpoints
         app.MapPost("/speaker/decks/begin", async (
                 DeckBeginRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHub.Core.Integrations.Graphics.SpeakerPresentationService decks,
                 Microsoft.Extensions.Options.IOptions<CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions> spOpts,
                 SharePointUploadClient sp,
@@ -386,6 +400,8 @@ public static class DirectUploadEndpoints
         app.MapPost("/speaker/decks/complete", async (
                 DeckCompleteRequest req,
                 ICurrentParticipantAccessor participant,
+                // §1236 — resolves which sponsor company this contact is acting for.
+                CommunityHub.Sponsors.SponsorActingCompanyService acting,
                 CommunityHub.Core.Integrations.Graphics.SpeakerPresentationService decks,
                 Microsoft.Extensions.Options.IOptions<CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions> spOpts,
                 SharePointUploadClient sp,

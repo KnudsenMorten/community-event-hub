@@ -113,7 +113,7 @@ public sealed class GetStartedDigestBuilder
 
         var ev = await _db.Events
             .Where(e => e.Id == eventId)
-            .Select(e => new { e.CommunityName, e.DisplayName })
+            .Select(e => new { e.CommunityName, e.DisplayName, e.Code })
             .FirstOrDefaultAsync(ct);
         if (ev is null) return System.Array.Empty<ReminderMessage>();
 
@@ -239,6 +239,7 @@ public sealed class GetStartedDigestBuilder
             tokens["eventDisplayName"] = ev.DisplayName ?? string.Empty;
             tokens["openStepCount"] = openKeys.Count.ToString();
             tokens["getStartedPath"] = route;
+            tokens["introHtml"] = IntroFor(p.Role, ev.DisplayName, ev.Code);
 
             // 🔴 §1081 stage A — NAME THE FIELDS, NOT JUST THE STEP. A sponsor chased for "Company
             // details" cannot tell which of three fields is blank, and §854 already settled that
@@ -447,6 +448,33 @@ public sealed class GetStartedDigestBuilder
             credits["logos"] = (lastLogo.UploadedByEmail, lastLogo.UploadedAt);
 
         return new SponsorCompanyDigestFacts(content.MissingFieldKeys, credits);
+    }
+
+    /// <summary>
+    /// 🔴 §1227 — the digest's opening sentence, BY ROLE.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-15: <i>"the get started digest is wrong, as it is sending this to
+    /// individuals … it took the sponsor digest and applied to all roles, big mistake"</i>.</para>
+    ///
+    /// <para>§1081 (2026-08-13) rewrote the ONE shared template's opening for sponsors — "this is the
+    /// whole team's checklist — anyone can finish an open step, and it closes for everybody" — which
+    /// is true only for the company-scoped sponsor wizard. Every other role's Get Started is personal,
+    /// so speakers, volunteers, attendees, media, partners and organizers were told a colleague could
+    /// finish their steps. The sentence now follows the wizard's scope.</para>
+    /// </remarks>
+    internal static string IntroFor(ParticipantRole role, string? eventDisplayName, string? eventCode)
+    {
+        var eventName = "<strong>" + WebUtility.HtmlEncode(eventDisplayName ?? string.Empty)
+            + (string.IsNullOrWhiteSpace(eventCode) ? string.Empty : $" ({WebUtility.HtmlEncode(eventCode)})")
+            + "</strong>";
+
+        // §1227b — the sponsor wording is the operator's own (2026-09-15).
+        return role == ParticipantRole.Sponsor
+            ? $"Your <strong>Get Started</strong> checklist for {eventName} still has open tasks. It's "
+              + "shared across your company, so a colleague can pick up any step — each one only needs "
+              + "completing once."
+            : $"You have a few steps left to complete in <strong>Get Started</strong> for {eventName}.";
     }
 
     /// <summary>The step's GUI title from SharedResource.resx (fallback: the key itself).</summary>

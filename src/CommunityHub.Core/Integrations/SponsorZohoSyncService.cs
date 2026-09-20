@@ -348,7 +348,8 @@ public sealed class SponsorZohoSyncService
                 //
                 // 🔒 Costs no extra call: `z` was already read above, outside the gate. When the
                 // gate IS open the existing push carries the name, so this runs only when it is shut.
-                var nameNeedsPush = ShouldPushName(z?.CompanyName, companyName);
+                // §1237 — companyId passed, so a bare id / "(name not synced …)" is never written.
+                var nameNeedsPush = ShouldPushName(z?.CompanyName, companyName, companyId);
                 if (nameNeedsPush && !reportChanged)
                 {
                     var nameOutcome = await _zoho.UpdateSponsorAsync(
@@ -389,7 +390,7 @@ public sealed class SponsorZohoSyncService
                                  .Where(id => !string.Equals(id, info.ZohoSponsorId, StringComparison.Ordinal)))
                     {
                         var extraNow = await _zoho.GetSponsorByIdAsync(token!, extraId, ct);
-                        if (!ShouldPushName(extraNow?.CompanyName, companyName)) continue;
+                        if (!ShouldPushName(extraNow?.CompanyName, companyName, companyId)) continue;
 
                         var xNameOutcome = await _zoho.UpdateSponsorAsync(
                             token!, extraId,
@@ -456,7 +457,7 @@ public sealed class SponsorZohoSyncService
                     // on its own, on both records, at every run.
                     // 🔒 §1153 — A NAME WE COULD NOT READ IS NOT A NAME THAT DIFFERS.
                     // See the exhibitor block below for why this guard is not optional.
-                    var wantsName = ShouldPushName(z?.CompanyName, companyName);
+                    var wantsName = ShouldPushName(z?.CompanyName, companyName, companyId);
 
                     // 🔴 §1175 — SAY IT ONCE WHEN A WRITE KEEPS NOT LANDING.
                     //
@@ -564,7 +565,7 @@ public sealed class SponsorZohoSyncService
                         // §1220 — unread is unknown, not blank; see the primary record above.
                         if (extra is null) { transientSkips++; continue; }
 
-                        var xName = ShouldPushName(extra?.CompanyName, companyName);
+                        var xName = ShouldPushName(extra?.CompanyName, companyName, companyId);
                         var xDescription = NeedsManualEntry(extra?.Description, info.CompanyDescription);
                         var xWebsite = NeedsManualEntry(extra?.WebsiteUrl, info.WebsiteUrl);
                         if (!xName && !xDescription && !xWebsite) continue;
@@ -672,7 +673,7 @@ public sealed class SponsorZohoSyncService
                     if (!reportChanged)
                     {
                         var exNow = await _zoho.GetExhibitorByIdAsync(token!, info.ZohoExhibitorId!, ct);
-                        if (ShouldPushName(exNow?.CompanyName, companyName))
+                        if (ShouldPushName(exNow?.CompanyName, companyName, companyId))
                         {
                             var exNameOutcome = await _zoho.UpdateExhibitorAsync(
                                 token!, info.ZohoExhibitorId!,
@@ -784,7 +785,7 @@ public sealed class SponsorZohoSyncService
                         // genuinely empty name in Zoho is not corrected; Zoho requires one to create
                         // a record, so that case is close to unreachable, and it is far cheaper than
                         // a PUT per company per run.
-                        var wantsName = ShouldPushName(z?.CompanyName, companyName);
+                        var wantsName = ShouldPushName(z?.CompanyName, companyName, companyId);
 
                         // §1175 — the same announcement gate as the sponsor record, and this is the
                         // record it was really written for: the social pages are the fields §791.3
@@ -890,16 +891,17 @@ public sealed class SponsorZohoSyncService
             // changed ("if chg happens"). ⚠️ They are listed IN FULL rather than "1 new video":
             // Backstage wants the whole set on the exhibitor's page, and a delta would leave him
             // reconstructing which ones are already there.
+            //
+            // 🔴 §1230 — COLLATERAL IS NO LONGER LISTED. Operator 2026-09-15, on "Exhibitor · Fellowmind ·
+            // Booth collateral (…pdf)" with an internal SharePoint link: *"this alert mail is wrong. it
+            // will never link to a internal sharepoint url, so the comparison should be turned off, as
+            // there is no api for this field in zoho"*. The link is an internal document-library URL
+            // that Backstage can never use, so the line asked for work that cannot be done. Videos stay:
+            // they are public URLs he pastes into Backstage.
             if (reportChanged && materials.Count > 0)
             {
                 foreach (var m in materials.Where(m => m.Kind == BoothMaterialKind.Video))
                     manualLines.Add(ManualField("Exhibitor", companyName, "Booth video", m.Url));
-
-                foreach (var m in materials.Where(m => m.Kind == BoothMaterialKind.Collateral))
-                    manualLines.Add(ManualField(
-                        "Exhibitor", companyName,
-                        $"Booth collateral{(string.IsNullOrWhiteSpace(m.FileName) ? "" : $" ({m.FileName})")}",
-                        m.Url));
             }
 
             // §792 — the CONTACT details are an API update too, so they become mail like the rest.
@@ -1184,9 +1186,11 @@ public sealed class SponsorZohoSyncService
         // them: a sponsor adding a video changes nothing on SponsorInfo, so the stamp would still
         // match and the mail would never mention it. ORDERED so the hash is stable — a set that
         // hashes differently on each read would mail on every pass.
-        if (materials is { Count: > 0 })
+        // 🔴 §1230 — COLLATERAL IS OUT OF THE HASH TOO. It is no longer reported (see the manual-lines
+        // block), so a new collateral upload must not re-open the mail and send the other lines again.
+        if (materials?.Where(m => m.Kind != BoothMaterialKind.Collateral).ToList() is { Count: > 0 } reportable)
         {
-            payload += "\n" + string.Join("\n", materials
+            payload += "\n" + string.Join("\n", reportable
                 .Select(m => $"{m.Kind}|{m.Url}|{m.FileName}")
                 .OrderBy(x => x, StringComparer.Ordinal));
         }
@@ -1422,8 +1426,17 @@ public sealed class SponsorZohoSyncService
             // Operator 2026-07-23: a successful Zoho write (member DELETE) must notify the
             // ops mailbox so the exhibitor page can be re-published/pruned in Backstage.
             if (ok && _zohoChanges is not null)
+                // §1237 — name the exhibitor. `info` is already loaded above, so this costs nothing;
+                // the id stays as a secondary because this line asks a human to find the record in
+                // Backstage, where the id is what identifies it.
                 await _zohoChanges.NotifyAsync("Sponsors / exhibitors",
-                    new[] { $"Deleted booth member {email} from exhibitor (company {companyId})" }, ct);
+                    new[]
+                    {
+                        $"Deleted booth member {email} from exhibitor "
+                        + $"{(string.IsNullOrWhiteSpace(info.CompanyName)
+                                ? SponsorCompanyName.UnresolvedName(companyId)
+                                : info.CompanyName)} (company {companyId})",
+                    }, ct);
 
             return ok ? BoothMemberDeleteResult.Deleted : BoothMemberDeleteResult.Error;
         }
@@ -1483,9 +1496,24 @@ public sealed class SponsorZohoSyncService
         // §792.5 — WHICH companies contributed those lines, so only they are stamped as reported.
         var reportedCompanyIds = new List<string>();
 
+        // 🔴 §1237 — THE NAME COMES FROM WHAT CEH ALREADY HOLDS, AND THE ID IS NOT A FALLBACK.
+        //
+        // `name` started as `info.SponsorCompanyId` and was only replaced if Company Manager was
+        // ENABLED and answered. That string is not merely printed: it is passed to SyncAsync as the
+        // company NAME and written to Zoho. So with CM off or unreachable, CEH pushed "36" into
+        // Backstage as a sponsor's name and mailed *"Pushed to sponsor '36' — Zoho GUI fields:
+        // Company name"* — while `SponsorInfo.CompanyName` held "Surveil" the whole time.
+        var localNames = await SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, infos.Select(i => i.SponsorCompanyId), ct);
+
         foreach (var info in infos)
         {
-            string name = info.SponsorCompanyId;
+            // Local first (public → legal → captured), CM only as an enrichment below. When nothing
+            // is known this is the honest "(name not synced …)" label, which §1237's guard refuses to
+            // push — an unknown name is UNKNOWN, never a number.
+            string name = localNames.TryGetValue(info.SponsorCompanyId, out var localName)
+                ? localName
+                : SponsorCompanyName.UnresolvedName(info.SponsorCompanyId);
             CompanyManagerCompany? company = null;
             if (_cmOptions.Enabled && int.TryParse(info.SponsorCompanyId, out var cid))
             {
@@ -1931,7 +1959,18 @@ public sealed class SponsorZohoSyncService
     /// <para>Pure and public so the rule and its tests are the same rule.</para>
     /// </remarks>
     public static bool ShouldPushName(string? inZoho, string? ours) =>
+        ShouldPushName(inZoho, ours, companyId: null);
+
+    /// <summary>
+    /// 🔴 §1237 — …and NEVER push a value that is not a name. Passing <paramref name="companyId"/>
+    /// lets the guard refuse the bare id and the "(name not synced …)" label, which the callers used
+    /// as their fallback before enriching from Company Manager. With CM off or unreachable that
+    /// fallback was written to Zoho as the sponsor's NAME, and the public agenda then showed a number.
+    /// A missing name is UNKNOWN — the same rule as the blank guard above, one value further out.
+    /// </summary>
+    public static bool ShouldPushName(string? inZoho, string? ours, string? companyId) =>
         !string.IsNullOrWhiteSpace(ours)
+        && !SponsorCompanyName.IsUnresolved(ours, companyId)
         && !string.IsNullOrWhiteSpace(inZoho)
         && !NameEq(inZoho!, ours!);
 }

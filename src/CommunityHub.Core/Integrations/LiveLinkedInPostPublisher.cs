@@ -517,7 +517,23 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         foreach (Match m in MentionSpan.Matches(text))
         {
             sb.Append(EscapeCommentary(text[last..m.Index]));
-            sb.Append(m.Value);          // verbatim — this is the mention
+            // 🔴 §1234 — THE MENTION'S OWN CONTENT IS ESCAPED; ONLY ITS DELIMITERS ARE NOT.
+            //
+            // Passing the whole span verbatim shipped any reserved character INSIDE the display
+            // name or the URN unescaped — and `_` is reserved. LinkedIn then fails to parse the
+            // mention and renders the ENTIRE commentary literally: every mention shows as raw
+            // markup AND every escape shows its backslash.
+            //
+            // ⚠️ Measured in PROD 2026-09-16, post 46115: the session's speakers included the URNs
+            // `7ruvU3A_Oc` and `_wR2V3KVW-`, so the whole post published as markup — while the
+            // previous days' posts, whose speakers' URNs held no `_`, rendered perfectly. That is
+            // what makes this bug look intermittent: it fires on WHO is mentioned, not on the text.
+            //
+            // 🔑 LinkedIn support's own answer (little-text spec + DSAPI case): reserved characters
+            // must be escaped in the mention name and in the URN too. A hyphen is NOT reserved, so
+            // the common `-` ids are unaffected and previously-correct posts are byte-identical.
+            sb.Append("@[").Append(EscapeCommentary(m.Groups["name"].Value)).Append("](")
+              .Append(EscapeCommentary(m.Groups["urn"].Value)).Append(')');
             last = m.Index + m.Length;
         }
         sb.Append(EscapeCommentary(text[last..]));
@@ -530,7 +546,7 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
     /// for a mention and smuggle unescaped text past §326k.
     /// </summary>
     private static readonly Regex MentionSpan = new(
-        @"@\[[^\[\]]+\]\(urn:li:person:[A-Za-z0-9_-]+\)", RegexOptions.Compiled);
+        @"@\[(?<name>[^\[\]]+)\]\((?<urn>urn:li:person:[A-Za-z0-9_-]+)\)", RegexOptions.Compiled);
 
     private static string? HeaderValue(HttpResponseMessage resp, string name) =>
         resp.Headers.TryGetValues(name, out var v) ? v.FirstOrDefault() : null;

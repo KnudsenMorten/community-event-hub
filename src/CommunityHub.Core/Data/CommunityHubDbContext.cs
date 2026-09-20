@@ -181,6 +181,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SponsorInfo> SponsorInfos => Set<SponsorInfo>();
     public DbSet<SponsorSession> SponsorSessions => Set<SponsorSession>();          // §292
     public DbSet<SponsorSessionSpeaker> SponsorSessionSpeakers => Set<SponsorSessionSpeaker>();  // §292
+    /// <summary>§1235 — the person↔sponsor-company links (one contact may serve several companies).</summary>
+    public DbSet<SponsorCompanyContact> SponsorCompanyContacts => Set<SponsorCompanyContact>();
     public DbSet<SponsorBoothMember> SponsorBoothMembers => Set<SponsorBoothMember>();
     public DbSet<SponsorBoothMaterial> SponsorBoothMaterials => Set<SponsorBoothMaterial>();
     public DbSet<SponsorUploadLocation> SponsorUploadLocations => Set<SponsorUploadLocation>();
@@ -2011,6 +2013,32 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade);
             // One row per (company, email); used to dedupe the Zoho reconcile.
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Email }).IsUnique();
+        });
+
+        // --- SponsorCompanyContact (§1235) ----------------------------------
+        // The person↔company link. One contact may serve SEVERAL sponsor companies (a group's
+        // global CMO signing for every division); the role flags live here because being a signer
+        // is something you are FOR A COMPANY.
+        b.Entity<SponsorCompanyContact>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // 🔒 NoAction, not Cascade: Event already cascades to Participant, so a second cascade
+            // path from the same root would be ambiguous to SQL Server (the same reason
+            // Participant.Hotel uses NoAction). Links are removed explicitly by the sync.
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            // One link per (person, company) — the sync upserts on this.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId, x.SponsorCompanyId }).IsUnique();
+            // "This company's contacts" — the resolver's read path.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
+            // 🔴 The ERP contact number is unique WITHIN a company's account, never event-wide:
+            // e-conomic numbers are per-customer sequences, so two accounts both have a contact 6.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.ErpContactNumber });
         });
 
         // --- SponsorBoothMaterial -------------------------------------------

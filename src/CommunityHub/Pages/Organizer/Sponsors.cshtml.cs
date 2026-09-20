@@ -62,7 +62,8 @@ public class SponsorsModel : PageModel
     /// service refuses it).
     /// </summary>
     public List<OrphanedFacts> OrphanedSponsorFacts { get; private set; } = new();
-    public record OrphanedFacts(int Id, string CompanyId, string? ShortDescription);
+    /// §1237 — <c>CompanyName</c> so the orphan table names the company instead of showing a bare CM id.
+    public record OrphanedFacts(int Id, string CompanyId, string? ShortDescription, string CompanyName);
 
     // --- Search / sort / paging (GET-bound so links/bookmarks keep state).
     //     Mirrors the Participants / Speakers / Attendees grids (REQUIREMENTS §20/§21).
@@ -116,13 +117,17 @@ public class SponsorsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
+        // §1237 — name the company, never the bare CM id: this prompt is the last thing the
+        // organizer reads before the widest-blast-radius action on the page.
+        var companyLabel = await CompanyLabelAsync(me.EventId, companyId, ct);
+
         // §334: this deactivates EVERY contact at the company, cancels their group party
         // reservation and drops the company off the public sponsors page — the widest blast
         // radius on this page, and it was one JS confirm() away.
         if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
         {
             Error = TypedConfirmation.Rejection(
-                TypedConfirmation.ConfirmPhrase, $"withdraw {companyId}");
+                TypedConfirmation.ConfirmPhrase, $"withdraw {companyLabel}");
             await LoadAsync(me.EventId, ct);
             return Page();
         }
@@ -131,7 +136,8 @@ public class SponsorsModel : PageModel
             me.EventId, companyId, me.Email, ct);
         if (result.Found)
         {
-            Message = $"Company {companyId} withdrawn: {result.ContactsDeactivated} contact(s) "
+            // §1237 — report the NAME back, not the id the organizer never uses.
+            Message = $"Company {companyLabel} withdrawn: {result.ContactsDeactivated} contact(s) "
                       + $"deactivated, {result.GroupRsvpsCancelled} lingering party reservation(s) "
                       + "cancelled. Zoho/ERP records were not touched.";
         }
@@ -187,7 +193,10 @@ public class SponsorsModel : PageModel
             // ⚠️ Say so rather than silently doing nothing: a company with no facts row is a real
             // state here (the grid is built from contacts and tasks), and "nothing happened" would
             // read as the flag having been set.
-            Error = $"Company {companyId} has no sponsor record yet, so there is nothing to mark. "
+            // §1237 — a name can still exist without a facts row (upload location / ERP link), so
+            // resolve; the "(name not synced …)" label is shown honestly when it genuinely cannot.
+            Error = $"Company {await CompanyLabelAsync(me.EventId, companyId, ct)} has no sponsor "
+                  + "record yet, so there is nothing to mark. "
                   + "It gets one when the webshop pull classifies it or you link it by hand.";
             await LoadAsync(me.EventId, ct);
             return Page();
@@ -198,11 +207,16 @@ public class SponsorsModel : PageModel
         info.LastUpdatedByEmail = me.Email;
         await _db.SaveChangesAsync(ct);
 
+        // §1237 — name the company; `info` is right here, so the id alone was never necessary.
+        var testDataLabel = string.IsNullOrWhiteSpace(info.CompanyName)
+            ? CommunityHub.Core.Integrations.SponsorCompanyName.UnresolvedName(companyId)
+            : $"{info.CompanyName} ({companyId})";
+
         Message = isTest
-            ? $"{companyId} is now marked as TEST data — it will not be created or updated in Zoho "
+            ? $"{testDataLabel} is now marked as TEST data — it will not be created or updated in Zoho "
               + "Backstage, and it is left out of the social-media campaign. Nothing already in "
               + "Zoho was changed."
-            : $"{companyId} is no longer marked as test data — it syncs to Zoho and is announced "
+            : $"{testDataLabel} is no longer marked as test data — it syncs to Zoho and is announced "
               + "like any other sponsor.";
 
         return RedirectToPage(new { });
@@ -567,13 +581,24 @@ public class SponsorsModel : PageModel
                 .ToListAsync(ct)),
             StringComparer.OrdinalIgnoreCase);
 
-        OrphanedSponsorFacts = (await _db.SponsorInfos
+        var orphanRows = (await _db.SponsorInfos
                 .Where(s => s.EventId == eventId)
                 .Select(s => new { s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort })
                 .ToListAsync(ct))
             .Where(s => !liveCompanyIds.Contains(s.SponsorCompanyId))
             .OrderBy(s => s.SponsorCompanyId, StringComparer.OrdinalIgnoreCase)
-            .Select(s => new OrphanedFacts(s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort))
+            .ToList();
+
+        // §1237 — orphans have no active contact, so they are NOT in the `names` map built above;
+        // resolve their names through the same local chain so the table shows "Name (36)".
+        var orphanNames = await ResolveCompanyNamesAsync(
+            eventId, orphanRows.Select(s => s.SponsorCompanyId), ct);
+
+        OrphanedSponsorFacts = orphanRows
+            .Select(s => new OrphanedFacts(
+                s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort,
+                orphanNames.TryGetValue(s.SponsorCompanyId, out var on)
+                    ? on : SponsorCompanyName.UnresolvedName(s.SponsorCompanyId)))
             .ToList();
     }
 
@@ -590,4 +615,17 @@ public class SponsorsModel : PageModel
     private Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
         int eventId, IEnumerable<string> companyIds, CancellationToken ct) =>
         SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, companyIds, ct);
+
+    /// <summary>
+    /// §1237 — one company rendered for a human: <c>"Name (36)"</c>. When no name has been
+    /// captured the honest "(name not synced — CM id 36)" label is returned as-is: it already
+    /// carries the id, so appending it again would only add noise.
+    /// </summary>
+    private async Task<string> CompanyLabelAsync(int eventId, string companyId, CancellationToken ct)
+    {
+        var names = await ResolveCompanyNamesAsync(eventId, new[] { companyId }, ct);
+        var name = names.TryGetValue(companyId, out var nm)
+            ? nm : SponsorCompanyName.UnresolvedName(companyId);
+        return SponsorCompanyName.IsUnresolved(name, companyId) ? name : $"{name} ({companyId})";
+    }
 }

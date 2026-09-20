@@ -7,6 +7,7 @@
 @inject CommunityHub.Core.Settings.FeatureSettingsService FeatureSettings
 @inject CommunityHub.Core.Settings.RingResolver RingResolver
 @inject CommunityHub.Core.Data.CommunityHubDbContext Db
+@inject CommunityHub.Sponsors.SponsorActingCompanyService ActingCompany
 @{
     // Product / tool name shown in the graphics layout. This is the display
     // name only - the codebase, namespaces, and Azure resources stay
@@ -356,10 +357,10 @@
         var isExhibitor = false;
         if (role == CommunityHub.Core.Domain.ParticipantRole.Sponsor && me is not null)
         {
-            var sponsorCompanyId = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
-                .FirstOrDefaultAsync(Db.Participants
-                    .Where(p => p.Id == me.ParticipantId)
-                    .Select(p => p.SponsorCompanyId));
+            // §1236 — the nav follows the company they are ACTING for: a contact serving a Gold
+            // division and a digital-only one must see the booth items switch with the company,
+            // rather than keep the primary company's answer.
+            var sponsorCompanyId = await ActingCompany.CurrentAsync(me.ParticipantId, me.EventId);
             if (sponsorCompanyId is not null)
             {
                 isExhibitor = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
@@ -748,6 +749,42 @@
                     <button type="submit" class="secondary">Return to organizer</button>
                 </form>
             }
+        </div>
+    }
+    @{
+        // §1236 — resolved HERE rather than in the nav block above, whose variables are scoped to its
+        // own @if. Sponsors only; everyone else pays one null check.
+        IReadOnlyList<CommunityHub.Sponsors.SponsorCompanyOption> sponsorCompanies =
+            Array.Empty<CommunityHub.Sponsors.SponsorCompanyOption>();
+        string? actingCompanyId = null;
+        var switcherMe = CurrentParticipant.Current;
+        if (switcherMe is not null && switcherMe.Role == CommunityHub.Core.Domain.ParticipantRole.Sponsor)
+        {
+            sponsorCompanies = await ActingCompany.OptionsAsync(switcherMe.ParticipantId, switcherMe.EventId);
+            actingCompanyId = await ActingCompany.CurrentAsync(switcherMe.ParticipantId, switcherMe.EventId);
+        }
+    }
+    @* §1236 — COMPANY SWITCHER. Only for a sponsor contact who actually serves SEVERAL companies
+       (a group's shared coordinator); one company ⇒ one option ⇒ nothing rendered, so the portal is
+       unchanged for everyone else. The chosen company is re-validated on every read, so this control
+       proposes, it does not authorize. *@
+    @if (sponsorCompanies.Count > 1)
+    {
+        <div class="card" style="margin:8px 0;padding:10px 12px;display:flex;flex-wrap:wrap;
+                                 gap:10px;align-items:center;">
+            <form method="post" asp-page="/Sponsor/SwitchCompany"
+                  style="margin:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                <input type="hidden" name="returnUrl" value="@Context.Request.Path@Context.Request.QueryString" />
+                <label for="actingCompany" style="margin:0;">You are working on behalf of</label>
+                <select id="actingCompany" name="companyId" onchange="this.form.submit();">
+                    @foreach (var c in sponsorCompanies)
+                    {
+                        <option value="@c.CompanyId" selected="@(c.CompanyId == actingCompanyId)">@c.DisplayName</option>
+                    }
+                </select>
+                @* Works without JavaScript too — the select's onchange is a convenience, not the mechanism. *@
+                <button type="submit" class="secondary">Switch</button>
+            </form>
         </div>
     }
     <main id="main" tabindex="-1">

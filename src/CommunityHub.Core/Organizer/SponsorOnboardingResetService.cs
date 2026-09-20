@@ -239,7 +239,15 @@ public sealed class SponsorOnboardingResetService
 
         await _db.SaveChangesAsync(ct);
 
-        var detail = $"Reset sponsor onboarding for company {sponsorCompanyId}: "
+        // §1237 — the audit entry and the organizer banner name the company, not its CM id.
+        var names = await Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, new[] { sponsorCompanyId }, ct);
+        var companyName = names.TryGetValue(sponsorCompanyId, out var nm)
+            ? nm : Integrations.SponsorCompanyName.UnresolvedName(sponsorCompanyId);
+        var companyLabel = Integrations.SponsorCompanyName.IsUnresolved(companyName, sponsorCompanyId)
+            ? companyName : $"{companyName} ({sponsorCompanyId})";
+
+        var detail = $"Reset sponsor onboarding for company {companyLabel}: "
                      + string.Join("; ", parts) + ".";
         return new SponsorResetResult(
             true, tasks, booth, overviewCleared, welcomes, ledger, detail, warnings);

@@ -5,6 +5,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -61,6 +62,7 @@ public class CompanyDetailsModel : PageModel
     private readonly CommunityHub.Core.Integrations.Erp.EconomicContactAdminService _erpContacts;
     private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<CompanyDetailsModel> _log;
+    private readonly SponsorActingCompanyService _acting;
 
     /// <summary>§482b — pulls an ERP contact change back into the hub straight away. OPTIONAL so a
     /// host without Company Manager keeps working; the edit still lands in the ERP either way.</summary>
@@ -80,6 +82,7 @@ public class CompanyDetailsModel : PageModel
         CommunityHub.Core.Integrations.Erp.EconomicContactAdminService erpContacts,
         CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<CompanyDetailsModel> log,
+        SponsorActingCompanyService acting,
         CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null,
         // §1072 — the designer notice must declare itself ops mail or the ring gate eats it.
         IEmailContextAccessor? emailCtx = null)
@@ -98,6 +101,7 @@ public class CompanyDetailsModel : PageModel
         _zohoSync = zohoSync;
         _erpContacts = erpContacts;
         _log = log;
+        _acting = acting;
     }
 
     /// <summary>Non-sponsor reached the page (server-side gate, not CSS).</summary>
@@ -199,7 +203,7 @@ public class CompanyDetailsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: false, ct); return Page(); }
 
         var error = ValidateUrl("Website URL", WebsiteUrl)
@@ -265,7 +269,7 @@ public class CompanyDetailsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: true, ct); return Page(); }
 
         if (!BoothCheckInSlots.IsValid(slot))
@@ -307,7 +311,7 @@ public class CompanyDetailsModel : PageModel
         if (me is null) return new JsonResult(new { ok = false, error = "not-signed-in" }) { StatusCode = 401 };
         if (me.Role != ParticipantRole.Sponsor) return new JsonResult(new { ok = false, error = "forbidden" }) { StatusCode = 403 };
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) return new JsonResult(new { ok = false, error = "no-company" }) { StatusCode = 400 };
 
         var error = ValidateUrl("Website URL", WebsiteUrl)
@@ -385,7 +389,7 @@ public class CompanyDetailsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: true, ct); return Page(); }
 
         var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
@@ -667,7 +671,7 @@ public class CompanyDetailsModel : PageModel
 
     private async Task LoadAsync(CurrentParticipant me, bool prefill, CancellationToken ct)
     {
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; return; }
 
         var info = await _db.SponsorInfos.AsNoTracking().FirstOrDefaultAsync(
@@ -1109,7 +1113,7 @@ public class CompanyDetailsModel : PageModel
         var me = _participant.Current;
         if (me is null) return (null, null, RedirectToPage("/Login"));
         if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return (me, null, Page()); }
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: true, ct); return (me, null, Page()); }
         return (me, companyId, null);
     }
@@ -1187,9 +1191,7 @@ public class CompanyDetailsModel : PageModel
         return string.IsNullOrWhiteSpace(cleaned) ? "Sponsor" : cleaned;
     }
 
-    private async Task<string?> GetCompanyIdAsync(int participantId, CancellationToken ct) =>
-        await _db.Participants
-            .Where(p => p.Id == participantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+    // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+    private async Task<string?> GetCompanyIdAsync(int participantId, int eventId, CancellationToken ct) =>
+        await _acting.CurrentAsync(participantId, eventId, ct);
 }

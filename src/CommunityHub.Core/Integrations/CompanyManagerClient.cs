@@ -222,6 +222,53 @@ public sealed class CompanyManagerClient
     /// <c>linkedin_url</c>, <c>twitter_url</c>). Only the keys you pass are written.
     /// Returns whether the update succeeded.
     /// </summary>
+    /// <summary>
+    /// §1238 — CREATE a company in Company Manager. Returns its new id, or 0 when the write was
+    /// refused (guard) or the webshop rejected it.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why this exists.</b> The ERP→webshop reconcile is driven by the e-conomic SPONSOR
+    /// customer group, and a customer with no matching <c>erp_customer_number</c> in Company Manager
+    /// was simply reported — *"no matching webshop company"* — for ever. So a sponsor created in the
+    /// ERP never appeared in the webshop, and the operator saw a sync that "worked" and a CM that
+    /// stayed empty (2026-09-17, Truesec Sweden / e-conomic #341409358).</para>
+    ///
+    /// <para>🔒 Same external-write guard as every other webshop write: a host that may not write to
+    /// the webshop (DEV) creates nothing and says so through the guard, never through a half-made
+    /// company.</para>
+    ///
+    /// <para>⚠️ The caller must have checked that no company already carries this
+    /// <paramref name="erpCustomerNumber"/> — this method does not de-duplicate, and a duplicate
+    /// company in a live webshop is painful to unpick (there is no delete route).</para>
+    /// </remarks>
+    public async Task<int> CreateCompanyAsync(
+        string name, string erpCustomerNumber, CancellationToken ct = default)
+    {
+        if (!await _writes.AllowAsync(ExternalSystems.Webshop, nameof(CreateCompanyAsync), ct))
+            return 0;
+        if (string.IsNullOrWhiteSpace(name)) return 0;
+
+        var body = new Dictionary<string, object?>
+        {
+            ["name"] = name.Trim(),
+            ["erp_customer_number"] = (erpCustomerNumber ?? string.Empty).Trim(),
+        };
+
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/companies";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            // UTF-8 JSON so Danish æøå survive (WordPress is charset-sensitive) — same as the PUT.
+            Content = new StringContent(
+                JsonSerializer.Serialize(body), new UTF8Encoding(false), "application/json"),
+        };
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return 0;
+
+        using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), default, ct);
+        var id = GetInt(doc.RootElement, "id");
+        return id > 0 ? id : GetInt(doc.RootElement, "company_id");
+    }
+
     public async Task<bool> UpdateCompanyAsync(
         int companyId, IReadOnlyDictionary<string, object?> fields, CancellationToken ct = default)
     {
@@ -309,6 +356,46 @@ public sealed class CompanyManagerClient
         if (!resp.IsSuccessStatusCode) return 0;
         using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), default, ct);
         return GetInt(doc.RootElement, "user_id") is var u && u > 0 ? u : GetInt(doc.RootElement, "id");
+    }
+
+    /// <summary>
+    /// §1235c — the webshop user id for an e-mail, or 0 when the webshop has no such user.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why it matters.</b> The webshop refuses to create a user whose address already
+    /// exists, and the link fallback needs that user's ID. §1235b could only use an id CEH had
+    /// already captured (<c>Participant.CmUserId</c>) — so a shared contact belonging to a company
+    /// the hub has never synced could not be linked at all. Measured live 2026-09-17: Truesec A/S
+    /// (company 108) was created, and its contacts stayed unlinked because CEH held no ids for them.</para>
+    ///
+    /// <para>🔒 <c>GET /users?search=</c> matches loosely (username, name, e-mail), so the result is
+    /// filtered to an EXACT e-mail match — a "search" that returns somebody else's account must never
+    /// become a company link.</para>
+    ///
+    /// <para>Read-only: no write guard, nothing created.</para>
+    /// </remarks>
+    public async Task<int> FindUserIdByEmailAsync(string email, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return 0;
+        var wanted = email.Trim();
+
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/users?search={Uri.EscapeDataString(wanted)}";
+        using var resp = await _http.GetAsync(url, ct);
+        if (!resp.IsSuccessStatusCode) return 0;
+
+        using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), default, ct);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return 0;
+
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            var mail = GetString(el, "email") ?? GetString(el, "user_email");
+            if (!string.Equals(mail?.Trim(), wanted, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var id = GetInt(el, "id");
+            if (id <= 0) id = GetInt(el, "user_id");
+            if (id > 0) return id;
+        }
+        return 0;
     }
 
     /// <summary>POST link an existing user to a company (companies/{id}/users {user_id}).</summary>

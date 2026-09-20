@@ -3,6 +3,7 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -29,6 +30,7 @@ public class LogisticsModel : PageModel
     private readonly CompanyManagerClient _cm;
     private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<LogisticsModel> _log;
+    private readonly SponsorActingCompanyService _acting;
 
     public LogisticsModel(
         ICurrentParticipantAccessor participant,
@@ -37,7 +39,8 @@ public class LogisticsModel : PageModel
         CommunityHubDbContext db,
         CompanyManagerClient cm,
         CompanyManagerOptions cmOptions,
-        ILogger<LogisticsModel> log)
+        ILogger<LogisticsModel> log,
+        SponsorActingCompanyService acting)
     {
         _participant = participant;
         _eventConfigLoader = eventConfigLoader;
@@ -46,6 +49,7 @@ public class LogisticsModel : PageModel
         _cm = cm;
         _cmOptions = cmOptions;
         _log = log;
+        _acting = acting;
     }
 
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
@@ -112,10 +116,8 @@ public class LogisticsModel : PageModel
         // Personalise with the sponsor's real company name (Company Manager public
         // name → legal name). Fail-soft: a CM hiccup leaves the page generic, never
         // shows "Company {id}".
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+        // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
         if (_cmOptions.Enabled && int.TryParse(companyId, out var companyIdInt))
         {
             try

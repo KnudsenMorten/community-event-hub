@@ -307,7 +307,14 @@ public class LeadsModel : PageModel
         if (await LeadsDisabledAsync(me.EventId, ct)) return RedirectToPage();
 
         await _keys.RevokeAsync(me.EventId, sponsorCompanyId, me.Email, ct);
-        TempData["Notice"] = $"Revoked API key for sponsor '{sponsorCompanyId}'.";
+        // §1237 — name the sponsor, not its CM id. This handler redirects without a LoadAsync, so
+        // CompanyNames is empty here; resolve the single id through the same local chain.
+        var names = await ResolveCompanyNamesAsync(me.EventId, new[] { sponsorCompanyId }, ct);
+        var label = names.TryGetValue(sponsorCompanyId, out var nm)
+            ? nm : SponsorCompanyName.UnresolvedName(sponsorCompanyId);
+        TempData["Notice"] = SponsorCompanyName.IsUnresolved(label, sponsorCompanyId)
+            ? $"Revoked API key for sponsor {label}."
+            : $"Revoked API key for sponsor '{label}' ({sponsorCompanyId}).";
         return RedirectToPage();
     }
 

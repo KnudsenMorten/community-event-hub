@@ -76,12 +76,13 @@ public sealed class SpeakerSessionExtraRecipientTests
     // ── The shipped default: both addresses he named, on the To: line ────────────────────
 
     [Fact]
-    public void Default_extra_recipients_are_the_two_he_named()
+    public void Default_extra_recipients_are_the_ones_he_named()
     {
         var list = new EmailOptions().SpeakerSessionAlsoToList();
 
+        // §1233 — mok@ added back, 2026-09-15.
         Assert.Equal(
-            new[] { "kea@expertslive.dk", "kent.agerlund@twoday.com" },
+            new[] { "kea@expertslive.dk", "kent.agerlund@twoday.com", "mok@expertslive.dk" },
             list);
     }
 
@@ -236,18 +237,18 @@ public sealed class SpeakerSessionAudienceTests
     public void The_audience_is_the_shared_inbox_first_then_the_named_organizers()
     {
         Assert.Equal(
-            new[] { "info@expertslive.dk", "kea@expertslive.dk", "kent.agerlund@twoday.com" },
+            new[] { "info@expertslive.dk", "kea@expertslive.dk", "kent.agerlund@twoday.com", "mok@expertslive.dk" },
             new EmailOptions().SpeakerSessionRecipients());
     }
 
     [Fact]
-    public void The_developer_mailbox_is_not_in_the_audience()
+    public void The_operator_is_in_the_audience_but_the_shared_inbox_stays_first()
     {
-        // 🔒 *"remove mok@expertslive.dk"*. §493 reserves it for SYSTEM alerts; a queue of pending
-        // approvals is organizer work, and routing it to one person is what made it invisible.
-        Assert.DoesNotContain(
-            new EmailOptions().SpeakerSessionRecipients(),
-            a => a.Contains("mok@", StringComparison.OrdinalIgnoreCase));
+        // §1233 — *"yes please add mok"* (2026-09-15), reversing §1124's removal. He is an EXTRA: the
+        // shared inbox is still the primary, so the mail never depends on one person reading it.
+        var audience = new EmailOptions().SpeakerSessionRecipients();
+        Assert.Contains("mok@expertslive.dk", audience);
+        Assert.Equal("info@expertslive.dk", audience[0]);
     }
 
     [Fact]
@@ -257,7 +258,7 @@ public sealed class SpeakerSessionAudienceTests
         // is a configuration choice, not an accident of one blank field.
         var opts = new EmailOptions { OrganizerInbox = "" };
         Assert.Equal(
-            new[] { "kea@expertslive.dk", "kent.agerlund@twoday.com" },
+            new[] { "kea@expertslive.dk", "kent.agerlund@twoday.com", "mok@expertslive.dk" },
             opts.SpeakerSessionRecipients());
     }
 

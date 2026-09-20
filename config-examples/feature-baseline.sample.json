@@ -1,0 +1,32 @@
+{
+  "_schema": "ceh/feature-baseline@1",
+  "_doc": "SAMPLE feature baseline for ONE edition, applied with scripts/Set-FeatureBaseline.ps1 -Apply. A feature listed here is set to exactly this state; a feature NOT listed is left completely alone (the script never deletes and never touches what you did not ask for). So the shortest useful baseline is a handful of lines, not all of them — list what you want pinned, and let everything else run on its built-in default.",
+  "_howToStart": "Do not hand-write this file. Run scripts/Set-FeatureBaseline.ps1 -Export against a working environment to capture its real posture, then delete the entries you do not care about and commit the rest. Exporting writes nothing and is the safe way to learn the feature keys your build actually has.",
+  "_ringValues": "releasedToRing: 0=Ring0 (earliest/dev), 1=Ring1, 2=Ring2, 3=Broad (everyone). A feature is live for a person only when it is enabled AND their ring is at or below the released ring, so a feature can be safely switched on for a pilot group by releasing it to Ring1 while everyone else sits at Broad.",
+  "_emailWarning": "Switching a feature ON can start sending real e-mail within minutes, because many features send mail as part of normal operation. The script refuses to enable anything without -AllowEnable and prints every feature it would switch on. On a live environment run -WhatIf first.",
+  "_releasedToRingOverride": "Normally null. Set it only when you want to pin one feature's audience away from its group default; the application treats a non-null override as the winning value.",
+
+  "features": [
+    {
+      "_comment": "Off is the safe default for anything that talks to a system you have not configured yet. Listing it explicitly documents the decision, rather than leaving it to a default that could change upstream.",
+      "key": "sessionize-import",
+      "enabled": false,
+      "releasedToRing": 3,
+      "releasedToRingOverride": null
+    },
+    {
+      "_comment": "A feature you have decided to run for everyone.",
+      "key": "surveys",
+      "enabled": true,
+      "releasedToRing": 3,
+      "releasedToRingOverride": null
+    },
+    {
+      "_comment": "The pilot shape, and the one worth understanding: enabled, but released only to Ring1. People in a wider ring get nothing — no page, no e-mail — until you raise this to 3. This is how you test a mail-sending feature on yourself before it reaches an audience.",
+      "key": "welcome-email",
+      "enabled": true,
+      "releasedToRing": 1,
+      "releasedToRingOverride": null
+    }
+  ]
+}

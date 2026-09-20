@@ -352,7 +352,8 @@
                                         <div style="display:flex;flex-wrap:wrap;gap:8px;">
                                             <div style="flex:1 1 120px;">
                                                 <label for="EditType_@r.Id">Type</label>
-                                                <select id="EditType_@r.Id" name="EditType" asp-items="Model.TypeOptions"></select>
+                                                @* 🔴 §1232 — pre-select the row's type, or a save posts the first option (Keynote). *@
+                                                <select id="EditType_@r.Id" name="EditType" asp-items="Model.TypeOptionsFor(r.Type)"></select>
                                             </div>
                                             <div style="flex:1 1 120px;">
                                                 <label for="EditLength_@r.Id">Length</label>

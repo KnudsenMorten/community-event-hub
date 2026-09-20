@@ -230,7 +230,7 @@ public class SponsorZohoProvisionLinkedReconcileTests
     /// to be told about.</para>
     /// </remarks>
     [Fact]
-    public async Task Adding_a_booth_video_or_collateral_file_re_opens_the_report()
+    public async Task Adding_a_booth_video_re_opens_the_report_but_collateral_does_not()
     {
         using var db = ScenarioFixture.NewDb();
         var eventId = await SeedEventAsync(db);
@@ -263,7 +263,8 @@ public class SponsorZohoProvisionLinkedReconcileTests
         // A different stamp ⇒ the next pass sees "changed" ⇒ he is told about the video.
         Assert.NotEqual(afterFirstReport, afterVideo);
 
-        // ...and a collateral file moves it again.
+        // 🔴 §1230 — ...but a collateral file does NOT: it is no longer reported (internal SharePoint
+        // link, no Backstage API), so it must not re-open the mail.
         db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
         {
             EventId = eventId, SponsorCompanyId = "42",
@@ -273,7 +274,7 @@ public class SponsorZohoProvisionLinkedReconcileTests
         await db.SaveChangesAsync();
 
         await sync.StampManualReportAsync(eventId, new[] { "42" });
-        Assert.NotEqual(afterVideo,
+        Assert.Equal(afterVideo,
             (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
                 .ZohoSponsorProfilePushedHash);
 

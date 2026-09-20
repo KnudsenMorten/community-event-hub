@@ -75,7 +75,19 @@ public sealed record SessionizeSession(
     // §299.8/b7: comma-separated tag labels from the Sessionize "Tags" category
     // GROUP, when the v2 payload provides one. Null when the API omits tags (the
     // default — every existing construction is unaffected).
-    string? Tags = null);
+    string? Tags = null,
+    // 🔴 §1241 — the Sessionize `isConfirmed` flag: the SPEAKER has confirmed they will
+    // deliver this session. It is the red "not confirmed" badge on the Sessionize sessions
+    // grid, alongside the green "informed" date.
+    //
+    // 🔒 DEFAULTS TO TRUE, AND THAT DIRECTION IS DELIBERATE. The importer now REFUSES to
+    // import a session with this false (operator 2026-09-20: *"importer should only import
+    // if IsConfirmed = true"*), so a payload shape that does not carry the field — an older
+    // export, a different view, a test constructing this record — must read as "confirmed"
+    // and import. Defaulting to false would turn one missing JSON key into an import that
+    // silently brings in NOTHING, which is the §326ax failure: an absent signal must never
+    // be read as a negative one.
+    bool IsConfirmed = true);
 
 /// <summary>The outcome of parsing the Sessionize sessions view.</summary>
 public sealed record SessionizeSessionsParseResult(

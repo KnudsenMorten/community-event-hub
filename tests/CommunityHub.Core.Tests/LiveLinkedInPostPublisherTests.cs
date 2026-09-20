@@ -181,6 +181,64 @@ public sealed class LiveLinkedInPostPublisherTests
         Assert.Contains(@"\@", escaped);
     }
 
+    /// <summary>
+    /// 🔴 §1234 — A RESERVED CHARACTER INSIDE THE URN BREAKS THE WHOLE POST.
+    ///
+    /// <para>Measured in PROD 2026-09-16 (post 46115, session 13): the announced speakers' URNs were
+    /// <c>7ruvU3A_Oc</c> and <c>_wR2V3KVW-</c>. <c>_</c> is reserved in little text format, and the
+    /// mention span was passed through verbatim, so LinkedIn could not parse the mention and rendered
+    /// the ENTIRE commentary literally — every mention as raw markup, and every escape showing its
+    /// backslash (the organizer line read <c>@[Name](urn:li:person:…) \| @[Name](…)</c>).</para>
+    ///
+    /// <para>⚠️ This is why it looked like a sudden regression: the previous days' posts mentioned
+    /// people whose URNs happened to contain no <c>_</c>. The trigger is WHO is mentioned.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("7ruvU3A_Oc")]
+    [InlineData("_wR2V3KVW-")]
+    public void An_underscore_in_the_urn_is_escaped_so_the_mention_still_parses(string id)
+    {
+        var raw = $"With @[Kasper Larsen](urn:li:person:{id}) | @[Dan Toft](urn:li:person:NrfHR5tPrF)";
+
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw);
+
+        // The URN's reserved character is escaped; the mention's own delimiters are not.
+        Assert.Contains($"](urn:li:person:{id.Replace("_", @"\_")})", escaped);
+        Assert.Contains("@[Kasper Larsen](", escaped);
+        // The separator is still escaped as before — and LinkedIn renders it as a plain pipe once
+        // the commentary parses at all.
+        Assert.Contains(@"\|", escaped);
+        // 🔒 No BARE underscore survives anywhere: one unescaped reserved char is all it takes.
+        Assert.DoesNotContain("_", escaped.Replace(@"\_", string.Empty));
+    }
+
+    /// <summary>§1234 — a reserved character in the DISPLAY NAME is escaped the same way.</summary>
+    [Fact]
+    public void A_reserved_character_in_the_display_name_is_escaped()
+    {
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(
+            "@[Ann_Marie *Lee*](urn:li:person:TRlhoSVMoX)");
+
+        Assert.Contains(@"@[Ann\_Marie \*Lee\*](urn:li:person:TRlhoSVMoX)", escaped);
+    }
+
+    /// <summary>
+    /// 🔒 §1234 — a URN with no reserved character is byte-identical to before, so every post that
+    /// rendered correctly keeps rendering correctly. A hyphen is NOT reserved.
+    /// </summary>
+    [Theory]
+    [InlineData("TRlhoSVMoX")]
+    [InlineData("-r8QyRH5fl")]
+    [InlineData("c3hh-hQmZ3")]
+    public void A_urn_without_a_reserved_character_is_unchanged(string id)
+    {
+        var raw = $"Meet @[Carsten Meilbak](urn:li:person:{id}) today";
+
+        Assert.Contains(
+            $"@[Carsten Meilbak](urn:li:person:{id})",
+            LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw));
+    }
+
     [Fact]
     public void Text_with_no_mention_escapes_exactly_as_before()
     {

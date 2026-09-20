@@ -617,11 +617,12 @@ public static class EmailTemplateCatalog
                 ParticipantRole.Media, ParticipantRole.EventPartner, ParticipantRole.Sponsor,
             },
 
-            // GetStartedDigestBuilder branches on exactly these three.
-            "getstarted-digest" => new[]
-            {
-                ParticipantRole.Speaker, ParticipantRole.Sponsor, ParticipantRole.Attendee,
-            },
+            // §1227 — every role with a Get Started wizard. This listed only Speaker/Sponsor/Attendee,
+            // but GetStartedDigestBuilder's default branch (RoleWizardService.Handles) also mails
+            // Volunteer, Organizer, Media and EventPartner — PROD's ledger shows all seven on
+            // 2026-09-14. Those four had no per-role ring row to set; they resolved to the all-roles
+            // ring, and still do until a per-role row is saved, so no send changes.
+            "getstarted-digest" => AllRoles,
 
             // The generic welcome is the fallback for roles with no welcome-{role} variant.
             "welcome" => new[] { ParticipantRole.Organizer, ParticipantRole.Attendee },
@@ -783,7 +784,8 @@ public static class EmailTemplateCatalog
         "speaker-graphics-ready"       => "A speaker whose promo graphics have just been released.",
         "some-announcement"            => "The speaker or sponsor a scheduled social-media post is "
                                         + "about — once when it is scheduled, once the day before.",
-        "getstarted-digest"            => "Speakers who have not finished Get Started — biweekly until they do.",
+        // §1227 — every role with a Get Started wizard, on the cadence set per role; not "speakers, biweekly".
+        "getstarted-digest"            => "Anyone who has not finished Get Started — repeated on the configured cadence until they do.",
         "getstarted-deadline-reminder" => "Speakers with Get Started still open, once, before the deadline.",
         "onboarding-getting-started"   => "A speaker starting onboarding.",
         "onboarding-step-reset"        => "A speaker whose onboarding step an organizer has reopened.",

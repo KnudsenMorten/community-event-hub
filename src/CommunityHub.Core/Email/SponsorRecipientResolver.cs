@@ -161,11 +161,41 @@ public sealed class SponsorRecipientResolver
             return Array.Empty<SponsorRecipient>();
         }
 
+        // 🔴 §1235 — A COMPANY'S CONTACTS ARE ITS LINKED PEOPLE, NOT ONLY THE PEOPLE WHOSE PRIMARY
+        // COMPANY IT IS. A sponsor group's GLOBAL event coordinator has one participant row whose
+        // primary company is one division; without the union below, every OTHER division's mail
+        // resolved to nobody and was silently not sent.
+        var linked = await _db.SponsorCompanyContacts
+            .Where(x => x.EventId == eventId && x.SponsorCompanyId == sponsorCompanyId)
+            .Select(x => new { x.ParticipantId, x.IsEventCoordinator })
+            .ToListAsync(ct);
+        var linkedIds = linked.Select(x => x.ParticipantId).ToList();
+
         var contacts = await _db.Participants
             .Where(p => p.EventId == eventId
                         && p.Role == ParticipantRole.Sponsor
-                        && p.SponsorCompanyId == sponsorCompanyId)
+                        && (p.SponsorCompanyId == sponsorCompanyId || linkedIds.Contains(p.Id)))
             .ToListAsync(ct);
+
+        // The LINK's coordinator flag decides for this company — a person may coordinate division A
+        // and merely sign for division B, which is the operator's ARROW case (*"they share event
+        // coordinator, but different signers"*). The person-level flag describes their primary
+        // company only, so relying on it alone would both miss and over-include.
+        var linkCoordinatorEmails = contacts
+            .Where(p => linked.Any(l => l.ParticipantId == p.Id && l.IsEventCoordinator))
+            .Select(p => p.Email)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .ToList();
+
+        // 🔒 …AND THE PERSON-LEVEL FLAG MUST NOT LEAK ACROSS COMPANIES. For somebody whose PRIMARY
+        // company is a different division, their `IsEventCoordinator` is a statement about THAT
+        // division. Leaving them in the list would mail this company's coordinator mail to a person
+        // who only SIGNS here — over-inclusion is as wrong as the missing recipient above, and
+        // quieter. Their own division's mail is unaffected: it resolves on its own primary rules.
+        contacts = contacts
+            .Where(p => p.SponsorCompanyId == sponsorCompanyId
+                        || linked.Any(l => l.ParticipantId == p.Id && l.IsEventCoordinator))
+            .ToList();
 
         // PRIMARY: e-conomic ERP Role-2 set (read-only). Null => unavailable,
         // fall back to the flag-only Select (CM default + manual overrides).
@@ -174,6 +204,16 @@ public sealed class SponsorRecipientResolver
         {
             erpCoordinatorEmails = await _erpCoordinators
                 .GetCoordinatorEmailsAsync(sponsorCompanyId, ct);
+        }
+
+        // §1235 — fold the link-flagged coordinators in beside the ERP set. ⚠️ Kept ADDITIVE rather
+        // than replacing the ERP answer: when ERP is available it stays authoritative for the people
+        // it knows, and the links only add a coordinator it has no opinion about.
+        if (linkCoordinatorEmails.Count > 0)
+        {
+            erpCoordinatorEmails = (erpCoordinatorEmails ?? Array.Empty<string>())
+                .Concat(linkCoordinatorEmails)
+                .ToList();
         }
 
         return Select(contacts, erpCoordinatorEmails);

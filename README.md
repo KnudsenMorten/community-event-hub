@@ -670,6 +670,7 @@ your real event, keep them in a private copy.
 | **[`docs/FEATURES.md`](docs/FEATURES.md)** | The complete delivered feature catalog — an index of every entry with its ship date, then the detail. |
 | **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, scheduled jobs, e-mail, build, infrastructure, deploy and the operational runbook. |
 | **[`config/README.md`](config/README.md)** | Every per-edition configuration and content file, what reads it, and how to point the app at your own. |
+| **[`docs/FORKING.md`](docs/FORKING.md)** | Running your own copy and still taking upstream updates: what to customize, how to switch integrations off or replace them, and what upstream promises not to break. |
 | [`docs/ROLE-FLOWS.md`](docs/ROLE-FLOWS.md), [`docs/UX-FLOWS-DETAILED.md`](docs/UX-FLOWS-DETAILED.md), [`docs/SECURITY-NOTES.md`](docs/SECURITY-NOTES.md) | Supporting design notes. |
 
 The public mirror is updated milestone by milestone; every public commit names the private source commit

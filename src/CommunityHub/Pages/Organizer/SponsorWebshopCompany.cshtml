@@ -61,7 +61,8 @@ else
 {
     <div class="card">
         <h1 style="margin-top:0;">@(string.IsNullOrEmpty(Model.PublicName) ? Model.CompanyName : Model.PublicName)</h1>
-        <p style="color:#6b7280;">Company Manager company #@Model.SelectedCompanyId</p>
+        @* §1237 — name the company; the CM id stays as a secondary. *@
+        <p style="color:#6b7280;">@Model.DisplayName — Company Manager company #@Model.SelectedCompanyId</p>
         <p><a asp-page="/Organizer/SponsorWebshopCompany">&larr; All sponsors</a></p>
 
         @if (!string.IsNullOrEmpty(Model.Error))

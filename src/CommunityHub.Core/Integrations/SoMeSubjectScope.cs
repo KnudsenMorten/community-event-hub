@@ -165,9 +165,17 @@ public sealed class SoMeSubjectScope
 
         // 🔒 The SAME sponsor rule the planner and the tier content already use — the flag he sets,
         // or a company whose every contact is a test user (§905).
-        foreach (var companyId in await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct))
+        // §1237 — the reason a human reads names the sponsor. One local lookup for the whole set,
+        // no network; the KEY keeps the id, because that is what the planner matches on.
+        var testCompanyIds = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+        var sponsorNames = await SponsorCompanyNameService.ResolveFromLocalAsync(
+            _db, eventId, testCompanyIds, ct);
+        foreach (var companyId in testCompanyIds)
         {
-            keys[$"sponsor:{companyId}"] = $"sponsor company {companyId} — test data";
+            var who = sponsorNames.TryGetValue(companyId, out var nm)
+                ? nm
+                : SponsorCompanyName.UnresolvedName(companyId);
+            keys[$"sponsor:{companyId}"] = $"sponsor company {who} — test data";
         }
 
         return keys;

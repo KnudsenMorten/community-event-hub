@@ -65,7 +65,11 @@ public sealed class SponsorBoothPageTests
     private static BoothModel NewModel(CommunityHubDbContext db, DefaultHttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        var model = new BoothModel(accessor, db, InertVenue());
+        // §1236 — the page resolves its company through the acting-company service; with no cookie
+        // it answers exactly what the old inline lookup did (the contact's primary company).
+        var model = new BoothModel(
+            accessor, db, InertVenue(),
+            new CommunityHub.Sponsors.SponsorActingCompanyService(db, new HttpContextAccessorOver(http)));
         var actionContext = new ActionContext(
             http, new RouteData(), new PageActionDescriptor(), new ModelStateDictionary());
         model.PageContext = new PageContext(actionContext);

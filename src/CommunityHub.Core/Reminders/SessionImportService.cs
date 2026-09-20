@@ -78,16 +78,23 @@ public sealed class SessionImportService
     // the source Level label. Optional; null falls back to the "(NNN)" parse only.
     private readonly Config.SessionOptionsService? _options;
 
+    // §1240 — the ONE authority for removing a session (attendee-engagement blockers and all).
+    // Optional so every existing construction still compiles; null ⇒ a [NoImport] row that already
+    // exists in CEH is REPORTED rather than removed, never silently ignored.
+    private readonly Organizer.SessionDeletionService? _deletions;
+
     public SessionImportService(
         CommunityHubDbContext db,
         TimeProvider clock,
         Config.RoomRegistryService? rooms = null,
-        Config.SessionOptionsService? options = null)
+        Config.SessionOptionsService? options = null,
+        Organizer.SessionDeletionService? deletions = null)
     {
         _db = db;
         _clock = clock;
         _rooms = rooms;
         _options = options;
+        _deletions = deletions;
     }
 
     /// <summary>
@@ -137,6 +144,10 @@ public sealed class SessionImportService
         int created = 0, updated = 0, skipped = 0, linksCreated = 0, linksRemoved = 0;
         // §999 — CEH-owned fields where Sessionize now disagrees. Collected, never applied.
         var deviations = new List<SessionizeFieldDeviation>();
+        // 🔴 §1240 — CEH sessions a [NoImport] row says should not exist. Removed AFTER the main
+        // save, never inside the loop: SessionDeletionService commits, and committing mid-loop
+        // would flush half-built session rows as a side effect of a delete.
+        var toRemove = new List<Session>();
 
         foreach (var src in sessions)
         {
@@ -145,6 +156,66 @@ public sealed class SessionImportService
                 carriedWarnings.Add(
                     $"Session '{src.Title}': skipped - no Sessionize id.");
                 skipped++;
+                continue;
+            }
+
+            // 🔴 §1240 — [NoImport]: THIS ROW MUST NEVER BECOME A CEH SESSION.
+            //
+            // Operator 2026-09-20: *"sponsor sessions … must not be imported into ceh, as they will
+            // come from ceh already … it will conflict if they come into ceh as we will then have 2
+            // sessions at the same time"*. Those rows exist in the Sessionize planner to hold the
+            // slot in the grid, and the real session is created on the CEH side by the sponsor.
+            //
+            // ⚠️ Unlike [Placeholder] this is NOT a hold. He will never rename these, so there is
+            // no later run in which the row becomes importable.
+            if (Integrations.Sessions.SessionizeConventions.IsNoImport(src.Title))
+            {
+                skipped++;
+                if (bySessionizeId.TryGetValue(src.SessionizeId, out var stale)
+                    // 🔒 Only ever a SESSIONIZE-IMPORTED row. Matching on the Sessionize id already
+                    // makes a hub-added session unreachable here, but the delete is the one
+                    // irreversible thing this service does, so the guard is stated rather than
+                    // inferred from a key space.
+                    && !stale.IsHubAdded)
+                {
+                    toRemove.Add(stale);
+                }
+                continue;
+            }
+
+            // 🔴 §1241 — THE SPEAKER HAS NOT CONFIRMED YET ⇒ DO NOT IMPORT.
+            //
+            // Operator 2026-09-20: *"importer should only import if IsConfirmed = true"*. This is
+            // the red "not confirmed" badge on the Sessionize sessions grid — 18 of the 76 ELDK27
+            // sessions on the day it was built.
+            //
+            // 🔑 An IMPORT gate, not a publish gate, and it needs no release switch: the moment the
+            // speaker confirms in Sessionize the flag flips and the next run creates the session
+            // normally. Gating the import rather than the push also keeps the hub honest — an
+            // unconfirmed talk is not yet part of the programme, so it should not be sitting in the
+            // agenda, the speaker portal or the graphics queue looking settled.
+            if (!src.IsConfirmed)
+            {
+                skipped++;
+                // ⚠️ AN ALREADY-IMPORTED SESSION IS LEFT ALONE, NOT REMOVED — deliberately unlike
+                // the [NoImport] rule (§1240b), and the difference is what the two states mean. A
+                // [NoImport] row is never a session at all; an unconfirmed one is a REAL session in
+                // a transient state, which may already be pushed to Backstage and already carrying
+                // attendee questions. Deleting on an un-confirm would destroy live work over a flag
+                // that can flip back, so it is reported and the organizer decides.
+                if (bySessionizeId.TryGetValue(src.SessionizeId, out var unconfirmed))
+                {
+                    carriedWarnings.Add(
+                        $"Session '{src.Title}' is no longer confirmed by its speaker in Sessionize, "
+                        + $"but ALREADY EXISTS in CEH (id {unconfirmed.Id}). Left untouched — remove "
+                        + "it in the hub if the session is genuinely off.");
+                }
+                else
+                {
+                    carriedWarnings.Add(
+                        $"Session '{src.Title}': not imported — the speaker has not confirmed it in "
+                        + "Sessionize yet. It will import by itself once they do.");
+                }
                 continue;
             }
 
@@ -187,11 +258,24 @@ public sealed class SessionImportService
             session.Abstract = src.Abstract;
             session.Level = src.Level;
 
+            // 🔴 §1240 — "Common" IS NOT A TRACK. Operator 2026-09-20: *"i have created Common in
+            // the event track, but dont create that in zoho … these sessions should be tagged as
+            // common session like welcome keynote and closing keynote"*, and *"we already have a
+            // common setting on per session level which is equivalent to track = Common in
+            // sessionize"*.
+            //
+            // ⇒ The Sessionize track item "Common" maps onto the EXISTING §1011 per-session tick
+            // box, and CEH stores NO track for it. Storing the literal "Common" would be worse than
+            // cosmetic: the Backstage push CREATES a missing track by name, so the next push pass
+            // would create a "Common" track in the live agenda — on an API with no delete.
+            var srcIsCommon = Integrations.Sessions.SessionizeConventions.IsCommonTrack(src.Track);
+
             if (isNew)
             {
                 // CREATE — seed 1:1 from Sessionize. Nothing to protect.
                 session.Room = src.Room;
-                session.Track = src.Track;
+                session.Track = srcIsCommon ? null : src.Track;
+                session.IsCommonForAllTracks = srcIsCommon;
                 session.Tags = src.Tags;
             }
             else
@@ -203,7 +287,15 @@ public sealed class SessionImportService
                 // Reporting it would mail him hourly about a field he deliberately switched off —
                 // the §594 failure wearing a different hat.
                 if (!session.IsCommonForAllTracks)
-                    AddDeviation(deviations, session, "Track", session.Track, src.Track);
+                {
+                    // 🔒 §1240 — when Sessionize has SINCE been moved to "Common" but the hub row is
+                    // not flagged, report the FLAG rather than a track rename. CEH owns the track on
+                    // an existing row (§999), so this is still report-only — but a line reading
+                    // "Track: Security → Common" would invite him to type a track that must never
+                    // exist. Naming the tick box is the action that is actually correct.
+                    AddDeviation(deviations, session, "Track", session.Track,
+                        srcIsCommon ? CommonTrackDeviationLabel : src.Track);
+                }
                 AddDeviation(deviations, session, "Tags", session.Tags, src.Tags);
             }
             // §299.8/b7: derive the NUMERIC level code from the label against the
@@ -347,10 +439,60 @@ public sealed class SessionImportService
 
         await _db.SaveChangesAsync(ct);
 
+        // 🔴 §1240 — remove the CEH sessions that a [NoImport] row says should not be there
+        // (operator 2026-09-20 chose automatic removal over a warning).
+        //
+        // 🔒 Through `SessionDeletionService`, the single delete authority, so the §327d blockers
+        // still hold: a session carrying attendee QUESTIONS, EVALUATIONS or MASTER-CLASS BOOKINGS
+        // is REFUSED and reported rather than taking that input with it. That is not this rule
+        // overriding his decision — it is the difference between deleting a duplicate row and
+        // destroying something an attendee typed, which no import may do silently.
+        foreach (var stale in toRemove)
+        {
+            if (_deletions is null)
+            {
+                carriedWarnings.Add(
+                    $"Session '{stale.Title}' (id {stale.Id}) matches the "
+                    + $"{Integrations.Sessions.SessionizeConventions.NoImportMarker} rule but could "
+                    + "NOT be removed — no delete service is wired into this import. Delete it in "
+                    + "the hub.");
+                continue;
+            }
+
+            var outcome = await _deletions.DeleteAsync(eventId, stale.Id, ct);
+            switch (outcome.Status)
+            {
+                case Organizer.SessionDeletionService.DeletionStatus.Deleted:
+                    carriedWarnings.Add(
+                        $"Removed session '{stale.Title}' (id {stale.Id}) from CEH: its Sessionize "
+                        + $"row is marked {Integrations.Sessions.SessionizeConventions.NoImportMarker} "
+                        + "(a planner-only slot — the real session is owned by CEH).");
+                    break;
+                case Organizer.SessionDeletionService.DeletionStatus.Blocked:
+                    carriedWarnings.Add(
+                        $"Session '{stale.Title}' (id {stale.Id}) is marked "
+                        + $"{Integrations.Sessions.SessionizeConventions.NoImportMarker} in Sessionize "
+                        + "but was NOT removed — it carries "
+                        + string.Join(", ", outcome.BlockingDependencies)
+                        + ". Nothing an attendee supplied is deleted by an import; clear that first "
+                        + "if the session really is a duplicate.");
+                    break;
+            }
+        }
+
         return new SessionImportResult(
             sessions.Count, created, updated, skipped,
             linksCreated, linksRemoved, carriedWarnings, null, toReport);
     }
+
+    /// <summary>
+    /// §1240 — what the deviation mail prints as "Sessionize's value" when Sessionize has moved a
+    /// session to the <c>Common</c> track but the hub row is not flagged common-for-all-tracks.
+    /// It names the tick box, because typing "Common" into the Track field is the one thing that
+    /// must NOT happen (the Backstage push would then create that track in the live agenda).
+    /// </summary>
+    internal const string CommonTrackDeviationLabel =
+        "Common — tick \"Common for all tracks\" on the session (do NOT type a track)";
 
     /// <summary>§999 — record a CEH-vs-Sessionize difference, ignoring pure formatting.</summary>
     /// <remarks>

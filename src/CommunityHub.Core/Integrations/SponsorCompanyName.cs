@@ -39,4 +39,23 @@ public static class SponsorCompanyName
     /// nothing: <c>ResolveAllAsync</c> already applies this chain, so the caller never sees a miss.</para>
     /// </summary>
     public static string UnresolvedName(string companyId) => $"(name not synced — CM id {companyId})";
+
+    /// <summary>
+    /// 🔴 §1237 — TRUE when a "name" is not a name at all: the bare company id, or the
+    /// <see cref="UnresolvedName"/> label. Such a value must never be SHOWN to a human as a company
+    /// name, and must never be PUSHED to the event platform as one.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠️ It is not cosmetic. The sponsor push passes this string to Zoho as the company NAME,
+    /// and the callers defaulted it to <c>info.SponsorCompanyId</c> before enriching it from Company
+    /// Manager — so with CM disabled or unreachable, CEH wrote the literal <c>"36"</c> into Backstage
+    /// as a sponsor's name and mailed *"Pushed to sponsor '36' — Zoho GUI fields: Company name"*.
+    /// Measured on PROD 2026-09-17, for a company whose real name ("Surveil") CEH held locally the
+    /// whole time.</para>
+    /// </remarks>
+    public static bool IsUnresolved(string? name, string? companyId) =>
+        string.IsNullOrWhiteSpace(name)
+        || (!string.IsNullOrWhiteSpace(companyId)
+            && string.Equals(name!.Trim(), companyId!.Trim(), StringComparison.OrdinalIgnoreCase))
+        || name!.Trim().StartsWith("(name not synced", StringComparison.OrdinalIgnoreCase);
 }

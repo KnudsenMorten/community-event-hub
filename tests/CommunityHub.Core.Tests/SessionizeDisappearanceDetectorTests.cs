@@ -216,6 +216,70 @@ public sealed class SessionizeDisappearanceDetectorTests
         Assert.Single(await queue.ListPendingAsync(EventId));
     }
 
+    // ===================== §1231: organizer-deactivated speakers ================
+
+    /// <summary>
+    /// 🔴 §1231 — a speaker an organizer DEACTIVATED is not reported: that is the decision the mail
+    /// asks for. PROD 2026-09-15: re-added in Sessionize under a new id, old row deactivated, and the
+    /// old profile still alerted every 6 h.
+    /// </summary>
+    [Fact]
+    public async Task An_organizer_deactivated_speaker_is_not_reported()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var old = await SeedSpeakerAsync(db, "Old Row", "spk-old-id");
+        db.Participants.Find(old)!.DeactivatedByOrganizerAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        var det = new SessionizeDisappearanceDetector(db, alerts: null);
+        var r = await det.ScanAsync(EventId, Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.False(r.Any);
+        Assert.Single(db.SpeakerProfiles);       // never deleted
+    }
+
+    /// <summary>⚠️ Merely INACTIVE is still reported — an unreviewed import vanishing is news.</summary>
+    [Fact]
+    public async Task A_merely_inactive_speaker_is_still_reported()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var p = await SeedSpeakerAsync(db, "Unreviewed", "spk-unreviewed");
+        db.Participants.Find(p)!.IsActive = false;
+        await db.SaveChangesAsync();
+
+        var det = new SessionizeDisappearanceDetector(db, alerts: null);
+        var r = await det.ScanAsync(EventId, Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.Single(r.DisappearedSpeakers);
+    }
+
+    /// <summary>§1231 — the mail names the PARTICIPANT id; the bare profile id read as another person.</summary>
+    [Fact]
+    public async Task The_mail_names_the_participant_id_not_just_the_profile_id()
+    {
+        // A distinct edition id: the ops-alert throttle key is per edition and process-static.
+        const int ownEvent = 91231;
+        using var db = ScenarioFixture.NewDb();
+        var p = new Participant
+        {
+            EventId = ownEvent, Email = "gone@example.test", FullName = "Gone Speaker",
+            Role = ParticipantRole.Speaker,
+        };
+        db.Participants.Add(p);
+        await db.SaveChangesAsync();
+        var prof = new SpeakerProfile { EventId = ownEvent, ParticipantId = p.Id, SessionizeSpeakerId = "spk-gone" };
+        db.SpeakerProfiles.Add(prof);
+        await db.SaveChangesAsync();
+
+        var sender = new CapturingEmailSender();
+        var det = new SessionizeDisappearanceDetector(db, NewAlerts(sender));
+        await det.ScanAsync(ownEvent, Array.Empty<string>(), Array.Empty<string>());
+
+        var m = Assert.Single(sender.Messages);
+        Assert.Contains($"participant #{p.Id} (speaker profile {prof.Id})", m.Html);
+        Assert.DoesNotContain("CEH id", m.Html);
+    }
+
     [Fact]
     public async Task No_alerts_sender_still_detects_but_skips_email_and_never_deletes()
     {

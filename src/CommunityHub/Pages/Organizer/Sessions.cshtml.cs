@@ -315,9 +315,21 @@ public class SessionsModel : PageModel
     public int TotalCount { get; private set; }
     public int HubAddedCount { get; private set; }
 
-    public SelectList TypeOptions => new(
+    public SelectList TypeOptions => TypeOptionsFor(null);
+
+    /// <summary>
+    /// §1232 — the Type options with the row's CURRENT type pre-selected.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 The per-row edit form used the shared <see cref="TypeOptions"/>, which selects nothing, so
+    /// the browser showed the FIRST option — <see cref="SessionType.Keynote"/>, enum value 0. Saving
+    /// the form for any other reason (speakers, room, title) posted Keynote and stamped
+    /// <c>TypeIsManualOverride</c>, so no import ever corrected it. Measured in PROD 2026-09-15:
+    /// a Master Class became a Keynote and the Zoho diff mail asked for PRESENTATION → KEYNOTE.
+    /// </remarks>
+    public SelectList TypeOptionsFor(SessionType? current) => new(
         Enum.GetValues<SessionType>().Select(t => new { Value = t, Text = Display(t) }),
-        "Value", "Text");
+        "Value", "Text", current);
 
     /// <summary>§299.8/b7 — the config length quick-picks (label + minutes) for the
     /// filter select and the add/edit minute-input datalists. Per-edition CONFIG.</summary>

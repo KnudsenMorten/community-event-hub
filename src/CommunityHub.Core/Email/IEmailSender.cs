@@ -210,7 +210,11 @@ public sealed class EmailOptions
     /// recipient list that lived only in a slot setting could lose an address on a swap and fail
     /// silently. Config may still override it per environment.</para>
     /// </remarks>
-    public string SpeakerSessionAlsoTo { get; set; } = "kea@expertslive.dk, kent.agerlund@twoday.com";
+    /// <para>§1233 — <c>mok@</c> added back (operator 2026-09-15, <i>"yes please add mok"</i>), after
+    /// a held-speaker mail reached the shared audience but not him. The §1124 removal is reversed by
+    /// the same person who asked for it.</para>
+    public string SpeakerSessionAlsoTo { get; set; } =
+        "kea@expertslive.dk, kent.agerlund@twoday.com, mok@expertslive.dk";
 
     /// <summary>
     /// §1121 — <see cref="SpeakerSessionAlsoTo"/> parsed into addresses: split on comma/semicolon,
@@ -239,10 +243,10 @@ public sealed class EmailOptions
     /// drift with a longer list. ⇒ The audience is defined ONCE, here, and every site asks for it.
     /// The next speaker/session mail is then correct by construction rather than by remembering.</para>
     ///
-    /// <para>🔒 <b>The developer mailbox is deliberately NOT in this list</b> (<i>"remove
-    /// mok@expertslive.dk"</i>). §493 reserves <c>mok@</c> for SYSTEM alerts; a queue of pending
-    /// approvals is organizer work, and routing it to one person is what made it invisible when that
-    /// person was busy — the same reasoning §874 used for the held-speaker mail.</para>
+    /// <para>🔑 <b>§1233 — <c>mok@</c> is back in this list as an EXTRA</b> (operator 2026-09-15,
+    /// <i>"yes please add mok"</i>), reversing §1124's <i>"remove mok@expertslive.dk"</i>. The shared
+    /// inbox stays FIRST, so the mail is still organizer work that does not depend on one person —
+    /// which was §874's actual concern; he simply also wants to see it.</para>
     ///
     /// <para>⚠️ An empty <see cref="OrganizerInbox"/> does not silently drop the mail: the extras
     /// still receive it. Only an empty list overall means nobody is told, and that is a

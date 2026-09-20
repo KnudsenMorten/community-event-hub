@@ -71,7 +71,7 @@ public sealed class EmailTemplateRingStateRoleTests
     [Theory]
     [InlineData("task-deadline-reminder", 7)]              // every role owns tasks (PartyTaskSeeder alone spans six + attendees)
     [InlineData("onboarding-getting-started", 6)]          // 5 persona sets; attendees get none
-    [InlineData("getstarted-digest", 3)]                   // Speaker + Sponsor + Attendee
+    [InlineData("getstarted-digest", 7)]                   // §1227 — every role with a Get Started wizard
     [InlineData("welcome", 2)]                             // the roles with no welcome-{role} variant
     [InlineData("masterclass-question-posted", 2)]         // speakers of the class + signed-up attendees
     [InlineData("task-allocation-committed", 2)]           // volunteers + organizers
@@ -90,6 +90,11 @@ public sealed class EmailTemplateRingStateRoleTests
         Assert.Contains(ParticipantRole.Speaker, roles);
         Assert.Contains(ParticipantRole.Sponsor, roles);
         Assert.Contains(ParticipantRole.Attendee, roles);
+        // 🔴 §1227 — and the four RoleWizardService roles the builder's default branch also mails.
+        Assert.Contains(ParticipantRole.Volunteer, roles);
+        Assert.Contains(ParticipantRole.Organizer, roles);
+        Assert.Contains(ParticipantRole.Media, roles);
+        Assert.Contains(ParticipantRole.EventPartner, roles);
     }
 
     /// <summary>

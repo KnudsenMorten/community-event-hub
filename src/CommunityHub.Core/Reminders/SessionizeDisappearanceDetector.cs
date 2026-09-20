@@ -87,16 +87,27 @@ public sealed class SessionizeDisappearanceDetector
 
         // SPEAKERS: profiles linked to Sessionize (carry a SessionizeSpeakerId) whose id is
         // absent from the latest pull. Join Participant for a human-readable name.
+        //
+        // 🔒 §1231 — a speaker an organizer has DEACTIVATED is not reported. That decision is exactly
+        // what this mail asks for, so once it is taken the mail has nothing left to say — yet it
+        // repeated every 6 h forever, because the old Sessionize id stays on the profile. Measured in
+        // PROD 2026-09-15: a speaker re-added in Sessionize got a new id and a new participant; the
+        // old row was deactivated and its profile kept alerting.
+        // ⚠️ `DeactivatedByOrganizerAt`, not `IsActive`: an imported speaker can be inactive simply
+        // because nobody has reviewed them yet, and that speaker vanishing IS news.
         var linkedSpeakers = await _db.SpeakerProfiles
             .AsNoTracking()
-            .Where(sp => sp.EventId == eventId && sp.SessionizeSpeakerId != null && sp.SessionizeSpeakerId != "")
+            .Where(sp => sp.EventId == eventId && sp.SessionizeSpeakerId != null && sp.SessionizeSpeakerId != ""
+                         && sp.Participant.DeactivatedByOrganizerAt == null)
             .Select(sp => new
             {
                 sp.Id,
+                sp.ParticipantId,
                 SessionizeId = sp.SessionizeSpeakerId!,
                 Name = sp.Participant.FullName,
             })
             .ToListAsync(ct);
+        var participantIdByProfileId = linkedSpeakers.ToDictionary(s => s.Id, s => s.ParticipantId);
 
         var disappearedSpeakers = linkedSpeakers
             .Where(s => !presentSpeakers.Contains(s.SessionizeId))
@@ -147,7 +158,8 @@ public sealed class SessionizeDisappearanceDetector
 
         if (_alerts is null) return result;       // no ops sender wired ⇒ skip the email only
 
-        var emailed = await TryEmailAsync(eventId, disappearedSpeakers, disappearedSessions, ct);
+        var emailed = await TryEmailAsync(
+            eventId, disappearedSpeakers, disappearedSessions, participantIdByProfileId, ct);
         return result with { Emailed = emailed };
     }
 
@@ -170,6 +182,7 @@ public sealed class SessionizeDisappearanceDetector
         int eventId,
         IReadOnlyList<(int Id, string Name, string SessionizeId)> speakers,
         IReadOnlyList<(int Id, string Title, string SessionizeId)> sessions,
+        IReadOnlyDictionary<int, int> participantIdByProfileId,
         CancellationToken ct)
     {
         // §108: show the edition Code/DisplayName, never the raw numeric event id.
@@ -186,7 +199,7 @@ public sealed class SessionizeDisappearanceDetector
             $"[CEH] Sessionize entities disappeared — manual review ({label}): "
             + $"{speakers.Count} speaker(s), {sessions.Count} session(s)";
 
-        var html = BuildHtml(eventId, speakers, sessions);
+        var html = BuildHtml(eventId, speakers, sessions, participantIdByProfileId);
 
         // Throttle per edition so a still-missing set won't email on every import tick.
         var throttleKey = $"sessionize-disappearance-{eventId}";
@@ -200,7 +213,8 @@ public sealed class SessionizeDisappearanceDetector
     private static string BuildHtml(
         int eventId,
         IReadOnlyList<(int Id, string Name, string SessionizeId)> speakers,
-        IReadOnlyList<(int Id, string Title, string SessionizeId)> sessions)
+        IReadOnlyList<(int Id, string Title, string SessionizeId)> sessions,
+        IReadOnlyDictionary<int, int> participantIdByProfileId)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(
@@ -214,8 +228,13 @@ public sealed class SessionizeDisappearanceDetector
             sb.Append("<h3>Speakers</h3><ul>");
             foreach (var s in speakers)
             {
+                // §1231 — name the PARTICIPANT id (what the Participants page shows). The profile id
+                // alone was labelled "CEH id" and read as a different person entirely.
+                var who = participantIdByProfileId.TryGetValue(s.Id, out var pid)
+                    ? $"participant #{pid} (speaker profile {s.Id})"
+                    : $"speaker profile {s.Id}";
                 sb.Append(
-                    $"<li>{Enc(s.Name)} — CEH id {s.Id}, Sessionize id {Enc(s.SessionizeId)}</li>");
+                    $"<li>{Enc(s.Name)} — {who}, Sessionize id {Enc(s.SessionizeId)}</li>");
             }
             sb.Append("</ul>");
         }

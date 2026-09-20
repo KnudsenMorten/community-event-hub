@@ -61,16 +61,20 @@ public sealed class BoothMediaReachesTheMailTests
         Assert.NotEqual(before, after);
     }
 
-    /// <summary>The same for an uploaded file — "including files" was explicit.</summary>
+    /// <summary>
+    /// 🔴 §1230 — REVERSED. Collateral is no longer reported (its link is an internal SharePoint URL that
+    /// Backstage can never use — operator 2026-09-15: "the comparison should be turned off"), so an
+    /// upload alone must NOT move the stamp and re-send the hand-entry mail.
+    /// </summary>
     [Fact]
-    public void Adding_a_collateral_file_alone_changes_the_stamp()
+    public void Adding_a_collateral_file_alone_does_not_change_the_stamp()
     {
         var info = Info();
 
         var before = SponsorZohoSyncService.ManualReportHash(info);
         var after = SponsorZohoSyncService.ManualReportHash(info, new[] { Collateral() });
 
-        Assert.NotEqual(before, after);
+        Assert.Equal(before, after);
     }
 
     /// <summary>A SECOND video is a change too — the mail lists the whole set, so the set must hash.</summary>
@@ -115,12 +119,9 @@ public sealed class BoothMediaReachesTheMailTests
         }
     }
 
-    /// <summary>
-    /// A renamed collateral file is a different thing to upload, so it must re-report — the mail
-    /// carries the file NAME next to the URL precisely so he knows which one it is.
-    /// </summary>
+    /// <summary>§1230 — a renamed collateral file is not reported either, so it does not re-open the mail.</summary>
     [Fact]
-    public void Renaming_a_collateral_file_changes_the_stamp()
+    public void Renaming_a_collateral_file_does_not_change_the_stamp()
     {
         var info = Info();
         var a = SponsorZohoSyncService.ManualReportHash(
@@ -128,7 +129,7 @@ public sealed class BoothMediaReachesTheMailTests
         var b = SponsorZohoSyncService.ManualReportHash(
             info, new[] { Collateral(file: "one-pager-v2.pdf") });
 
-        Assert.NotEqual(a, b);
+        Assert.Equal(a, b);
     }
 
     /// <summary>

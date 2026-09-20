@@ -115,10 +115,14 @@ public sealed class EmailReminderCadencePerRoleTests
         var eventId = await NewEventAsync(db);
         var svc = NewService(db);
 
-        var reaches = EmailTemplateCatalog.RecipientRolesFor(SharedMail);
+        // §1227 — the digest reaches EVERY role (it always did; the list said three), so the rule is
+        // exercised on a recurring mail that genuinely reaches one role: the attendee party chaser.
+        const string singleRoleMail = "attendee-party-reminder";
+        Assert.True(EmailTemplateCatalog.IsRecurring(singleRoleMail));
+        var reaches = EmailTemplateCatalog.RecipientRolesFor(singleRoleMail);
         var stranger = Enum.GetValues<ParticipantRole>().First(r => !reaches.Contains(r));
 
-        Assert.False(await svc.SetIntervalAsync(eventId, SharedMail, 3, "org@example.test", stranger));
+        Assert.False(await svc.SetIntervalAsync(eventId, singleRoleMail, 3, "org@example.test", stranger));
         Assert.Empty(await db.EmailReminderCadences.Where(c => c.Role == stranger).ToListAsync());
     }
 

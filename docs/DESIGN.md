@@ -970,10 +970,83 @@ Speakers).
   — every session showing it has a null track; 16 of 25 live sessions are track-less.
   - ⇒ The diff expects **no track** for a ticked session: already null ⇒ **no line at all** (and so no
     §1002 hourly re-mail); a track still set ⇒ a **closable** "clear the Track field" line.
-  - The **create still sends the track** (operator decision): the sessions API cannot update or
-    delete, so a refused create is worse than a create plus a `DescribeCreateGaps` line telling him
-    to clear it. `SessionImportService` also stops reporting a Sessionize **Track** deviation for a
-    ticked session — that field is exactly what the tick box overrules.
+  - The **create still sends the track** (operator decision) **when the session has one**: the
+    sessions API cannot update or delete, so a refused create is worse than a create plus a
+    `DescribeCreateGaps` line telling him to clear it. `SessionImportService` also stops reporting a
+    Sessionize **Track** deviation for a ticked session — that field is exactly what the tick box
+    overrules.
+- **§1241 — the speaker's own confirmation gates the IMPORT.** Operator 2026-09-20: *"importer should
+  only import if IsConfirmed = true"*. The v2 session object carries `status` / `isInformed` /
+  `isConfirmed` (the *Informed & Confirmed* column on the Sessionize grid); CEH read none of them
+  until now. `SessionizeSession.IsConfirmed` is parsed and `SessionImportService` skips the row.
+  - 🔒 **The DTO default is `true`, and the parser only reads the key when it is PRESENT.**
+    `GetBool` cannot tell `false` from absent, and the importer now refuses unconfirmed rows — so a
+    view that does not carry the field would otherwise import **nothing at all**, silently. Same
+    shape as §326ax: an absent signal must never read as a negative one.
+  - ✅ **No release switch.** The flag flipping in Sessionize *is* the release; the next run creates
+    the session. Gating the import rather than the push is also the honest place — an unconfirmed
+    talk is not part of the programme, so it should not sit in the agenda or the graphics queue.
+  - ⚠️ **An already-imported session that goes un-confirmed is LEFT and reported, never deleted** —
+    deliberately unlike §1240b's `[NoImport]`. That row was never a session; this one is a real
+    session in a transient state, possibly already pushed to Backstage and already carrying attendee
+    questions, and the flag can flip back.
+  - `status` is **Accepted** on every live row (the endpoint is already filtered to the accepted
+    set), so it distinguishes nothing and is not read.
+  - 🛑 **`isPlenumSession` is NOT used**, though it looks like a native "common session" flag. Live
+    2026-09-20 it was set on a regular Intune-track session (operator: *"is NOT a common track"*),
+    so keying off it would have published that session to Backstage with no track. The `Common`
+    track stays the signal.
+- **The two Sessionize conventions (§1240).** `SessionizeConventions` is the single home for both of
+  them, read by the importer AND the push so they cannot drift apart.
+  - **`[NoImport]` in the title** (§1240b) ⇒ the row is **skipped by the import entirely** — it is a
+    planner-only slot for a session CEH already owns (the sponsor sessions). If one already exists as
+    a CEH session it is **removed**, through `SessionDeletionService` so the §327d blockers hold:
+    attendee questions / evaluations / master-class bookings refuse the delete and are reported.
+    `IsHubAdded` rows are excluded explicitly as well as by key space — the sponsor's real session is
+    hub-added, and inverting this rule would delete precisely what it protects. Deletes run AFTER the
+    main `SaveChangesAsync` (that service commits, and committing mid-loop would flush half-built
+    rows). `SessionDeletionService` is registered in the Jobs host for this.
+  - 🔒 Matched **anywhere in the title**, case-insensitively — never as a prefix. He moved the
+    markers to the END of the title the same day (*"Identity "black belt" session [Placeholder]"*),
+    and a prefix rule would have stopped matching silently at exactly that moment.
+  - 🛑 **There is NO `[Placeholder]` rule.** One existed for part of 2026-09-20 (imported, held back
+    from Backstage) and he **reversed it the same day**: *"i have changed my mind rgr [Placeholder].
+    i want it to show on zoho, so change logic and remove that gate"*. A placeholder is an ordinary
+    session carrying a working title; it publishes, marker and all, until he renames it in Sessionize.
+    ⚠️ The word still appears in live titles, so `SessionizeConventions` and
+    `SessionizeConventionsTests` both state the absence explicitly — otherwise the next reader finds
+    the word, finds no rule, and "restores" a gate nobody wants.
+  - 🔑 **Marker vs. category — the rule for anything added later.** `[NoImport]` may live in the
+    TITLE only because that row never reaches an audience. The title is the public display name, so a
+    `[Common]` marker would be published ("[Common] Keynote: TBD") — which is why
+    common-for-all-tracks is a TRACK. Operator 2026-09-20, ruling out his own suggestion: *"no then it
+    comes into displayname in zoho and ceh and we want not that"*. `[Placeholder]` is the live proof:
+    it publishes verbatim.
+  - **Sessionize track `Common`** ⇒ `IsCommonForAllTracks = true` with `Track` left **NULL** on
+    create. This is the one place the flag is set by an import rather than by the tick box; the
+    operator's framing is that they are the same thing. Storing the literal would be worse than
+    cosmetic — create-if-missing would put a `Common` track into the live agenda, on an API with no
+    delete. On an EXISTING row CEH still owns the track, so a move to `Common` is *reported*, and the
+    deviation line names the **tick box** rather than reading "Track: Security → Common".
+  - 🔴 **§1240d — a common session with no track is CREATED, with no `track` key in the payload.**
+    It was briefly *skipped* instead, on the rule that "Zoho's create requires a track". Operator
+    2026-09-20: *"these 2 should be created as well, why would you skip them"* · *"but they are both
+    common"* — and he was right, because the rule did not survive being checked:
+    - It is **his own §569 sentence** (*"you can NOT create a session without a track"*), never an
+      observed API rejection — inherited as fact and never separated from evidence.
+    - `BuildSessionPayload` **omits `track` entirely** when the id is null, so the payload is valid.
+    - §1011 live-verified `track: null` on 16 of 25 live sessions — it is a legitimate state, and
+      it is precisely the state a common session belongs in.
+    - ⚠️ **The asymmetry is what decides it:** a refused create returns HTTP 400 having written
+      **nothing**, so trying costs one reported failure and buys the answer; skipping is a permanent
+      manual chore bought with an assumption.
+    A blank track on an **ordinary** session still fails — that is a real data gap. A ticked session
+    that still carries a real track keeps §1011's behaviour (created *with* it, mail says to clear
+    it), and `DescribeCreateGaps` now takes `trackSent` so it never asks him to clear a field that
+    was never set (§594). `ResolveOrCreateTrackAsync` still refuses to create a track named `Common`,
+    for one typed by hand in the organizer editor.
+  - ⚠️ **`Community` is a real track** and is untouched — one letter apart from the marker, and
+    swallowing it would silently strip a track off the public agenda.
 - **Session type (§1012).** `ZohoOptions.SessionTypeMap` maps CEH `SessionType` → the Backstage
   value, resolved **per session** on create (it was one hard-coded `PushSessionType` for every
   session, so every CEH keynote was created as a Presentation), and `session_type` is now diffed.
@@ -1170,6 +1243,18 @@ Two interchangeable sources feed **one** upsert core. The upsert semantics live 
 the speaker bio/social fields, **never delete**, **never change role**, send the welcome
 email to new speakers). Rows/speakers with no email are skipped + reported. Imported speakers are all
 role Speaker; reclassifying a MasterclassSpeaker is a manual organizer action.
+
+**Which sessions are imported — the ENDPOINT decides, not CEH (verified 2026-09-15).** The import applies
+no filter on session status, time or room: `SessionizeApiClient.ParseSessions` keeps every session with
+a Sessionize id from the `All` view (the default; `Sessions` if configured), and
+`SessionImportService.ImportSessionsAsync` upserts all of them. The scope is therefore whatever the
+Sessionize API endpoint is set to expose. The edition's endpoint exposes **scheduled sessions only**
+(measured: 15 sessions in both views, all with a time and a room, matching Sessionize's "Scheduled
+15/63"); unscheduled accepted sessions never reach CEH. That is deliberate — the operator schedules in the
+Sessionize planner first. To stop sessions arriving while planning, switch the **`sessionize-import`**
+feature off (Settings → Speakers & sessions); it stops the scheduled pull and the manual pull button, and
+the next run after re-enabling catches up. ⚠️ On an EXISTING session the schedule fields (date/time, room,
+track, tags) are CEH-owned (§999): a slot moved in the Sessionize planner is reported by mail, not applied.
 
 **Speaker-owned bio + delta/full import modes (2026-06-15).** The bio fields — `Tagline`,
 `Biography`, `Blog`, `LinkedIn`, `Twitter`, and `PhotoUrl` (Sessionize `profilePicture`, now stored)
@@ -2608,7 +2693,7 @@ pinned against each job's real `[TimerTrigger]` by `JobCadenceWordsMatchCronTest
 | Mail | Job | Job runs | Who is due |
 |---|---|---|---|
 | `task-deadline-reminder` | `ReminderJob` | **daily 08:00 UTC** | ONLY on the due day, then repeats at the organizer's interval — **settable per role** (2026-08-05) |
-| `getstarted-digest` | `ReminderJob` | daily 08:00 UTC | not finished Get Started — repeats at the organizer's interval (default 14 days), **settable per role** (2026-08-05) |
+| `getstarted-digest` | `ReminderJob` | daily 08:00 UTC | not finished Get Started, every role (§1227) — repeats at the organizer's interval (default 14 days), **settable per role** (2026-08-05) |
 | `getstarted-deadline-reminder` | `ReminderJob` | daily 08:00 UTC | **one-shot**, before the configured speaker deadline |
 | attendee **party** + attendee **Master Class** task chasers | `ReminderJob` | daily 08:00 UTC | **every 14 days** from the task's creation |
 | `hotel-cutoff-reminder` | `ReminderJob` | daily 08:00 UTC | **3 days before** a hotel release deadline (organizers) |
@@ -4845,7 +4930,11 @@ template, never a private file that is merely missing, so a lost private file st
 
 **Publish workflow** (`.github/workflows/publish-public.yml`) fires on tags `public-vX.Y.Z`,
 `eldk-vX.Y.Z` (team-generic), or `eldkNN-vX.Y.Z` (event-specific — works for eldk27/eldk28/… with no
-workflow change). It checks out both repos side-by-side, runs `publish-to-public.ps1`, and
+workflow change). 🔑 **A PUBLIC RELEASE IS `public-vX.Y.Z`** — the public edition carries its own
+version line because forks follow it, and MAJOR means a change to the contract a fork depends on
+(config keys, feature keys, DB schema, integration interfaces, content layout). See
+[`docs/FORKING.md`](FORKING.md). The edition tags remain valid triggers and mean an internal
+milestone, not something a fork should track. It checks out both repos side-by-side, runs `publish-to-public.ps1`, and
 force-pushes the sanitized tree to public `main`. A `dryRun` workflow input shows the WhatIf plan
 without pushing.
 
@@ -6395,6 +6484,11 @@ sponsor was unfinished. `TotalSteps` remains the **display** base, so the number
    disappears when nothing is done (a heading reading *"Already done (0):"* would be worse than
    silence, and that is a new sponsor's state).
 3. Copy framing the list as the **company's** checklist rather than *"waiting for you"*.
+   ⚠️ **§1227 (2026-09-15): for SPONSORS ONLY.** The template is shared by every role, so this copy went
+   to speakers, volunteers, attendees, media, partners and organizers, whose wizards are personal. The
+   opening is now `{{introHtml}}` from `GetStartedDigestBuilder.IntroFor(role, …)`: the team sentence for
+   a sponsor, *"You have a few steps left to complete in Get Started for …"* for everyone else.
+   `EmailTemplateCatalog.RecipientRolesFor` now lists all seven roles the digest reaches.
 
 **Attribution is read, never inferred** — `SponsorUploadAudits.UploadedByEmail`/`UploadedAt` for the
 logos, `BoothCheckInSetByEmail`/`SetAt` for check-in, `SponsorInfo.LastUpdatedByEmail`/`UpdatedAt` for
@@ -7061,3 +7155,83 @@ Nothing else needs its own rule. The event-platform reconcile already pushes the
 name to **both** the sponsor and the exhibitor record whenever it differs from what is stored there,
 so correcting the source corrects both on the next pass. A second alerting channel for those records
 was considered and rejected: it would report the same company twice for one cause.
+
+## 2026-09-14/15 — Sponsor sync, uploads and ops-mail corrections (§1223, §1225, §1226, §1228–§1230)
+
+- **Webshop users are created with the full e-mail as username (§1226).** `CompanyManagerClient.CreateUserAsync`
+  used the address's local part; generic mailboxes (`info@`, `sales@`) collide across companies, so the
+  webshop answered `409` and the ERP reconcile reported NOT LINKED for a user that did not exist. The full
+  address is unique by definition. Existing users keep their usernames.
+- **A refused event-platform push of an API-writable field is retried, not mailed (§1225).** Zoho's generic
+  `400` ("An unexpected error occurred") appears inside its read-failure bursts, so it is not a reliable
+  verdict on the payload. In `SponsorZohoSyncService` the Refused outcome for sponsor, extra-category and
+  exhibitor records now logs (with Zoho's body, via the client) and retries next run. The hand-entry mail
+  carries only what has no API: booth videos and contact details.
+- **Booth collateral is not a hand-entry item (§1230).** Its link is an internal document-library URL the
+  event platform can never use. Collateral lines are removed and collateral is excluded from
+  `ManualReportHash`, so an upload does not re-open the mail. Booth videos remain (public URLs).
+- **Upload alerts and collateral file names use the sponsor name (§1229/§1229b).**
+  `SponsorBoothMaterialsFormService` resolves the name once with `SponsorCompanyNameService.ResolveFromLocalAsync`
+  (public → legal, local, no network) and uses it for the alert and as the file-name prefix; a company with
+  no synced name keeps its number in the file name rather than the "not synced" label. Nothing matches
+  collateral files by prefix (the booth-material row stores the URL).
+- **Sponsor Admin → Welcome shows company names and no stale "Blocked" (§1223).** The monitor applies the
+  sender's gates only; the SharePoint-folder guard was deleted from the sender in §816.
+- **An HTML comment or internal-only block must not sit between table rows in the intro (§1228).** The
+  public `/About` view strips internal-only blocks; a stripped block inside a table ends the table and the
+  following rows render as literal `| … |`. `IntroTableIntegrityTests` enforces this on the source.
+- **The session edit form pre-selects the row's type (§1232).** `SessionManagementService.UpdateSessionAsync`
+  writes the posted type AND stamps `TypeIsManualOverride` on every save, so the per-row select must post the
+  current value. It used the shared `TypeOptions` (nothing selected ⇒ the browser posts the first option,
+  `Keynote` = 0); it now uses `SessionsModel.TypeOptionsFor(r.Type)`. A wrongly-stamped Keynote is sent to the
+  event platform as `KEYNOTE` (the only mapped type; everything else is the default `PRESENTATION`).
+- **A sponsor contact may serve several companies (§1235).** `SponsorCompanyContact` is the person↔company
+  link and carries the per-company role flags — being a signer is something you are FOR A COMPANY, so a
+  group's global coordinator can coordinate every division while signing for only one.
+  `SponsorCompanyMembershipService` is the choke point ("which companies does this person serve?").
+  `Participant.SponsorCompanyId` remains the PRIMARY company and still drives the portal, the task scope and
+  every existing reader; a second company adds a link and never moves the person. The mail audience is the
+  union of primary + linked contacts, with the LINK's coordinator flag deciding for that company.
+  🔴 The ERP contact number is matched within the company's account: ERP contact numbers are per-customer
+  sequences, so two accounts both have a contact 6 and an event-wide match returns the wrong person.
+  ⚠️ Leaving one company's roster unlinks that company; the person is deactivated only when no link remains.
+- **The ERP→webshop reconcile creates a missing company (§1238).** Driven by the ERP sponsor customer
+  group: a customer with no webshop company is now ADOPTED onto a same-named company that has no ERP number
+  (PUT), else CREATED via `POST /companies` (`CompanyManagerClient.CreateCompanyAsync`, behind the same
+  external-write guard), then its contacts are added in the same pass. 🔒 Adopt-before-create because the
+  CM API has no delete route (§505). Package, billing and the public name stay owned by Company Manager.
+- **A sponsor company is named, never numbered — and an id is never pushed as a name (§1237).** Human-facing
+  strings resolve through `SponsorCompanyNameService.ResolveFromLocalAsync` (public → legal → captured;
+  local, no network), with the webshop/CM lookup as an enrichment rather than the only source. 🔴 The same
+  value is written to the event platform as the company NAME, so `SponsorCompanyName.IsUnresolved` +
+  `ShouldPushName(inZoho, ours, companyId)` refuse a bare id or the "(name not synced …)" label at every push
+  site: an unknown name is UNKNOWN, the §1140b blank-guard rule one value further out. ⚠️ Two places keep the
+  id honestly: a company whose record no longer exists, and the id inputs an organizer types before a record
+  exists.
+- **The sponsor portal scopes to the ACTING company (§1236).** `SponsorActingCompanyService` (web project)
+  resolves it from the `ceh.sponsor.company` cookie, **re-validated against the contact's §1235 links on
+  every read** and falling back to their primary company; the switcher in `_Layout` renders only for a
+  contact with more than one company, and `POST /Sponsor/SwitchCompany` records the choice. Every sponsor
+  page and upload endpoint asks this service — pinned by a source-scan test, because an inline lookup would
+  pin that page to the primary company and still appear to work.
+- **A shared contact is LINKED in the webshop, not re-created (§1235b/§1235c).** The webshop refuses a
+  duplicate address, so `ErpWebshopContactSyncService` links instead: the user id comes from
+  `Participant.CmUserId` when the hub holds it, otherwise from `GET /users?search=<email>`
+  (`FindUserIdByEmailAsync`, filtered to an EXACT e-mail match — that search is loose), then
+  `LinkUserToCompanyAsync`. ⚠️ An address neither side knows is reported, not invented.
+- **A social mention escapes its own content, not its delimiters (§1234).** `little` text format reserves
+  `\ | { } @ [ ] ( ) < > * _ ~`, and that applies INSIDE a mention too — display name and URN. The publisher
+  re-emits each mention as `@[` + escaped name + `](` + escaped URN + `)`. 🔴 One unescaped reserved
+  character does not degrade that one mention: the platform fails to parse the commentary and renders the
+  WHOLE post literally, markup and backslashes visible. A hyphen is not reserved, so most ids are unaffected —
+  which is what made this look intermittent.
+- **The speaker/session pending-task audience is one list (§1124, extended §1233).**
+  `EmailOptions.SpeakerSessionRecipients()` = the organizer inbox first, then the configurable extras
+  (`Email:SpeakerSessionAlsoTo`). Defaulted in code, not in an app setting, because slot settings swap on a
+  deploy; config may override per environment. All seven such mails call it, so the audience changes in one
+  place. ⚠️ The Sessionize DISAPPEARANCE alert is not one of the seven — it still goes to the engine-alert
+  recipient alone.
+- **The Sessionize disappearance scan skips organizer-deactivated speakers (§1231).**
+  `SessionizeDisappearanceDetector` filters on `Participant.DeactivatedByOrganizerAt == null` — not `IsActive`,
+  which is also false for an unreviewed import. The mail names `participant #N (speaker profile M)`; the
+  sync-queue delta keeps the profile id as its `EntityId`.

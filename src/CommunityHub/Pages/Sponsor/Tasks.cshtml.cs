@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Sponsors;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -28,6 +29,7 @@ public class TasksModel : PageModel
     private readonly SponsorDeliverablesService _deliverables;
     private readonly CommunityHub.Core.Email.CalendarInviteEmailService _calendarInvite;
     private readonly ILogger<TasksModel> _logger;
+    private readonly SponsorActingCompanyService _acting;
 
     // §603 — the shared artefact uploader, so a task can receive its file IN PLACE instead of
     // sending the sponsor to Company Details. Deliberately the SAME uploader every other surface
@@ -83,7 +85,8 @@ public class TasksModel : PageModel
         CommunityHub.Core.Integrations.SponsorZohoSyncService zohoSync,
         CommunityHub.Core.Config.SponsorConfigLoader sponsorConfig,
         CommunityHub.Core.Config.SponsorConfigOptions sponsorConfigOptions,
-        ILogger<TasksModel> logger)
+        ILogger<TasksModel> logger,
+        SponsorActingCompanyService acting)
     {
         _purchaseTasks = purchaseTasks;
         _zohoSync = zohoSync;
@@ -98,6 +101,7 @@ public class TasksModel : PageModel
         _taskBodies = taskBodies;
         _placeholders = placeholders;
         _logger = logger;
+        _acting = acting;
     }
 
     /// <summary>§603 — the file posted by an artefact-backed task's inline upload form.</summary>
@@ -172,7 +176,7 @@ public class TasksModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, ct); return Page(); }
 
         var task = await _db.Tasks.AsNoTracking().FirstOrDefaultAsync(
@@ -218,7 +222,7 @@ public class TasksModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null)
         {
             NoCompanyLink = true;
@@ -324,7 +328,7 @@ public class TasksModel : PageModel
 
     private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)
     {
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null)
         {
             NoCompanyLink = true;
@@ -488,7 +492,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) return RedirectToPage();
 
         // Posted as "{decisionKey}:{accept|decline}" — the key travels so a body carrying two
@@ -557,7 +561,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) return RedirectToPage();
 
         if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName)
@@ -620,7 +624,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) return RedirectToPage();
 
         var member = await _db.SponsorBoothMembers.FirstOrDefaultAsync(
@@ -662,11 +666,9 @@ public class TasksModel : PageModel
             : $"Synced — {result.AddedToZoho} added, {result.PulledFromZoho} pulled.";
     }
 
-    private async Task<string?> GetCompanyIdAsync(int participantId, CancellationToken ct) =>
-        await _db.Participants
-            .Where(p => p.Id == participantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+    // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+    private async Task<string?> GetCompanyIdAsync(int participantId, int eventId, CancellationToken ct) =>
+        await _acting.CurrentAsync(participantId, eventId, ct);
 
     /// <summary>
     /// §193 "Add Reminder": e-mail the signed-in sponsor contact a calendar
@@ -678,7 +680,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) return RedirectToPage();
 
         var task = await _db.Tasks.AsNoTracking().FirstOrDefaultAsync(

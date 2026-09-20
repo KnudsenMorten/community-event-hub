@@ -276,7 +276,18 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
         try
         {
             var baseName = Path.GetFileNameWithoutExtension(file.FileName);
-            var fileName = $"{Sanitize(companyId)}_{Sanitize(baseName)}{ext}";
+
+            // 🔴 §1229b — the SPONSOR NAME leads the file name too, not the company number. Operator
+            // 2026-09-15: *"use the sponsor name in the file name too"* (after "102_Det-danske-…pdf").
+            // Resolved once and reused for the alert below. Nothing matches collateral files by their
+            // prefix — the SponsorBoothMaterial row stores the URL — so existing files are unaffected.
+            // 🔒 A company with no synced name keeps its number rather than "(name not synced …)" in a
+            // file name that people read in SharePoint.
+            var sponsorName = (await Core.Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, eventId, new[] { companyId }, ct))[companyId];
+            var filePrefix = sponsorName == Core.Integrations.SponsorCompanyName.UnresolvedName(companyId)
+                ? companyId : sponsorName;
+            var fileName = $"{Sanitize(filePrefix)}_{Sanitize(baseName)}{ext}";
             await using var upload = file.OpenReadStream();
             var (_, webUrl, _) = await _sp!.UploadFileStreamAsync(
                 sp!.SiteUrl, sp.DriveName, CollateralFolder()!, fileName,
@@ -309,8 +320,13 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
                 var spec = new CommunityHub.Uploads.SponsorUploadSpec(
                     folder, "booth", CollateralExts, 25 * Mb, notify, IsWall: false);
 
+                // 🔴 §1229 — the sponsor's DISPLAY NAME, not its company number. Operator 2026-09-15, on
+                // "Sponsor upload — 102 — …": *"use displayname of sponsor for these mails - we dont
+                // know their number"*. This call passed `companyId` where the other upload paths pass
+                // the resolved name (resolved above, before the file name). Same canonical chain as the
+                // rest of the hub (public → legal); no captured name ⇒ the resolver's "not synced" label.
                 await CommunityHub.Uploads.SponsorUploadKinds.NotifyAsync(
-                    _notifyEmail, spec, companyId, fileName, webUrl, email, _log, ct, _emailCtx);
+                    _notifyEmail, spec, sponsorName, fileName, webUrl, email, _log, ct, _emailCtx);
             }
 
             model.CollateralFile = null;

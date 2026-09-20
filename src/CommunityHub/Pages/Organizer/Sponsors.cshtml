@@ -360,13 +360,18 @@
                     @foreach (var f in Model.OrphanedSponsorFacts)
                     {
                         <tr style="border-bottom:1px solid #eee;">
-                            <td style="padding:6px;font-family:monospace;">@f.CompanyId</td>
+                            @* §1237 — the NAME first; the CM id stays as a secondary. *@
+                            <td style="padding:6px;">
+                                @f.CompanyName
+                                <span style="font-family:monospace;color:#6b7280;">(@f.CompanyId)</span>
+                            </td>
                             <td style="padding:6px;color:#6b7280;">@(string.IsNullOrWhiteSpace(f.ShortDescription) ? "—" : f.ShortDescription)</td>
                             <td style="padding:6px;">
                                 @* type=button opens the shared confirm modal, then posts
                                    the hidden delete form with this facts-row id. *@
                                 <button type="button" class="js-delete-facts"
-                                        data-id="@f.Id" data-name="@f.CompanyId"
+                                        @* §1237 — the confirm modal names the company, not its id. *@
+                                        data-id="@f.Id" data-name="@f.CompanyName"
                                         aria-haspopup="dialog"
                                         style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
                                     @Localizer["SponsorFacts.Delete"]

@@ -1187,6 +1187,11 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoSyncService
 // §482b — also registered in the WEB host so a sponsor's contact edit can pull the change back
 // immediately (ERP → Company Manager → hub). Without this the edit was correct but invisible until
 // the scheduled sync ran, which reads as "my change did nothing".
+// §1235 — the person↔sponsor-company links (one contact may serve several companies).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorCompanyMembershipService>();
+// §1236 — which company a sponsor contact is acting for (the portal switcher). Scoped: it reads the
+// request's cookie and re-validates it against the contact's links on every read.
+builder.Services.AddScoped<CommunityHub.Sponsors.SponsorActingCompanyService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorContactSyncService>();
 // Stage 4b: create/link Zoho sponsor + exhibitor records from webshop data. The
 // exhibitor-create seam (exhibitor_requests) — Live; CanCreate guards it when the

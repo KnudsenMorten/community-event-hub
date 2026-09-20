@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Sponsors;
+using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -33,15 +34,18 @@ public class CaptureLeadModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SponsorLeadCaptureService _capture;
+    private readonly SponsorActingCompanyService _acting;
 
     public CaptureLeadModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        SponsorLeadCaptureService capture)
+        SponsorLeadCaptureService capture,
+        SponsorActingCompanyService acting)
     {
         _db = db;
         _participant = participant;
         _capture = capture;
+        _acting = acting;
     }
 
     public bool AccessDenied { get; private set; }
@@ -70,7 +74,7 @@ public class CaptureLeadModel : PageModel
             return Page();
         }
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (string.IsNullOrWhiteSpace(companyId))
         {
             NoCompanyLink = true;
@@ -92,7 +96,7 @@ public class CaptureLeadModel : PageModel
             return Page();
         }
 
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (string.IsNullOrWhiteSpace(companyId))
         {
             NoCompanyLink = true;
@@ -122,9 +126,7 @@ public class CaptureLeadModel : PageModel
     private async Task LoadRecentAsync(int eventId, string companyId, CancellationToken ct) =>
         RecentLeads = await _capture.GetBoothCapturedAsync(eventId, companyId, RecentTake, ct);
 
-    private async Task<string?> GetCompanyIdAsync(int participantId, CancellationToken ct) =>
-        await _db.Participants
-            .Where(p => p.Id == participantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
+    // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
+    private async Task<string?> GetCompanyIdAsync(int participantId, int eventId, CancellationToken ct) =>
+        await _acting.CurrentAsync(participantId, eventId, ct);
 }
