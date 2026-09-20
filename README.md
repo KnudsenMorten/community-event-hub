@@ -457,6 +457,37 @@ az functionapp config appsettings set -g $RG -n $FN_APP  --output none --setting
 | `Email__UnsubscribeSecret` | Optional — a long random string; without it, mass mails carry no unsubscribe link |
 | `Embedding__BackstageOrigin` | Optional — set by the infrastructure from `backstageEmbedOrigin`; see [Embedding](#embedding) |
 
+**Or do the same with one command** — [`scripts/Set-CommunitySettings.ps1`](scripts/Set-CommunitySettings.ps1)
+writes these settings to **both** apps, refuses to leave the environment half-configured, and can tell
+you what is wrong with one that is already deployed:
+
+```powershell
+# Diagnose a deployed environment. Read-only — changes nothing.
+./scripts/Set-CommunitySettings.ps1 -Check `
+    -ResourceGroup $RG -WebAppName $WEB_APP -JobsAppName $FN_APP
+
+# Write the settings to a file first, to review before applying.
+./scripts/Set-CommunitySettings.ps1 -OutFile settings.json `
+    -SmtpHost smtp.example.net -SmtpPort 587 -SmtpUsername <user> `
+    -SmtpKey '@Microsoft.KeyVault(VaultName=<vault>;SecretName=<secret>)' `
+    -FromAddress 'noreply@your-event.example' -FromDisplayName 'Demo Community' `
+    -OrganizerInbox 'organizers@your-event.example' `
+    -RedirectAllTo 'you@your-event.example'
+
+# Or apply straight to both apps, turning on the integrations you use.
+./scripts/Set-CommunitySettings.ps1 -Apply `
+    -ResourceGroup $RG -WebAppName $WEB_APP -JobsAppName $FN_APP `
+    -SmtpHost smtp.example.net -SmtpUsername <user> -SmtpKey '<kv-ref>' `
+    -FromAddress 'noreply@your-event.example' -EnableSessionize
+```
+
+`-Check` reports settings that are missing, settings still pointing at the upstream community, and
+whether an enabled integration is actually configured. `-RedirectAllTo` sends every message to one
+inbox instead of its real recipient — the safe way to run a new environment; clearing it is how you go
+live. Integration switches (`-EnableZoho`, `-EnableSessionize`, `-EnableWooCommerce`, `-EnableLinkedIn`,
+`-EnableSharePoint`, `-EnableOpenAI`, …) are written **false** unless passed, so one run gives a known
+posture. Full reference: [`docs/FORKING.md` §3a](docs/FORKING.md).
+
 Every integration (Sessionize, Zoho, webshop, finance system, SharePoint, LinkedIn, AI) is optional and
 stays off until you configure its section. If you enable one, also override its upstream defaults:
 `ContentStudio__EventName`, `ContentStudio__TicketsUrl`, `ContentStudio__AgendaUrl` (social posts),
@@ -671,6 +702,8 @@ your real event, keep them in a private copy.
 | **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, scheduled jobs, e-mail, build, infrastructure, deploy and the operational runbook. |
 | **[`config/README.md`](config/README.md)** | Every per-edition configuration and content file, what reads it, and how to point the app at your own. |
 | **[`docs/FORKING.md`](docs/FORKING.md)** | Running your own copy and still taking upstream updates: what to customize, how to switch integrations off or replace them, and what upstream promises not to break. |
+| **[`scripts/Set-CommunitySettings.ps1`](scripts/Set-CommunitySettings.ps1)** | Configure a new environment (SMTP + which integrations are on), and `-Check` a deployed one that isn't working. See [Getting started §4](#4-secrets-and-app-settings) and [`docs/FORKING.md` §3a](docs/FORKING.md). |
+| **[`scripts/Set-FeatureBaseline.ps1`](scripts/Set-FeatureBaseline.ps1)** | Capture which features are enabled to a JSON file, and re-apply it to another environment. See [`docs/FORKING.md` §3b](docs/FORKING.md). |
 | [`docs/ROLE-FLOWS.md`](docs/ROLE-FLOWS.md), [`docs/UX-FLOWS-DETAILED.md`](docs/UX-FLOWS-DETAILED.md), [`docs/SECURITY-NOTES.md`](docs/SECURITY-NOTES.md) | Supporting design notes. |
 
 The public mirror is updated milestone by milestone; every public commit names the private source commit
