@@ -61,13 +61,16 @@ var host = new HostBuilder()
     // removal ran FIRST and `AddApplicationInsightsTelemetryWorkerService()` then re-added its rule
     // afterwards — the code read correctly, compiled, deployed, and changed nothing. It MUST stay
     // after the ConfigureServices block that registers the AI worker service.
-    .ConfigureLogging(logging =>
+    .ConfigureLogging((context, logging) =>
     {
         logging.Services.Configure<Microsoft.Extensions.Logging.LoggerFilterOptions>(options =>
         {
             var aiRule = options.Rules.FirstOrDefault(r => r.ProviderName
                 == "Microsoft.Extensions.Logging.ApplicationInsights.ApplicationInsightsLoggerProvider");
             if (aiRule is not null) options.Rules.Remove(aiRule);
+
+            // §1317 — EF Core + HttpClient at Warning unless Diagnostics__VerboseLogging=true.
+            DiagnosticsLogging.Apply(options, context.Configuration);
         });
     })
     .Build();

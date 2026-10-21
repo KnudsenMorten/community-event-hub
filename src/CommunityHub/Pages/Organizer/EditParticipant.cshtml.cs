@@ -28,12 +28,19 @@ public class EditParticipantModel : PageModel
     // constructions are unchanged; wired by DI at runtime.
     private readonly Core.Organizer.ParticipantDeactivationService? _reactivate;
 
+    // §1296 — hotel coverage: the resolved "we cover X of Y booked" read-out and the one editable
+    // EXTRA-nights field. Optional so the existing test constructions are unchanged; DI wires it.
+    // 🔒 A missing service here makes the whole block ABSENT, never wrong: the page would rather
+    // show nothing about somebody's hotel bill than a number it could not resolve.
+    private readonly Core.Entitlements.HotelCoverageService? _coverage;
+
     public EditParticipantModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant,
         WelcomeEmailService welcome, AttendeeOneDayWelcomeEmailService attendeeWelcome,
         TimeProvider clock,
         CommunityHub.Forms.RoleChangeTaskReconciler? roleChange = null,
-        Core.Organizer.ParticipantDeactivationService? reactivate = null)
+        Core.Organizer.ParticipantDeactivationService? reactivate = null,
+        Core.Entitlements.HotelCoverageService? coverage = null)
     {
         _db = db;
         _participant = participant;
@@ -42,6 +49,71 @@ public class EditParticipantModel : PageModel
         _clock = clock;
         _roleChange = roleChange;
         _reactivate = reactivate;
+        _coverage = coverage;
+    }
+
+    // ---------------------------------------------------------------------
+    //  §1296 hotel coverage
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// §1296 — this person's resolved coverage, or null when it does not apply to them (attendee /
+    /// sponsor / uncategorized speaker) or the service is not wired.
+    /// </summary>
+    public Core.Entitlements.ParticipantHotelCoverage? Coverage { get; private set; }
+
+    /// <summary>The edition's standard for their class, in words ("2 nights", "whole stay").</summary>
+    public string? CoverageStandardText { get; private set; }
+
+    /// <summary>Bound: extra nights ELDK covers for this person, on top of their class standard.</summary>
+    [BindProperty] public int ExtraNights { get; set; }
+
+    /// <summary>Bound: the optional reason, so a hotel bill can be explained months later.</summary>
+    [BindProperty] public string? ExtraNightsNote { get; set; }
+
+    /// <summary>
+    /// §1296 — set this person's EXTRA covered nights. The ONLY per-person coverage control there
+    /// is: the standard comes from Settings, and an absolute override was deliberately never built
+    /// (two fields that both answer "how many nights?" is one too many).
+    /// </summary>
+    [CommunityHub.Audit.Audit("Set a participant's extra hotel nights", TargetType = "HotelCoverageExtra")]
+    public async Task<IActionResult> OnPostExtraNightsAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+        // No participant id ⇒ this is the "add a person" form, which has nobody to cover yet.
+        if (_coverage is null || Id is not int pid) return RedirectToPage(new { Id });
+
+        await _coverage.SetExtraNightsAsync(
+            me.EventId, pid, ExtraNights, ExtraNightsNote, me.Email, ct);
+
+        var resolved = await _coverage.ResolveAsync(me.EventId, pid, ct);
+        return RedirectToPage(new
+        {
+            Id,
+            message = $"Extra nights saved. We now cover {resolved.Result.Covered} of "
+                    + $"{resolved.Result.Booked} booked night(s); the person pays "
+                    + $"{resolved.Result.OwnExpense}.",
+        });
+    }
+
+    /// <summary>Load the coverage block (no-op when the service is not wired or is not applicable).</summary>
+    private async Task LoadCoverageAsync(int eventId, int participantId, CancellationToken ct)
+    {
+        if (_coverage is null) return;
+
+        var resolved = await _coverage.ResolveAsync(eventId, participantId, ct);
+        if (resolved.Class is null) return;   // hotel coverage does not apply to this person
+
+        Coverage = resolved;
+        CoverageStandardText = Core.Entitlements.HotelCoverage.Describe(resolved.Rule);
+        ExtraNights = resolved.Result.Extra;
+        ExtraNightsNote = await _db.HotelCoverageExtras
+            .AsNoTracking()
+            .Where(x => x.EventId == eventId && x.ParticipantId == participantId)
+            .Select(x => x.Note)
+            .FirstOrDefaultAsync(ct);
     }
 
     public bool AccessDenied { get; private set; }
@@ -168,7 +240,7 @@ public class EditParticipantModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         if (Id is null)
         {
@@ -192,6 +264,7 @@ public class EditParticipantModel : PageModel
 
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         await LoadSpeakerDetailAsync(p, ct);
+        await LoadCoverageAsync(me.EventId, p.Id, ct);   // §1296
         return Page();
     }
 

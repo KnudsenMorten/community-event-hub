@@ -17,8 +17,7 @@
            now. The link is not a courtesy: the operator asked for the second board to be retired
            precisely because two of them disagreed, and a retired page with no forwarding address is
            how somebody ends up trusting a bookmark to a board that no longer exists. *@
-        <p>The sponsor maintenance actions — contact sync, coordinator migration, Zoho provisioning
-           and the ERP&nbsp;&rarr;&nbsp;webshop reconcile.</p>
+        <p>The sponsor maintenance actions — Zoho re-sync, Zoho provisioning and carrying a profile forward.</p>
         <p style="font-size:13.5px;color:#555;">
             Looking for sponsor <strong>status</strong>? It moved to
             <a asp-page="/Organizer/ParticipantStatus" asp-route-role="@ParticipantRole.Sponsor">Participant status</a>,
@@ -34,32 +33,16 @@
         }
 
         <div style="margin:10px 0 16px;padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid #2563eb;border-radius:8px;">
-            <strong>Webshop → Zoho maintenance.</strong>
+            <strong>Zoho maintenance.</strong>
             <p style="margin:4px 0 8px;font-size:13.5px;color:#374151;">
-                Fill each sponsor's Event Coordinator from the webshop default coordinator (only where empty — CEH owns it once set),
-                then re-sync every sponsor record to Zoho Backstage. This also corrects the older UTF-8 mojibake (æ/ø/å) in Zoho.
+                Re-sync every sponsor record to Zoho Backstage (the coordinator is CEH's own — people come from e-conomic).
+                This also corrects the older UTF-8 mojibake (æ/ø/å) in Zoho.
             </p>
             <form method="post" asp-page-handler="MigrateResync" style="display:inline;margin:0;">
-                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.CompanyCount">Migrate coordinators &amp; re-sync all to Event System (Zoho)</button>
+                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.CompanyCount">Re-sync all to Event System (Zoho)</button>
             </form>
             <form method="post" asp-page-handler="Provision" style="display:inline;margin:0 0 0 8px;">
                 <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.CompanyCount">Create / link missing in Event System (Zoho)</button>
-            </form>
-            <form method="post" asp-page-handler="ReconcileErp" style="display:inline;margin:0 0 0 8px;">
-                <button type="submit" data-ceh-confirm="confirmReconcileErp">Reconcile ERP → webshop (users + defaults)</button>
-            </form>
-            @* §496c — the missing LAST leg. The buttons above push ERP → webshop; this PULLS
-               webshop → hub, so a contact added directly in Company Manager shows up in CEH without
-               waiting for the scheduled pull. Idempotent — pressing it twice changes nothing. *@
-            <form method="post" asp-page-handler="SyncContacts" style="display:inline;margin:0 0 0 8px;">
-                <button type="submit">Sync contacts webshop → hub (now)</button>
-            </form>
-            @* §1158 — the one-time public-name sweep. PREVIEW is a separate, unconfirmed button on
-               purpose: it writes nothing, so making him confirm it would train him to click through
-               the confirmation that actually matters. *@
-            <form method="post" asp-page-handler="NormalizePublicNames" style="display:inline;margin:0 0 0 8px;">
-                <input type="hidden" name="apply" value="false" />
-                <button type="submit">Preview public-name cleanup (A/S, ApS, GmbH &hellip;)</button>
             </form>
 
             @* §1173 — when a sponsor re-registers under a new VAT number it becomes a NEW company:
@@ -81,10 +64,6 @@
                     <button type="submit" name="apply" value="true" data-ceh-confirm="confirmCarryForward">Carry it forward</button>
                 </form>
             </div>
-            <form method="post" asp-page-handler="NormalizePublicNames" style="display:inline;margin:0 0 0 8px;">
-                <input type="hidden" name="apply" value="true" />
-                <button type="submit" data-ceh-confirm="confirmNormalizeNames">Apply public-name cleanup</button>
-            </form>
             <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
                 <strong>Create / link</strong> provisions sponsors/exhibitors that don't exist in Zoho yet (replaces the legacy sync script — also runs automatically after each order pull when enabled).
             </p>
@@ -92,16 +71,10 @@
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmProvision",
             Title: "Create / link sponsors in Zoho?",
-            Body: "This creates or links {count} sponsor compan(ies) in Zoho Backstage from webshop data. Existing/linked companies are left unchanged. Continue?",
+            Body: "This creates or links {count} sponsor compan(ies) in Zoho Backstage from CEH data. Existing/linked companies are left unchanged. Continue?",
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel",
             DefaultCount: Model.CompanyCount.ToString())' />
-        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
-            Id: "confirmReconcileErp",
-            Title: "Reconcile ERP to webshop?",
-            Body: "This creates missing Company Manager users from the backend group-1 contacts and sets each company default signer + event coordinator from the contact roles (never overwriting a curated default). Contacts missing a Role:1/Role:2 are emailed to the organizer. Continue?",
-            ConfirmLabel: "Run it",
-            CancelLabel: "Cancel")' />
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmCarryForward",
             Title: "Carry the sponsor profile forward?",
@@ -109,15 +82,9 @@
             ConfirmLabel: "Carry it forward",
             CancelLabel: "Cancel")' />
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
-            Id: "confirmNormalizeNames",
-            Title: "Remove legal forms from public names?",
-            Body: "This rewrites the PUBLIC company name in the webshop for every sponsor whose name ends in a legal form (A/S, ApS, GmbH, LLC, K/S, AG …), so the audience-facing name reads like a brand. The billing/legal name is NOT touched. Sponsors can edit their public name afterwards and this will not run again on its own. Preview it first if you have not. Continue?",
-            ConfirmLabel: "Rewrite the names",
-            CancelLabel: "Cancel")' />
-        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmMigrateResync",
-            Title: "Migrate coordinators & re-sync to Zoho?",
-            Body: "This fills missing Event Coordinators from the webshop and re-syncs {count} sponsor compan(ies) to Zoho Backstage, overwriting the synced fields there. Continue?",
+            Title: "Re-sync all sponsors to Zoho?",
+            Body: "This re-syncs {count} sponsor compan(ies) to Zoho Backstage, overwriting the synced fields there. Continue?",
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel",
             DefaultCount: Model.CompanyCount.ToString())' />

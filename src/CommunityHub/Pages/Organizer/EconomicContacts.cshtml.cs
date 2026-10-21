@@ -59,30 +59,18 @@ public class EconomicContactsModel : PageModel
                 using var scope = scopeFactory.CreateScope();
                 var sp = scope.ServiceProvider;
 
-                // Leg 1 — ERP → Company Manager, scoped to THIS customer (§482b).
-                var erpToCm = sp.GetService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
-                if (erpToCm is not null)
-                {
-                    await erpToCm.SyncAsync(onlyCustomerNumber: erpCustomerNumber, ct: ct);
-                }
-
-                // Leg 2 — Company Manager → hub, for the company carrying this ERP number.
-                var cm = sp.GetService<CommunityHub.Core.Integrations.CompanyManagerClient>();
-                var cmToHub = sp.GetService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
+                // 🔴 §1312 — e-conomic → the hub DIRECTLY, for sponsors and potential sponsors alike. It used to go e-conomic →
+                // Company Manager → hub, and that path refused a potential sponsor, so a role saved here for SquaredUp never
+                // arrived (operator 2026-09-30: "add this 30 min ago" · "we dont use company manager anymore").
+                var erpToHub = sp.GetService<CommunityHub.Core.Integrations.Webshop.ShopErpRoleSyncService>();
                 var db = sp.GetService<CommunityHub.Core.Data.CommunityHubDbContext>();
-                if (cm is null || cmToHub is null || db is null) return;
+                if (erpToHub is null || db is null) return;
 
                 var eventId = await db.Events.Where(e => e.IsActive)
                     .Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
                 if (eventId is null) return;
 
-                var companies = await cm.ListCompaniesAsync(ct);
-                var match = companies.FirstOrDefault(c =>
-                    int.TryParse(c.ErpCustomerNumber, out var n) && n == erpCustomerNumber);
-                if (match is not null)
-                {
-                    await cmToHub.SyncCompanyAsync(eventId.Value, match.Id, ct);
-                }
+                await erpToHub.RunAsync(eventId.Value, ct, onlyErpCustomerNumber: erpCustomerNumber);
             }
             catch (Exception ex)
             {
@@ -111,7 +99,7 @@ public class EconomicContactsModel : PageModel
     private CurrentParticipant? Guard()
     {
         var me = _participant.Current;
-        if (me is null || me.Role != ParticipantRole.Organizer) { AccessDenied = me is not null; return null; }
+        if (me is null || !me.Role.HasOrganizerAccess()) { AccessDenied = me is not null; return null; }
         return me;
     }
 

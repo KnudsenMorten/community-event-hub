@@ -140,7 +140,9 @@ public sealed class InvoicePayloadMatchesTheScriptTests
 
         Assert.Equal("ELDK27 - Experts Live Denmark", options.InvoiceHeading);
         Assert.Equal("Sponsorship", options.InvoiceTextLine1);
-        Assert.Equal("Danish", options.InvoiceLayoutNameLike);   // §809.2 — "Dansk" matched nothing
+        // §1312 — ENGLISH now, for every invoice (operator 2026-09-29: "use english as default template for all"). It was
+        // the script's "Danish" (§809.2 — "Dansk" matched nothing); layouts listed live: 21 Danish, 23 English.
+        Assert.Equal("English", options.InvoiceLayoutNameLike);
 
         // 🔴 §811(c) — his CHANGE, not the script's value: *"our ref should be employee 3 - Morten
         // Waltorp Knudsen"*. The script's own invoices carry employee 1 (Martin Byskov), so this is
@@ -174,5 +176,25 @@ public sealed class InvoicePayloadMatchesTheScriptTests
         var recipient = Assert.IsType<Dictionary<string, object?>>(payload["recipient"]);
         var vatZone = Assert.IsType<Dictionary<string, object?>>(recipient["vatZone"]);
         Assert.Equal(1, vatZone["vatZoneNumber"]);
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — a customer with no zip / city (SquaredUp, UK, whole address on one line) gets them LEFT OUT: a null is a
+    /// 400 "Expected String but got Null. Path 'recipient.zip'" (ELDK27-0009, 2026-10-01). A filled address part is still sent.
+    /// </summary>
+    [Fact]
+    public void A_missing_address_part_is_left_out_never_sent_as_null()
+    {
+        var oneLine = Customer() with { Address = "Pearce Building, West Street, Maidenhead SL6 1RL", Zip = null, City = null };
+
+        var recipient = Assert.IsType<Dictionary<string, object?>>(LiveEconomicInvoiceClient.BuildPayload(Invoice(oneLine))["recipient"]);
+        Assert.False(recipient.ContainsKey("zip"));
+        Assert.False(recipient.ContainsKey("city"));
+        Assert.Equal("Pearce Building, West Street, Maidenhead SL6 1RL", recipient["address"]);
+        Assert.DoesNotContain(recipient.Values, v => v is null);
+
+        var full = Assert.IsType<Dictionary<string, object?>>(LiveEconomicInvoiceClient.BuildPayload(Invoice(Customer()))["recipient"]);
+        Assert.Equal("2100", full["zip"]);
+        Assert.Equal("København", full["city"]);
     }
 }

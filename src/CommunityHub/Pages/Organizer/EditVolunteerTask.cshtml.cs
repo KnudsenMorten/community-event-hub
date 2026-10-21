@@ -58,7 +58,7 @@ public class EditVolunteerTaskModel : PageModel
 
     [BindProperty] public InputModel Input { get; set; } = new();
 
-    public record TaskView(int Id, string Bucket, string Subcategory);
+    public record TaskView(int Id, string Bucket, string? Subcategory);
     public record TaskRow(int Id, string Title, string Bucket, bool HasDescription);
 
     /// <summary>The editable shared task definition. Mirrors the
@@ -88,7 +88,7 @@ public class EditVolunteerTaskModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
         AiEnabled = _guidance.IsAiBacked;
@@ -149,11 +149,11 @@ public class EditVolunteerTaskModel : PageModel
     private async Task<bool> LoadTaskAsync(CurrentParticipant me, int taskId, CancellationToken ct)
     {
         var task = await _db.VolunteerTasks
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category).Include(t => t.Subcategory)
             .FirstOrDefaultAsync(t => t.Id == taskId && t.EventId == me.EventId, ct);
         if (task is null) return false;
 
-        Editing = new TaskView(task.Id, task.Subcategory.Category.Name, task.Subcategory.Name);
+        Editing = new TaskView(task.Id, task.Category.Name, task.Subcategory?.Name);
         Input = new InputModel
         {
             TaskId = task.Id,
@@ -177,12 +177,12 @@ public class EditVolunteerTaskModel : PageModel
     {
         var tasks = await _db.VolunteerTasks
             .Where(t => t.EventId == me.EventId)
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category).Include(t => t.Subcategory)
             .ToListAsync(ct);
 
         AllTasks = tasks
             .Select(t => new TaskRow(
-                t.Id, t.Title, t.Subcategory.Category.Name,
+                t.Id, t.Title, t.Category.Name,
                 !string.IsNullOrWhiteSpace(t.Description)))
             .OrderBy(t => t.Bucket)
             .ThenBy(t => t.Title)

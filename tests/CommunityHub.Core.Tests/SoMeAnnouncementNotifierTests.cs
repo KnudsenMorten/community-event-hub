@@ -98,4 +98,33 @@ public sealed class SoMeAnnouncementNotifierTests
         Assert.Contains("optional", block, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("thanks for following", block, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// 🔴 Operator 2026-10-01: the "Follow" link was broken — the follow card (speaker AND sponsor
+    /// announcement pages) and this mail linked <c>/company/experts-live-denmark/</c>, which LinkedIn
+    /// answers with 404. The invite must link the one shared constant, and no source file may carry
+    /// the dead slug again.
+    /// </summary>
+    [Fact]
+    public void The_follow_invite_links_the_real_company_page_and_the_dead_slug_is_gone()
+    {
+        Assert.Equal("https://www.linkedin.com/company/expertslivedk", EventLinkedInPage.Url);
+        Assert.Contains($"href=\"{EventLinkedInPage.Url}\"", SoMeAnnouncementNotifier.FollowBlock(null),
+            StringComparison.Ordinal);
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        var offenders = Directory.EnumerateFiles(Path.Combine(dir!.FullName, "src"), "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                     || f.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                     && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(f => !f.EndsWith("EventLinkedInPage.cs", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("company/experts-live-denmark", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(offenders.Count == 0, "Dead LinkedIn slug still linked in: " + string.Join(", ", offenders));
+    }
 }

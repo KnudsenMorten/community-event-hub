@@ -86,21 +86,17 @@ public sealed record SponsorWizardView(IReadOnlyList<SponsorWizardStep> Steps)
 public sealed class SponsorWizardService
 {
     private readonly CommunityHubDbContext _db;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly EconomicContactAdminService _erpContacts;
     private readonly ILogger<SponsorWizardService> _log;
     private readonly Core.Content.WelcomeCopyStore? _welcome;
 
     public SponsorWizardService(
-        CommunityHubDbContext db, CompanyManagerClient cm, CompanyManagerOptions cmOptions,
+        CommunityHubDbContext db,
         EconomicContactAdminService erpContacts, ILogger<SponsorWizardService> log,
         // §680 — optional + last, the same pattern the other three wizard services use.
         Core.Content.WelcomeCopyStore? welcome = null)
     {
         _db = db;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _erpContacts = erpContacts;
         _log = log;
         _welcome = welcome;
@@ -279,13 +275,12 @@ public sealed class SponsorWizardService
     /// </summary>
     private async Task<bool?> ContactsDoneAsync(string companyId, CancellationToken ct)
     {
-        if (!_cmOptions.Enabled || !_erpContacts.CanWrite || !int.TryParse(companyId, out var cid))
-            return null;
+        if (!_erpContacts.CanWrite) return null;
         try
         {
-            var company = await _cm.GetCompanyAsync(cid, ct);
-            if (company is null || !int.TryParse(company.ErpCustomerNumber, out var erpNo) || erpNo <= 0)
-                return null;
+            // §1312 — the e-conomic number from CEH's own company record (Company Manager is retired).
+            var erpNo = await CommunityHub.Core.Integrations.Webshop.ShopCompanyErp.CustomerNumberAsync(_db, companyId, ct) ?? 0;
+            if (erpNo <= 0) return null;
             var contacts = await _erpContacts.ListContactsAsync(erpNo, ct);
             return contacts.Count > 0;
         }

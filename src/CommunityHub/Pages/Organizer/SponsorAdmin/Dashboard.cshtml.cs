@@ -47,63 +47,10 @@ public class DashboardModel : PageModel
     [TempData] public string? ActionMessage { get; set; }
 
     /// <summary>
-    /// One-time (re-runnable) maintenance: fill each sponsor's Event Coordinator
-    /// from the webshop default coordinator where empty, then re-sync every sponsor
+    /// Re-runnable maintenance: re-sync every sponsor
+    /// (§1312 — no webshop coordinator fill any more: Company Manager is retired)
     /// record to Zoho Backstage (fixes the legacy UTF-8 mojibake + pushes contacts).
     /// </summary>
-    /// <summary>
-    /// §496c — pull sponsor CONTACTS from Company Manager into the hub, on demand.
-    ///
-    /// <para><b>Why this is needed.</b> §493b syncs immediately when a sponsor edits contacts on
-    /// the hub's Company Details page — but a contact added DIRECTLY in Company Manager (or in the
-    /// ERP, then pushed to CM) raises no event the hub can see. Until the next scheduled
-    /// <c>SponsorOrderPullService</c> run, the person exists in CM and is invisible in CEH, with no
-    /// way to hurry it along. The operator hit exactly that: <i>"i see the new contact in CM module
-    /// - mh@2linkit.net - fix so i also see in ceh"</i>.</para>
-    ///
-    /// <para>Idempotent — it is the same per-company sync the scheduled pull runs, so pressing it
-    /// twice changes nothing the second time.</para>
-    /// </summary>
-    public async Task<IActionResult> OnPostSyncContactsAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        var db = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>();
-        var sync = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
-
-        // Every sponsor company the hub knows about for this edition.
-        var companyIds = await db.Participants
-            .Where(p => p.EventId == me.EventId
-                        && p.Role == CommunityHub.Core.Domain.ParticipantRole.Sponsor
-                        && p.SponsorCompanyId != null)
-            .Select(p => p.SponsorCompanyId!)
-            .Distinct()
-            .ToListAsync(ct);
-
-        int companies = 0, created = 0, updated = 0, failed = 0;
-        foreach (var idStr in companyIds)
-        {
-            if (!int.TryParse(idStr, out var cmId)) continue;
-            try
-            {
-                // One company's Company Manager hiccup must not abandon the rest — the same
-                // per-company tolerance the scheduled pull uses.
-                var r = await sync.SyncCompanyAsync(me.EventId, cmId, ct);
-                companies++;
-                created += r.ParticipantsCreated;
-                updated += r.ParticipantsUpdated;
-            }
-            catch { failed++; }
-        }
-
-        ActionMessage = $"Contact sync: {companies} company(ies) checked, {created} contact(s) created, "
-                        + $"{updated} updated"
-                        + (failed > 0 ? $", {failed} company(ies) could not be reached." : ".");
-        return RedirectToPage();
-    }
-
     public async Task<IActionResult> OnPostMigrateResyncAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -215,116 +162,6 @@ public class DashboardModel : PageModel
     }
 
     /// <summary>
-    /// §1158 — the ONE-TIME sweep that takes the legal form (A/S, ApS, GmbH, LLC, K/S, AG …) off
-    /// every sponsor's PUBLIC name in the webshop. Preview by default; <c>apply=true</c> writes.
-    /// </summary>
-    /// <remarks>
-    /// <para>Operator 2026-08-31: <i>"i would like a one-time run through all sponsors in the
-    /// webshop and adjust the public name and remove these legal company types acronyms"</i>.</para>
-    ///
-    /// <para>🔒 <b>Two presses, on purpose.</b> He also said <i>"i am worried to automate this"</i>
-    /// and <i>"as a sponsor can change the field at any time"</i>. Preview shows exactly which names
-    /// change before any of them do — this rewrites names in a live webshop that sponsors see, and
-    /// the recurring reconcile deliberately does NOT do this (it fills only an empty field).</para>
-    /// </remarks>
-    public async Task<IActionResult> OnPostNormalizePublicNamesAsync(bool apply, CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        // GATE (§16/§234): the same kill-switch as the reconcile that owns this field.
-        if (!await _gate.IsFeatureEnabledAsync("erp-webshop-reconcile", me.EventId, ct))
-        {
-            ActionMessage = "The ERP-to-webshop reconcile feature is turned off for this event. "
-                + "Enable it in Settings to run the public-name sweep.";
-            return RedirectToPage();
-        }
-
-        var svc = HttpContext.RequestServices.GetRequiredService<SponsorPublicNameNormalizer>();
-        var r = await svc.RunAsync(me.EventId, apply, ct);
-
-        if (!r.Enabled)
-        {
-            ActionMessage = "Company Manager is not configured for this environment.";
-            return RedirectToPage();
-        }
-
-        // ⚠️ ALWAYS list what was left alone. A name whose legal form we do not RECOGNISE looks
-        // exactly like a name that is already correct, so without this the result cannot tell him
-        // which is which — the first run reported "10 of 17 changed" and two of the untouched seven
-        // were unrecognised forms, not clean names.
-        var untouched = r.Unchanged.Count == 0
-            ? string.Empty
-            : $" Left unchanged ({r.Unchanged.Count}): "
-              + string.Join(", ", r.Unchanged.Take(30))
-              + (r.Unchanged.Count > 30 ? $" … and {r.Unchanged.Count - 30} more" : string.Empty)
-              + ". If one of those still carries a legal form, tell me — it means the form is not "
-              + "recognised yet.";
-
-        if (r.Changes.Count == 0)
-        {
-            ActionMessage = $"Public names: {r.CompaniesChecked} company(ies) checked, "
-                + "none carries a legal form we recognise — nothing to change."
-                + (r.Unreadable > 0 ? $" ⚠️ {r.Unreadable} could not be read and were skipped." : string.Empty)
-                + untouched;
-            return RedirectToPage();
-        }
-
-        var lines = r.Changes
-            .Take(25)
-            .Select(c => $"{c.CurrentName} → {c.SuggestedName}"
-                + (c.Source == "legal" ? " (public name was empty)" : string.Empty)
-                + (c.Error is not null ? $" — FAILED: {c.Error}" : string.Empty));
-
-        var applied = r.Changes.Count(c => c.Applied);
-        var failed = r.Changes.Count(c => !c.Applied && c.Error is not null);
-
-        ActionMessage = (apply
-                ? $"Public names UPDATED: {applied} of {r.Changes.Count} changed"
-                  + (failed > 0 ? $", {failed} FAILED" : string.Empty)
-                : $"Public names PREVIEW ({r.Changes.Count} would change — nothing written yet)")
-            + $", {r.CompaniesChecked} company(ies) checked"
-            + (r.Unreadable > 0 ? $", ⚠️ {r.Unreadable} unreadable and skipped" : string.Empty)
-            + ": " + string.Join("; ", lines)
-            + (r.Changes.Count > 25 ? $" … and {r.Changes.Count - 25} more." : string.Empty)
-            + untouched;
-
-        return RedirectToPage();
-    }
-
-    /// <summary>
-    /// ERP→webshop reconcile: create missing Company Manager users from the group-1
-    /// e-conomic contacts, set each company's default signer + event coordinator from
-    /// the contact roles, and email an alert for any contacts missing a Role:1/Role:2.
-    /// </summary>
-    public async Task<IActionResult> OnPostReconcileErpAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        // GATE (§16/§234): same per-edition 'erp-webshop-reconcile' kill-switch the
-        // scheduled ErpSyncCustomerContactJob checks.
-        if (!await _gate.IsFeatureEnabledAsync("erp-webshop-reconcile", me.EventId, ct))
-        {
-            ActionMessage = "The ERP-to-webshop contact reconcile feature is turned off for this event. "
-                + "Enable it in Settings to run the reconcile.";
-            return RedirectToPage();
-        }
-
-        var svc = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
-        // §482b: the organizer's manual reconcile stays a FULL sweep across all sponsor customers.
-        var r = await svc.SyncAsync(ct: ct);
-        ActionMessage = !r.Enabled
-            ? "Backend / Company Manager is not configured for this environment."
-            : $"ERP→webshop reconcile: {r.Customers} sponsor customers, {r.UsersCreated} webshop user(s) created, " +
-              $"{r.DefaultsSet} default(s) set, {r.Alerts} item(s) need attention" +
-              (r.Alerts > 0 ? $" (alert emailed to {CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService.AlertEmail}): {string.Join("; ", r.AlertNotes.Take(10))}" : ".");
-        return RedirectToPage();
-    }
-
-    /// <summary>
     /// How many ACTIVE sponsor companies the maintenance actions will touch — the number the
     /// confirm dialogs quote ("re-sync N compan(ies)"). One cheap query; it is a count, not a board.
     /// </summary>
@@ -352,7 +189,7 @@ public class DashboardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         // 🔒 §1071 — ACTIVE contacts only, the same rule the retired table finally learned: a
         // company whose every contact is deactivated is not a current sponsor, and the maintenance

@@ -1,0 +1,269 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopOrdersModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Sponsor orders — both shops";
+}
+
+<div class="card">
+    <h1>Sponsor orders — both shops</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Every sponsor order: the current webshop's and the new CEH shop's. Open a CEH order to set its signer,
+           add special conditions (they print as "Agreed Terms" on the contract and are kept for invoicing), send it
+           for signature or cancel it.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+        @if (Model.WebshopError is not null) { <p class="error">@Model.WebshopError</p> }
+
+        <a class="shop-pending @(Model.PendingCount > 0 ? "has" : "")" asp-page="/Organizer/ShopOrders" asp-route-SourceFilter="pending">
+            <strong>@Model.PendingCount</strong> not confirmed yet
+            @if (Model.PendingCount > 0) { <span>· @ShopPageModel.Eur(Model.PendingTotalEur) incl. VAT · carts, reserved and waiting for signature</span> }
+        </a>
+
+        <details class="shop-prestage" @(Model.Selected is null ? "" : "")>
+            <summary><strong>Pre-stage a cart</strong> for a sponsor or a potential sponsor</summary>
+            <form method="post" asp-page-handler="Prestage" class="shop-form">
+                <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                <label>Company
+                    <select name="companyId" required>
+                        <option value="">Choose…</option>
+                        @foreach (var c in Model.AllCompanies)
+                        {
+                            <option value="@c.Id" selected="@(Model.Selected?.SponsorCompanyId == c.Id)">@c.Name</option>
+                        }
+                    </select></label>
+                <label>Product
+                    <select name="productId" required>
+                        @foreach (var g in Model.PublishedProducts.GroupBy(x => x.PrimaryCategory?.Group ?? ShopGroup.Unassigned))
+                        {
+                            <optgroup label="@WebshopCatalogModel.GroupLabel(g.Key)">
+                                @foreach (var pr in g) { <option value="@pr.Id">@pr.Name — @(pr.PrimaryCategory?.Group == ShopGroup.Swag ? ShopPageModel.Eur(Model.SwagPrice(pr)) + " sponsor contribution, for every attendee bag" : ShopPageModel.Eur(pr.EffectivePriceEur) + (pr.IsDiscounted ? $" (discounted from {ShopPageModel.Eur(pr.PriceEur)})" : ""))</option> }
+                            </optgroup>
+                        }
+                    </select></label>
+                <label>Quantity <input type="number" name="quantity" value="1" min="1" max="99" /></label>
+                <button type="submit">Add to their cart</button>
+                <p style="font-size:12.5px;color:#4b5563;margin:0;">The cart belongs to the company: its signer and coordinator see it in the shop
+                   and get the daily reminder until it is signed or emptied.</p>
+            </form>
+        </details>
+
+        <p style="font-size:14px;">Show:
+            <a asp-page="/Organizer/ShopOrders" asp-route-SourceFilter="pending">not confirmed</a> ·
+            <a asp-page="/Organizer/ShopOrders">both</a> ·
+            <a asp-page="/Organizer/ShopOrders" asp-route-SourceFilter="ceh">CEH shop</a> ·
+            <a asp-page="/Organizer/ShopOrders" asp-route-SourceFilter="webshop">webshop</a>
+            · <a asp-page="/Organizer/WebshopCatalog">catalogue</a> · <a asp-page="/Organizer/ShopBoothMap">booth map</a>
+            · <a asp-page="/Organizer/ShopEventReservations">reservations (this event)</a> · <a asp-page="/Organizer/ShopReservations">reservation rights (next edition)</a> · <a asp-page="/Organizer/ShopCatalogPages">catalogue pages</a>
+            · <a asp-page="/Organizer/ShopPromotions">commercial corner</a></p>
+
+        @if (Model.Selected is not null)
+        {
+            var o = Model.Selected;
+            <section class="shop-selected">
+                <h2>@(o.Number ?? $"Cart #{o.Id}") · @(Model.SelectedCompany?.LegalName ?? o.SponsorCompanyId) · @o.Status</h2>
+                @if (Model.SelectedTotals is not null)
+                {
+                    <ul>@foreach (var l in Model.SelectedTotals.Lines)
+                        {
+                            <li>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "") —
+                                @if (l.NormalUnitEur is decimal was) { <s style="color:#6b7280;">@ShopPageModel.Eur(was * l.Quantity)</s> }
+                                @ShopPageModel.Eur(l.LineEur)
+                                @if (o.Status is not (ShopOrderStatus.Signed or ShopOrderStatus.Cancelled))
+                                {
+                                    var agreed = o.Lines.FirstOrDefault(x => x.Id == l.LineId)?.AgreedUnitPriceEur;
+                                    @* §1312 — a price for THIS company only; the normal price shows crossed out beside it. *@
+                                    <form method="post" asp-page-handler="AgreedPrice" style="display:inline;">
+                                        <input type="hidden" name="orderId" value="@o.Id" /><input type="hidden" name="lineId" value="@l.LineId" />
+                                        <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                                        <label>Price for this company (€, per unit)
+                                            <input type="number" name="price" min="0" step="1" value="@(agreed?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))"
+                                                   placeholder="normal" style="width:7em;" /></label>
+                                        <button type="submit">Set price</button>
+                                    </form>
+                                }
+                                @if (o.Status == ShopOrderStatus.Cart)
+                                {
+                                    <form method="post" asp-page-handler="RemoveLine" style="display:inline;">
+                                        <input type="hidden" name="orderId" value="@o.Id" /><input type="hidden" name="lineId" value="@l.LineId" />
+                                        <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                                        <button type="submit" aria-label="Remove @l.Name">Remove</button>
+                                    </form>
+                                }
+                            </li>
+                        }</ul>
+                    <p>Total @ShopPageModel.Eur(Model.SelectedTotals.TotalEur) (VAT @ShopPageModel.Eur(Model.SelectedTotals.VatEur))</p>
+                }
+                @if (ShopOrdersModel.IsPending(o.Status) && o.Lines.Count > 0)
+                {
+                    <h3>Send an offer</h3>
+                    <form method="post" asp-page-handler="Offer" class="shop-form">
+                        <input type="hidden" name="orderId" value="@o.Id" />
+                        <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                        <label>To (e-mail) <input type="email" name="toEmail" required
+                               value="@(Model.SelectedContacts.FirstOrDefault(c => c.ParticipantId == o.SignerParticipantId)?.Email ?? Model.SelectedCompany?.CompanyEmail)" /></label>
+                        <label>Name (optional — else looked up from the address) <input name="toName" maxlength="200"
+                               value="@(Model.SelectedContacts.FirstOrDefault(c => c.ParticipantId == o.SignerParticipantId)?.Name)" /></label>
+                        <label>Personal note (optional) <textarea name="note" rows="3"></textarea></label>
+                        <button type="submit">E-mail the products, prices and draft contract</button>
+                        <p style="font-size:12.5px;color:#4b5563;margin:0;">For a potential sponsor: nothing is reserved and they need no account.</p>
+                    </form>
+                }
+                @if (ShopOrdersModel.IsPending(o.Status))
+                {
+                    <h3>Signer and coordinator</h3>
+                    @if (Model.SelectedContacts.Count == 0 && Model.SelectedKnown.Count == 0)
+                    {
+                        <p class="error">This company has no contacts yet — add one before the contract can be signed.</p>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="People" class="shop-form">
+                            <input type="hidden" name="orderId" value="@o.Id" />
+                            <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                            <label>Signer (signs the contract)
+                                <select name="signerId">
+                                    <option value="">(not chosen)</option>
+                                    @foreach (var c in Model.SelectedContacts) { <option value="@c.ParticipantId" selected="@(o.SignerParticipantId == c.ParticipantId)">@c.Name · @c.Email@(c.IsSigner ? " (default signer)" : "")</option> }
+                                    @foreach (var k in Model.SelectedKnown) { <option value="k:@k.Id">@k.FullName · @k.Email@(k.IsSigner ? " (signer in e-conomic)" : "") — not in the hub yet</option> }
+                                </select></label>
+                            <label>Event coordinator
+                                <select name="coordinatorId">
+                                    <option value="">(not chosen)</option>
+                                    @foreach (var c in Model.SelectedContacts) { <option value="@c.ParticipantId" selected="@(o.CoordinatorParticipantId == c.ParticipantId)">@c.Name · @c.Email@(c.IsEventCoordinator ? " (default coordinator)" : "")</option> }
+                                    @foreach (var k in Model.SelectedKnown) { <option value="k:@k.Id">@k.FullName · @k.Email@(k.IsEventCoordinator ? " (coordinator in e-conomic)" : "") — not in the hub yet</option> }
+                                </select></label>
+                            <label>PO / reference <input name="purchaseOrderRef" value="@o.PurchaseOrderRef" maxlength="200" /></label>
+                            <button type="submit">Save</button>
+                        </form>
+                        <form method="post" asp-page-handler="Send" style="margin-top:8px;"
+                              onsubmit="return confirm('E-mail the contract to the signer? Nothing is ordered until it is signed.');">
+                            <input type="hidden" name="orderId" value="@o.Id" />
+                            <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                            @* Operator 2026-09-29: "will this button send the signing email or can you make a button to manually send
+                               the signin email again" — it does; on a contract already sent it says so. *@
+                            <button type="submit">@(o.Status == ShopOrderStatus.AwaitingSignature ? "Re-send the signing e-mail to the signer" : "Send the contract to the signer")</button>
+                        </form>
+                    }
+                }
+                @if (o.SignedAt is not null) { <p>Signed @o.SignedAt.Value.ToString("yyyy-MM-dd HH:mm") UTC by @o.SignedByName (@o.SignedByEmail) · @o.SignatureKind</p> }
+                @if (o.Status is ShopOrderStatus.Cart or ShopOrderStatus.Reserved or ShopOrderStatus.AwaitingSignature && o.Lines.Count > 0)
+                {
+                    @* §1312 — "Manual Confirm Order": the sponsor signed their own way (printed / PDF). *@
+                    <form method="post" asp-page-handler="ConfirmOffline" enctype="multipart/form-data" class="shop-confirm-offline"
+                          onsubmit="return confirm('Confirm this order as signed by the sponsor (offline)? The items are ordered and the sponsor gets the order confirmation.');">
+                        <input type="hidden" name="orderId" value="@o.Id" />
+                        <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                        <label>Signed contract (PDF, optional) <input type="file" name="signedPdf" accept="application/pdf" /></label>
+                        <button type="submit">Confirm order (signed offline)</button>
+                    </form>
+                }
+                @if (Model.SelectedCompany?.ErpError is not null) { <p class="error">e-conomic: @Model.SelectedCompany.ErpError</p> }
+                @if (Model.SelectedCompany?.VatCheck is not null) { <p>VAT: @Model.SelectedCompany.VatCheck</p> }
+                @if (o.Status == ShopOrderStatus.Signed)
+                {
+                    <p>Invoice: @(o.InvoicedAt is not null ? $"draft {o.ErpDraftInvoiceNumber} ({o.ErpInvoiceReference}), {o.InvoicedAt:yyyy-MM-dd}"
+                        : "not yet")
+                        @if (o.InvoiceProblem is not null) { <br /><span class="@(o.InvoiceProblem.StartsWith("DRY RUN") ? "" : "error")">@o.InvoiceProblem</span> }</p>
+                    @if (o.InvoicedAt is null)
+                    {
+                        <form method="post" asp-page-handler="Invoice"
+                              onsubmit="return confirm('@(Model.InvoiceDryRun ? "Show what the e-conomic draft invoice would be (dry run)?" : "Create the draft invoice in e-conomic now?")');">
+                            <input type="hidden" name="orderId" value="@o.Id" />
+                            <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                            <button type="submit">@(Model.InvoiceDryRun ? "Preview the e-conomic invoice (dry run)" : "Create the e-conomic draft invoice now")</button>
+                        </form>
+                    }
+                }
+                <p><a asp-page="/Organizer/ShopOrders" asp-page-handler="Pdf" asp-route-orderId="@o.Id">Download contract PDF</a></p>
+
+                <h3>Special conditions</h3>
+                <form method="post" asp-page-handler="Terms" class="shop-form">
+                    <input type="hidden" name="orderId" value="@o.Id" />
+                    <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+                    <label>Agreed terms (printed on the contract)
+                        <textarea name="terms" rows="4">@o.SpecialTerms</textarea></label>
+                    @* §1312 — the invoice is created at once and DATED this day (operator 2026-09-30: "send the invoice now but just change the invoice date to what is agreed upon and terms"). *@
+                    <label>Invoice date (blank = the day it is created · shown on the contract and invoice) <input type="date" name="invoiceNotBefore" value="@o.InvoiceNotBefore?.ToString("yyyy-MM-dd")" /></label>
+                    @* §1312 — the label says what blank really does (operator 2026-09-30: "i will leave it as for now, but change the
+                       text … so i can manually overrule it"): blank = the customer's own terms in e-conomic, nothing stated on the
+                       contract; a number is printed on the contract and the invoice. *@
+                    <label>Payment days (blank = the customer's standard terms in e-conomic · enter days to overrule — shown on the contract and invoice) <input type="number" name="paymentDays" min="1" max="365" value="@o.PaymentDays" /></label>
+                    <button type="submit">Save special conditions</button>
+                </form>
+
+                @if (o.Status != ShopOrderStatus.Cancelled)
+                {
+                    <h3>Cancel</h3>
+                    <form method="post" asp-page-handler="Cancel" class="shop-form" onsubmit="return confirm('Cancel this order and give its items back to both shops?');">
+                        <input type="hidden" name="orderId" value="@o.Id" />
+                        <label>Reason <input name="reason" /></label>
+                        <button type="submit">Cancel the order</button>
+                    </form>
+                }
+            </section>
+        }
+
+        <div style="overflow-x:auto;">
+        <table class="shop-orders-table">
+            <thead><tr><th>Source</th><th>Order</th><th>Company</th><th>Status</th><th>Date</th><th>Items</th><th style="text-align:right;">Total €</th></tr></thead>
+            <tbody>
+            @foreach (var r in Model.Rows)
+            {
+                <tr>
+                    <td>@r.Source</td>
+                    <td>@if (r.ShopOrderId is int id) { <a asp-page="/Organizer/ShopOrders" asp-route-Order="@id" asp-route-SourceFilter="@Model.SourceFilter">@r.Reference</a> } else { @r.Reference }
+                        @if (r.HasSpecialTerms) { <span title="Has special conditions">★</span> }</td>
+                    <td>@r.Company</td>
+                    <td style="white-space:nowrap;">@System.Text.RegularExpressions.Regex.Replace(r.Status ?? "", "(?<=[a-z])(?=[A-Z])", " ")</td>
+                    <td style="white-space:nowrap;">@r.Date?.ToString("yyyy-MM-dd")</td>
+                    <td>@r.Items</td>
+                    <td style="text-align:right;white-space:nowrap;">@(r.TotalEur is decimal t ? ShopPageModel.Eur(t) : "")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+
+        <h2 style="margin-top:36px;">Registered through the CEH shop</h2>
+        @if (Model.Registered.Count == 0) { <p>No registrations yet.</p> }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table class="shop-orders-table">
+                <thead><tr><th>Company</th><th>CVR</th><th>Country</th><th>State</th><th>e-conomic</th><th>Registered</th></tr></thead>
+                <tbody>
+                @foreach (var c in Model.Registered)
+                {
+                    <tr><td>@c.LegalName</td><td>@c.Cvr</td><td>@c.CountryIso2</td><td>@c.State</td>
+                        <td>@(c.ErpError is not null ? "FAILED: " + c.ErpError : c.ErpCustomerNumber ?? "—")</td>
+                        <td>@c.CreatedAt.ToString("yyyy-MM-dd") · @c.RegisteredByEmail</td></tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+</div>
+<style>
+    .shop-confirm-offline { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; margin:10px 0; padding:8px 10px; border:1px dashed #b45309; border-radius:8px; background:#fffbeb; }
+    .shop-form { display:grid; gap:12px; max-width:760px; }
+    .shop-form input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]), .shop-form select, .shop-form textarea {
+        width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px; border:1px solid #9ca3af; border-radius:8px; background:#fff; }
+    .shop-form label { display:grid; gap:5px; font-size:15px; font-weight:600; }
+    .shop-pending { display:inline-block; padding:8px 14px; border-radius:999px; background:#f1f5f9; border:1px solid #cbd5e1; text-decoration:none; margin:4px 0 12px; }
+    .shop-pending.has { background:#fff7ed; border-color:#fdba74; }
+    .shop-prestage { border:1px solid #d1d5db; border-radius:8px; padding:8px 14px; margin:0 0 14px; }
+    .shop-prestage summary { cursor:pointer; }
+    /* Operator 2026-09-28: "make more room between colmns" — "AwaitingSignature" ran into the date. */
+    .shop-orders-table { border-collapse:separate; border-spacing:0; }
+    .shop-orders-table th, .shop-orders-table td { padding:6px 18px 6px 0; text-align:left; vertical-align:top; }
+    .shop-orders-table th:last-child, .shop-orders-table td:last-child { padding-right:0; }
+    .shop-orders-table tbody tr + tr td { border-top:1px solid #e5e7eb; }
+    .shop-selected { border:1px solid #c7d2fe; background:#f8faff; border-radius:8px; padding:12px 16px; margin-bottom:16px; }
+</style>

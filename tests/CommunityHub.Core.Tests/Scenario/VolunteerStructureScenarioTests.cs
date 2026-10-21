@@ -1,4 +1,5 @@
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Volunteers;
 using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -21,7 +22,20 @@ namespace CommunityHub.Core.Tests.Scenario;
 public sealed class VolunteerStructureScenarioTests
 {
     private static VolunteerStructureService NewService(CommunityHub.Core.Data.CommunityHubDbContext db)
-        => new(db, ScenarioFixture.Clock);
+        => new(db, ScenarioFixture.Clock, VolunteerAssignmentGate.For(db));
+
+    /// <summary>§1299 — Assign only QUEUES; the volunteer sees the task once the shared queue is
+    /// published (committed). Scenarios that need a real assignment do both.</summary>
+    private static async Task AssignAndPublishAsync(
+        CommunityHub.Core.Data.CommunityHubDbContext db, VolunteerStructureService svc, Actor org,
+        int taskId, int volunteerId)
+    {
+        await svc.AssignVolunteerAsync(org, taskId, volunteerId);
+        await new VolunteerAllocationService(db, ScenarioFixture.Clock,
+                new CommunityHub.Core.Settings.FeatureGateService(db),
+                new CommunityHub.Core.Settings.RingResolver(db))
+            .CommitAsync(org);
+    }
 
     private static Actor Organizer(ScenarioSeed.SeedResult s)
         => new(s.OrganizerId, ScenarioSeed.OrganizerEmail, ParticipantRole.Organizer, s.EventId);
@@ -263,9 +277,14 @@ public sealed class VolunteerStructureScenarioTests
         await Assert.ThrowsAsync<VolunteerValidationException>(
             () => svc.AssignVolunteerAsync(org, task.Id, seed.SpeakerOneId));
 
-        // Organizer assigns a volunteer: OK + idempotent on repeat.
+        // Organizer assigns a volunteer: OK + idempotent on repeat. §1299 — it QUEUES (one draft,
+        // no real assignment) until the queue is published.
         Assert.True(await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId));
         Assert.True(await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId));
+        Assert.Equal(1, await db.TaskAllocationDrafts
+            .CountAsync(d => d.TaskId == task.Id && d.ParticipantId == seed.VolunteerId));
+        Assert.False(await db.VolunteerTaskAssignments.AnyAsync(a => a.TaskId == task.Id));
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId); // publish; still idempotent
         Assert.Equal(1, await db.VolunteerTaskAssignments
             .CountAsync(a => a.TaskId == task.Id && a.ParticipantId == seed.VolunteerId));
 
@@ -290,8 +309,8 @@ public sealed class VolunteerStructureScenarioTests
         var others = await svc.CreateTaskAsync(org, sub.Id, "Someone else's task", null, null, null);
 
         var second = await AddVolunteerAsync(db, seed, "second.volunteer@example.test");
-        await svc.AssignVolunteerAsync(org, mine.Id, seed.VolunteerId);
-        await svc.AssignVolunteerAsync(org, others.Id, second);
+        await AssignAndPublishAsync(db, svc, org, mine.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, others.Id, second);
 
         var myTasks = await svc.LoadMyTasksAsync(seed.EventId, seed.VolunteerId);
         var t = Assert.Single(myTasks);
@@ -310,7 +329,7 @@ public sealed class VolunteerStructureScenarioTests
         var cat = await svc.CreateCategoryAsync(org, "Cat", null);
         var sub = await svc.CreateSubcategoryAsync(org, cat.Id, "Sub", null);
         var task = await svc.CreateTaskAsync(org, sub.Id, "Task", null, null, null);
-        await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId);
 
         var assignedVol = Volunteer(seed, seed.VolunteerId, ScenarioSeed.VolunteerEmail);
         Assert.True(await svc.SetTaskStatusAsync(assignedVol, task.Id, VolunteerTaskStatus.Done));
@@ -344,7 +363,7 @@ public sealed class VolunteerStructureScenarioTests
         // Appoint a supervisor (one volunteer) and assign a DIFFERENT volunteer.
         var supervisorId = await AddVolunteerAsync(db, seed, "supervisor.vol@example.test");
         await svc.AppointSupervisorAsync(org, cat.Id, supervisorId);
-        await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId);
 
         // The assigned volunteer raises help; it inherits the task's category.
         var worker = Volunteer(seed, seed.VolunteerId, ScenarioSeed.VolunteerEmail);
@@ -384,7 +403,7 @@ public sealed class VolunteerStructureScenarioTests
             () => svc.RaiseHelpAsync(notAssigned, task.Id, "help"));
 
         // Assign + raise, then a supervisor of a DIFFERENT category cannot answer.
-        await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId);
         var req = await svc.RaiseHelpAsync(notAssigned, task.Id, "now I can ask");
 
         var otherCat = await svc.CreateCategoryAsync(org, "Other", null);
@@ -473,7 +492,7 @@ public sealed class VolunteerStructureScenarioTests
         var supervisorId = await AddVolunteerAsync(db, seed, "supervisor.vol@example.test");
         await svc.SetLeadAsync(org, cat.Id, seed.OrganizerId);
         await svc.AppointSupervisorAsync(org, cat.Id, supervisorId);
-        await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId);
 
         var worker = Volunteer(seed, seed.VolunteerId, ScenarioSeed.VolunteerEmail);
         var req = await svc.RaiseHelpAsync(worker, task.Id, "Printer is jammed");
@@ -516,7 +535,7 @@ public sealed class VolunteerStructureScenarioTests
         var sub = await svc.CreateSubcategoryAsync(org, cat.Id, "Badge desk", null);
         var task = await svc.CreateTaskAsync(org, sub.Id, "Host badge desk", null, null, null);
         await svc.SetLeadAsync(org, cat.Id, seed.OrganizerId);
-        await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await AssignAndPublishAsync(db, svc, org, task.Id, seed.VolunteerId);
 
         var worker = Volunteer(seed, seed.VolunteerId, ScenarioSeed.VolunteerEmail);
         var req = await svc.RaiseHelpAsync(worker, task.Id, "Need a hand");

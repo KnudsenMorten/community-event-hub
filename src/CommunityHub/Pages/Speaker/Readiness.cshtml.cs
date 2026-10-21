@@ -27,19 +27,22 @@ public class ReadinessModel : PageModel
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
     private readonly FormTaskReconciler _formTaskReconciler;
     private readonly ILogger<ReadinessModel> _logger;
+    private readonly CommunityHub.Core.Domain.SpeakerAccessService _access;
 
     public ReadinessModel(
         ICurrentParticipantAccessor participant,
         SpeakerReadinessService readiness,
         SpeakerDeadlineSeeder speakerDeadlines,
         FormTaskReconciler formTaskReconciler,
-        ILogger<ReadinessModel> logger)
+        ILogger<ReadinessModel> logger,
+        CommunityHub.Core.Domain.SpeakerAccessService access)
     {
         _participant = participant;
         _readiness = readiness;
         _speakerDeadlines = speakerDeadlines;
         _formTaskReconciler = formTaskReconciler;
         _logger = logger;
+        _access = access;
     }
 
     public bool AccessDenied { get; private set; }
@@ -56,7 +59,8 @@ public class ReadinessModel : PageModel
 
         Role = me.Role;
         FirstName = me.FirstName;
-        if (me.Role != ParticipantRole.Speaker)
+        // §1255 — capability, not role (see ParticipantCapabilities).
+        if (!await _access.HasSpeakerHubAccessAsync(me.EventId, me.ParticipantId, me.Role, ct))
         {
             AccessDenied = true;
             return Page();

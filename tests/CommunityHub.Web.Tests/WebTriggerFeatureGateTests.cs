@@ -236,9 +236,6 @@ public sealed class WebTriggerFeatureGateTests
         CommunityHubDbContext db, HttpContext http) =>
         new(db, Accessor(http), keys: null!, detTokens: null!, sync: null!,
             emailSender: null!, new FixedClock(), new FeatureGateService(db),
-            // Company Manager lookups are disabled (Enabled=false default) — the
-            // handlers under test never call the client, so a null client is safe.
-            cm: null!, cmOptions: new CommunityHub.Core.Integrations.CompanyManagerOptions(),
             logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<
                 CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel>.Instance)
         {

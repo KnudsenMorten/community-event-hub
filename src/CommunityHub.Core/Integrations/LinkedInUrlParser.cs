@@ -10,8 +10,9 @@ namespace CommunityHub.Core.Integrations;
 /// <para>🔑 <b>Why this is deliberately small.</b> A real company mention needs
 /// <c>urn:li:organization:{id}</c>. The obvious plan — take the sponsor's stored profile URL and pull
 /// the id out of it — was measured on 2026-08-04 and does not work: <b>all 14 sponsor URLs on record
-/// are vanity slugs</b> (<c>/company/glueckkanja</c>), and the API lookup that would translate one is
-/// refused for this app (§824.14c). So this parser is not the id source; it is a convenience that
+/// are vanity slugs</b> (<c>/company/glueckkanja</c>). ⚠️ §1300: the API lookup that translates one DOES
+/// work (§856.1 superseded §824.14c) and now runs in <see cref="SponsorOrganizationResolutionService"/>,
+/// which caches the id on the sponsor. So this parser is not the id source; it is a convenience that
 /// catches the case where somebody pasted a URL that already carries the number, which is what a
 /// company's own admin view produces (<c>/company/98360537/admin/dashboard/</c>).</para>
 ///

@@ -7,13 +7,14 @@ namespace CommunityHub.Core.Email;
 /// <summary>
 /// Resolves the e-conomic event-coordinator (Role 2) email set for one sponsor
 /// company (REQUIREMENTS §7c). It bridges the hub's sponsor company id to
-/// e-conomic by reading the company's <c>erp_customer_number</c> from Company
-/// Manager, then asks the read-only <see cref="IEconomicRoleClient"/> for that
-/// customer's contact roles.
+/// e-conomic by reading the company's e-conomic customer number from CEH's own
+/// company record (<see cref="Domain.ShopCompany.ErpCustomerNumber"/> — §1312, Company
+/// Manager is retired), then asks the read-only <see cref="IEconomicRoleClient"/> for
+/// that customer's contact roles.
 ///
 /// <para>This is the PRIMARY audience source for sponsor email; the
-/// <see cref="SponsorRecipientResolver"/> falls back to the Company Manager
-/// single default coordinator (and the hub's manual role flags) when this returns
+/// <see cref="SponsorRecipientResolver"/> falls back to the hub's
+/// role flags (set from e-conomic by the role sync, or by hand) when this returns
 /// <c>null</c> (ERP roles disabled / unreachable / no data).</para>
 ///
 /// <para>STRICTLY READ-ONLY and FAIL-SOFT — any failure yields <c>null</c>
@@ -28,7 +29,7 @@ public interface ISponsorErpCoordinatorSource
     /// Return the set of event-coordinator (Role 2) contact emails for the
     /// sponsor company, or <c>null</c> when ERP roles are unavailable
     /// (disabled / company not mapped to an ERP customer / read failed / empty)
-    /// so the caller falls back to the Company Manager default. Emails are
+    /// so the caller falls back to the hub role flags. Emails are
     /// returned verbatim from e-conomic; matching to participants is the
     /// resolver's job. Signer-only contacts (Role 1 without Role 2) are excluded
     /// here; a both-roles contact is included.
@@ -37,7 +38,7 @@ public interface ISponsorErpCoordinatorSource
         string sponsorCompanyId, CancellationToken ct = default);
 }
 
-/// <summary>Disabled no-op source — always returns null so the resolver uses the CM fallback. The default.</summary>
+/// <summary>Disabled no-op source — always returns null so the resolver uses the hub role flags. The default.</summary>
 public sealed class NullSponsorErpCoordinatorSource : ISponsorErpCoordinatorSource
 {
     public bool IsEnabled => false;
@@ -48,23 +49,23 @@ public sealed class NullSponsorErpCoordinatorSource : ISponsorErpCoordinatorSour
 }
 
 /// <summary>
-/// Live implementation: Company Manager (company id → <c>erp_customer_number</c>)
+/// Live implementation: CEH's company record (company id → e-conomic customer number)
 /// + the read-only e-conomic role client (customer → coordinator emails). Both
 /// reads are best-effort; on any gap or error it returns <c>null</c> so the
-/// resolver falls back to the Company Manager default coordinator.
+/// resolver falls back to the hub's own role flags.
 /// </summary>
 public sealed class SponsorErpCoordinatorSource : ISponsorErpCoordinatorSource
 {
-    private readonly CompanyManagerClient _companyManager;
+    private readonly Data.CommunityHubDbContext _db;
     private readonly IEconomicRoleClient _roleClient;
     private readonly ILogger<SponsorErpCoordinatorSource> _log;
 
     public SponsorErpCoordinatorSource(
-        CompanyManagerClient companyManager,
+        Data.CommunityHubDbContext db,
         IEconomicRoleClient roleClient,
         ILogger<SponsorErpCoordinatorSource> log)
     {
-        _companyManager = companyManager;
+        _db = db;
         _roleClient = roleClient;
         _log = log;
     }
@@ -81,15 +82,10 @@ public sealed class SponsorErpCoordinatorSource : ISponsorErpCoordinatorSource
 
         try
         {
-            // The hub's SponsorCompanyId is the Company Manager company id.
-            if (!int.TryParse(sponsorCompanyId.Trim(), out var cmCompanyId))
-            {
-                // A non-CM id (e.g. a test-only "test-2linkit") has no ERP mapping.
-                return null;
-            }
-
-            var company = await _companyManager.GetCompanyAsync(cmCompanyId, ct);
-            var erpCustomerNumber = company?.ErpCustomerNumber;
+            var id = sponsorCompanyId.Trim();
+            var erpCustomerNumber = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                _db.ShopCompanies.Where(c => c.SponsorCompanyId == id && c.ErpCustomerNumber != null)
+                    .OrderByDescending(c => c.EventId).Select(c => c.ErpCustomerNumber), ct);
             if (string.IsNullOrWhiteSpace(erpCustomerNumber))
             {
                 return null; // not mapped to an ERP customer -> fall back
@@ -114,7 +110,7 @@ public sealed class SponsorErpCoordinatorSource : ISponsorErpCoordinatorSource
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "ERP coordinator resolution for sponsor company {Company} failed; falling back to CM default.",
+                "ERP coordinator resolution for sponsor company {Company} failed; falling back to the hub role flags.",
                 sponsorCompanyId);
             return null;
         }

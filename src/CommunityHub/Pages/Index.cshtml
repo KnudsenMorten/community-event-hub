@@ -57,6 +57,13 @@
 <div class="card">
     <h1>@Localizer["Hub.Welcome", Model.Me.FirstName]</h1>
     <p>@Model.EventDisplayName &middot; @Localizer["Hub.SignedInAs"] <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
+    @* §1305 — an order the organizer prepared is the first thing a sponsor sees ("so a sponsor can login and accept
+       and quickly sign"). Renders nothing unless the CEH shop is on and the company has an unsigned order. *@
+    @if (Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Sponsor || Model.Me.IsActingAs)
+    {
+        @await Component.InvokeAsync("ShopOrderReady")
+        @* The teaser bar is under the site menu on every sponsor page (_Layout) — not again here ("it shows 2 times on home"). *@
+    }
     @* "All tasks complete" lives ONLY on the checklist card below, and only when the
        role actually has tracked tasks — so attendees (no hub tasks) no longer see a
        confusing "All tasks complete!" with nothing behind it (operator 2026-06-23). *@

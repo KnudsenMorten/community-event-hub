@@ -230,14 +230,23 @@ public static class CouponInvoiceLineComposer
         // 🔒 A line is DROPPED, never faked. The coupon name below already identifies the agreement,
         // so an invoice without this line is complete and readable; an invoice with an 17-digit
         // number in it is neither.
-        if (!IsMachineId(ticketClassLabel)) parts.Add($"Ticket Class: {ticketClassLabel}");
+        if (!IsMachineId(ticketClassLabel) && !string.IsNullOrWhiteSpace(ticketClassLabel))
+            parts.Add($"Ticket Class: {CollapseSpaces(ticketClassLabel)}");
 
+        // §1301 — a BLANK line before the coupon (operator 2026-09-24: "make also empty line before
+        // the coupon name"): what was bought above, under which agreement below.
+        parts.Add(string.Empty);
         parts.Add($"Coupon: {couponName}");
 
         if (!string.IsNullOrEmpty(conversionNote)) parts.Add(conversionNote);
 
         return string.Join(WebshopInvoiceLineComposer.NewLine, parts);
     }
+
+    /// <summary>§1301 — Backstage names carry double spaces ("2-day (Pre-day  + Main Event)"); an
+    /// invoice should not.</summary>
+    private static string CollapseSpaces(string s) =>
+        System.Text.RegularExpressions.Regex.Replace(s.Trim(), @"\s{2,}", " ");
 
     /// <summary>§1116 — see <see cref="HumanLabel.IsMachineId"/>, which every renderer shares.</summary>
     private static bool IsMachineId(string? value) => HumanLabel.IsMachineId(value);

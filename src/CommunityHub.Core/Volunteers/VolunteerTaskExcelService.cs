@@ -85,8 +85,8 @@ public sealed class VolunteerTaskExcelService
     {
         var tasks = await _db.VolunteerTasks
             .Where(t => t.EventId == eventId)
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
-            .OrderBy(t => t.Subcategory.Category.Name)
+            .Include(t => t.Category)
+            .OrderBy(t => t.Category.Name)
             .ThenBy(t => t.Title)
             .ToListAsync(ct);
 
@@ -109,7 +109,7 @@ public sealed class VolunteerTaskExcelService
             ws.Cell(row, 7).SetValue(t.Prerequisites ?? string.Empty);
             ws.Cell(row, 8).SetValue(t.Expectations ?? string.Empty);
             ws.Cell(row, 9).SetValue(t.DueDate?.ToString("yyyy-MM-dd") ?? string.Empty);
-            ws.Cell(row, 10).SetValue(t.Subcategory?.Category?.Name ?? string.Empty);
+            ws.Cell(row, 10).SetValue(t.Category?.Name ?? string.Empty);
             row++;
         }
 
@@ -154,7 +154,6 @@ public sealed class VolunteerTaskExcelService
             .Where(c => c.EventId == eventId)
             .ToListAsync(ct);
         var categoryByName = categories.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
-        var subByCategory = new Dictionary<int, VolunteerSubcategory>();
 
         var headerRowNum = headerRow.RowNumber();
         foreach (var r in ws.RowsUsed().Where(r => r.RowNumber() > headerRowNum))
@@ -174,14 +173,14 @@ public sealed class VolunteerTaskExcelService
                 isNew = true;
                 var bucketName = FirstNonBlank(
                     Cell(r, col, "Bucket"), Cell(r, col, "ResponsibleTeam"), UnsortedBucketName);
-                var sub = await ResolveSubcategoryAsync(
-                    eventId, bucketName, now, categoryByName, subByCategory, ct);
+                var cat = await ResolveCategoryAsync(eventId, bucketName, now, categoryByName, ct);
 
                 task = new VolunteerTask
                 {
                     // ExternalKey defaults to a fresh GUID on the model — leave it.
+                    // §1299 — directly under the bucket; no placeholder subcategory.
                     EventId = eventId,
-                    SubcategoryId = sub.Id,
+                    CategoryId = cat.Id,
                     CreatedAt = now,
                 };
                 _db.VolunteerTasks.Add(task);
@@ -246,41 +245,21 @@ public sealed class VolunteerTaskExcelService
         return parts.Count > 0 ? string.Join(" ", parts) : title.Trim() + ".";
     }
 
-    /// <summary>Upsert the bucket (<see cref="VolunteerCategory"/>) by name and ensure
-    /// its single "Imported plan" subcategory, mirroring <see cref="VolunteerPlanImportService"/>.</summary>
-    private async Task<VolunteerSubcategory> ResolveSubcategoryAsync(
+    /// <summary>Upsert the bucket (<see cref="VolunteerCategory"/>) by name, mirroring
+    /// <see cref="VolunteerPlanImportService"/>. §1299 — a new task lands directly under it.</summary>
+    private async Task<VolunteerCategory> ResolveCategoryAsync(
         int eventId, string bucketName, DateTimeOffset now,
         Dictionary<string, VolunteerCategory> categoryByName,
-        Dictionary<int, VolunteerSubcategory> subByCategory,
         CancellationToken ct)
     {
         if (!categoryByName.TryGetValue(bucketName, out var cat))
         {
             cat = new VolunteerCategory { EventId = eventId, Name = bucketName, CreatedAt = now };
             _db.VolunteerCategories.Add(cat);
-            await _db.SaveChangesAsync(ct); // need cat.Id for the subcategory FK
+            await _db.SaveChangesAsync(ct); // need cat.Id for the task FK
             categoryByName[bucketName] = cat;
         }
-
-        if (subByCategory.TryGetValue(cat.Id, out var cached)) return cached;
-
-        var sub = await _db.VolunteerSubcategories.FirstOrDefaultAsync(
-            s => s.EventId == eventId && s.CategoryId == cat.Id
-                 && s.Name == VolunteerPlanImportService.ImportedSubcategoryName, ct);
-        if (sub is null)
-        {
-            sub = new VolunteerSubcategory
-            {
-                EventId = eventId,
-                CategoryId = cat.Id,
-                Name = VolunteerPlanImportService.ImportedSubcategoryName,
-                CreatedAt = now,
-            };
-            _db.VolunteerSubcategories.Add(sub);
-            await _db.SaveChangesAsync(ct); // need sub.Id for the task FK
-        }
-        subByCategory[cat.Id] = sub;
-        return sub;
+        return cat;
     }
 
     // -- Cell helpers --------------------------------------------------------

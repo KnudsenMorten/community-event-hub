@@ -63,6 +63,7 @@ public sealed class SponsorWebshopLinksReminderBuilder
     private readonly SponsorRecipientResolver _sponsorRecipients;
     private readonly EngineAlertSender? _alerts;
     private readonly string _webshopUrl;
+    private readonly Settings.FeatureGateService? _gate;
 
     public SponsorWebshopLinksReminderBuilder(
         CommunityHubDbContext db,
@@ -70,8 +71,10 @@ public sealed class SponsorWebshopLinksReminderBuilder
         TimeProvider clock,
         SponsorRecipientResolver sponsorRecipients,
         EngineAlertSender? alerts = null,
-        string? webshopUrl = null)
+        string? webshopUrl = null,
+        Settings.FeatureGateService? gate = null)
     {
+        _gate = gate;
         _db = db;
         _templates = templates;
         _clock = clock;
@@ -124,11 +127,12 @@ public sealed class SponsorWebshopLinksReminderBuilder
                 s.Id,
                 s.SponsorCompanyId,
                 s.CompanyName,
-                s.WebsiteUrl,
-                s.LinkedInUrl,
             })
             .ToListAsync(ct);
 
+        // §1360 — the links are ONE field, on the company page (CompanyLinks). The sponsor record's copy was read here and
+        // chased Egiss for links the company page already had.
+        var links = await Integrations.Webshop.CompanyLinks.AllAsync(_db, eventId, ct);
         // ISO week index — the cadence control. See the class remarks.
         var now = _clock.GetUtcNow();
         var week = ISOWeek.GetWeekOfYear(now.UtcDateTime);
@@ -137,9 +141,14 @@ public sealed class SponsorWebshopLinksReminderBuilder
         var messages = new List<ReminderMessage>();
         var operatorRows = new List<string>();
 
+        // §1305 — while the CEH shop is on, the company profile is kept on its "Cart & company" page: the mail says so
+        // and links there (in the hub) instead of the old webshop. Off: the old wording and link, unchanged.
+        var cehShop = _gate is not null && await _gate.IsFeatureEnabledAsync("sponsor-webshop", eventId, ct);
+
         foreach (var co in companies)
         {
-            var missing = MissingFor(co.WebsiteUrl, co.LinkedInUrl);
+            var l = Integrations.Webshop.CompanyLinks.Of(links, co.SponsorCompanyId);
+            var missing = MissingFor(l.Website, l.LinkedIn);
             if (missing.Count == 0) continue;   // ⇐ this is what makes the chaser stop by itself
 
             var companyName = string.IsNullOrWhiteSpace(co.CompanyName)
@@ -171,7 +180,11 @@ public sealed class SponsorWebshopLinksReminderBuilder
                     + string.Join(string.Empty, missing.Select(m =>
                         $"<li>{WebUtility.HtmlEncode(m)}</li>"))
                     + "</ul>";
-                tokens["webshopUrl"] = _webshopUrl;
+                tokens["webshopUrl"] = cehShop
+                    ? (tokens.GetValueOrDefault("hubUrl") ?? string.Empty).TrimEnd('/') + "/Sponsor/Shop/Cart"
+                    : _webshopUrl;
+                tokens["profilePlace"] = cehShop ? "your company profile in the Sponsor Shop" : "the webshop";
+                tokens["profileButton"] = cehShop ? "Add them in the Sponsor Shop" : "Add them on the webshop";
 
                 var rendered = _templates.Render(TemplateName, tokens);
 
@@ -229,15 +242,16 @@ public sealed class SponsorWebshopLinksReminderBuilder
         var html =
             $"<p><strong>{rows.Count}</strong> sponsor "
             + (rows.Count == 1 ? "company is" : "companies are")
-            + " missing a website or LinkedIn address <strong>in the webshop</strong>. Since the "
-            + "webshop owns those fields, they cannot be filled in from the hub — the companies "
-            + "below have been asked to add them at the source.</p>"
+            // §1360 — CEH owns these fields since §1312 (operator: "old webshop is not owner of this anymore").
+            + " missing a website or LinkedIn address <strong>in CEH</strong> — neither on the sponsor's own "
+            + "Company details nor on the company page (Organizer → Companies). The companies below have been "
+            + "asked to add them; an organizer can also fill them in on the company page.</p>"
             + "<ul>" + string.Join(string.Empty, rows) + "</ul>"
             + "<p style=\"color:#6b7280;font-size:13px;\">X/Twitter is optional and is never "
             + "chased. This list is sent once a week and stops when nothing is missing.</p>";
 
         await _alerts.AlertAsync(
-            $"{rows.Count} sponsor(s) missing a webshop website or LinkedIn [ELDK27]",
+            $"{rows.Count} sponsor(s) missing a website or LinkedIn [ELDK27]",
             html, ct,
             // 🔒 No throttle key — the weekly guard above is the dedup, and a second invisible
             // in-memory window on top would be the §765 two-switch trap: two things deciding one

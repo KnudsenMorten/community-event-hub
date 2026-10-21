@@ -1440,6 +1440,7 @@ public class CouponInvoicingModel : PageModel
                 // authoritative long after e-conomic had renumbered it to 170.
                 purchase.ErpInvoiceNumber = draft.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 purchase.ErpInvoiceIsBooked = false;
+                purchase.ErpInvoiceRaisedByCeh = true;   // §1312 — CEH's own invoice: rebuilt if its draft is deleted
                 purchase.ErpInvoiceConfirmedAt = now;
                 purchase.ErpInvoiceConfirmedByEmail = me.Email;
                 await _db.SaveChangesAsync(ct);
@@ -1525,13 +1526,17 @@ public class CouponInvoicingModel : PageModel
             return RedirectWithFlash(Message, Error);
         }
 
-        pool.LowBalanceThreshold = PoolThreshold is > 0 ? PoolThreshold : null;
+        // §1341 — 0 is kept as 0 (warning off); only a blank field means "use the default". It used
+        // to fold 0 into null, so "0 = no warning" silently became the default of 5.
+        pool.LowBalanceThreshold = PoolThreshold is >= 0 ? PoolThreshold : null;
         pool.UpdatedAt = _clock.GetUtcNow();
         pool.LastUpdatedByEmail = me.Email;
         await _db.SaveChangesAsync(ct);
 
-        Message = $"'{pool.CouponInvoicingSetting?.CouponName}': warning level set to "
-                + $"{pool.LowBalanceThreshold?.ToString() ?? CouponPrepaidBalance.DefaultLowBalanceThreshold + " (default)"}.";
+        Message = pool.LowBalanceThreshold == 0
+            ? $"'{pool.CouponInvoicingSetting?.CouponName}': running-low warning switched off."
+            : $"'{pool.CouponInvoicingSetting?.CouponName}': warning level set to "
+              + $"{pool.LowBalanceThreshold?.ToString() ?? CouponPrepaidBalance.DefaultLowBalanceThreshold + " (default)"}.";
 
         return RedirectWithFlash(Message, Error);
     }
@@ -1561,6 +1566,74 @@ public class CouponInvoicingModel : PageModel
             Message = $"'{coupon}': allocation removed, including its purchase history.";
         }
 
+        return RedirectWithFlash(Message, Error);
+    }
+
+    /// <summary>§1362 — the new, LOWER total for "Reduce to".</summary>
+    [BindProperty] public int? PoolReduceTotal { get; set; }
+
+    /// <summary>
+    /// §1362 — reduce a pool with a correction backed by a credit note. Adds a NEGATIVE purchase row, so the history and
+    /// every invoice number stay; raises nothing in e-conomic (the credit note is made there by hand, and its number is
+    /// typed here or on the row afterwards — until then the §795.2 chase asks for it).
+    /// </summary>
+    public async Task<IActionResult> OnPostReducePoolAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var pool = await _db.CouponPrepaidAllocations
+            .Include(a => a.CouponInvoicingSetting)
+            .Include(a => a.Purchases)
+            .FirstOrDefaultAsync(a => a.Id == PoolAllocationId && a.EventId == me.EventId, ct);
+        if (pool?.CouponInvoicingSetting is not { } rule)
+        {
+            Error = "That allocation no longer exists.";
+            return RedirectWithFlash(Message, Error);
+        }
+        if (PoolReduceTotal is not { } target)
+        {
+            Error = "Enter the new, lower total the code should allow.";
+            return RedirectWithFlash(Message, Error);
+        }
+
+        // The same claim source as the page (CEH's mirror of the Backstage orders), so "already claimed" here is the
+        // number the organizer sees on the pool.
+        var raw = await _db.Orders.Where(o => o.EventId == me.EventId).Select(o => o.RawJson).ToListAsync(ct);
+        var claims = raw.SelectMany(j => CouponClaimExtractor.FromOrderJson(j))
+            .Where(c => string.Equals(c.CouponName, rule.CouponName, StringComparison.OrdinalIgnoreCase));
+        var balance = CouponPrepaidBalance.For(pool, claims);
+
+        var plan = CouponPoolReduction.For(balance.Purchased, balance.Claimed, target);
+        if (!plan.Ok)
+        {
+            Error = plan.Refusal;
+            return RedirectWithFlash(Message, Error);
+        }
+
+        var now = _clock.GetUtcNow();
+        var creditNote = string.IsNullOrWhiteSpace(PoolErpInvoiceNumber) ? null : PoolErpInvoiceNumber.Trim();
+        pool.Purchases.Add(new CouponPrepaidPurchase
+        {
+            Quantity = plan.Delta,
+            UnitPriceDkk = CouponPoolReduction.UnitPriceFor(pool.Purchases),
+            ErpInvoiceNumber = creditNote,
+            ErpInvoiceConfirmedAt = creditNote is null ? null : now,
+            ErpInvoiceConfirmedByEmail = creditNote is null ? null : me.Email,
+            // 🔒 Never CEH's own invoice: the §1312 refresher must not try to "raise it again".
+            ErpInvoiceRaisedByCeh = false,
+            Notes = string.IsNullOrWhiteSpace(PoolPurchaseNotes) ? "Correction (credit note)" : PoolPurchaseNotes.Trim(),
+            CreatedAt = now,
+            CreatedByEmail = me.Email,
+        });
+        pool.UpdatedAt = now;
+        pool.LastUpdatedByEmail = me.Email;
+        await _db.SaveChangesAsync(ct);
+
+        Message = $"'{rule.CouponName}': reduced by {-plan.Delta} to {target} ticket(s). "
+                + $"Set the promo code's max in Backstage to {target}."
+                + (creditNote is null ? " Enter the credit-note number on the correction row when it is made." : string.Empty);
         return RedirectWithFlash(Message, Error);
     }
 
@@ -2116,6 +2189,7 @@ public class CouponInvoicingModel : PageModel
         CouponBillingType.AllocatedPrepaymentByCustomer => "Prepaid tickets with ticket-pool",
         CouponBillingType.ClaimableAdHocPaymentByCustomer => "Ad-hoc invoicing when claimed",
         CouponBillingType.NoInvoicing => "No invoicing — free or included",
+        CouponBillingType.Ignored => "Ignore — a discount code, nothing to bill",
         _ => "Not mapped yet",
     };
 
@@ -2127,6 +2201,8 @@ public class CouponInvoicingModel : PageModel
             "Ad-hoc invoicing when claimed — anyone with the code can claim it, first come first served; the partner is invoiced for what is claimed",
         CouponBillingType.NoInvoicing =>
             "No invoicing — free or already included, deliberately never billed",
+        CouponBillingType.Ignored =>
+            "Ignored — a discount code the attendee pays the rest of in Backstage; CEH never bills, chases or mails about it",
         _ => "Not mapped yet — nobody has said who pays",
     };
 }

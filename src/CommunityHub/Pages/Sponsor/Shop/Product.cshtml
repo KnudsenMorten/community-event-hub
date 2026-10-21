@@ -1,0 +1,69 @@
+@page "{id:int}"
+@model CommunityHub.Pages.Sponsor.Shop.ProductModel
+@using CommunityHub.Core.Integrations.Webshop
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = Model.Product?.Name ?? "Product";
+}
+
+<div class="card">
+    <partial name="_ShopNotices" model="Model" />
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        @if (Model.Product is null)
+        {
+            <p>That product is not available. <a asp-page="/Sponsor/Shop/Index">Back to the shop</a></p>
+        }
+        else
+        {
+            var p = Model.Product;
+            var a = Model.Availability;
+            <p><a asp-page="/Sponsor/Shop/Index" asp-route-Group="@p.PrimaryCategory?.Group">&larr; @(p.PrimaryCategory?.Name ?? "Shop")</a></p>
+            <h1>@p.Name</h1>
+            @if (!string.IsNullOrEmpty(Model.Message))
+            {
+                <p class="info @(Model.MessageIsError ? "shop-msg-error" : "")" role="status">@Model.Message
+                    @if (!Model.MessageIsError) { <a asp-page="/Sponsor/Shop/Cart">Go to cart</a> }</p>
+            }
+            <div style="display:flex;flex-wrap:wrap;gap:20px;">
+                <div style="flex:1 1 280px;min-width:0;">
+                    @foreach (var img in p.Images.OrderBy(i => i.SortOrder))
+                    {
+                        <img src="/shop-image/@img.Id" alt="@(img.AltText ?? p.Name)" style="width:100%;border-radius:8px;margin-bottom:10px;" />
+                    }
+                </div>
+                <div style="flex:1 1 280px;min-width:0;">
+                    <p style="font-size:22px;font-weight:700;margin:0;"><partial name="_ShopPrice" model="p" />
+                        <span style="font-size:13px;font-weight:normal;color:#4b5563;">excl. VAT</span></p>
+                    @if (Model.SurchargePercentNow > 0)
+                    {
+                        <p style="color:#b45309;">Late-order price now: @ShopPageModel.Eur(Math.Round(p.EffectivePriceEur * (1 + Model.SurchargePercentNow / 100m), 2)) (+@Model.SurchargePercentNow.ToString("0")%)</p>
+                    }
+                    @if (Model.SurchargeRule is not null) { <p style="font-size:13px;color:#4b5563;">@Model.SurchargeRule</p> }
+                    @if (p.BoothId is not null) { <p>Booth <strong>@p.BoothId</strong> · <a asp-page="/Sponsor/Shop/BoothMap" asp-route-highlight="@p.BoothId">see it on the map</a></p> }
+                    @if (p.Timeslot is not null) { <p>Timeslot <strong>@p.Timeslot</strong> @(p.TimeslotTime is null ? "" : $"({p.TimeslotTime})")</p> }
+                    <p class="@(a is { Available: true } ? "" : "error")">@(Model.IsReserved && a is not { Available: true } ? "Reserved" : ShopPageModel.AvailabilityText(a))</p>
+                    @if (p.PrimaryCategory?.Group == CommunityHub.Core.Domain.ShopGroup.Swag)
+                    {
+                        <p>This item goes into every attendee bag with your logo — choose it in the
+                           <a asp-page="/Sponsor/SwagCatalog">swag configurator</a>, which shows the total for all bags.</p>
+                    }
+                    else if (a is { Available: true })
+                    {
+                        <form method="post" asp-page-handler="Add" asp-route-id="@p.Id" style="display:flex;gap:8px;align-items:center;">
+                            @if (a.Unlimited || (a.Remaining ?? 1) > 1)
+                            {
+                                <label for="qty">Quantity</label>
+                                <input id="qty" type="number" name="quantity" value="1" min="1" max="@(a.Unlimited ? 99 : a.Remaining)" style="width:70px;" />
+                            }
+                            else { <input type="hidden" name="quantity" value="1" /> }
+                            <button type="submit">Add to cart</button>
+                        </form>
+                    }
+                    <div style="margin-top:16px;">@Html.Raw(ShopHtml.Sanitize(p.ShortDescriptionHtml))</div>
+                    <div style="margin-top:12px;">@Html.Raw(ShopHtml.Sanitize(p.DescriptionHtml))</div>
+                </div>
+            </div>
+        }
+    }
+</div>

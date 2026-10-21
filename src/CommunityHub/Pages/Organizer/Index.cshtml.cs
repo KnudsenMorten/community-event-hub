@@ -41,7 +41,7 @@ public class IndexModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         // Organizer-only page.
-        if (me.Role != ParticipantRole.Organizer)
+        if (!me.Role.HasOrganizerAccess())
         {
             AccessDenied = true;
             return Page();

@@ -80,9 +80,8 @@ else
                       maxlength="500" placeholder="e.g. blocked 13:00–15:00 for a session I want to attend">@d.UserNote</textarea>
         </div>
     }
-    @* §234 UX: the footer states what ACTUALLY happens per path — only the FIRST save is
-       applied + emailed to the volunteer lead; a later change is queued for organizer
-       approval and does not take effect (or email anyone) until it is approved. *@
+    @* §234 UX: the footer states what ACTUALLY happens per path. §1346: a later change is
+       now applied straight away and emailed to the volunteer lead (it was queued for approval). *@
     @if (Model.LastSavedAt is null)
     {
         <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
@@ -94,9 +93,9 @@ else
     else
     {
         <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
-            📋 When you click <strong>Save</strong>, your change is queued for the
-            organizers to approve. Until it is approved, your previously saved
-            availability still applies.
+            📧 When you click <strong>Save</strong>, your change takes effect straight away
+            and is sent to Morten Leth Hedegaard
+            (<a href="mailto:mlh@expertslive.dk">mlh@expertslive.dk</a>).
         </p>
     }
 }

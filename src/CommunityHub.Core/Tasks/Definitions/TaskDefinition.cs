@@ -80,6 +80,14 @@ public enum TaskAudiencePredicate
     /// The seeder supplies the fact by asking the same config the wizard asks.
     /// </remarks>
     IsSignalInScope = 10,
+
+    /// <summary>
+    /// §1307 — every session this speaker is on is a PANEL discussion. Panels are discussions, so there is no deck:
+    /// operator 2026-09-26 <i>"sessions categorized as panel, don't have all tasks for the linked speakers like
+    /// preview/final presentation tasks. That is not relevant for them as it is discussions only."</i> Stated positively
+    /// and EXCLUDED on the two upload definitions. A speaker with one talk and one panel is NOT panel-only.
+    /// </summary>
+    IsPanelOnlySpeaker = 11,
 }
 
 /// <summary>Who a task is for. Roles AND every <see cref="Requires"/> hold; no <see cref="Excludes"/> does.</summary>

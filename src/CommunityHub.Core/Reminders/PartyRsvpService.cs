@@ -246,10 +246,12 @@ public sealed class PartyRsvpService
     /// way to know it is synthetic, and dropping unlinked rows would silently lose real public
     /// sign-ups — the expensive direction.</para>
     /// </summary>
+    // §1307 — a row LINKED as a duplicate of another (SamePersonAsId) is not counted: operator 2026-09-26, two people
+    // linked on /Organizer/Participants \"count as one for party, lunch, etc.\" The party Excel already did this.
     public Task<List<PartyRsvp>> GetAllAsync(int eventId, CancellationToken ct = default) =>
         _db.PartyRsvps.AsNoTracking().Where(r => r.EventId == eventId)
             .Where(r => r.ParticipantId == null
-                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser))
+                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser && p.SamePersonAsId == null))
             .OrderByDescending(r => r.UpdatedAt).ToListAsync(ct);
 
     /// <summary>(total submissions, attending count) for an edition — active-only and non-test,
@@ -262,7 +264,7 @@ public sealed class PartyRsvpService
         var rows = await _db.PartyRsvps.AsNoTracking()
             .Where(r => r.EventId == eventId)
             .Where(r => r.ParticipantId == null
-                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser))
+                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser && p.SamePersonAsId == null))
             .Select(r => r.Attending).ToListAsync(ct);
         return (rows.Count, rows.Count(a => a));
     }

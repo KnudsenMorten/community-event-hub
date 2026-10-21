@@ -103,7 +103,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         if (!string.IsNullOrEmpty(Msg)) ActionMessage = Msg;
         Queue = await _queue.GetQueueAsync(me.EventId, source: null, ct);

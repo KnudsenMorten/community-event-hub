@@ -37,7 +37,7 @@
         }
 
         <p style="font-size:13px;color:#6b7280;">
-            Company name + contact details live in <strong>Company Manager (WordPress)</strong>.
+            Company name + billing details live on the CEH company page; contacts and roles come from <strong>e-conomic</strong>.
             Tasks are auto-generated from completed WooCommerce sponsor orders
             (daily 06:00 UTC) via <code>SponsorTaskExpander</code> + <code>config/sponsor.eldk27.json</code>.
             This page summarises the per-company state and exports the full grid.
@@ -83,6 +83,13 @@
             @* keep the current sort; reset to page 1 on a new search *@
             <input type="hidden" name="Sort" value="@Model.Sort" />
             <input type="hidden" name="Desc" value="@Model.Desc" />
+            @* §1359 — test, withdrawn and inactive companies only when ticked. *@
+            <div style="flex:0 0 auto;">
+                <label style="display:flex;gap:6px;align-items:center;font-weight:normal;">
+                    <input type="checkbox" name="ShowAll" value="true" checked="@Model.ShowAll" onchange="this.form.submit()" />
+                    Show test &amp; inactive (@Model.HiddenCount)
+                </label>
+            </div>
             <div style="flex:0 0 auto;">
                 <button type="submit">@Localizer["OrgGrid.Apply"]</button>
                 <a asp-page="/Organizer/Sponsors" style="margin-left:8px;font-size:13px;">Clear</a>
@@ -106,26 +113,29 @@
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("company")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@(Model.SortIndicator("company"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@(Model.SortIndicator("company"))</a>
                         </th>
+                        <th scope="col" style="padding:6px;min-width:220px;">Tier &amp; products</th>
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("contacts")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@(Model.SortIndicator("contacts"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@(Model.SortIndicator("contacts"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("open")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="open" asp-route-Desc="@Model.NextDescFor("open")" asp-route-PageNo="1">Open@(Model.SortIndicator("open"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="open" asp-route-Desc="@Model.NextDescFor("open")" asp-route-PageNo="1">Open@(Model.SortIndicator("open"))</a>
                         </th>
-                        <th scope="col" style="padding:6px;text-align:right;">In progress</th>
+                        <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("inprogress")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="inprogress" asp-route-Desc="@Model.NextDescFor("inprogress")" asp-route-PageNo="1">In progress@(Model.SortIndicator("inprogress"))</a>
+                        </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("done")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="done" asp-route-Desc="@Model.NextDescFor("done")" asp-route-PageNo="1">Done@(Model.SortIndicator("done"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="done" asp-route-Desc="@Model.NextDescFor("done")" asp-route-PageNo="1">Done@(Model.SortIndicator("done"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("overdue")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="overdue" asp-route-Desc="@Model.NextDescFor("overdue")" asp-route-PageNo="1">Overdue@(Model.SortIndicator("overdue"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="overdue" asp-route-Desc="@Model.NextDescFor("overdue")" asp-route-PageNo="1">Overdue@(Model.SortIndicator("overdue"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("total")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="total" asp-route-Desc="@Model.NextDescFor("total")" asp-route-PageNo="1">Total@(Model.SortIndicator("total"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="total" asp-route-Desc="@Model.NextDescFor("total")" asp-route-PageNo="1">Total@(Model.SortIndicator("total"))</a>
                         </th>
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("nextdue")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="nextdue" asp-route-Desc="@Model.NextDescFor("nextdue")" asp-route-PageNo="1">Next due@(Model.SortIndicator("nextdue"))</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll" asp-route-Sort="nextdue" asp-route-Desc="@Model.NextDescFor("nextdue")" asp-route-PageNo="1">Next due@(Model.SortIndicator("nextdue"))</a>
                         </th>
                         <th scope="col" style="padding:6px;">Status</th>
                     </tr>
@@ -144,6 +154,28 @@
                                    asp-route-ActiveFilter="all"
                                    title="View this company's participants">@c.CompanyName</a>
                                 <div style="color:#8a8f9c;font-size:11px;font-family:monospace;">id @c.CompanyId</div>
+                            </td>
+                            @* §1359 — what they bought: completed / signed orders only, never cancelled ones. *@
+                            <td style="padding:6px;font-size:13px;">
+                                @{ var bought = Model.PurchasesOf(c.CompanyId); }
+                                @if (bought.Tier is not null)
+                                {
+                                    <span style="display:inline-block;background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 8px;font-weight:700;">@bought.Tier</span>
+                                }
+                                @if (bought.Categories.Count > 0)
+                                {
+                                    <div style="color:#475569;font-size:12px;margin-top:2px;">@string.Join(" · ", bought.Categories)</div>
+                                }
+                                @if (bought.Products.Count > 0)
+                                {
+                                    <ul style="margin:4px 0 0;padding-left:16px;">
+                                        @foreach (var p in bought.Products) { <li>@p</li> }
+                                    </ul>
+                                }
+                                else
+                                {
+                                    <span style="color:#8a8f9c;">no completed order</span>
+                                }
                             </td>
                             <td style="padding:6px;">
                                 @{
@@ -202,6 +234,11 @@
                                    reservation cancelled, logins locked, tasks closed)
                                    and hides the company from the public page + counts.
                                    Zoho/ERP records are never touched (§56). *@
+                                @* §1359 — only visible with "Show test & inactive": every contact deactivated. *@
+                                @if (!c.IsWithdrawn && CommunityHub.Pages.Organizer.SponsorsModel.IsInactive(c))
+                                {
+                                    <span style="display:inline-block;background:#f1f5f9;color:#475569;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:600;margin-right:6px;">Inactive</span>
+                                }
                                 @if (c.IsWithdrawn)
                                 {
                                     <span style="display:inline-block;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:600;">Withdrawn</span>
@@ -216,6 +253,7 @@
                                                         border:1px solid #b91c1c;border-radius:6px;padding:4px 9px;">Mark as withdrawn</summary>
                                         <form method="post" asp-page-handler="WithdrawCompany" style="margin-top:6px;min-width:260px;">
                                             <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                            <input type="hidden" name="ShowAll" value="@Model.ShowAll" />
                                             <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
                                                 CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
                                                 $"Deactivates every contact at {c.CompanyName}, cancels their group party reservation and removes the company from the public sponsors page. Zoho/ERP records are NOT touched.",
@@ -237,6 +275,7 @@
                                 <form method="post" asp-page-handler="SetTestCompany"
                                       style="display:inline-block;vertical-align:top;margin-left:6px;">
                                     <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                    <input type="hidden" name="ShowAll" value="@Model.ShowAll" />
                                     <input type="hidden" name="isTest" value="@((!c.IsTestData).ToString().ToLowerInvariant())" />
                                     @if (c.IsTestData)
                                     {
@@ -268,6 +307,7 @@
                                     <form method="post" asp-page-handler="ResetSponsorOnboarding"
                                           style="margin-top:6px;min-width:300px;padding:10px;background:#fff8e1;border:1px solid #f5d98a;border-radius:8px;text-align:left;">
                                         <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                        <input type="hidden" name="ShowAll" value="@Model.ShowAll" />
                                         <p style="margin:0 0 8px;font-size:12px;color:#6b7280;">
                                             Makes @c.CompanyName look freshly onboarded so the journey can be
                                             re-tested. Package, tier, logo, contacts and logins are kept, and
@@ -311,7 +351,7 @@
                 <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
                     @if (Model.Paging.HasPrevious)
                     {
-                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search"
+                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll"
                            asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
                            asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
                            style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
@@ -319,7 +359,7 @@
                     <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
                     @if (Model.Paging.HasNext)
                     {
-                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search"
+                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-ShowAll="@Model.ShowAll"
                            asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
                            asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
                            style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
@@ -387,6 +427,7 @@
             <form method="post" asp-page-handler="DeleteFacts" id="deleteFactsForm" hidden>
                 <input type="hidden" name="sponsorInfoId" id="deleteFactsId" value="" />
                 <input type="hidden" name="Search" value="@Model.Search" />
+                <input type="hidden" name="ShowAll" value="@Model.ShowAll" />
                 <input type="hidden" name="Sort" value="@Model.Sort" />
                 <input type="hidden" name="Desc" value="@Model.Desc" />
                 <input type="hidden" name="PageNo" value="@Model.Paging.Page" />

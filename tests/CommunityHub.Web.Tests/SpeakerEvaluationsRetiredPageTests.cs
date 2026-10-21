@@ -104,7 +104,8 @@ public sealed class SpeakerEvaluationsRetiredPageTests
         return new EvaluationsModel(
             accessor,
             new CommunityHub.Core.Reminders.SpeakerSessionsService(db),
-            qr)
+            qr,
+            new CommunityHub.Core.Domain.SpeakerAccessService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };

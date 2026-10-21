@@ -44,7 +44,8 @@ public sealed class EconomicInvoiceReferenceScanTests
     { "collection": [
         { "bookedInvoiceNumber": 20147, "references": { "other": "CouponTicket-ARROW-DK-9001" } },
         { "bookedInvoiceNumber": 20148, "references": { } },
-        { "bookedInvoiceNumber": 20149, "references": { "other": "WebshopOrderId-4711" } }
+        { "bookedInvoiceNumber": 20149, "references": { "other": "WebshopOrderId-4711" } },
+        { "bookedInvoiceNumber": 20150, "netAmount": -27000.00, "references": { "other": "CouponTicket-ARROW-DK-9001" } }
       ] }
     """;
 
@@ -85,7 +86,7 @@ public sealed class EconomicInvoiceReferenceScanTests
 
         var refs = await client.ListInvoiceReferencesAsync();
 
-        var coupon = Assert.Single(refs, r => r.Reference == "CouponTicket-ARROW-DK-9001");
+        var coupon = Assert.Single(refs, r => r.Reference == "CouponTicket-ARROW-DK-9001" && !r.IsCreditNote);
         Assert.Equal(20147, coupon.Number);
         Assert.True(coupon.IsBooked);
         Assert.Equal("invoice 20147 (booked)", coupon.Display);
@@ -104,8 +105,25 @@ public sealed class EconomicInvoiceReferenceScanTests
 
         var refs = await client.ListInvoiceReferencesAsync();
 
-        Assert.Equal(3, refs.Count);                       // 20148 carries no reference
+        Assert.Equal(4, refs.Count);                       // 20148 carries no reference
         Assert.DoesNotContain(refs, r => r.Number == 20148);
+    }
+
+    /// <summary>
+    /// 🔴 §1362 — crediting an invoice in e-conomic copies its reference, so the credit note carries OUR marker too.
+    /// A negative booked invoice is a credit note and says so.
+    /// </summary>
+    [Fact]
+    public async Task A_credit_note_carrying_our_reference_is_flagged_as_one()
+    {
+        var client = Make(out _);
+
+        var refs = await client.ListInvoiceReferencesAsync();
+
+        var credit = Assert.Single(refs, r => r.Number == 20150);
+        Assert.True(credit.IsCreditNote);
+        Assert.Equal("credit note 20150", credit.Display);
+        Assert.All(refs.Where(r => r.Number != 20150), r => Assert.False(r.IsCreditNote));
     }
 
     /// <summary>

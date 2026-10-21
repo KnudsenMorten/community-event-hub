@@ -1,0 +1,168 @@
+@page "{Id}"
+@model CommunityHub.Pages.Organizer.ShopCompanyModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = Model.Company is null ? "Company" : $"Company: {Model.Company.PublicName ?? Model.Company.LegalName}";
+    var c = Model.Company;
+}
+
+<div class="card">
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else if (c is not null)
+    {
+        <p><a asp-page="/Organizer/ShopCompanies">&larr; Companies</a></p>
+        <h1>@c.OrganizerLabel</h1>
+        <p><span class="co-state @(c.State == ShopCompanyState.Sponsor ? "is-sponsor" : "")">@(c.State == ShopCompanyState.Sponsor ? "Sponsor" : "Potential sponsor")</span>
+           · @(c.Source == ShopCompanySource.CompanyManager ? "from the old webshop" : "registered in CEH") · id @c.SponsorCompanyId</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        <div class="co-grid">
+            <section class="co-panel">
+                <h2>e-conomic data <span class="co-owner erp">Data owner: e-conomic</span></h2>
+                <p class="co-hint">Changed in e-conomic, not here — invoices depend on it.</p>
+                <dl class="co-dl">
+                    <dt>Customer number</dt><dd>@(c.ErpCustomerNumber ?? "—")
+                        @if (c.ErpCustomerNumber is null && c.Source == ShopCompanySource.Registered)
+                        {
+                            @* §1312 — a registration that could not reach e-conomic is created from here. *@
+                            <form method="post" asp-page-handler="Erp" asp-route-Id="@Model.Id" style="display:inline;"
+                                  onsubmit="return confirm('Create this company in e-conomic now, with its signer and coordinator as contacts? An existing customer with the same CVR is linked instead.');">
+                                <button type="submit" class="primary">Create in e-conomic now</button>
+                            </form>
+                            @if (!string.IsNullOrWhiteSpace(c.ErpError)) { <br /><span style="color:#b91c1c;font-size:13px;">@c.ErpError</span> }
+                        }
+                    </dd>
+                    <dt>Legal company name</dt><dd>@c.LegalName</dd>
+                    <dt>CVR / VAT number</dt><dd>@(c.Cvr ?? "—")</dd>
+                    <dt>Phone</dt><dd>@(c.Phone ?? "—")</dd>
+                    <dt>Currency</dt><dd>@c.Currency</dd>
+                    <dt>VAT zone</dt><dd>@c.VatZone</dd>
+                    <dt>Billing address</dt><dd>@string.Join(", ", new[] { c.Address, $"{c.Postcode} {c.City}".Trim(), c.CountryIso2 }.Where(s => !string.IsNullOrWhiteSpace(s)))</dd>
+                    <dt>Billing e-mail</dt><dd>@(c.InvoiceEmail ?? "—")</dd>
+                </dl>
+            </section>
+
+            <section class="co-panel">
+                <h2>CEH data <span class="co-owner ceh">Data owner: CEH</span></h2>
+                <form method="post" asp-page-handler="Data" asp-route-Id="@Model.Id" class="co-form">
+                    <label>Public company name <input name="publicName" value="@c.PublicName" maxlength="200" /></label>
+                    <label>Website <input name="website" value="@c.Website" maxlength="300" /></label>
+                    <label>LinkedIn URL <input name="linkedIn" value="@c.LinkedInUrl" maxlength="300" /></label>
+                    <label>X / Twitter URL <input name="twitter" value="@c.TwitterUrl" maxlength="300" /></label>
+                    <label>Billing reference (PO) <input name="billingReference" value="@c.BillingReference" maxlength="100" /></label>
+                    <label>Internal notes <textarea name="notes" rows="3" maxlength="4000">@c.Notes</textarea></label>
+                    @* §1312 — CodeTwo: "remove that and only tag their company on linkedin". *@
+                    <label style="display:flex;gap:8px;align-items:center;font-weight:normal;"><input type="checkbox" name="soMeTagContacts" value="true" checked="@Model.SoMeTagContacts" style="width:auto;" />
+                        Tag the company's people (signer, event coordinators) in social-media posts — untick to tag only the company</label>
+                    <button type="submit">Save</button>
+                </form>
+            </section>
+        </div>
+
+        <section class="co-panel">
+            <h2>Default signer and event coordinator</h2>
+            @if (c.State == ShopCompanyState.Sponsor)
+            {
+                <p class="co-hint">⚠ This is a <strong>sponsor</strong>: a new event coordinator gets the sponsor welcome mail.</p>
+            }
+            else
+            {
+                <p class="co-hint">A potential sponsor gets no mail — choosing people here only lets them sign in and sign.</p>
+            }
+            <form method="post" asp-page-handler="Defaults" asp-route-Id="@Model.Id" class="co-form co-two">
+                <label>Default signer
+                    <select name="signerKey">
+                        <option value="">— Not set —</option>
+                        @foreach (var p in Model.People) { <option value="@p.Key" selected="@(p.Key == Model.CurrentSignerKey)">@p.Name (@p.MaskedEmail)@(p.Key.StartsWith("k:") ? " — from e-conomic / old webshop" : "")</option> }
+                    </select>
+                </label>
+                <label>Default event coordinator
+                    <select name="coordinatorKey">
+                        <option value="">— Not set —</option>
+                        @foreach (var p in Model.People) { <option value="@p.Key" selected="@(p.Key == Model.CurrentCoordinatorKey)">@p.Name (@p.MaskedEmail)@(p.Key.StartsWith("k:") ? " — from e-conomic / old webshop" : "")</option> }
+                    </select>
+                </label>
+                <div><button type="submit" class="primary">Save roles</button></div>
+            </form>
+            <p class="co-hint">The people and their roles come from e-conomic (role 1 = signer, 2 = event coordinator): applied at once
+               when the e-conomic contacts page is saved, and every 10 minutes. A signed sponsor's e-conomic contacts become linked
+               users; a potential sponsor's are only offered in the dropdowns. A role is never removed automatically.</p>
+            @if (!string.IsNullOrWhiteSpace(Model.Company?.ErpRoleWarning))
+            {
+                @* §1312 — operator 2026-09-30: "then you must warn me of missing roles". *@
+                <div class="co-warn" role="alert"><strong>Check the roles — CEH and e-conomic do not agree:</strong>
+                    <ul>@foreach (var line in Model.Company.ErpRoleWarning.Split('\n')) { <li>@line</li> }</ul></div>
+            }
+        </section>
+
+        <section class="co-panel">
+            <h2>Linked users (@Model.LinkedPeople.Count)</h2>
+            @if (Model.LinkedPeople.Count == 0) { <p>Nobody from this company is in the hub yet.</p> }
+            else
+            {
+                <div style="overflow-x:auto;">
+                <table class="co-people">
+                    <thead><tr><th>Name</th><th>E-mail</th><th>Role</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var p in Model.LinkedPeople)
+                    {
+                        <tr>
+                            <td>@p.Name</td><td>@p.Email</td>
+                            <td>@(string.Join(", ", new[] { p.IsSigner ? "signer" : null, p.IsCoordinator ? "event coordinator" : null }.Where(s => s is not null)))</td>
+                            <td>
+                                <form method="post" asp-page-handler="Unlink" asp-route-Id="@Model.Id" onsubmit="return confirm('Remove @p.Name from this company? The person is kept in the hub.');">
+                                    <input type="hidden" name="participantId" value="@p.ParticipantId" /><button type="submit">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                </div>
+            }
+            <h3>Link a user</h3>
+            <form method="post" asp-page-handler="Link" asp-route-Id="@Model.Id" class="co-form co-two">
+                @if (Model.NotLinked.Count > 0)
+                {
+                    <label>Known from e-conomic / the old webshop
+                        <select name="knownKey">
+                            <option value="">— Select a person —</option>
+                            @foreach (var k in Model.NotLinked) { <option value="k:@k.Id">@k.FullName (@k.Email)</option> }
+                        </select>
+                    </label>
+                }
+                <label>…or a new person: e-mail <input name="email" type="email" maxlength="256" /></label>
+                <label>Name <input name="name" maxlength="200" /></label>
+                <div><button type="submit">Link user</button></div>
+            </form>
+        </section>
+    }
+</div>
+<style>
+    .co-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+    .co-panel { border:1px solid #e5e7eb; border-radius:10px; padding:12px 16px; margin:0 0 16px; background:#fff; }
+    .co-panel h2 { font-size:18px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .co-owner { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:3px 10px; border-radius:999px; }
+    .co-owner.erp { background:#fff7ed; color:#b45309; border:1px solid #fdba74; }
+    .co-owner.ceh { background:#eef4fb; color:#1565c0; border:1px solid #bcd3ee; }
+    .co-hint { font-size:13px; color:#4b5563; }
+    /* §1312 — room between the columns and rows (operator 2026-09-30: "looks also cramped - add more space"). */
+    .co-people { border-collapse:collapse; margin:0 0 8px; }
+    .co-people th, .co-people td { padding:10px 16px 10px 0; text-align:left; vertical-align:middle; border-bottom:1px solid #eef0f3; }
+    .co-people form { margin:0; }
+    .co-panel h3 { margin-top:24px; }
+    .co-warn { border:1px solid #fca5a5; border-left:4px solid #dc2626; background:#fef2f2; border-radius:8px; padding:10px 14px; margin:8px 0 0; }
+    .co-warn ul { margin:6px 0 0; padding-left:20px; }
+    .co-dl { display:grid; grid-template-columns:minmax(130px, auto) 1fr; gap:6px 12px; margin:0; }
+    .co-dl dt { font-weight:600; color:#374151; }
+    .co-dl dd { margin:0; overflow-wrap:anywhere; }
+    .co-form { display:grid; gap:10px; }
+    .co-form label { display:grid; gap:4px; font-weight:600; font-size:14px; }
+    .co-form input, .co-form select, .co-form textarea { font-size:16px; padding:8px 10px; min-width:0; }
+    .co-two { grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); align-items:end; }
+    .co-state { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; color:#374151; font-size:13px; font-weight:600; }
+    .co-state.is-sponsor { background:#dcfce7; color:#166534; }
+</style>

@@ -156,12 +156,46 @@ public sealed class CouponPrepaidBalanceTests
     public void An_exactly_used_pool_is_exhausted_but_not_oversubscribed()
     {
         var claims = Enumerable.Range(1, 4).Select(i => Claim(id: $"t{i}")).ToArray();
-        var b = CouponPrepaidBalance.For(Pool(purchased: 4), claims);
+        var b = CouponPrepaidBalance.For(Pool(purchased: 4, threshold: 2), claims);
 
         Assert.Equal(0, b.Remaining);
         Assert.True(b.IsExhausted);
         Assert.False(b.IsOversubscribed);
         Assert.True(b.IsLow);
+    }
+
+    /// <summary>
+    /// 🔴 §1341 — operator 2026-10-08: a 5-ticket pool, warn at 5, invoiced, nothing claimed, read
+    /// "running low" / "needs a decision" and mailed an ACTION REQUIRED. A level at or above the
+    /// pool's size is capped at size − 1, so a fresh pool is never low.
+    /// </summary>
+    [Fact]
+    public void A_fresh_pool_is_not_low_when_its_level_is_at_or_above_its_size()
+    {
+        var none = Array.Empty<CouponClaim>();
+
+        Assert.False(CouponPrepaidBalance.For(Pool(purchased: 5, threshold: 5), none).IsLow);
+        Assert.False(CouponPrepaidBalance.For(Pool(purchased: 3, threshold: 10), none).IsLow);
+
+        // ...but the first claim brings it within reach of the level.
+        Assert.True(CouponPrepaidBalance.For(Pool(purchased: 5, threshold: 5), new[] { Claim(id: "1") }).IsLow);
+    }
+
+    /// <summary>
+    /// §1341 — 0 is the default and means NO running-low warning, even used up; only going past
+    /// what was paid for is flagged, because that is tickets nobody paid for.
+    /// </summary>
+    [Fact]
+    public void Level_zero_is_the_default_and_warns_only_when_oversubscribed()
+    {
+        Assert.Equal(0, CouponPrepaidBalance.DefaultLowBalanceThreshold);
+
+        var four = Enumerable.Range(1, 4).Select(i => Claim(id: $"t{i}")).ToArray();
+        var five = Enumerable.Range(1, 5).Select(i => Claim(id: $"t{i}")).ToArray();
+
+        Assert.False(CouponPrepaidBalance.For(Pool(purchased: 4), four).IsLow);              // default
+        Assert.False(CouponPrepaidBalance.For(Pool(purchased: 4, threshold: 0), four).IsLow); // explicit
+        Assert.True(CouponPrepaidBalance.For(Pool(purchased: 4, threshold: 0), five).IsLow);  // -1
     }
 
     [Fact]

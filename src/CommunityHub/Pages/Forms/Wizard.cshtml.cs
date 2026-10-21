@@ -91,7 +91,9 @@ public class WizardModel : PageModel
     }
 
     /// <summary>One normalized step (across the speaker / role wizard view shapes).</summary>
-    public sealed record PlanStep(string Key, string Route, bool Done);
+    /// <summary>§1312 — <paramref name="Required"/>: a MANDATORY step (marked red while not done). Optional /
+    /// informational steps are never marked (operator 2026-09-27: "remember it is only for mandatory - not optional").</summary>
+    public sealed record PlanStep(string Key, string Route, bool Done, bool Required = false);
 
     /// <summary>The normalized, ordered, gated, done-marked plan the host renders against.</summary>
     public sealed class WizardPlan
@@ -874,7 +876,9 @@ public class WizardModel : PageModel
             return new WizardPlan
             {
                 ResxPrefix = "SponsorWiz",
-                Steps = sv.Steps.Select(s => new PlanStep(s.Key, SponsorStepRoute(s.Anchor), s.Done ?? false)).ToList(),
+                // A step the plan does not evaluate (Done null) or an informational one is optional: never marked missing.
+                Steps = sv.Steps.Select(s => new PlanStep(s.Key, SponsorStepRoute(s.Anchor), s.Done ?? false,
+                    Required: s.Done is not null && !InformationalSteps.Contains(s.Key))).ToList(),
             };
         }
 
@@ -884,7 +888,7 @@ public class WizardModel : PageModel
             return new WizardPlan
             {
                 ResxPrefix = "SpeakerWiz",
-                Steps = v.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done)).ToList(),
+                Steps = v.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done, Required: GetStartedSteps.IsMandatory(s.Key))).ToList(),   // §1312
             };
         }
 
@@ -894,7 +898,7 @@ public class WizardModel : PageModel
             return new WizardPlan
             {
                 ResxPrefix = "RoleWiz",
-                Steps = v.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done)).ToList(),
+                Steps = v.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done, Required: GetStartedSteps.IsMandatory(s.Key))).ToList(),   // §1312
             };
         }
 
@@ -909,7 +913,7 @@ public class WizardModel : PageModel
             return new WizardPlan
             {
                 ResxPrefix = "RoleWiz",
-                Steps = av.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done)).ToList(),
+                Steps = av.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done, Required: GetStartedSteps.IsMandatory(s.Key))).ToList(),   // §1312
             };
         }
 

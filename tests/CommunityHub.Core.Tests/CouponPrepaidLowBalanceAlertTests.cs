@@ -113,12 +113,12 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     //  What counts as low
     // ---------------------------------------------------------------------
 
-    /// <summary>50 bought, 47 claimed ⇒ 3 left, under the default threshold of 5.</summary>
+    /// <summary>50 bought, 47 claimed ⇒ 3 left, under the pool's level of 5.</summary>
     [Fact]
     public async Task A_pool_at_or_below_its_threshold_is_warned_about()
     {
         using var db = NewDb();
-        await SeedAsync(db, purchased: 50, claimed: 47);
+        await SeedAsync(db, purchased: 50, claimed: 47, threshold: 5);
         var (service, mail) = NewService(db, new FixedClock(Now));
 
         Assert.Equal(1, await service.AlertAsync(EventId));
@@ -197,7 +197,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
         await SeedAsync(db, purchased: 10, claimed: 4, cancelled: 4);
         var (service, mail) = NewService(db, new FixedClock(Now));
 
-        // 4 live claims of 10 ⇒ 6 left, above the default threshold of 5 — the four cancelled ones
+        // 4 live claims of 10 ⇒ 6 left (default level 0 = no warning) — the four cancelled ones
         // are not spent.
         Assert.Equal(0, await service.AlertAsync(EventId));
         Assert.Empty(mail.Sent);
@@ -237,7 +237,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     public async Task It_goes_quiet_for_a_day_and_then_repeats()
     {
         using var db = NewDb();
-        await SeedAsync(db, purchased: 50, claimed: 47);
+        await SeedAsync(db, purchased: 50, claimed: 47, threshold: 5);
         var clock = new FixedClock(Now);
         var (service, mail) = NewService(db, clock);
 
@@ -261,7 +261,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     public async Task Getting_worse_breaks_the_quiet_period()
     {
         using var db = NewDb();
-        var pool = await SeedAsync(db, purchased: 50, claimed: 47);   // 3 left
+        var pool = await SeedAsync(db, purchased: 50, claimed: 47, threshold: 5);   // 3 left
         var clock = new FixedClock(Now);
         var (service, mail) = NewService(db, clock);
 
@@ -289,7 +289,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     public async Task Getting_better_but_still_low_says_nothing_more()
     {
         using var db = NewDb();
-        await SeedAsync(db, purchased: 50, claimed: 49);              // 1 left
+        await SeedAsync(db, purchased: 50, claimed: 49, threshold: 5);              // 1 left
         var clock = new FixedClock(Now);
         var (service, mail) = NewService(db, clock);
 
@@ -368,24 +368,38 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     /// claim — so a second alert would have been a second chance to tune one of them wrong.
     /// </summary>
     [Fact]
-    public async Task A_capped_ad_hoc_coupon_near_its_cap_is_warned_about()
+    public async Task A_capped_ad_hoc_coupon_past_its_cap_is_warned_about()
     {
         using var db = NewDb();
-        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 47);
+        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 53);
         var (service, mail) = NewService(db, new FixedClock(Now));
 
         Assert.Equal(1, await service.AlertAsync(EventId));
 
         var sent = Assert.Single(mail.Messages);
         // ⚠️ "available/remaining" in the mail, which is what he asked for by name.
-        Assert.Contains("3", sent.Html);
         Assert.Contains("of 50", sent.Html);
         Assert.Contains("ARROW-DK", sent.Html);
         Assert.Contains("ad-hoc cap", sent.Html);
         // The subject must not still say "prepaid pool" — this one is not one.
         Assert.DoesNotContain("prepaid", sent.Subject, StringComparison.OrdinalIgnoreCase);
 
-        Assert.Equal(3, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
+        Assert.Equal(-3, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
+    }
+
+    /// <summary>
+    /// §1341 — the default level is 0 (no running-low warning) for a cap too: near it, or exactly
+    /// at it, is silent. Same rule as a pool, so the two cannot drift.
+    /// </summary>
+    [Fact]
+    public async Task A_capped_ad_hoc_coupon_near_or_at_its_cap_is_not_warned_about()
+    {
+        using var db = NewDb();
+        await SeedCappedAdHocAsync(db, cap: 5, claimed: 5);
+        var (service, mail) = NewService(db, new FixedClock(Now));
+
+        Assert.Equal(0, await service.AlertAsync(EventId));
+        Assert.Empty(mail.Sent);
     }
 
     /// <summary>An UNCAPPED ad-hoc coupon has no number to be near, so it is never warned about.</summary>
@@ -425,7 +439,7 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     public async Task A_capped_coupon_stays_quiet_until_it_gets_worse()
     {
         using var db = NewDb();
-        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 47);
+        var rule = await SeedCappedAdHocAsync(db, cap: 50, claimed: 51);
         var clock = new FixedClock(Now);
         var (service, mail) = NewService(db, clock);
 
@@ -439,12 +453,12 @@ public sealed class CouponPrepaidLowBalanceAlertTests
 
         // Worse ⇒ immediate, inside the quiet period.
         db.Orders.RemoveRange(db.Orders);
-        db.Orders.Add(new Order { EventId = EventId, RawJson = OrderJson(49) });
+        db.Orders.Add(new Order { EventId = EventId, RawJson = OrderJson(53) });
         await db.SaveChangesAsync();
 
         Assert.Equal(1, await service.AlertAsync(EventId));
         Assert.Equal(2, mail.Sent.Count);
-        Assert.Equal(1, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
+        Assert.Equal(-3, (await db.CouponInvoicingSettings.FindAsync(rule.Id))!.LastCapAlertRemaining);
     }
 
     /// <summary>
@@ -455,13 +469,15 @@ public sealed class CouponPrepaidLowBalanceAlertTests
     public async Task A_pool_and_a_capped_coupon_share_a_single_mail()
     {
         using var db = NewDb();
-        await SeedAsync(db, purchased: 50, claimed: 47);
+        await SeedAsync(db, purchased: 50, claimed: 47, threshold: 5);
 
         var adHoc = new CouponInvoicingSetting
         {
             EventId = EventId, CouponName = "GLOBE-CAP",
             BillingType = CouponBillingType.ClaimableAdHocPaymentByCustomer,
-            ErpCustomerNumber = 777, ClaimCapTickets = 4,
+            // §1341 — the default level is 0, so the ad-hoc side has to be PAST its cap to be in
+            // the mail: cap 1, two claims below.
+            ErpCustomerNumber = 777, ClaimCapTickets = 1,
         };
         db.CouponInvoicingSettings.Add(adHoc);
         db.Orders.Add(new Order
@@ -472,7 +488,10 @@ public sealed class CouponPrepaidLowBalanceAlertTests
             BackstageOrderId = "9002",
             RawJson = "{\"id\":\"9002\",\"tickets\":[{\"id\":\"g1\",\"promo_code\":\"GLOBE-CAP\","
                       + "\"ticket_name\":\"2-day\",\"base_price\":3500,\"status_string\":\"active\","
-                      + "\"contact\":{\"email\":\"g@example.test\",\"first_name\":\"G\",\"last_name\":\"H\"}}]}",
+                      + "\"contact\":{\"email\":\"g@example.test\",\"first_name\":\"G\",\"last_name\":\"H\"}},"
+                      + "{\"id\":\"g2\",\"promo_code\":\"GLOBE-CAP\","
+                      + "\"ticket_name\":\"2-day\",\"base_price\":3500,\"status_string\":\"active\","
+                      + "\"contact\":{\"email\":\"g2@example.test\",\"first_name\":\"G\",\"last_name\":\"I\"}}]}",
         });
         await db.SaveChangesAsync();
 

@@ -327,6 +327,27 @@ public class SponsorInfo
     public string? LinkedInOrganizationId { get; set; }
 
     /// <summary>
+    /// 🔴 §1312 — tag the company's PEOPLE (signers, event coordinators) in its social-media posts. Default on; off ⇒ only
+    /// the company itself is tagged. Operator 2026-09-30: "i need an option in the some posting to exclude the tagging of
+    /// sponsor contacts (signer, event coordinator). CodeTwo have asked for me to remove that and only tag their company on
+    /// linkedin". Set on the organizer's shop company page.
+    /// </summary>
+    public bool SoMeTagContacts { get; set; } = true;
+
+    /// <summary>
+    /// §1300 — the company SLUG that <see cref="LinkedInOrganizationId"/> was looked up from by the
+    /// scheduled routine. When the sponsor's <see cref="LinkedInUrl"/> no longer carries this slug the id
+    /// is looked up again. Null with an id present = an id set by hand, which is kept (it wins).
+    /// </summary>
+    /// <remarks>⚠️ §1300 supersedes the "403 / cannot be derived" note above: the vanity-name FINDER
+    /// works on the live token (REQUIREMENTS §856.1); only the by-id GETTER is refused.</remarks>
+    public string? LinkedInOrganizationLookedUpFrom { get; set; }
+
+    /// <summary>§1300 — when the organization lookup last ran for this sponsor (negative answers are
+    /// re-asked after a day, like person mentions).</summary>
+    public DateTimeOffset? LinkedInOrganizationCheckedAt { get; set; }
+
+    /// <summary>
     /// Company Twitter/X page URL (full https URL). Hub-collected on the Company
     /// Details page; synced to Zoho Backstage exhibitor <c>company_social_pages</c>.
     /// </summary>
@@ -342,31 +363,6 @@ public class SponsorInfo
     public string? EventCoordinatorCompanyName { get; set; }
     public string? EventCoordinatorEmail { get; set; }
     public string? EventCoordinatorPhone { get; set; }
-
-    /// <summary>
-    /// §597.4 — the Company Manager user id that was the company's <b>Default Event Coordinator</b>
-    /// the last time CEH read it. Null = never read.
-    /// </summary>
-    /// <remarks>
-    /// <para>Operator 2026-07-28: *"maybe add the ability to select DEFAULT event coordinator here"* →
-    /// *"then you know which will be synced to zoho"* → *"default comes from CM (default event
-    /// coordinator)"*. So the POINTER is CM's to own, even though the VALUES above are CEH's once a
-    /// human edits them on Company Details.</para>
-    ///
-    /// <para><b>This column is what makes both halves true at once.</b> Without it the fill was
-    /// blank-only — CEH took the coordinator once and could never notice him changing it in CM
-    /// afterwards. With it, a CHANGED pointer is unambiguous evidence of a deliberate decision in CM
-    /// and the coordinator is re-read; an UNCHANGED pointer leaves whatever the hub holds alone, so
-    /// a hub edit is never silently reverted by the next sync.</para>
-    ///
-    /// <para>🔒 <b>Why the pointer and not the e-mail.</b> Zoho hard-caps contact-e-mail updates at
-    /// 3 attempts and a burnt cap means an exhibitor's LEADS ARE LOST (§596.1) — his words: *"which
-    /// is a disaster as leads will be lost"*. Deriving the contact from "first coordinator in the
-    /// list" would churn the e-mail every time a booth member was added or removed and spend the cap
-    /// on nothing. A single pointer changes only when he changes it. The
-    /// <see cref="ZohoContactEmail"/> guard still stands in front of every send regardless.</para>
-    /// </remarks>
-    public int? CmDefaultCoordinatorUserId { get; set; }
 
     /// <summary>
     /// The contact email LAST pushed to Zoho Backstage for this company (the
@@ -436,7 +432,7 @@ public class SponsorInfo
     /// <summary>Up to 80 chars. One-liner shown on listings.</summary>
     public string? CompanyDescriptionShort { get; set; }
 
-    /// <summary>Up to 600 chars. Social-media announcement intro (bullets fine).</summary>
+    /// <summary>Up to 900 chars (<c>ZohoExhibitorLimits.SocialBrandingText</c>). Social-media announcement intro (bullets fine).</summary>
     public string? SocialMediaIntro { get; set; }
 
     // --- Release ring (company default for its contacts, REQUIREMENTS §23) ----

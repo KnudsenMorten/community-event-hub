@@ -214,6 +214,13 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Integrations__ExternalWrites__Webshop'
           value: string(allowExternalWrites)
         }
+        // §1305 — the CEH sponsor shop's STOCK writes, 'true' on BOTH environments (operator 2026-09-26:
+        // "i accept the risk with dev writing to cm, it is controlled"). Its own ceiling so that DEV's
+        // Zoho sync / ERP reconcile still cannot write Company Manager (see appservice.bicep).
+        {
+          name: 'Integrations__ExternalWrites__WebshopStock'
+          value: 'true'
+        }
         // NOTE: no Sql__AdminPassword / Sql__AdminUser is emitted. The Functions
         // app authenticates to Azure SQL passwordlessly via its system-assigned
         // managed identity (the connection string in Program.cs appends

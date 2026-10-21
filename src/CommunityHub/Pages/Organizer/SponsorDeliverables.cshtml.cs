@@ -29,8 +29,6 @@ public class SponsorDeliverablesModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SponsorDeliverablesService _deliverables;
     private readonly TimeProvider _clock;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorDeliverablesModel> _logger;
 
     public SponsorDeliverablesModel(
@@ -38,16 +36,12 @@ public class SponsorDeliverablesModel : PageModel
         ICurrentParticipantAccessor participant,
         SponsorDeliverablesService deliverables,
         TimeProvider clock,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
         ILogger<SponsorDeliverablesModel> logger)
     {
         _db = db;
         _participant = participant;
         _deliverables = deliverables;
         _clock = clock;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _logger = logger;
     }
 
@@ -84,7 +78,7 @@ public class SponsorDeliverablesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
         try

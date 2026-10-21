@@ -261,6 +261,20 @@ public sealed class BoothWallSpecs
 }
 
 /// <summary>
+/// §1352 — <c>agendaSessions</c>: the agenda room per sponsor-session product kind (the text between
+/// "Sponsor " and " Session" in the product name, e.g. "Long 60 min"), and the track a session gets
+/// while its sponsor has not chosen one (Zoho refuses a session without a track).
+/// </summary>
+public sealed class SponsorAgendaSessionsConfig
+{
+    [JsonPropertyName("rooms")]
+    public Dictionary<string, string> Rooms { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("fallbackTrack")]
+    public string? FallbackTrack { get; set; }
+}
+
+/// <summary>
 /// The sponsor configuration (sponsor.&lt;edition&gt;.json) - the parts the
 /// task-expansion needs. Other sections of the file are ignored here.
 /// </summary>
@@ -283,6 +297,10 @@ public sealed class SponsorConfig
 
     [JsonPropertyName("boothWallSpecs")]
     public BoothWallSpecs? BoothWallSpecs { get; set; }
+
+    /// <summary>§1352 — where bought sponsor sessions go in the agenda. Null = the feature is off.</summary>
+    [JsonPropertyName("agendaSessions")]
+    public SponsorAgendaSessionsConfig? AgendaSessions { get; set; }
 
     // --- Parsed views (the *Raw maps include "_doc" string entries) ---------
 

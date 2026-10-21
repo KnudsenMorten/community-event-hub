@@ -77,58 +77,6 @@ public sealed class ErpSyncTests
         Assert.False(result.RegistryChecked);   // registry did not confirm
     }
 
-    // --- Customer / contact mapping ----------------------------------------
-
-    [Fact]
-    public void MapCustomer_resolves_public_name_first()
-    {
-        var cm = Company(publicName: "2LINKIT", legalName: "Legal Name ApS",
-            cvr: "13585628", currency: "DKK");
-        var customer = EconomicCustomerSyncService.MapCustomer(
-            "42", cm, billingName: "Billing GmbH", contactEmail: "coord@example.test");
-
-        Assert.Equal("2LINKIT", customer.Name);                  // public wins
-        Assert.Equal("13585628", customer.CorporateIdentificationNumber);
-        Assert.Equal("DKK", customer.Currency);
-        Assert.Equal("coord@example.test", customer.Email);
-    }
-
-    [Fact]
-    public void MapCustomer_falls_back_through_the_chain()
-    {
-        // No public, no legal, no billing → the §528b unresolved-name label (was "Company 7",
-        // which read as a real company name and hid a failed sync).
-        Assert.Equal(
-            CommunityHub.Core.Integrations.SponsorCompanyName.UnresolvedName("7"),
-            EconomicCustomerSyncService.MapCustomer("7", cm: null, billingName: null, contactEmail: null).Name);
-
-        // Legal when public blank.
-        Assert.Equal("Legal ApS",
-            EconomicCustomerSyncService.MapCustomer("7",
-                Company(publicName: "", legalName: "Legal ApS"), null, null).Name);
-
-        // Billing when public + legal blank.
-        Assert.Equal("Billing GmbH",
-            EconomicCustomerSyncService.MapCustomer("7",
-                Company(publicName: "", legalName: ""), billingName: "Billing GmbH", null).Name);
-    }
-
-    [Fact]
-    public void MapContact_derives_role_from_signer_and_coordinator_ids()
-    {
-        var company = Company(signerUserId: 10, coordinatorUserId: 20);
-
-        Assert.Equal(ErpContactRole.Signer,
-            EconomicCustomerSyncService.MapContact("42",
-                new CompanyManagerUser(10, "s@x.test", "Signer One", "Signer"), company).Role);
-        Assert.Equal(ErpContactRole.EventCoordinator,
-            EconomicCustomerSyncService.MapContact("42",
-                new CompanyManagerUser(20, "c@x.test", "Coord Two", "Coord"), company).Role);
-        Assert.Equal(ErpContactRole.Contact,
-            EconomicCustomerSyncService.MapContact("42",
-                new CompanyManagerUser(99, "o@x.test", "Other", "Other"), company).Role);
-    }
-
     // --- Customer sync against the interface --------------------------------
 
     [Fact]
@@ -137,8 +85,7 @@ public sealed class ErpSyncTests
         using var db = NewDb();
         var svc = NewCustomerSvc(db, new StubErpClient(canWrite: true));
 
-        var customer = EconomicCustomerSyncService.MapCustomer(
-            "42", Company(publicName: "Acme", cvr: "12345678"), null, null); // bad checksum
+        var customer = Customer(cvr: "12345678"); // bad checksum
 
         var result = await svc.SyncCustomerAsync(EventId, customer);
 
@@ -156,8 +103,7 @@ public sealed class ErpSyncTests
         using var db = NewDb();
         var svc = NewCustomerSvc(db, new StubErpClient(canWrite: false)); // TESTMODE-like
 
-        var customer = EconomicCustomerSyncService.MapCustomer(
-            "42", Company(publicName: "Acme", cvr: "13585628"), null, null);
+        var customer = Customer(cvr: "13585628");
 
         var result = await svc.SyncCustomerAsync(EventId, customer);
 
@@ -173,8 +119,7 @@ public sealed class ErpSyncTests
         using var db = NewDb();
         var erp = new StubErpClient(canWrite: true);
         var svc = NewCustomerSvc(db, erp);
-        var customer = EconomicCustomerSyncService.MapCustomer(
-            "42", Company(publicName: "Acme", cvr: "13585628"), null, null);
+        var customer = Customer(cvr: "13585628");
 
         var first = await svc.SyncCustomerAsync(EventId, customer);
         Assert.Equal(ErpSyncOutcome.Created, first.Outcome);
@@ -304,13 +249,9 @@ public sealed class ErpSyncTests
         new(db, erp, fx, new EconomicErpOptions { BaseCurrency = baseCurrency }, TimeProvider.System,
             NullLogger<EconomicOrderCreationService>.Instance);
 
-    private static CompanyManagerCompany Company(
-        string publicName = "Acme", string legalName = "Acme ApS", string cvr = "",
-        string currency = "", int signerUserId = 0, int coordinatorUserId = 0) =>
-        new(Id: 42, Name: legalName, PublicName: publicName, WebsiteUrl: "", LinkedInUrl: "",
-            TwitterUrl: "", DefaultSignerUserId: signerUserId,
-            EventCoordinationDefaultContactUserId: coordinatorUserId,
-            CorporateIdentificationNumber: cvr, Currency: currency, VatZone: "", ErpCustomerNumber: "");
+    private static ErpCustomer Customer(string cvr) =>
+        new(CompanyId: "42", Name: "Acme", CorporateIdentificationNumber: cvr, Currency: null,
+            VatZone: null, Email: null, ErpCustomerNumber: null);
 
     private sealed class FakeCvrLookup : IExternalCvrLookup
     {

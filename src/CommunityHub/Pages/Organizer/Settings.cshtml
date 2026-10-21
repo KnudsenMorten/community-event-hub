@@ -93,6 +93,9 @@
     <p>@Localizer["Settings.Intro"]</p>
     <p><a asp-page="/Organizer/ResourceRings">@Localizer["Settings.AssignRingsLink"] &rarr;</a></p>
     <p><a asp-page="/Organizer/Settings/Config">@Localizer["ConfigEditor.Title"] &rarr;</a></p>
+    @* §1296 — the included hotel nights per rule (operator 2026-09-22: "we need somewhere in the
+       settings menu where i can define the included nights per rule"). *@
+    <p><a asp-page="/Organizer/Settings/HotelNights">Hotel nights we cover &rarr;</a></p>
     <p><a asp-page="/Organizer/Setup">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
     @* Build stamp per environment — answers "which build + env" without a
        per-feature version (REQUIREMENTS §23a). Rings show rollout; this shows code. *@
@@ -684,14 +687,14 @@
                     var xEffective = xOwn ?? t.OverrideRing ?? Ring.Ring0;
                     <div class="set-feat">
                         <div class="set-body">
+                            @* §1286 — the TITLE leads, the subject is the small line under it. A subject
+                               made only of placeholders ("[Event Display Name]: [Subject Tail]") said
+                               nothing, and he scrolled past the mail he was looking for. *@
                             <h3 style="font-size:15px;">
+                                @t.Title
                                 @if (!string.IsNullOrWhiteSpace(t.Subject))
                                 {
-                                    <text>Subject: &ldquo;@t.Subject&rdquo;</text>
-                                }
-                                else
-                                {
-                                    <text>@t.Title</text>
+                                    <br /><span style="font-size:12px;font-weight:400;color:#64748b;">Subject: &ldquo;@t.Subject&rdquo;</span>
                                 }
                                 <span class="set-tag kind"
                                       title="One template serving several roles. It is filed under its main audience, and shown here because it also reaches this role.">shared &middot; @xReach.Count roles</span>
@@ -832,14 +835,12 @@
                            the mail that actually goes out. Line 2 = the internal key + the EFFECTIVE
                            ring. Subjects collide (three welcomes all read "Welcome to …"), so the key
                            disambiguates; the key alone is what made this page read as machine output. *@
+                        @* §1286 — the TITLE leads, the subject is the small line under it. *@
                         <h3 style="font-size:15px;">
+                            @t.Title
                             @if (!string.IsNullOrWhiteSpace(t.Subject))
                             {
-                                <text>Subject: &ldquo;@t.Subject&rdquo;</text>
-                            }
-                            else
-                            {
-                                <text>@t.Title</text>
+                                <br /><span style="font-size:12px;font-weight:400;color:#64748b;">Subject: &ldquo;@t.Subject&rdquo;</span>
                             }
                             @* §704.1c — a RING-EXEMPT mail gets NO ring badge. Showing one is the
                                §326bx defect: a badge that governs nothing. *@

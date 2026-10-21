@@ -2,13 +2,13 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Sponsor.IndexModel
 @{
-    ViewData["Title"] = "Sponsor Webshop";
+    ViewData["Title"] = "Previous orders";
 }
 
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h1>Sponsor Webshop</h1>
+        <h1>Previous orders</h1>
         <p class="error">This page is for sponsors only.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -16,7 +16,7 @@
 else if (Model.NoCompanyLink)
 {
     <div class="card">
-        <h1>Sponsor Webshop</h1>
+        <h1>Previous orders</h1>
         <p class="error">Your sponsor account is not yet linked to a company,
            so we cannot show your details. Please contact the organizers.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
@@ -25,10 +25,10 @@ else if (Model.NoCompanyLink)
 else
 {
     <div class="card">
-        <h1>Webshop orders</h1>
+        <h1>Previous orders</h1>
         <p style="margin:0 0 10px;color:#555;font-size:14px;">
             Completed orders we have on file for your company in the current sales window.
-            If something is missing, check your order status in the sponsor webshop, or contact the organizers.
+            If something is missing, contact the organizers.
         </p>
         @if (Model.SponsorOrders.Count == 0)
         {

@@ -65,7 +65,7 @@ public sealed class TaskBodyEmailHtmlRenderer : TaskBodyRenderer
     protected override void Button(TaskButton block, StringBuilder sb, TaskRenderContext context)
     {
         var href = Escape(context.ResolveText(block.Href));
-        var label = Escape(block.Label);
+        var label = Escape(context.ResolveText(block.Label));
         var fill = block.Style == TaskButtonStyle.Primary ? Blue : "#4b5563";
 
         // VML needs an explicit pixel width — the WORD engine does not size a roundrect to its

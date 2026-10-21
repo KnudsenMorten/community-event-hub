@@ -95,6 +95,11 @@ public sealed class SpeakerPresentationTaskReconciler
         // completes because the speaker has no work is the false confidence §687.3 removes.
         if (slots.Count == 0) return new SpeakerArtefactState(satisfied, unreadable);
 
+        // §1307 — a panel has no deck (a discussion), so it never counts as "missing": a speaker with a talk and a panel
+        // is done once the TALK has its deck. A panel-only speaker has no upload task at all (IsPanelOnlySpeaker).
+        slots = slots.Where(s => !s.IsPanel).ToList();
+        if (slots.Count == 0) return new SpeakerArtefactState(satisfied, unreadable);
+
         if (canReadPreview && slots.All(s => !string.IsNullOrWhiteSpace(s.PreviewFileName)))
             satisfied.Add("preview");
         if (canReadFinal && slots.All(s => !string.IsNullOrWhiteSpace(s.FinalFileName)))

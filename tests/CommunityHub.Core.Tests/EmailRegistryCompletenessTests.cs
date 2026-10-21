@@ -195,6 +195,17 @@ public sealed class EmailRegistryCompletenessTests
             "signal-join-links",       // SignalFormService ("email me the join links")
             "some-speaker-prealert",   // SoMeDispatchService
             "some-published",          // SoMeDispatchService
+            "some-graphic-blocked",    // SoMeDispatchService (§1304 critical alert, RingExempt at the send site)
+            // §1305 — ShopMailer. The registration code goes to someone who is not a participant yet
+            // (no ring exists for them — same class as pin-signin); the organizer notice goes to a mailbox list.
+            "shop-registration-code",  // ShopMailer.SendRegistrationCodeAsync
+            "shop-organizer-notice",   // ShopMailer.NotifyOrganizersAsync
+            // Read before adding: ShopMailer.SendOfferAsync passes `RingExempt: true` — the organizer types the address
+            // of a potential sponsor, who is usually not a participant and has no ring (same class as the code).
+            "shop-offer",              // ShopMailer.SendOfferAsync
+            "shop-organizer-reservation", // ShopMailer.SendOrganizerReservationReminderAsync — RingExempt: the requester the organizer typed (§1308)
+            "shop-reservation-answer",    // ShopMailer.SendReservationAnswerAsync — RingExempt: the answer to the person who asked (§1312)
+            "shop-order-cancelled",       // ShopMailer.SendCancelledAsync — RingExempt: the people of the cancelled order (§1312)
             // §707.27 F — registered read-only for visibility on 2026-07-30. Each send site was READ
             // before this line was added (the ⚠ above): all three already passed `RingExempt: true`,
             // so the registry moved to match the code, never the other way round. None reaches a

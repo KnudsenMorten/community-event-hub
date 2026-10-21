@@ -17,14 +17,13 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// Web tests for the volunteer "My Availability" page applying the §59 delta-approval
-/// queue to volunteers (§45). Mirrors the §38e "first submission applies, a later CHANGE
-/// is queued" pattern:
+/// Web tests for the volunteer "My Availability" page (§45):
 /// <list type="bullet">
 /// <item>A FIRST-time availability submission (no rows yet) APPLIES directly — no delta.</item>
-/// <item>A later EDIT does NOT overwrite — it ENQUEUEs a Volunteer Update delta and keeps
-/// the current (approved) availability until an organizer approves it.</item>
-/// <item>Approve APPLIES the queued new availability; reject KEEPS the old.</item>
+/// <item>§1346 — a later EDIT also APPLIES directly (no delta) and e-mails the volunteer lead
+/// the old→new. It used to be queued for approval (§59) and looked "not saved" to volunteers.</item>
+/// <item>A Volunteer Update delta already in the queue (pre-§1346) still applies on Approve and
+/// keeps the old availability on Reject.</item>
 /// </list>
 /// Drives the real <see cref="AvailabilityModel"/> over a fake volunteer session + in-memory
 /// DB. FAKE names only.
@@ -54,7 +53,8 @@ public sealed class VolunteerAvailabilityQueueTests
 
     private sealed class NoOpEmailSender : IEmailSender
     {
-        public Task SendAsync(string to, string s, string h, CancellationToken ct = default) => Task.CompletedTask;
+        public List<(string To, string Subject, string Html)> Sent { get; } = new();
+        public Task SendAsync(string to, string s, string h, CancellationToken ct = default) { Sent.Add((to, s, h)); return Task.CompletedTask; }
         public Task SendAsync(string to, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendAsync(string to, string s, string h, string t, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendWithIcsAsync(string to, string s, string h, string ics, string f, CancellationToken ct = default) => Task.CompletedTask;
@@ -80,16 +80,15 @@ public sealed class VolunteerAvailabilityQueueTests
             new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
     }
 
-    private static AvailabilityModel NewModel(CommunityHubDbContext db, HttpContext http)
+    private static AvailabilityModel NewModel(CommunityHubDbContext db, HttpContext http, NoOpEmailSender? mail = null)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         // A non-existent config path → the loader returns defaults (no extra volunteer days);
         // the editable days come from the seeded Event's StartDate..EndDate.
         var cfg = new EventEditionConfigLoader();
         var cfgOptions = new EventConfigOptions { EventConfigPath = "config/does-not-exist.json" };
-        var queue = new SyncDeltaQueueService(db);
         return new AvailabilityModel(
-            db, accessor, cfg, cfgOptions, new NoOpEmailSender(), queue,
+            db, accessor, cfg, cfgOptions, mail ?? new NoOpEmailSender(),
             NullLogger<AvailabilityModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
@@ -189,29 +188,67 @@ public sealed class VolunteerAvailabilityQueueTests
     }
 
     [Fact]
-    public async Task A_later_edit_enqueues_a_delta_and_does_not_overwrite()
+    public async Task A_later_edit_applies_directly_and_mails_the_lead_the_change()
+    {
+        // §1346: the volunteer saved a change, re-opened the form, saw her OLD values (the change
+        // was waiting in the approval queue) and re-submitted ~20 times. A change now applies.
+        using var db = NewDb();
+        var vol = await SeedVolunteerAsync(db);
+        var http = new DefaultHttpContext { User = Session(vol) };
+
+        await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
+
+        var mail = new NoOpEmailSender();
+        var edit = WithInputs(NewModel(db, http, mail), "Morning 7–12", "need 13:00 free");
+        var editResult = await edit.OnPostAsync(default);
+
+        Assert.IsType<RedirectToPageResult>(editResult);
+        var row = db.VolunteerDayAvailabilities.Single();
+        Assert.Equal(VolunteerAvailabilityLevel.Half, row.Level);   // Morning = Half — APPLIED
+        Assert.Contains("need 13:00 free", row.Note);
+        Assert.Empty(db.SyncDeltas);                                 // nothing queued
+        Assert.False(edit.Form.NoticeIsError);
+        Assert.Contains("saved", edit.Form.Notice, StringComparison.OrdinalIgnoreCase);
+
+        var sent = Assert.Single(mail.Sent);
+        Assert.Equal(AvailabilityModel.NotifyEmail, sent.To);
+        Assert.Contains("changed their availability", sent.Subject);
+        Assert.Contains("What changed", sent.Html);
+        Assert.Contains("Full day", sent.Html);       // before
+        Assert.Contains("Morning 7–12", sent.Html);   // after
+    }
+
+    [Fact]
+    public async Task An_unchanged_resave_writes_nothing_and_mails_nobody()
     {
         using var db = NewDb();
         var vol = await SeedVolunteerAsync(db);
         var http = new DefaultHttpContext { User = Session(vol) };
 
-        // First submission (Full) applies.
         await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
+        var mail = new NoOpEmailSender();
+        var again = WithInputs(NewModel(db, http, mail), "Full day");
+        await again.OnPostAsync(default);
 
-        // Later EDIT (Full → Morning) is QUEUED, not applied.
-        var editResult = await WithInputs(NewModel(db, http), "Morning 7–12", "need 13:00 free").OnPostAsync(default);
+        Assert.Empty(mail.Sent);
+        Assert.Empty(db.SyncDeltas);
+        Assert.Contains("No changes", again.Form.Notice);
+    }
 
-        Assert.IsType<RedirectToPageResult>(editResult);
-        // The stored availability is UNCHANGED (still Full) while the change is pending.
-        var row = db.VolunteerDayAvailabilities.Single();
-        Assert.Equal(VolunteerAvailabilityLevel.Full, row.Level);
-        // A Volunteer Update delta is now pending for this volunteer.
-        var delta = Assert.Single(db.SyncDeltas);
-        Assert.Equal(SyncDeltaEntityType.Volunteer, delta.EntityType);
-        Assert.Equal(SyncDeltaChangeKind.Update, delta.ChangeKind);
-        Assert.Equal(SyncDeltaStatus.Pending, delta.Status);
-        Assert.Equal(vol.Id.ToString(), delta.EntityId);
-        Assert.Equal("Vera Volunteer", delta.EntityLabel);
+    /// <summary>Seeds the pre-§1346 state: a first save, then a queued Volunteer Update for
+    /// <paramref name="slot"/> — the shape still sitting in the PROD queue for some volunteers.</summary>
+    private static async Task<SyncDelta> QueueLegacyEditAsync(
+        CommunityHubDbContext db, Participant vol, HttpContext http, string slot, string? note)
+    {
+        await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
+        var opt = CommunityHub.Core.Volunteers.VolunteerDayOptions.For(Day1).Single(o => o.Slot == slot);
+        var stored = CommunityHub.Core.Volunteers.VolunteerDayOptions.ComposeNote(opt.Slot, note);
+        var changes = SyncDeltaQueueService.BuildVolunteerAvailabilityChanges(new[]
+        {
+            (Day1.ToString("yyyy-MM-dd"), "Full day", slot, opt.Level, stored),
+        });
+        return await new SyncDeltaQueueService(db).EnqueueVolunteerAvailabilityUpdateAsync(
+            EventId, vol.Id, vol.FullName, changes);
     }
 
     [Fact]
@@ -221,10 +258,7 @@ public sealed class VolunteerAvailabilityQueueTests
         var vol = await SeedVolunteerAsync(db);
         var http = new DefaultHttpContext { User = Session(vol) };
 
-        await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
-        await WithInputs(NewModel(db, http), "Morning 7–12", "need 13:00 free").OnPostAsync(default);
-
-        var delta = db.SyncDeltas.Single();
+        var delta = await QueueLegacyEditAsync(db, vol, http, "Morning 7–12", "need 13:00 free");
         var queue = new SyncDeltaQueueService(db);
         var result = await queue.ApproveAsync(delta.Id, "olivia@example.test");
 
@@ -244,10 +278,7 @@ public sealed class VolunteerAvailabilityQueueTests
         var vol = await SeedVolunteerAsync(db);
         var http = new DefaultHttpContext { User = Session(vol) };
 
-        await WithInputs(NewModel(db, http), "Full day").OnPostAsync(default);
-        await WithInputs(NewModel(db, http), "Not able to help").OnPostAsync(default);
-
-        var delta = db.SyncDeltas.Single();
+        var delta = await QueueLegacyEditAsync(db, vol, http, "Not able to help", null);
         var queue = new SyncDeltaQueueService(db);
         var result = await queue.RejectAsync(delta.Id, "olivia@example.test", "Spoke to volunteer");
 

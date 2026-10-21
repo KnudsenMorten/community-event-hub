@@ -32,6 +32,7 @@ public class MyScheduleModel : PageModel
     private readonly VolunteerShiftService _shifts;
     private readonly VolunteerHelpNotificationService _helpNotify;
     private readonly CalendarInviteEmailService _calendarInvite;
+    private readonly VolunteerAssignmentGate _assignmentGate;
     private readonly ILogger<MyScheduleModel> _logger;
 
     public MyScheduleModel(
@@ -42,8 +43,10 @@ public class MyScheduleModel : PageModel
         VolunteerShiftService shifts,
         VolunteerHelpNotificationService helpNotify,
         CalendarInviteEmailService calendarInvite,
+        VolunteerAssignmentGate assignmentGate,
         ILogger<MyScheduleModel> logger)
     {
+        _assignmentGate = assignmentGate;
         _db = db;
         _participant = participant;
         _schedule = schedule;
@@ -67,10 +70,24 @@ public class MyScheduleModel : PageModel
 
     [TempData] public string? Notice { get; set; }
 
+    /// <summary>
+    /// 🔒 §1295 — is this volunteer's own assignments surface released to them? Guards EVERY
+    /// handler, not just the GET: hiding the menu item is presentation, and a POST route stays
+    /// reachable to anyone who kept the page open or typed the URL.
+    /// </summary>
+    /// <remarks>
+    /// Answers <c>NotFound</c> rather than <c>Forbid</c>: an unreleased surface should not exist
+    /// as far as the visitor is concerned, and a 403 invites "ask an organizer for access" for a
+    /// page nobody has been given yet.
+    /// </remarks>
+    private Task<bool> MayViewAsync(CurrentParticipant me, CancellationToken ct)
+        => _assignmentGate.MaySeeOwnAssignmentsAsync(me.EventId, me.ParticipantId, ct);
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!await MayViewAsync(me, ct)) return NotFound();
 
         await LoadAsync(me, ct);
         return Page();
@@ -84,6 +101,7 @@ public class MyScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!await MayViewAsync(me, ct)) return NotFound();
 
         // Defense-in-depth: a volunteer may not set Cancelled ("No longer needed")
         // from their self-service surface — that is a coordinator/supervisor action.
@@ -109,6 +127,7 @@ public class MyScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!await MayViewAsync(me, ct)) return NotFound();
         try
         {
             var req = await _svc.RaiseHelpAsync(Actor(me), taskId, message, ct);
@@ -147,6 +166,7 @@ public class MyScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!await MayViewAsync(me, ct)) return NotFound();
         try
         {
             await _shifts.SetDecisionAsync(me.EventId, me.ParticipantId, taskId, decision, note, ct);
@@ -173,6 +193,7 @@ public class MyScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!await MayViewAsync(me, ct)) return NotFound();
 
         var host = Request.Host.Value ?? "communityhub";
         var assigned = await _db.VolunteerTaskAssignments

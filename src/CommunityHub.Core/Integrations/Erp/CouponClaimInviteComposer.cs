@@ -319,6 +319,8 @@ public static class CouponClaimInviteComposer
             "Free — these tickets are included, and you are not invoiced for them",
         // Unmapped: no agreed billing exists yet, so the mail says nothing about it.
         Domain.CouponBillingType.Unmapped => null,
+        // §1312 — an ignored discount code has no agreement to describe.
+        Domain.CouponBillingType.Ignored => null,
         // No type supplied — the pre-§1117 callers. The bool still distinguishes the two BILLED
         // kinds correctly; it simply cannot see the free one, which is why the field was added.
         null => i.IsPrepaid

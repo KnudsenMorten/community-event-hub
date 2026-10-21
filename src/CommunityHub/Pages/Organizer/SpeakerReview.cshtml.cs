@@ -123,7 +123,7 @@ public class SpeakerReviewModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
         try
@@ -145,12 +145,15 @@ public class SpeakerReviewModel : PageModel
     /// canonical classification driving the speaker-hat entitlements. A null
     /// <paramref name="category"/> (the "(not set)" option) marks the speaker
     /// uncategorized again: excluded from every count and blocked from
-    /// activation. Also accepts the Guest-only ELDK-funded hotel nights
-    /// (<paramref name="guestFundedNights"/>) so category + nights save in one
-    /// post; the nights value is ignored (cleared) for non-Guest categories.
+    /// activation.
+    ///
+    /// <para>🗑 §1296 — it no longer takes the Guest-only hotel nights. Guest is a STANDARD now
+    /// (Settings → "Hotel nights we cover"), and anything individual is the single extra-nights
+    /// field on the person's own page. <c>SpeakerProfile.GuestFundedNights</c> is left on the
+    /// entity (additive-only rule) but is written by nothing and read by nothing.</para>
     /// </summary>
     public async Task<IActionResult> OnPostCategoryAsync(
-        int participantId, SpeakerCategory? category, int? guestFundedNights, CancellationToken ct)
+        int participantId, SpeakerCategory? category, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
@@ -159,13 +162,7 @@ public class SpeakerReviewModel : PageModel
         var profile = await GetProfileAsync(me.EventId, participantId, ct);
         if (profile is null) return RedirectToPage(new { Msg = "Speaker profile not found." });
 
-        if (guestFundedNights is < 0)
-            return RedirectToPage(new { Msg = "Guest hotel nights cannot be negative." });
-
         profile.Category = category;
-        // Guest nights are meaningful for the Guest category only — a switch away
-        // from Guest clears the stale value so the tallies never read it again.
-        profile.GuestFundedNights = category == SpeakerCategory.Guest ? guestFundedNights : null;
         profile.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return RedirectToPage(new

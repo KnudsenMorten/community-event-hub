@@ -36,7 +36,12 @@ public static class HotelEmailContentBuilder
         string? hotelAddress,
         string? hotelConfirmationNumber,
         bool inviteAttached = true,
-        string? addToCalendarHtml = null)
+        string? addToCalendarHtml = null,
+        // §1296 — the coverage split for THIS stay, or null when it does not apply / is unknown.
+        // Optional + last so the one production call site and every test keep compiling; when it is
+        // absent the mail is exactly what it was, which is the right fallback for a mail that must
+        // never invent a number about somebody's bill.
+        Entitlements.HotelCoverageResult? coverage = null)
     {
         var hasAssignedHotel = !string.IsNullOrWhiteSpace(hotelName);
         var hotelLabel = hasAssignedHotel ? hotelName!.Trim() : "your assigned hotel";
@@ -62,13 +67,24 @@ public static class HotelEmailContentBuilder
             : "Status: Not yet confirmed by hotel. We'll update this entry once the hotel returns the confirmation number.\n";
         var roomTypeLine = string.IsNullOrWhiteSpace(roomType) ? "" : $"Room type: {roomType.Trim()}\n";
 
+        // §1296 — what we pay and what they pay, in the record they keep. The form told them at
+        // booking time; this is the same sentence, so the two can never say different things.
+        static string Nights(int n) => n == 1 ? "1 night" : $"{n} nights";
+        var coverageText = coverage is { Booked: > 0 } c
+            ? (c.HasOwnExpense
+                ? $"Experts Live Denmark covers {Nights(c.Covered)} of your stay. "
+                  + $"You pay for {Nights(c.OwnExpense)} yourself, directly to the hotel."
+                : $"Experts Live Denmark covers all {Nights(c.Booked)} of your stay.")
+            : null;
+        var coverageLine = coverageText is null ? "" : $"\n{coverageText}\n";
+
         var description =
             $"Your hotel reservation at {location} for {eventCode}.\n\n" +
             $"Hotel:     {hotelLabel}\n" +
             (address is null ? "" : $"Address:   {address}\n") +
             $"Check-in:  {checkInDate:d MMM yyyy}\n" +
             $"Check-out: {checkOutDate:d MMM yyyy}\n" +
-            confLine + roomTypeLine + "\n" +
+            confLine + roomTypeLine + coverageLine + "\n" +
             "Questions: info@expertslive.dk\n\nCheers,\nELDK-team";
 
         var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
@@ -96,6 +112,9 @@ public static class HotelEmailContentBuilder
                 ? $"<strong>Confirmation number:</strong> {System.Net.WebUtility.HtmlEncode(effectiveConf ?? "")}<br/>" +
                   (string.IsNullOrWhiteSpace(roomType) ? "" : $"<strong>Room type:</strong> {System.Net.WebUtility.HtmlEncode(roomType.Trim())}") + "</p>"
                 : "<strong>Status:</strong> Awaiting hotel confirmation &mdash; we'll update this entry once the hotel returns the confirmation number.</p>") +
+            (coverageText is null
+                ? ""
+                : $"<p>{System.Net.WebUtility.HtmlEncode(coverageText)}</p>") +
             (string.IsNullOrEmpty(addToCalendarHtml) ? "" : addToCalendarHtml) +
             "<p>Cheers,<br/>ELDK-team</p>";
 

@@ -128,6 +128,7 @@ public sealed class NavBuilderTests
         "/Organizer/TasksTable",
     };
 
+    // §1312 — EventPartner left this list: event partners have the full organizer area (operator 2026-10-01).
     private static readonly ParticipantRole[] NonOrganizerRoles =
     {
         ParticipantRole.Speaker,
@@ -135,8 +136,19 @@ public sealed class NavBuilderTests
         ParticipantRole.Sponsor,
         ParticipantRole.Attendee,
         ParticipantRole.Media,
-        ParticipantRole.EventPartner,
     };
+
+    /// <summary>§1312 — operator 2026-10-01: "i need all event partners to have access in the organizer pages, so they can access
+    /// logistics, etc. full access is fine". An event partner gets the organizer area AND keeps their own menu.</summary>
+    [Fact]
+    public void An_event_partner_gets_the_organizer_area_and_keeps_their_own_menu()
+    {
+        var nav = NavBuilder.Build(ParticipantRole.EventPartner);
+        Assert.True(nav.HasManagement);
+        Assert.Contains(nav.Groups, g => !g.IsManagement);
+        Assert.True(ParticipantRole.EventPartner.HasOrganizerAccess());
+        Assert.False(ParticipantRole.Media.HasOrganizerAccess());
+    }
 
     [Theory]
     [MemberData(nameof(NonOrganizerRoleData))]
@@ -204,8 +216,12 @@ public sealed class NavBuilderTests
         // queries an invoice. It sat under Setup, which is where things go that you set once.
         // 🔒 The limit still exists and is still tight. If it needs raising again, that is a
         // conversation about what the menu is FOR, not a number to nudge.
-        Assert.True(mgmt.Items.Count <= 17,
-            $"Lean organizer menu should stay ~13-17 hub-level entries; got {mgmt.Items.Count}.");
+        // §1265 — raised 17 → 18 for Session Evaluation, and that conversation was had: operator
+        // 2026-09-21, *"i dont have any menu in organizer gui with all the sessin eval mgmt stuff"*,
+        // then *"fix the remaining 4 items"* with this one named among them. Same test as §646/§1120:
+        // during the event this page is WORKED (sync, results, releases), not configured once.
+        Assert.True(mgmt.Items.Count <= 18,
+            $"Lean organizer menu should stay ~13-18 hub-level entries; got {mgmt.Items.Count}.");
         Assert.All(mgmt.Items, i => Assert.Null(i.SectionKey));   // flat — no sub-folds
 
         foreach (var hub in new[]
@@ -596,7 +612,7 @@ public sealed class NavBuilderTests
         Assert.Contains("/Forms/Wizard?step=masterclass", attendee);          // in-hub Master Class chooser
         Assert.Contains("/Attendee/Waitlist", attendee); // waitlist view
 
-        var vol = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).AllItems.Select(i => i.Href).ToList();
+        var vol = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true, volunteerAssignmentsVisible: true).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/volunteer/myschedule", vol);   // merged shifts + tasks home
         // §939 — the standalone availability page is retired; the wizard step replaces it.
         Assert.Contains("/Forms/Wizard?step=availability", vol); // per-day available/blocked
@@ -762,7 +778,9 @@ public sealed class NavBuilderTests
         // in-hub orders page does NOT (fixed 2026-07-07: it warned about an external
         // login that never happens, on every click).
         Assert.Equal(ExternalRedirectKind.Webshop, Item("Nav.SponsorBuyServices").Redirect);
-        Assert.Equal(ExternalRedirectKind.None, Item("Nav.SponsorOrders").Redirect);
+        // §1305 — two "Previous Orders" entries, switched by sponsor-webshop (old list / combined list); both in-hub.
+        Assert.Equal(2, items.Count(i => i.LabelKey == "Nav.SponsorOrders"));
+        Assert.All(items.Where(i => i.LabelKey == "Nav.SponsorOrders"), i => Assert.Equal(ExternalRedirectKind.None, i.Redirect));
 
         // Non-redirect leaves (e.g. the booth run-of-show, Our Booth, Tasks) carry no kind.
         Assert.Equal(ExternalRedirectKind.None, Item("Nav.SponsorBoothRunOfShow").Redirect);
@@ -772,7 +790,9 @@ public sealed class NavBuilderTests
     [Fact]
     public void Volunteer_menu_matches_redesign()
     {
-        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).Groups[0];
+        // §1295 — "My Schedule" is now released per volunteer (volunteer-assignments); this suite
+        // asserts the RELEASED menu, and Volunteer_assignments_menu_item_is_ring_gated covers the held one.
+        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true, volunteerAssignmentsVisible: true).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
         // Removed: Resources, the shift-signup wizard, the separate
@@ -863,10 +883,39 @@ public sealed class NavBuilderTests
     /// <c>NavBuilder</c> — exactly the kind that drifts back the next time somebody adds an Event Info
     /// leaf a few lines too early.</para>
     /// </summary>
+    /// <summary>
+    /// §1295 — a volunteer the <c>volunteer-assignments</c> feature has NOT been released to gets
+    /// no "My Schedule" item at all, while the rest of their menu is untouched.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 The item and the page must agree. The page answers 404 when the feature is held, so a
+    /// menu that always showed the link would hand every onboarding volunteer a dead end —
+    /// worse than no link, because it looks like something broke rather than something not
+    /// started yet. Operator 2026-09-21: assignment must not happen while volunteers activate.
+    /// </remarks>
+    [Fact]
+    public void Volunteer_assignments_menu_item_is_ring_gated()
+    {
+        var held = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/volunteer/myschedule", held);
+
+        // Everything else a volunteer navigates by is still there.
+        Assert.Contains("/Forms/Wizard", held);                      // Get Started
+        Assert.Contains("/Forms/Wizard?step=availability", held);    // My availability
+        Assert.Contains("/volunteer/supervisor", held);              // supervisors keep theirs
+
+        var released = NavBuilder.Build(
+                ParticipantRole.Volunteer, isVolunteerSupervisor: true, volunteerAssignmentsVisible: true)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/volunteer/myschedule", released);
+    }
+
     [Fact]
     public void Volunteer_register_menu_sits_left_of_event_info()
     {
-        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).Groups[0];
+        // §1295 — built with assignments released, so the menu under test is the full one.
+        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true, volunteerAssignmentsVisible: true).Groups[0];
 
         var headings = g.Sections()
             .Where(s => s.HeadingKey is not null)

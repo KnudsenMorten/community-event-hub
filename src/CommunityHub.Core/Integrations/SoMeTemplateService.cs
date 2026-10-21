@@ -183,6 +183,7 @@ public sealed class SoMeTemplateService
             // (LinkedIn only tags people who follow the page), so a preview showing every name as a
             // tag would set an expectation the live post cannot meet.
             ["Speakers"] = "Sample Speaker | Another Speaker (not tagged — does not follow the page)",
+            ["SponsorCompanyMention"] = "@Contoso",
             ["SponsorSigner"] = "Sample Signer",
             ["SponsorEventCoordinators"] = "Sample Coordinator | Another Coordinator",
             // §885 — one phrase from his own catalog. The sample says so, because a preview showing

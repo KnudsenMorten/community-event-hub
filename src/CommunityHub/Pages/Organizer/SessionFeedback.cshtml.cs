@@ -92,6 +92,13 @@ public class SessionFeedbackModel : PageModel
     public SatisfactionScore.Result? Pooled { get; private set; }
     public double? MeanSession { get; private set; }
     public int Unattributed { get; private set; }
+
+    /// <summary>§1273 — per day / session type / track, responses by channel, and when it was calculated.</summary>
+    public EvaluationStatisticsService.Breakdown? Statistics { get; private set; }
+
+    /// <summary>§1273 — Danish wall time for the "calculated at" line.</summary>
+    public static string DanishTime(DateTimeOffset t) =>
+        TimeZoneInfo.ConvertTime(t, CommunityHub.Core.Integrations.EventTimezone.Tz).ToString("ddd dd MMM HH:mm");
     public int Threshold => SatisfactionScore.MinimumResponses;
     public int QuietMinutes => EvaluationReportDebounceService.QuietMinutes;
 
@@ -146,6 +153,38 @@ public class SessionFeedbackModel : PageModel
                 ? $". {result.Backfilled} earlier response(s) were attributed retrospectively."
                 : ".");
 
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// §1357 — set every response collected so far INACTIVE: kept, counted nowhere (scores, statistics,
+    /// comparison, reports, scoreboard). Operator 2026-10-19: *"make a state inactive so it is not included …
+    /// like a button"* — for test and demo votes before the event. Reversible with <see cref="OnPostReactivateAllAsync"/>.
+    /// </summary>
+    public async Task<IActionResult> OnPostSetAllInactiveAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var n = await EvaluationResponseActivation.SetAllInactiveAsync(_db, me.EventId, DateTimeOffset.UtcNow, ct);
+        Message = n == 0
+            ? "There were no active responses to set inactive."
+            : $"{n} response(s) set inactive — they no longer count anywhere. \"Reactivate all\" brings them back.";
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>§1357 — every inactive response counts again.</summary>
+    public async Task<IActionResult> OnPostReactivateAllAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var n = await EvaluationResponseActivation.ReactivateAllAsync(_db, me.EventId, ct);
+        Message = n == 0 ? "There were no inactive responses." : $"{n} response(s) count again.";
         await LoadAsync(me.EventId, ct);
         return Page();
     }
@@ -264,7 +303,10 @@ public class SessionFeedbackModel : PageModel
 
         var pdf = _reports.Render(report.Data);
         var safeTitle = string.Join("_", report.Data.SessionTitle.Split(Path.GetInvalidFileNameChars()));
-        return File(pdf, "application/pdf", $"evaluation-{evaluationSessionId}-{safeTitle}.pdf");
+        // §1289 — shown IN the browser (a new tab), not downloaded: the operator asked how to "click
+        // on a session and see all feedbacks". Inline keeps the filename, so Save still names it well.
+        Response.Headers.ContentDisposition = $"inline; filename=\"evaluation-{evaluationSessionId}-{safeTitle}.pdf\"";
+        return File(pdf, "application/pdf");
     }
 
     public string FeedbackUrlFor(string token) =>
@@ -279,6 +321,22 @@ public class SessionFeedbackModel : PageModel
         Pooled = pooled;
         MeanSession = mean;
         Unattributed = unattributed;
+        // §1273 — the breakdown (per day / type / track, by channel, calculated-at). Built from the
+        // same DbContext; the type words come from the Sessions page so both say "Master Class".
+        Statistics = await new EvaluationStatisticsService(_db).BuildAsync(
+            eventId,
+            t => t is CommunityHub.Core.Domain.SessionType st ? SessionsModel.Display(st) : "Unknown type",
+            ct);
         PdfFolderConfigured = _pdfStore.CanManage;
+        // §1354 — the same responses split by channel and capture policy.
+        ByPolicy = await EvaluationPolicyComparison.BuildAsync(_db, eventId, ct);
+        // §1357 — how many count, how many are set aside.
+        ActivationCounts = await EvaluationResponseActivation.CountAsync(_db, eventId, ct);
     }
+
+    /// <summary>§1357 — active vs inactive responses of the edition.</summary>
+    public EvaluationResponseActivation.Counts ActivationCounts { get; private set; } = new(0, 0);
+
+    /// <summary>§1354 — responses per channel and capture policy (count, average, answer rates).</summary>
+    public IReadOnlyList<EvaluationPolicyComparison.Row> ByPolicy { get; private set; } = Array.Empty<EvaluationPolicyComparison.Row>();
 }

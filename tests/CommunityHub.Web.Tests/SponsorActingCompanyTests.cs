@@ -72,6 +72,30 @@ public sealed class SponsorActingCompanyTests
     }
 
     [Fact]
+    public async Task Potential_sponsor_companies_are_listed_by_name_in_the_switcher()
+    {
+        // §1309 — operator 2026-09-27: "the same person can be linked to multiple companies … arrow have same event
+        // coordinator in all 4 countries". A potential sponsor's record is hidden by the sponsor filter; the switcher
+        // showed "Company ceh-…" for it.
+        var (db, me) = await SeedAsync("1");
+        using var _ = db;
+        db.SponsorInfos.Add(new SponsorInfo { EventId = EventId, SponsorCompanyId = "ceh-se", CompanyName = "Arrow Sweden", IsSponsor = false });
+        db.ShopCompanies.Add(new ShopCompany { EventId = EventId, SponsorCompanyId = "ceh-no", LegalName = "Arrow Norway AS", PublicName = "Arrow Norway" });
+        db.SponsorCompanyContacts.AddRange(
+            new SponsorCompanyContact { EventId = EventId, ParticipantId = me.Id, SponsorCompanyId = "ceh-se" },
+            new SponsorCompanyContact { EventId = EventId, ParticipantId = me.Id, SponsorCompanyId = "ceh-no" });
+        await db.SaveChangesAsync();
+
+        var options = await new SponsorActingCompanyService(db, new FakeHttp()).OptionsAsync(me.Id, EventId);
+
+        Assert.Equal(3, options.Count);
+        Assert.Contains(options, o => o.CompanyId == "ceh-se" && o.DisplayName == "Arrow Sweden");
+        // Ordering uses the LEGAL (billing) name + country, never the public name (operator 2026-09-27: "it is very important
+        // that the contract, reservation, registration, billing goes to the correct legal entity").
+        Assert.Contains(options, o => o.CompanyId == "ceh-no" && o.DisplayName == "Arrow Norway AS (DK)");
+    }
+
+    [Fact]
     public async Task With_no_choice_the_primary_company_is_the_acting_one()
     {
         var (db, me) = await SeedAsync("1", "2");
@@ -187,6 +211,35 @@ public sealed class SponsorActingCompanyTests
             offenders.Count == 0,
             "These sponsor-portal files resolve the company inline instead of asking "
             + $"SponsorActingCompanyService: {string.Join(", ", offenders)}");
+    }
+
+    /// <summary>
+    /// §1312 — the signer mail links to ONE order; a signer for several companies must land on that order's company, not
+    /// on "That order was not found for your company". Every contract handler therefore loads the order through
+    /// <c>LoadOrderAsync</c> (which follows the order's company via <see cref="SponsorActingCompanyService.TrySelectAsync"/>,
+    /// the link check the tests above prove) — never by the current company alone.
+    /// </summary>
+    [Fact]
+    public void Every_contract_handler_follows_the_orders_company()
+    {
+        var src = File.ReadAllText(Path.Combine(FindDir("src", "CommunityHub"), "Pages", "Sponsor", "Shop", "Contract.cshtml.cs"));
+
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(src, @"_orders\.GetAsync\(").Count); // only inside LoadOrderAsync
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(src, @"await LoadOrderAsync\(id, ct\)").Count); // view, PDF, sign, cancel
+        Assert.Contains("FollowOrderCompanyAsync(orderCompany, ct)", src);
+    }
+
+    /// <summary>§1312 — following an order's company is refused for a company the person does not serve.</summary>
+    [Fact]
+    public async Task Following_an_order_of_another_company_changes_nothing()
+    {
+        var (db, me) = await SeedAsync("1", "2");
+        using var _ = db;
+        var http = new FakeHttp();
+        var svc = new SponsorActingCompanyService(db, http);
+
+        Assert.True(await svc.TrySelectAsync(me.Id, EventId, "2"));      // an order of a linked company: followed
+        Assert.False(await svc.TrySelectAsync(me.Id, EventId, "999"));   // someone else's order: refused
     }
 
     private static string FindDir(params string[] parts)

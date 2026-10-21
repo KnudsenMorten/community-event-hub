@@ -42,21 +42,18 @@
       {
         "key": "coordinator",
         "label": "Event Coordinator",
-        "companyManagerRoleId": 2,
         "canManage": true,
         "_doc": "Receives all sponsor reminders. Can assign tasks."
       },
       {
         "key": "signer",
         "label": "Signer / Approver",
-        "companyManagerRoleId": 1,
         "canManage": false,
         "_doc": "Never receives task reminders. Record/contact only."
       },
       {
         "key": "booth",
         "label": "Booth Staff",
-        "companyManagerRoleId": null,
         "canManage": false,
         "_doc": "Hub-only role. Reminded only for a task assigned to them."
       }

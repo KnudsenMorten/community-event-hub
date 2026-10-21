@@ -1,0 +1,81 @@
+@page "{id:int}"
+@model CommunityHub.Pages.Sponsor.Shop.ReservationModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Your reservation";
+    string Day(DateOnly? d) => d?.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture) ?? "—";
+}
+
+<div class="card">
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        <h1>Your reservation</h1>
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info @(Model.MessageIsError ? "shop-msg-error" : "")" role="status">@Model.Message</p>
+        }
+        @if (Model.Order is null)
+        {
+            <p>That reservation was not found for your company.</p>
+        }
+        else
+        {
+            var o = Model.Order;
+            var open = o.Status is ShopOrderStatus.Reserved or ShopOrderStatus.AwaitingSignature;
+            <p><strong>@o.Number</strong> · @(o.Status switch
+                {
+                    ShopOrderStatus.Reserved => "reserved for you",
+                    ShopOrderStatus.AwaitingSignature => "waiting for signature",
+                    ShopOrderStatus.Signed => "signed",
+                    ShopOrderStatus.Cancelled => "cancelled",
+                    _ => "not reserved",
+                })@(o.ReservationDeadline is not null && open ? $" · deadline {Day(o.ReservationDeadline)}" : "")</p>
+            <ul>@foreach (var l in o.Lines) { <li>@l.ProductName@(l.Quantity > 1 ? $" × {l.Quantity}" : "")</li> }</ul>
+
+            @if (open)
+            {
+                <p><a class="shop-sign-link" asp-page="/Sponsor/Shop/Cart">Review and sign</a></p>
+
+                <section id="more-time" class="resv-box">
+                    <h2>Ask for more time</h2>
+                    @if (o.HasOpenExtensionRequest)
+                    {
+                        <p>You asked for more time until <strong>@Day(o.ExtensionRequestedDeadline)</strong>. The organizers will answer by e-mail; until then the deadline stays @Day(o.ReservationDeadline).</p>
+                    }
+                    else if (o.CanAskForMoreTime)
+                    {
+                        <p>Choose the date you need and tell us why. The organizers approve or deny it, and you get an e-mail either way.</p>
+                        <form method="post" asp-page-handler="MoreTime" asp-route-id="@o.Id" class="resv-form">
+                            <label>New deadline <input type="date" name="until" required min="@o.ReservationDeadline!.Value.AddDays(1).ToString("yyyy-MM-dd")" /></label>
+                            <label class="wide">Reason <textarea name="reason" rows="3" maxlength="1000" required></textarea></label>
+                            <div class="wide"><button type="submit" class="primary">Send the request</button></div>
+                        </form>
+                    }
+                    else
+                    {
+                        <p>This reservation has no deadline, so there is nothing to extend.</p>
+                    }
+                </section>
+
+                <section id="cancel" class="resv-box">
+                    <h2>Cancel the reservation</h2>
+                    <p>Plans changed? Cancel it here and the items go back on sale for other sponsors. This cannot be undone.</p>
+                    <form method="post" asp-page-handler="Cancel" asp-route-id="@o.Id" onsubmit="return confirm('Cancel this reservation and release the items?');">
+                        <button type="submit">Cancel reservation</button>
+                    </form>
+                </section>
+            }
+        }
+    }
+</div>
+<style>
+    .resv-box { border:1px solid #e5e7eb; border-radius:10px; padding:12px 16px; margin:16px 0; background:#fff; }
+    .resv-box h2 { font-size:18px; margin:0 0 8px; }
+    .resv-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px 16px; }
+    .resv-form .wide { grid-column:1 / -1; }
+    .resv-form label { display:grid; gap:4px; font-weight:600; font-size:14px; }
+    .resv-form input, .resv-form textarea { font-size:16px; padding:8px 10px; min-width:0; }
+</style>

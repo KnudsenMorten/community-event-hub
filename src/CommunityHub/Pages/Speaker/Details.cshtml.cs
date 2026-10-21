@@ -35,16 +35,26 @@ public class DetailsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerDetailsFormService _form;
     private readonly SpeakerBioBackstageSyncService _sync;
+    private readonly CommunityHub.Core.Domain.SpeakerAccessService _access;
 
     public DetailsModel(
         ICurrentParticipantAccessor participant,
         SpeakerDetailsFormService form,
-        SpeakerBioBackstageSyncService sync)
+        SpeakerBioBackstageSyncService sync,
+        CommunityHub.Core.Domain.SpeakerAccessService access)
     {
         _participant = participant;
         _form = form;
         _sync = sync;
+        _access = access;
     }
+
+    /// <summary>
+    /// §1255 — speaker-hub access by CAPABILITY (a SpeakerProfile exists), not by
+    /// <c>Participant.Role</c>. See <see cref="CommunityHub.Core.Domain.ParticipantCapabilities"/>.
+    /// </summary>
+    private Task<bool> MayUseSpeakerHubAsync(CurrentParticipant me, CancellationToken ct) =>
+        _access.HasSpeakerHubAccessAsync(me.EventId, me.ParticipantId, me.Role, ct);
 
     public static readonly string[] AccreditationOptions = CommunityHub.Pages.Forms.SpeakerModel.AccreditationOptions;
     public static readonly string[] GenderOptions = CommunityHub.Pages.Forms.SpeakerModel.GenderOptions;
@@ -62,7 +72,7 @@ public class DetailsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Speaker) { AccessDenied = true; return Page(); }
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         Form = await _form.LoadAsync(me.EventId, me.ParticipantId, me.Email, ct);
         return Page();
@@ -79,7 +89,7 @@ public class DetailsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Speaker) { AccessDenied = true; return Page(); }
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         // Bind the posted editable fields (empty prefix → flat names from the partial), then
         // delegate validate + persist + the speaker-edit side-effects to the shared service —

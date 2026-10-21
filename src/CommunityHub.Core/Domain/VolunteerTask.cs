@@ -59,8 +59,21 @@ public class VolunteerTask
     public Event Event { get; set; } = null!;
 
     // --- Parent -------------------------------------------------------------
-    public int SubcategoryId { get; set; }
-    public VolunteerSubcategory Subcategory { get; set; } = null!;
+    /// <summary>
+    /// §1299 — the task's CATEGORY (bucket). Always set: a task belongs to a category and a
+    /// subcategory is an optional grouping inside it. When <see cref="SubcategoryId"/> is set,
+    /// this MUST equal that subcategory's <c>CategoryId</c> — every write path keeps the two in step.
+    /// </summary>
+    public int CategoryId { get; set; }
+    public VolunteerCategory Category { get; set; } = null!;
+
+    /// <summary>
+    /// §1299 — OPTIONAL organizer-named grouping inside the category (e.g. "Monday"). Null = the
+    /// task sits directly under its category. The hub never invents one (no "General" /
+    /// "Imported plan" placeholders).
+    /// </summary>
+    public int? SubcategoryId { get; set; }
+    public VolunteerSubcategory? Subcategory { get; set; }
 
     // --- Content ------------------------------------------------------------
     public string Title { get; set; } = string.Empty;
@@ -85,6 +98,25 @@ public class VolunteerTask
     /// <see cref="Shift"/> (the shift catalogue is config-driven elsewhere).
     /// </summary>
     public string? TimeEnd { get; set; }
+
+    // --- §1297 typed work window (2026-09-22) -------------------------------
+    /// <summary>
+    /// The task's START time as a typed value, projected from <see cref="Shift"/>. Null when
+    /// the free text holds no clock time.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <b>Additive, not a replacement.</b> <see cref="Shift"/> stays the value organizers
+    /// type, the Excel round-trip writes and the plan CSV imports — this is its machine-readable
+    /// projection, kept in step by <c>VolunteerTaskWindow.SyncTypedTimes</c> on every write and
+    /// backfilled for existing rows. Read it through <c>VolunteerTaskWindow.WindowOf</c>, which
+    /// falls back to parsing the text so a task from an untouched import path still schedules.
+    /// </remarks>
+    public TimeOnly? StartTime { get; set; }
+
+    /// <summary>The task's END time as a typed value, projected from <see cref="TimeEnd"/>.
+    /// <b>Duration is <c>EndTime − StartTime</c> and is never stored</b> — a stored duration
+    /// beside a start and an end is a third value that can disagree with the other two.</summary>
+    public TimeOnly? EndTime { get; set; }
 
     /// <summary>How important this task is (Need-to-have / Nice-to-have).</summary>
     public VolunteerTaskCriticality Criticality { get; set; } = VolunteerTaskCriticality.Unspecified;

@@ -16,15 +16,6 @@ public sealed record SponsorRecipient(
     string FullName,
     string? CcEmail)
 {
-    /// <summary>
-    /// The Company Manager / WordPress <c>user_id</c> id-link for this contact
-    /// (<see cref="Participant.CmUserId"/>), carried so the CM → hub correlation
-    /// keys on the unique id rather than name/email (REQUIREMENTS §7c). Null when
-    /// the contact has not yet been synced from CM. The audience SELECTION is
-    /// unchanged — this only surfaces the id for downstream correlation/audit.
-    /// </summary>
-    public int? CmUserId { get; init; }
-
 
     /// <summary>First word of the full name, or "there" when blank.</summary>
     public string FirstName =>
@@ -133,7 +124,6 @@ public sealed class SponsorRecipientResolver
                 Participants.AlternateEmailPolicy.CcFor(p.SecondaryEmail, p.AlternateEmail))
             {
                 // Carry the CM id-link so CM → hub correlation keys on the id.
-                CmUserId = p.CmUserId,
             })
             .GroupBy(r => r.Email, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())

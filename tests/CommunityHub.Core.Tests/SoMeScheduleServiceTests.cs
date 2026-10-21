@@ -54,7 +54,9 @@ public sealed class SoMeScheduleServiceTests
             db.SponsorInfos.Add(new SponsorInfo
             {
                 EventId = EventId, SponsorCompanyId = $"co-{i}", CompanyName = $"Company {i}",
-                SponsorPackage = SponsorPackage.Gold, SocialMediaIntro = "We do things.",
+                // §1348 — a booth tier the planner announces has a CURRENT booth order.
+                SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = true,
+                SocialMediaIntro = "We do things.",
                 WebsiteUrl = $"https://company{i}.com",
             });
 
@@ -75,6 +77,10 @@ public sealed class SoMeScheduleServiceTests
             {
                 EventId = EventId, SessionizeId = $"s{i}", Title = $"Session {i}",
                 Track = "AI", Type = SessionType.TechnicalSession,
+                // Pinned before the fixed clock: Session.CreatedAt defaults to the REAL now, and the
+                // planner settles a track 7 days after its newest session — so an unpinned seed moved
+                // round 1 with the calendar and failed once real time passed early October 2026.
+                CreatedAt = Now.AddDays(-30),
             });
         }
         await db.SaveChangesAsync();
@@ -224,7 +230,7 @@ public sealed class SoMeScheduleServiceTests
         db.SponsorInfos.Add(new SponsorInfo
         {
             EventId = EventId, SponsorCompanyId = "co-NEW", CompanyName = "Newcomer",
-            SponsorPackage = SponsorPackage.Gold,
+            SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = true,
         });
         // §854 — the newcomer has delivered their logo, so they are announceable.
         db.GraphicAssets.Add(new GraphicAsset
@@ -996,7 +1002,7 @@ public sealed class SoMeScheduleServiceTests
             db.SponsorInfos.Add(new SponsorInfo
             {
                 EventId = EventId, SponsorCompanyId = $"co-{i}", CompanyName = $"Company {i}",
-                SponsorPackage = SponsorPackage.Gold,
+                SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = true,
             });
             // §854 — they must have delivered a logo to be planned at all; this test is about
             // running out of WEEKDAYS, not about sponsors who are not ready.

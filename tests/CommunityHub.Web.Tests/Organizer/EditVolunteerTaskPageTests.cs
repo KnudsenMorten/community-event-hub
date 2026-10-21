@@ -50,7 +50,7 @@ public sealed class EditVolunteerTaskPageTests
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         var structure = new VolunteerStructureService(
-            db, TimeProvider.System, new HeuristicTaskGuidanceGenerator());
+            db, TimeProvider.System, VolunteerAssignmentGate.For(db), new HeuristicTaskGuidanceGenerator());
         return new EditVolunteerTaskModel(
             db, accessor, structure, new HeuristicTaskGuidanceGenerator(),
             NullLogger<EditVolunteerTaskModel>.Instance)

@@ -52,9 +52,13 @@ public static class JobsServiceRegistration
         // intercepted from worker DI; the durable host-side fix is to deliver the secret
         // via the X-Webhook-Secret header (ZohoOrderWebhook already validates it) so it is
         // never in a URL at all. See WebhookSecretRedactingTelemetryInitializer.
-        services.AddApplicationInsightsTelemetryWorkerService();
+        // §1317 — performance counters only when Diagnostics__VerboseLogging=true.
+        services.AddApplicationInsightsTelemetryWorkerService(o =>
+            o.EnablePerformanceCounterCollectionModule = DiagnosticsLogging.IsVerbose(config));
         services.ConfigureFunctionsApplicationInsights();
         services.AddSingleton<ITelemetryInitializer, WebhookSecretRedactingTelemetryInitializer>();
+        // §1317 — fast, successful SQL dependencies are dropped unless Diagnostics__VerboseLogging=true.
+        services.AddApplicationInsightsTelemetryProcessor<QuietSqlDependencyFilter>();
 
         // In Azure we authenticate to SQL with the Functions app's
         // system-assigned managed identity (passwordless). For local dev a SQL
@@ -274,17 +278,32 @@ public static class JobsServiceRegistration
         // §207: the 2-day attendee "Select your Master Class" task seeding.
         services.AddScoped<CommunityHub.Core.Config.AttendeeMasterClassTaskSeeder>();
 
-        // --- WooCommerce (sponsor pipeline) ---------------------------------
-        var wooOptions = new WooCommerceOptions();
-        config.GetSection(WooCommerceOptions.SectionName).Bind(wooOptions);
-        services.AddSingleton(wooOptions);
-        services.AddHttpClient<WooCommerceClient>()
-            // §649 — a WooCommerce 429 used to crash the WHOLE pull (observed 2026-07-29 08:30).
-            // That job now carries sponsor contacts into CEH, the Zoho provisioning AND the task
-            // form-links, so one rate-limit reply cost far more than it should. The handler already
-            // treats 429 as transient; WooCommerce simply never had it.
-            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
-            .AddCredentialFailureAlert("WooCommerce");
+        // 🗑 §1312 — the WooCommerce client is gone: the old webshop is closed; its orders are stored in CEH.
+
+        // 🗑 §1312 — the catalogue import from the old webshop is gone (CEH owns products, pictures and stock).
+
+        // §1305 — the shop's order source (signed CEH orders feed the onboarding pipeline + purchase
+        // summaries) and its reminders (daily pending order, weekly reservation).
+        var shopOptions = new CommunityHub.Core.Config.ShopConfigOptions();
+        config.GetSection(CommunityHub.Core.Config.ShopConfigOptions.SectionName).Bind(shopOptions);
+        services.AddSingleton(shopOptions);
+        services.AddSingleton<CommunityHub.Core.Config.ShopConfigLoader>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopSettings>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopOrderSource>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopBoothMapPicture>();   // §1312 booth on the map in the reservation mails
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopMailer>();
+        // §1305 — invoicing signed CEH orders prices them the same way the shop does.
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopStockService>();
+        // §1312 — the old webshop's orders, stored in CEH once (the webshop is closed); every reader of old orders uses this.
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource, CommunityHub.Core.Integrations.Webshop.WebshopOrderArchiveSource>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopOrderService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopReservationService>(); // §1308
+        // §1312 — the daily signing reminder re-sends the signing mail with the contract PDF.
+        services.AddSingleton<CommunityHub.Core.Integrations.Webshop.ShopContractPdfService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopSigningService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopCompanyDirectoryService>(); // §1311
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopDraftInvoiceService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopErpRoleSyncService>();
 
         // --- Sponsor task config (JSON-driven task expansion) ---------------
         var sponsorConfigOptions = new SponsorConfigOptions();
@@ -363,18 +382,9 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Reminders.SessionizeDeviationNotifier>();
         services.AddScoped<SessionizeApiImportService>();
 
-        // --- Company Manager (sponsor contact source of truth) -------------
-        var cmOptions = new CompanyManagerOptions();
-        config.GetSection(CompanyManagerOptions.SectionName).Bind(cmOptions);
-        services.AddSingleton(cmOptions);
-        // Bounded, jittered transient-fault retry (5xx/408/429/timeout) so a momentary
-        // upstream blip from Company Manager doesn't crash a reconcile (2026-06-27 incident).
-        services.AddHttpClient<CompanyManagerClient>()
-            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
-            .AddCredentialFailureAlert("Company Manager");
+        // 🗑 §1312 — Company Manager is retired (operator 2026-09-30): no client, no options, no contact sync.
         // §1235 — the person↔sponsor-company links (one contact may serve several companies).
         services.AddScoped<SponsorCompanyMembershipService>();
-        services.AddScoped<SponsorContactSyncService>();
         // "Alert only on 2 consecutive failures" gate for background jobs.
         services.AddScoped<CommunityHub.Core.Diagnostics.JobFailureTracker>();
         // Central wrapper used by EngineErrorAlertMiddleware so the same consecutive-failure
@@ -465,6 +475,8 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.ISponsorPurchaseSummary>(sp =>
             sp.GetRequiredService<CommunityHub.Core.Integrations.SponsorPurchaseSummaryService>());
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.ExpoLogisticsProducer>();
+        // §1296 — the hotel Excel reports ELDK / own-expenses nights, so the jobs host needs the resolver too.
+        services.AddScoped<CommunityHub.Core.Entitlements.HotelCoverageService>();
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.HotelLogisticsProducer>();
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LogisticsRunService>();
         services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LogisticsArtifactsService>();
@@ -500,6 +512,8 @@ public static class JobsServiceRegistration
         // Registered HERE and not in the web app: it is a job dependency, and a service the
         // scheduler cannot resolve fails the whole host at startup rather than at the timer.
         services.AddScoped<CommunityHub.Core.Integrations.Graphics.SoMeBundleBuildService>();
+        // §1312 — named copies of the SoMe sponsor graphics + the exhibitor walls filed by booth level (SponsorFileMirrorJob).
+        services.AddScoped<CommunityHub.Core.Integrations.Graphics.SponsorFileMirrorService>();
 
         // --- §750 C7: publish + notify session evaluation reports -------------
         // EvaluationReportPublishJob runs every 5 minutes and needs the whole chain: derive the
@@ -533,6 +547,8 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Evaluation.EvaluationQrService>();
         services.AddScoped<CommunityHub.Core.Reminders.EvaluationReportReadyMailService>();
         services.AddScoped<CommunityHub.Core.Evaluation.EvaluationReportDebounceService>();
+        // §1268 — EvaluationSessionSyncJob: the same sync the "Sync sessions from CEH" button runs.
+        services.AddScoped<CommunityHub.Core.Evaluation.EvaluationSessionSyncService>();
 
         // The single sponsor-pull engine, shared with CommunityHub.OneShot.
         services.AddScoped<SponsorOrderPullService>();
@@ -563,7 +579,8 @@ public static class JobsServiceRegistration
             store: sp.GetRequiredService<IZohoTokenStore>(),
             credentialKey: ZohoAccessTokenCache.CredentialKeyFor(
                 zohoOptions.ClientId, zohoOptions.RefreshToken)));
-        services.AddHttpClient<ZohoClient>();
+        // §1361 — every Zoho API call is paced (one budget per process) and paused after "Request limit exceeded".
+        services.AddHttpClient<ZohoClient>().AddHttpMessageHandler(() => new ZohoRequestPacer());
 
         // §59: delta-approval queue — sync engines ENQUEUE detected changes here for the
         // operator to approve/reject in /Organizer/SyncQueue (never auto-applied). The push
@@ -718,9 +735,7 @@ public static class JobsServiceRegistration
             .Bind(economicErpOptions);
         services.AddSingleton(economicErpOptions);
 
-        // ERP→webshop reconcile (the scheduled ErpSyncCustomerContactJob, 30-min timer):
-        // mirror the web app's registration so the job can resolve the sync service.
-        // All other deps (CompanyManagerClient/Options, EmailSender) are already above.
+        // e-conomic contact admin (the e-conomic contacts page, the wizard and ShopErpRoleSyncService).
         services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicContactAdminClient,
             CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>()
             .AddCredentialFailureAlert("e-conomic");
@@ -743,7 +758,6 @@ public static class JobsServiceRegistration
         // satisfied by null, so resolution was never in doubt. Optionality has to be paid for with a
         // test that asserts the dependency IS there where it matters.
         services.AddScoped<CommunityHub.Core.Organizer.ParticipantDeactivationService>();
-        services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
 
         // Read-only e-conomic ROLE source (REQUIREMENTS §7c): resolves the
         // sponsor-email coordinator audience from e-conomic contact role data
@@ -849,6 +863,9 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidLowBalanceAlertService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.DraftInvoiceCreatedNotifier>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.InvoiceProblemNotifier>();
+        // §1312 — the prepaid self-heal runs from CouponInvoiceJob: a deleted CEH prepaid draft is raised again.
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidInvoiceService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidInvoiceNumberRefresher>();
 
         // --- LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19) --
         // The SoMeDispatchJob publishes due, Active, Queued posts and sends the
@@ -887,6 +904,10 @@ public static class JobsServiceRegistration
         services.AddHttpClient<CommunityHub.Core.Integrations.LinkedInPeopleTypeaheadClient>()
             .AddCredentialFailureAlert("LinkedIn");
         services.AddScoped<CommunityHub.Core.Integrations.SpeakerMentionResolutionService>();
+        // §1300 — sponsor company → LinkedIn organization id (vanity finder), same job, same rule.
+        services.AddHttpClient<CommunityHub.Core.Integrations.LinkedInOrganizationLookupClient>()
+            .AddCredentialFailureAlert("LinkedIn");
+        services.AddScoped<CommunityHub.Core.Integrations.SponsorOrganizationResolutionService>();
         // 🔒 §844 — the media library, HERE as well as in the web host. The DISPATCHER resolves a
         // post's graphic or video by file name through it, and the dispatcher runs in THIS host: web
         // registration alone would deploy green and then publish every §828/§844 post text-only,
@@ -907,6 +928,7 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.SoMeVariableResolver>();
         // §864 — token resolution at publish time. Registered in BOTH hosts (see web Program.cs).
         services.AddScoped<CommunityHub.Core.Integrations.SoMePostComposer>();
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeMailPreview>();   // §1313 real text + picture in the SoMe organizer mails
         // §1170 — the human subject label for the auto-approval notice and the 24h digest. It was
         // registered in the WEB host only, so the mails the JOBS host sends fell back to raw subject
         // keys ("session:1") — the optional dependency was silently null exactly where it mattered.

@@ -66,6 +66,7 @@ public sealed class CouponPrepaidInvoiceService
     private readonly InvoicingOptions _invoicing;
     private readonly TimeProvider _clock;
     private readonly ILogger<CouponPrepaidInvoiceService> _log;
+    private readonly ZohoClient? _zoho;
 
     public CouponPrepaidInvoiceService(
         IEconomicInvoiceClient invoices,
@@ -73,7 +74,8 @@ public sealed class CouponPrepaidInvoiceService
         EconomicErpOptions options,
         InvoicingOptions invoicing,
         TimeProvider clock,
-        ILogger<CouponPrepaidInvoiceService> log)
+        ILogger<CouponPrepaidInvoiceService> log,
+        ZohoClient? zoho = null)
     {
         _invoices = invoices;
         _fx = fx;
@@ -81,9 +83,38 @@ public sealed class CouponPrepaidInvoiceService
         _invoicing = invoicing;
         _clock = clock;
         _log = log;
+        _zoho = zoho;
     }
 
     /// <summary>The reference this purchase's invoice carries in <c>references.other</c>.</summary>
+    /// <summary>
+    /// §1301 — a real ticket-class name for the invoice line. A human label passes through; an id (or
+    /// nothing) is looked up in Backstage <c>ticket_classes</c>. 🔒 Fail-soft: no Zoho, no token or no
+    /// match returns the input unchanged, and the composer then drops the line (§1116) — an invoice
+    /// without the class is complete; one with a 17-digit number is not.
+    /// </summary>
+    internal async Task<string> ResolveTicketClassNameAsync(string? label, CancellationToken ct)
+    {
+        var current = (label ?? string.Empty).Trim();
+        if (current.Length > 0 && !HumanLabel.IsMachineId(current)) return current;
+        if (_zoho is null || current.Length == 0) return current;
+
+        try
+        {
+            var token = await _zoho.GetAccessTokenAsync(ct);
+            if (string.IsNullOrWhiteSpace(token)) return current;
+            var names = await _zoho.GetTicketClassNamesAsync(token!, ct);
+            return names.TryGetValue(current, out var name) && !string.IsNullOrWhiteSpace(name)
+                ? name.Trim()
+                : current;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "§1301: ticket class name lookup failed for {Class}; the line is left out.", current);
+            return current;
+        }
+    }
+
     public static string ReferenceFor(int purchaseId) =>
         $"{PrepaidReferencePrefix}{purchaseId}";
 
@@ -130,6 +161,13 @@ public sealed class CouponPrepaidInvoiceService
                 "Enter the agreed unit price before creating the invoice — the hub has no price for "
                 + "a prepaid ticket class (nobody has claimed one yet), so it cannot guess it.");
         }
+
+        // 🔴 §1301 — the ticket CLASS NAME, resolved here, at the last step before the customer reads
+        // it. Operator 2026-09-24: *"i am missing the type of ticket … like 2-day ticket"*. Callers pass
+        // their best label, and a NEW pool's first invoice only ever had the Backstage id (the page
+        // that creates it never loaded the names), which §1116 then rightly dropped. Backstage's
+        // `ticket_classes` knows the name before any sale, so an id is looked up there.
+        ticketClassLabel = await ResolveTicketClassNameAsync(ticketClassLabel, ct);
 
         var customer = await _invoices.GetCustomerAsync(customerNumber, ct);
         if (customer is null)

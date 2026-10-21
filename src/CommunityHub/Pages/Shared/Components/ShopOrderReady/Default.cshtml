@@ -1,0 +1,30 @@
+@model CommunityHub.ViewComponents.ShopOrderReadyView
+@using CommunityHub.Core.Domain
+@{
+    var cart = Model.Status == ShopOrderStatus.Cart;
+    var what = Model.Items == 1 ? "1 item" : $"{Model.Items} items";
+}
+<section class="shop-ready" role="status" aria-live="polite">
+    <div class="shop-ready-text">
+        <strong>@(cart ? "Your sponsor order is ready" : $"Your order {Model.Number} is waiting for signature")</strong>
+        <span>@what prepared for you. @(Model.ViewerIsSigner
+            ? "Review it and sign the contract — it takes a minute."
+            : Model.SignerName is null ? "Review it and choose who signs." : $"{Model.SignerName} signs the contract.")</span>
+    </div>
+    @if (cart)
+    {
+        <a class="shop-ready-btn" href="/Sponsor/Shop/Cart">Review the order &rarr;</a>
+    }
+    else
+    {
+        <a class="shop-ready-btn" href="/Sponsor/Shop/Contract/@Model.OrderId">@(Model.ViewerIsSigner ? "Review and sign" : "Review the contract") &rarr;</a>
+    }
+</section>
+<style>
+    .shop-ready { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; justify-content:space-between;
+                  border:2px solid #1565c0; background:#eef4fb; border-radius:12px; padding:14px 16px; margin:0 0 16px; }
+    .shop-ready-text { display:grid; gap:2px; }
+    .shop-ready-text strong { font-size:17px; color:#0d47a1; }
+    .shop-ready-btn { background:#1565c0; color:#fff !important; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:700; white-space:nowrap; }
+    @@media (max-width:480px) { .shop-ready-btn { width:100%; text-align:center; } }
+</style>

@@ -211,7 +211,8 @@ public sealed class SoMeCapacityReport
 
         var live = sessions.Where(s => !excluded.Contains(s.Id)).ToList();
 
-        var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+        // §1347 — the planner's set (test OR withdrawn), so the capacity counts what it plans.
+        var testCompanies = await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(_db, eventId, ct);
 
         var sponsors = await _db.SponsorInfos
             .Where(s => s.EventId == eventId && s.SponsorCompanyId != null)

@@ -419,6 +419,12 @@ public static class TaskBodyParser
         // 🔒 An in-hub button never raises a sign-in hand-off notice: there is no second system to
         // explain. §176/§487 — a notice where none is needed is noise, and noise is how people learn
         // to click through the one dialog that mattered.
+        // §1305 — placeholders are substituted BEFORE parsing, so {{configuratorUrl}} arrives here as the in-hub
+        // /Sponsor/Shop while the CEH shop is on, under a file that still declares `interstitial: webshop` for the old
+        // shop. Refusing that dropped the button from every shop task (operator 2026-09-26: "there could be missing a
+        // button to order it"). With no declared target the notice is simply not needed — drop IT, keep the button.
+        if (target == TaskLinkTarget.InHub && interstitial != TaskInterstitial.None && declaredTarget.Length == 0)
+            interstitial = TaskInterstitial.None;
         if (target == TaskLinkTarget.InHub && interstitial != TaskInterstitial.None)
         {
             diagnostics.Add(new TaskBodyDiagnostic(

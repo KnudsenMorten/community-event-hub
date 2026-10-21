@@ -66,22 +66,6 @@ public class Participant
     public string? SponsorCompanyId { get; set; }
 
     /// <summary>
-    /// For a Sponsor-role contact: the Company Manager / WordPress <c>user_id</c>
-    /// — the <b>unique identifier that links this hub contact back to its Company
-    /// Manager user</b> (the canonical id-link the operator's ERP→webshop sync
-    /// uses; CM links a user by <c>user_id</c> and a company by <c>company_id</c>,
-    /// never by name). Written at sync time by
-    /// <see cref="Integrations.SponsorContactSyncService"/> from the CM
-    /// <c>/companies/{id}/users</c> response. Correlation back to CM (e.g. the
-    /// recipient resolver) prefers this id over email — email is reserved only for
-    /// the ERP→CM bridge where e-conomic and WordPress share no common id. Null for
-    /// non-sponsor participants and for sponsors not yet synced from CM. Tolerant
-    /// parse: CM returns it as a string ("68") on <c>/companies/{id}/users</c> and a
-    /// number (68) on <c>/users/{id}</c> — both resolve to this int.
-    /// </summary>
-    public int? CmUserId { get; set; }
-
-    /// <summary>
     /// §895 — the e-conomic <c>customerContactNumber</c>. <b>The identity of a sponsor contact.</b>
     /// </summary>
     /// <remarks>
@@ -95,7 +79,7 @@ public class Participant
     /// <para>🔒 <b>The e-conomic contact number survived all of it</b> (6, 31, 103), because ERP is
     /// where a rename is a RENAME rather than a delete-and-recreate. ERP is the master (§482), so
     /// its id is the identity and e-mail is demoted to an attribute — which is what it always was.
-    /// <see cref="CmUserId"/> stays as a LINK to the webshop seat, never as an identity.</para>
+    /// (The Company Manager user id that sat beside it was dropped in §1312 with Company Manager itself.)</para>
     ///
     /// <para>⚠️ Null for non-sponsor participants, and for sponsor rows created before this column
     /// existed — those are adopted on the next sync by matching e-mail once, then keyed by id

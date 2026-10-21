@@ -5,6 +5,7 @@ using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
 using CommunityHub.Sponsors;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
@@ -42,6 +43,33 @@ public class SwagCatalogModel : PageModel
     private readonly SwagCatalogCreditService _credits;
     private readonly TimeProvider _clock;
     private readonly SponsorActingCompanyService _acting;
+    private readonly CommunityHub.Core.Integrations.Webshop.ShopOrderService? _shopOrders;
+
+    /// <summary>
+    /// §1305 item 13 — true when the CEH shop is on: "Choose this" puts the item (for every bag) in the company's
+    /// CEH order instead of sending the sponsor to the old webshop. Operator: "keep the swag catalog as i originally
+    /// designed it … but end result is a cart entry + contract + signing + invoice".
+    /// </summary>
+    public bool OrderInCehShop { get; private set; }
+
+    [TempData] public string? ShopMessage { get; set; }
+    [TempData] public bool ShopMessageIsError { get; set; }
+
+    /// <summary>§1305 item 13 — "Choose this": the item, for all bags, into the company's CEH cart.</summary>
+    public async Task<IActionResult> OnPostAddToOrderAsync(long productId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null || _shopOrders is null) return RedirectToPage();
+        if (!await _gate.IsFeatureEnabledAsync(CommunityHub.Core.Integrations.Webshop.ShopMailer.FeatureKey, me.EventId, ct))
+            return RedirectToPage();
+        var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
+        if (string.IsNullOrWhiteSpace(companyId)) return RedirectToPage();
+        var bags = (await _catalog.GetAsync(ct)).BagQuantity;
+        var r = await _shopOrders.AddSwagAsync(me.EventId, companyId!, productId, bags, me.ParticipantId, ct);
+        ShopMessage = r.Message;
+        ShopMessageIsError = !r.Ok;
+        return RedirectToPage();
+    }
 
     public SwagCatalogModel(
         CommunityHubDbContext db,
@@ -51,8 +79,13 @@ public class SwagCatalogModel : PageModel
         SwagCatalogHoldService holds,
         SwagCatalogCreditService credits,
         TimeProvider clock,
-        SponsorActingCompanyService acting)
+        SponsorActingCompanyService acting,
+        // §1305 item 13 — the configurator's outcome becomes a CEH cart line (when the CEH shop is on).
+        CommunityHub.Core.Integrations.Webshop.ShopOrderService? shopOrders = null,
+        CommunityHub.Core.Integrations.Webshop.ShopSettings? shopSettings = null)
     {
+        _shopOrders = shopOrders;
+        _shopSettings = shopSettings;
         _db = db;
         _participant = participant;
         _catalog = catalog;
@@ -62,6 +95,15 @@ public class SwagCatalogModel : PageModel
         _clock = clock;
         _acting = acting;
     }
+
+    private readonly CommunityHub.Core.Integrations.Webshop.ShopSettings? _shopSettings;
+
+    /// <summary>
+    /// §1305 — with the CEH shop on: what the sponsor pays per item (webshop product id → amount), i.e. their share of the
+    /// item for every bag. Shown INSTEAD of the per-piece price and the full total (operator 2026-09-26).
+    /// </summary>
+    public IReadOnlyDictionary<long, CommunityHub.Core.Integrations.Webshop.ShopPricing.SwagSplit> Contribution { get; private set; } =
+        new Dictionary<long, CommunityHub.Core.Integrations.Webshop.ShopPricing.SwagSplit>();
 
     public bool WrongRole { get; private set; }
 
@@ -109,7 +151,10 @@ public class SwagCatalogModel : PageModel
         if (me is null) return;
 
         var isOrganizer = OrganizerAuth.IsRealOrganizer(me);
-        var released = await _gate.IsFeatureEnabledAsync(FeatureKey, me.EventId, ct);
+        // §1305 — the configurator is also the CEH shop's Swag door: open whenever the shop is open, not only under
+        // its own switch, so the Swag tab never leads to "not available".
+        var cehShop = await _gate.IsFeatureEnabledAsync(CommunityHub.Core.Integrations.Webshop.ShopMailer.FeatureKey, me.EventId, ct);
+        var released = cehShop || await _gate.IsFeatureEnabledAsync(FeatureKey, me.EventId, ct);
 
         if (!released && !isOrganizer)
         {
@@ -120,6 +165,7 @@ public class SwagCatalogModel : PageModel
         }
 
         IsUnreleasedPreview = !released && isOrganizer;
+        OrderInCehShop = _shopOrders is not null && cehShop;
 
         if (me.Role != ParticipantRole.Sponsor && !isOrganizer)
         {
@@ -131,6 +177,16 @@ public class SwagCatalogModel : PageModel
         var result = await _catalog.GetAsync(ct);
         Items = result.Items;
         BagQuantity = result.BagQuantity;
+        if (OrderInCehShop && _shopSettings is not null)
+        {
+            var ids = Items.Select(i => i.ProductId).ToList();
+            var rule = _shopSettings.Shop().SwagPricing;
+            Contribution = (await _db.ShopProducts.AsNoTracking()
+                    .Where(p => p.EventId == me.EventId && p.WooProductId != null && ids.Contains(p.WooProductId.Value))
+                    .ToListAsync(ct))
+                .ToDictionary(p => p.WooProductId!.Value,
+                    p => CommunityHub.Core.Integrations.Webshop.ShopPricing.SwagSplitFor(p, rule, Math.Max(1, BagQuantity)));
+        }
         CurrencySymbol = result.CurrencySymbol;
         // The diagnostic is operator language; a sponsor just sees an empty catalogue.
         if (isOrganizer) Diagnostic = result.Diagnostic;

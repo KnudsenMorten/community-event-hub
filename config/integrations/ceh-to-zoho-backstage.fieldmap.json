@@ -153,7 +153,7 @@
       ]
     },
     "Sponsor": {
-      "source": { "record": "SponsorInfo + CompanyManager company" },
+      "source": { "record": "SponsorInfo + ShopCompany" },
       "target": {
         "record": "sponsor",
         "guiPanel": "Sponsors",
@@ -177,7 +177,7 @@
       ]
     },
     "Exhibitor": {
-      "source": { "record": "SponsorInfo + CompanyManager company (booth sponsors only)" },
+      "source": { "record": "SponsorInfo + ShopCompany (booth sponsors only)" },
       "target": {
         "record": "exhibitor",
         "guiPanel": "Exhibitors",

@@ -52,6 +52,10 @@ public sealed class VolunteerAllocationRingScopeTests
     {
         using var db = NewDb();
         db.Events.Add(new Event { Id = EventId, CommunityName = "C", DisplayName = "C27", Code = "C27", IsActive = true });
+        db.SaveChanges();
+        // §1295 — this suite is about the volunteer-allocation QUEUE ring; assignment itself must
+        // be released or every commit would be held by the newer gate instead.
+        VolunteerAssignmentRelease.ToBroad(db, EventId);
         var task = new VolunteerTask { EventId = EventId, Title = "Registration", ResourcesNeeded = 5 };
         db.VolunteerTasks.Add(task);
 
@@ -93,6 +97,10 @@ public sealed class VolunteerAllocationRingScopeTests
     {
         using var db = NewDb();
         db.Events.Add(new Event { Id = EventId, CommunityName = "C", DisplayName = "C27", Code = "C27", IsActive = true });
+        db.SaveChanges();
+        // §1295 — this suite is about the volunteer-allocation QUEUE ring; assignment itself must
+        // be released or every commit would be held by the newer gate instead.
+        VolunteerAssignmentRelease.ToBroad(db, EventId);
         var task = new VolunteerTask { EventId = EventId, Title = "Registration", ResourcesNeeded = 5 };
         db.VolunteerTasks.Add(task);
         await db.SaveChangesAsync();

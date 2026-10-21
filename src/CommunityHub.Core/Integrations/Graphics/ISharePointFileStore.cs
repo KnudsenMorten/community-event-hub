@@ -101,6 +101,20 @@ public interface ISharePointFileStore
         CancellationToken ct = default);
 
     /// <summary>
+    /// §1312 — COPY a stored file (by item id) into a drive-relative <paramref name="relativeFolder"/> as
+    /// <paramref name="fileName"/>, replacing a file of that name. The live Graph store copies SERVER-SIDE (no bytes through
+    /// this host); this default downloads and re-uploads, which keeps every fake working. False when the source is gone.
+    /// </summary>
+    async Task<bool> CopyToFolderAsync(
+        string itemId, string relativeFolder, string fileName, CancellationToken ct = default)
+    {
+        var bytes = await DownloadAsync(itemId, ct);
+        if (bytes is null) return false;
+        await UploadToFolderAsync(relativeFolder, fileName, bytes, "application/octet-stream", ct);
+        return true;
+    }
+
+    /// <summary>
     /// §455 — STREAMING upload: store <paramref name="content"/> without ever holding the whole
     /// file in memory. For the big-file surfaces (speaker slide decks, sponsor exhibitor-wall
     /// artwork — both capped at 1 GB) where buffering the request body into a <c>MemoryStream</c>

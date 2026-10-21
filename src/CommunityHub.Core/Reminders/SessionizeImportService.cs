@@ -268,6 +268,16 @@ public sealed class SessionizeImportService
                 // (pairs with §203 pending-approval notifications).
                 var previousEmail = placeholder.Email;
 
+                // 🛑 §1252 — DO NOT ADD AN "ADDRESS ALREADY TAKEN" GUARD HERE. IT IS ALREADY DONE,
+                // ~60 lines up, where `matchedById` is set to null when another participant holds
+                // the incoming address (the §827 Thomas Martinsen case). By the time control
+                // reaches this line the address is provably free, so a second check here would be
+                // unreachable code that looks load-bearing.
+                //
+                // ⚠️ Recorded because it was nearly added on 2026-09-20 for a real scenario that
+                // sounded new — a Sessionize speaker on a placeholder address who is also about to
+                // become a sponsor's signer under the same real address — and which this guard
+                // already handles. The concern was right; the code was already there.
                 placeholder.Email = s.Email;
                 if (!string.IsNullOrWhiteSpace(fullName)) placeholder.FullName = fullName;
                 existing[s.Email] = placeholder; // so a duplicate row in the same pull is a no-op
@@ -384,8 +394,12 @@ public sealed class SessionizeImportService
                 // Operator override: re-seed from Sessionize and drop the dirty
                 // set so the profile tracks Sessionize again. A blank value in
                 // the source clears the field (a true full refresh).
-                prof.Tagline   = s.TagLine;
-                prof.Biography = s.Biography;
+                // §1256c — the bio arrives from Sessionize wrapped in <p>…</p> for some speakers.
+                // Nothing in the hub renders a bio as HTML, and the "apply by hand in Backstage"
+                // mail asks the operator to PASTE this value, so the tags must not survive the
+                // import (operator 2026-09-20: *"it should be removed in the importer"*).
+                prof.Tagline   = Integrations.HtmlTextNormalizer.ToPlainText(s.TagLine);
+                prof.Biography = Integrations.HtmlTextNormalizer.ToPlainText(s.Biography);
                 prof.Blog      = s.Blog;
                 prof.LinkedIn  = s.LinkedIn;
                 prof.Twitter   = s.Twitter;
@@ -397,11 +411,31 @@ public sealed class SessionizeImportService
             else
             {
                 // Delta: only fill genuinely-empty, never-speaker-edited fields.
-                prof.Tagline   = FillIfUntouched(prof, SpeakerProfile.BioFields.Tagline,   prof.Tagline,   s.TagLine);
-                prof.Biography = FillIfUntouched(prof, SpeakerProfile.BioFields.Biography, prof.Biography, s.Biography);
+                // §1256c — strip the markup on the way in (see the Full branch above).
+                prof.Tagline   = FillIfUntouched(prof, SpeakerProfile.BioFields.Tagline,   prof.Tagline,
+                                                 Integrations.HtmlTextNormalizer.ToPlainText(s.TagLine));
+                prof.Biography = FillIfUntouched(prof, SpeakerProfile.BioFields.Biography, prof.Biography,
+                                                 Integrations.HtmlTextNormalizer.ToPlainText(s.Biography));
                 prof.Blog      = FillIfUntouched(prof, SpeakerProfile.BioFields.Blog,      prof.Blog,      s.Blog);
                 prof.LinkedIn  = FillIfUntouched(prof, SpeakerProfile.BioFields.LinkedIn,  prof.LinkedIn,  s.LinkedIn);
                 prof.Twitter   = FillIfUntouched(prof, SpeakerProfile.BioFields.Twitter,   prof.Twitter,   s.Twitter);
+                // 🔴 §1250 — REPAIR a profile URL already stored with its tracking noise.
+                //
+                // The parser now cleans these on the way in, but a delta never overwrites a
+                // non-empty field — so the four speakers whose pushes were already failing would
+                // stay broken for ever, which would make the fix look like it had not worked.
+                //
+                // 🔑 This is a REPAIR, not an overwrite of somebody's choice: the value came from
+                // Sessionize in the first place, and stripping `?utm_source=share…` leaves the same
+                // profile. A field the SPEAKER has edited is still untouched — `CleanIfUntouched`
+                // checks the same speaker-edited set as everything else here.
+                prof.LinkedIn  = CleanIfUntouched(prof, SpeakerProfile.BioFields.LinkedIn,  prof.LinkedIn);
+                prof.Twitter   = CleanIfUntouched(prof, SpeakerProfile.BioFields.Twitter,   prof.Twitter);
+                // §1256c — the same REPAIR shape for a bio already stored WITH its markup: a delta
+                // never overwrites a non-empty field, so without this the existing HTML bios would
+                // keep their tags for ever and the fix would look like it had not worked.
+                prof.Tagline   = StripHtmlIfUntouched(prof, SpeakerProfile.BioFields.Tagline,   prof.Tagline);
+                prof.Biography = StripHtmlIfUntouched(prof, SpeakerProfile.BioFields.Biography, prof.Biography);
                 prof.PhotoUrl  = FillIfUntouched(prof, SpeakerProfile.BioFields.PhotoUrl,  prof.PhotoUrl,  s.ProfilePictureUrl);
                 if (string.IsNullOrWhiteSpace(prof.FirstName)) prof.FirstName = s.FirstName;
                 if (string.IsNullOrWhiteSpace(prof.LastName))  prof.LastName  = s.LastName;
@@ -549,6 +583,36 @@ public sealed class SessionizeImportService
         if (prof.IsSpeakerEdited(field)) return current;          // speaker owns it
         if (!string.IsNullOrWhiteSpace(current)) return current;  // already populated
         return incoming;                                          // genuinely empty
+    }
+
+    /// <summary>
+    /// §1250 — strip share-tracking noise off an ALREADY-STORED profile URL, unless the speaker
+    /// owns the field.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Distinct from <see cref="FillIfUntouched"/> on purpose: that one refuses to touch a
+    /// non-empty field, which is right for content but would leave a URL the event platform
+    /// rejects sitting there for ever. This one changes nothing but the noise — if cleaning is a
+    /// no-op the value is returned unchanged, so a clean URL is never rewritten and the row is not
+    /// dirtied.
+    /// </remarks>
+    private static string? CleanIfUntouched(SpeakerProfile prof, string field, string? current)
+    {
+        if (prof.IsSpeakerEdited(field)) return current;          // speaker owns it
+        if (string.IsNullOrWhiteSpace(current)) return current;   // nothing to clean
+        return Integrations.SocialUrlNormalizer.Clean(current) ?? current;
+    }
+
+    /// <summary>
+    /// §1256c — strip markup from a stored bio/tagline that came from Sessionize, leaving a
+    /// speaker-edited value alone (they own it). A repair, not an overwrite: the words are
+    /// unchanged, only the tags around them go.
+    /// </summary>
+    private static string? StripHtmlIfUntouched(SpeakerProfile prof, string field, string? current)
+    {
+        if (prof.IsSpeakerEdited(field)) return current;
+        if (!Integrations.HtmlTextNormalizer.LooksLikeHtml(current)) return current;
+        return Integrations.HtmlTextNormalizer.ToPlainText(current) ?? current;
     }
 
     /// <summary>

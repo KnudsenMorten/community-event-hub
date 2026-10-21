@@ -79,7 +79,7 @@ public sealed class SessionBulkOperationService
         // §748.1 — the LIVE four-point responses, not the retired 1–5 table (which can no longer
         // have rows, so this probe had quietly stopped blocking anything). SessionId is nullable on
         // a response (a device reading not yet matched to a session), hence the != null.
-        var withEvaluations = await _db.EvaluationResponses
+        var withEvaluations = await _db.EvaluationResponses.IgnoreQueryFilters()   // §1357 — inactive still blocks
             .Where(e => e.SessionId != null && targetIds.Contains(e.SessionId.Value))
             .Select(e => e.SessionId!.Value)
             .Distinct().ToListAsync(ct);

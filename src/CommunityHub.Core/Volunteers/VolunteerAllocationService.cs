@@ -62,7 +62,11 @@ public sealed record DropoutReplanResult(int FreedAssignments, int AffectedTasks
 /// simulated total but are NOT real assignments). Only <see cref="CommitAsync"/>
 /// turns the draft queue into real <see cref="VolunteerTaskAssignment"/> rows;
 /// <see cref="DiscardAsync"/> throws the draft away without ever assigning anyone.
-/// Drafts are scoped per organizer so concurrent planning sessions don't collide.
+/// §1299 — the VOLUNTEER queue is ONE SHARED queue per edition (operator 2026-09-23): every
+/// organizer sees, edits, publishes (commits) and discards the same set, whoever queued it —
+/// the organizer, a bucket supervisor assigning from the work structure, or the planner.
+/// <see cref="TaskAllocationDraft.OwnerParticipantId"/> is kept as "queued by". Until commit,
+/// nothing is visible to the volunteer. (The ORGANIZER queue stays per-owner.)
 ///
 /// All writes are organizer-only (a plain volunteer can't allocate others).
 /// </summary>
@@ -72,23 +76,32 @@ public sealed class VolunteerAllocationService
     private readonly TimeProvider _clock;
     private readonly FeatureGateService _gate;
     private readonly RingResolver _rings;
+    private readonly VolunteerAssignmentGate _assignmentGate;
 
     /// <summary>The QUEUE feature key whose released ring scopes a commit (category 3).</summary>
     public const string FeatureKey = "volunteer-allocation";
 
+    /// <param name="assignmentGate">
+    /// §1295 — the volunteer-assignment gate, applied to each draft's TARGET on top of this
+    /// queue's own ring. Optional only so the existing constructions keep compiling: when it is
+    /// not supplied one is built from the very same <paramref name="gate"/> and
+    /// <paramref name="rings"/>, so the check is ALWAYS enforced — there is no ungated path.
+    /// </param>
     public VolunteerAllocationService(
         CommunityHubDbContext db, TimeProvider clock,
-        FeatureGateService gate, RingResolver rings)
+        FeatureGateService gate, RingResolver rings,
+        VolunteerAssignmentGate? assignmentGate = null)
     {
         _db = db;
         _clock = clock;
         _gate = gate;
         _rings = rings;
+        _assignmentGate = assignmentGate ?? new VolunteerAssignmentGate(gate, rings);
     }
 
     private static void RequireOrganizer(VolunteerStructureService.ActorContext actor)
     {
-        if (actor.Role != ParticipantRole.Organizer)
+        if (!actor.Role.HasOrganizerAccess())
             throw new VolunteerAccessDeniedException("Organizer role required for allocation.");
 
         // §337 DEFENCE IN DEPTH. Role alone cannot exclude an acting-as session: §234 gives
@@ -131,7 +144,7 @@ public sealed class VolunteerAllocationService
             .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
 
         var draftCounts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+            .Where(d => d.EventId == actor.EventId
                         && d.TargetRole == ParticipantRole.Volunteer)
             .GroupBy(d => d.TaskId)
             .Select(g => new { TaskId = g.Key, Count = g.Count() })
@@ -161,7 +174,7 @@ public sealed class VolunteerAllocationService
                              && a.DecisionStatus != ShiftDecisionStatus.Declined, ct);
         var draft = await _db.TaskAllocationDrafts
             .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
-                             && d.OwnerParticipantId == actor.ParticipantId
+                             // §1299 — ONE shared volunteer queue per edition (no owner filter).
                              && d.TargetRole == ParticipantRole.Volunteer, ct);
 
         return new TaskCoverage(task.Id, task.Title, task.ResourcesNeeded, assigned, draft);
@@ -201,7 +214,7 @@ public sealed class VolunteerAllocationService
 
         var alreadyDrafted = await _db.TaskAllocationDrafts.AnyAsync(
             d => d.TaskId == taskId && d.ParticipantId == volunteerId
-                 && d.OwnerParticipantId == actor.ParticipantId
+                 // §1299 — ONE shared volunteer queue per edition (no owner filter).
                  && d.TargetRole == ParticipantRole.Volunteer, ct);
         if (alreadyDrafted) return true; // idempotent
 
@@ -225,7 +238,7 @@ public sealed class VolunteerAllocationService
         RequireOrganizer(actor);
         var row = await _db.TaskAllocationDrafts.FirstOrDefaultAsync(
             d => d.TaskId == taskId && d.ParticipantId == volunteerId
-                 && d.OwnerParticipantId == actor.ParticipantId && d.EventId == actor.EventId
+                 && d.EventId == actor.EventId
                  && d.TargetRole == ParticipantRole.Volunteer, ct);
         if (row is null) return false;
         _db.TaskAllocationDrafts.Remove(row);
@@ -237,9 +250,10 @@ public sealed class VolunteerAllocationService
     public async Task<List<TaskAllocationDraft>> LoadDraftAsync(
         VolunteerStructureService.ActorContext actor, CancellationToken ct = default) =>
         await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+            .Where(d => d.EventId == actor.EventId
                         && d.TargetRole == ParticipantRole.Volunteer)
             .Include(d => d.Participant)
+            .Include(d => d.OwnerParticipant) // §1299 — "queued by", shown in the shared queue
             .Include(d => d.Task)
             .OrderBy(d => d.Task.Title)
             .ToListAsync(ct);
@@ -256,7 +270,7 @@ public sealed class VolunteerAllocationService
         RequireOrganizer(actor);
 
         var drafts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+            .Where(d => d.EventId == actor.EventId
                         && d.TargetRole == ParticipantRole.Volunteer)
             .ToListAsync(ct);
         if (drafts.Count == 0) return new CommitResult(0, 0);
@@ -279,6 +293,13 @@ public sealed class VolunteerAllocationService
                 .ToListAsync(ct))
             .ToHashSet();
 
+        // §1295 — ON TOP of this queue's own ring: the volunteer-assignments switch decides
+        // whether a volunteer may be given work AT ALL. A draft whose target it holds stays in
+        // the queue exactly like an out-of-ring one (dormant, re-committable once released), so
+        // the two gates behave identically from the organizer's side and nothing is lost.
+        var assignmentAllowed = await _assignmentGate.FilterAssignableAsync(
+            actor.EventId, drafts.Select(d => d.ParticipantId), ct);
+
         int committed = 0, skipped = 0, outOfRing = 0, inactive = 0;
         var now = _clock.GetUtcNow();
         var consumed = new List<TaskAllocationDraft>();
@@ -286,7 +307,8 @@ public sealed class VolunteerAllocationService
         foreach (var d in drafts)
         {
             var targetRing = await _rings.GetEffectiveRingAsync(d.ParticipantId, ct);
-            if (!Rings.IsActiveForRing(targetRing, releasedRing))
+            if (!Rings.IsActiveForRing(targetRing, releasedRing)
+                || !assignmentAllowed.Contains(d.ParticipantId))   // §1295
             {
                 outOfRing++;   // leave this draft in the queue (dormant until promoted)
                 continue;
@@ -403,7 +425,7 @@ public sealed class VolunteerAllocationService
                                  && a.DecisionStatus != ShiftDecisionStatus.Declined, ct);
             var draftedNow = await _db.TaskAllocationDrafts
                 .CountAsync(d => d.TaskId == taskId && d.EventId == eventId
-                                 && d.OwnerParticipantId == ownerParticipantId
+                                 // §1299 — shared queue: every organizer's drafts count.
                                  && d.TargetRole == ParticipantRole.Volunteer, ct);
             var shortfall = Math.Max(0, task.ResourcesNeeded - assignedNow - draftedNow);
             if (shortfall == 0) continue;
@@ -415,7 +437,7 @@ public sealed class VolunteerAllocationService
                     .Select(a => a.ParticipantId).ToListAsync(ct))
                 .Concat(await _db.TaskAllocationDrafts
                     .Where(d => d.TaskId == taskId && d.EventId == eventId
-                                && d.OwnerParticipantId == ownerParticipantId
+                                // §1299 — shared queue: every organizer's drafts count.
                                 && d.TargetRole == ParticipantRole.Volunteer)
                     .Select(d => d.ParticipantId).ToListAsync(ct)));
 
@@ -448,7 +470,7 @@ public sealed class VolunteerAllocationService
     {
         RequireOrganizer(actor);
         var drafts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+            .Where(d => d.EventId == actor.EventId
                         && d.TargetRole == ParticipantRole.Volunteer)
             .ToListAsync(ct);
         if (drafts.Count == 0) return 0;

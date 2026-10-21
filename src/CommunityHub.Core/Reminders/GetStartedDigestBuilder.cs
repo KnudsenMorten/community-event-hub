@@ -253,8 +253,15 @@ public sealed class GetStartedDigestBuilder
                       + WebUtility.HtmlEncode(string.Join(", ", missingFieldKeys.Select(FieldTitleFor)))
                       + "</span>"
                     : string.Empty;
-                return $"<li style=\"margin:0 0 6px;\">{title}{detail}</li>";
+                // §1312 — for a SPONSOR each open step also says what it COSTS them (operator 2026-09-27: "can we improve
+                // what is missing and the consequence of this").
+                var why = p.Role == ParticipantRole.Sponsor && SponsorConsequence(k) is { } c
+                    ? $"<br /><span style=\"color:#b91c1c;font-size:14px;\">{WebUtility.HtmlEncode(c)}</span>"
+                    : string.Empty;
+                return $"<li style=\"margin:0 0 10px;\"><strong>{title}</strong>{detail}{why}</li>";
             }));
+            tokens["sponsorPreambleHtml"] = p.Role == ParticipantRole.Sponsor ? SponsorPreambleHtml(tokens.GetValueOrDefault("supportEmail")) : string.Empty;
+            tokens["sponsorOutroHtml"] = p.Role == ParticipantRole.Sponsor ? SponsorOutroHtml(intervalDays ?? IntervalDays) : string.Empty;
 
             // 🔑 §1081 stage A — THE REASON THIS WHOLE CHANGE EXISTS. A coordinator was chased while
             // a colleague had already done several steps, and the mail never said so — so it read as
@@ -463,18 +470,66 @@ public sealed class GetStartedDigestBuilder
     /// so speakers, volunteers, attendees, media, partners and organizers were told a colleague could
     /// finish their steps. The sentence now follows the wizard's scope.</para>
     /// </remarks>
-    internal static string IntroFor(ParticipantRole role, string? eventDisplayName, string? eventCode)
+    public static string IntroFor(ParticipantRole role, string? eventDisplayName, string? eventCode)
     {
         var eventName = "<strong>" + WebUtility.HtmlEncode(eventDisplayName ?? string.Empty)
             + (string.IsNullOrWhiteSpace(eventCode) ? string.Empty : $" ({WebUtility.HtmlEncode(eventCode)})")
             + "</strong>";
 
-        // §1227b — the sponsor wording is the operator's own (2026-09-15).
+        // §1227b — the sponsor wording is the operator's own (2026-09-15), extended with his 2026-09-27 mail ("we completely
+        // understand … TIP: It is better to complete it and come back and modify if needed").
         return role == ParticipantRole.Sponsor
-            ? $"Your <strong>Get Started</strong> checklist for {eventName} still has open tasks. It's "
-              + "shared across your company, so a colleague can pick up any step — each one only needs "
-              + "completing once."
+            ? $"Our records show that your <strong>Get Started</strong> onboarding for {eventName} is not complete yet. "
+              + "We completely understand — this is a busy season with many events running in parallel. It's shared across "
+              + "your company, so a colleague can pick up any step — each one only needs completing once.<br /><br />"
+              + "<strong>TIP:</strong> it is better to complete it now and come back to change things later, than to leave it open."
             : $"You have a few steps left to complete in <strong>Get Started</strong> for {eventName}.";
+    }
+
+    /// <summary>
+    /// §1312 — what an open sponsor step COSTS the sponsor (operator 2026-09-27, from his own mail: "Social media
+    /// announcements will be missed … Visibility on the event site and in the agenda … Your logo … leaves gaps in the
+    /// shared sponsor layouts"). Null for a step with nothing specific to say.
+    /// </summary>
+    public static string? SponsorConsequence(string stepKey) => stepKey switch
+    {
+        "company" => "Without it your company cannot be included in our social-media sponsor announcements — a significant part "
+                     + "of your sponsorship value — and attendees find an empty profile on the event site and in the agenda.",
+        "logos" => "A missing logo leaves gaps in the shared sponsor layouts on the website, in the agenda, on signage and in "
+                   + "the keynote slides — for everyone, not only you.",
+        "contacts" => "Without the right signer and event coordinator, contracts, practical information and deadlines do not "
+                      + "reach the right people.",
+        "booth-materials" => "Without your booth materials we cannot prepare your booth artwork and print in time.",
+        "booth-checkin" => "Without your check-in details we cannot plan your arrival, access and booth set-up.",
+        "booth-members" => "Booth staff who are not registered cannot get their access badges.",
+        "party" => "Without your answer we cannot hold places for your team at the party.",
+        "deadlines" => "Your tasks have deadlines — missing one can mean missing a print, catering or set-up cut-off.",
+        _ => null,
+    };
+
+    /// <summary>§1312 — the whitelist box (operator 2026-09-27: "Before you do anything else: please whitelist info@…").</summary>
+    public static string SponsorPreambleHtml(string? supportEmail)
+    {
+        var from = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(supportEmail) ? "our sender address" : supportEmail);
+        return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0;\"><tr>"
+             + "<td style=\"background-color:#fff7ed;border-left:4px solid #b45309;padding:14px 18px;border-radius:4px;\">"
+             + $"<p style=\"margin:0 0 6px;font-weight:700;\">Before anything else: please whitelist {from}</p>"
+             + "<p style=\"margin:0;\">All practical information for sponsors — onboarding, deadlines, expo details and reminders — "
+             + "comes from this address, and filtered mail is a common cause of missed information. If you have not seen earlier "
+             + "mails from us, please check your junk / spam folder and add us as a safe sender. If your organisation filters "
+             + "external mail, forward this to your IT department.</p>"
+             + "</td></tr></table>"
+             + "<p style=\"margin:0;font-size:16px;line-height:16px;mso-line-height-rule:exactly;\">&nbsp;</p>";
+    }
+
+    /// <summary>§1312 — the honest cadence, and "wrong person? tell us" (operator 2026-09-27).</summary>
+    public static string SponsorOutroHtml(int intervalDays)
+    {
+        var every = intervalDays switch { 1 => "every day", 7 => "every week", 14 => "every two weeks", _ => $"every {intervalDays} days" };
+        return $"<p style=\"margin:16px 0 0;\">You will receive this reminder {every} until the onboarding is complete — the fastest "
+             + "way to stop it is to complete it 😊</p>"
+             + "<p style=\"margin:12px 0 0;\">If anything is unclear, or the right person for this is a colleague, just reply to this "
+             + "mail and we will help — or point us to them directly.</p>";
     }
 
     /// <summary>The step's GUI title from SharedResource.resx (fallback: the key itself).</summary>

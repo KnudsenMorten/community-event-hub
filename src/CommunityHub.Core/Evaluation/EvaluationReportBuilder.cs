@@ -266,6 +266,23 @@ public sealed class EvaluationReportBuilder
             })
             .FirstOrDefaultAsync(ct) ?? new { Qr = 0, Device = 0 };
 
+        // §1278 — the follow-up answers, counted per code and labelled from the catalog. Only codes
+        // someone actually picked are listed, most-picked first; the list order breaks ties.
+        var points = await _db.EvaluationResponses
+            .Where(r => r.SessionId == sessionId && (r.PositivePoint != null || r.ImprovementPoint != null))
+            .Select(r => new { r.PositivePoint, r.ImprovementPoint })
+            .ToListAsync(ct);
+        static IReadOnlyList<EvaluationReportService.FollowUpCount> Count(
+            IEnumerable<string?> picked, IReadOnlyList<EvaluationFollowUps.Choice> catalog) =>
+            catalog
+                .Select((c, i) => (c, i, n: picked.Count(p => p == c.Code)))
+                .Where(x => x.n > 0)
+                .OrderByDescending(x => x.n).ThenBy(x => x.i)
+                .Select(x => new EvaluationReportService.FollowUpCount(x.c.Label, x.n))
+                .ToList();
+        var positivePoints = Count(points.Select(p => p.PositivePoint), EvaluationFollowUps.Positive);
+        var improvementPoints = Count(points.Select(p => p.ImprovementPoint), EvaluationFollowUps.Improvement);
+
         var data = new EvaluationReportService.ReportData(
             EventName: ev?.DisplayName ?? ev?.Code ?? "Event",
             SessionTitle: session.Title,
@@ -281,7 +298,9 @@ public sealed class EvaluationReportBuilder
             WindowOpensAt: scheduled.CollectionWindowOpensAt,
             WindowClosesAt: scheduled.CollectionWindowClosesAt,
             QrResponses: sourceCounts.Qr,
-            DeviceResponses: sourceCounts.Device);
+            DeviceResponses: sourceCounts.Device,
+            PositivePoints: positivePoints,
+            ImprovementPoints: improvementPoints);
 
         return new Report(data, DeriveVersion(inputs!));
     }

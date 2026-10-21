@@ -76,7 +76,7 @@ public sealed class VolunteerMyScheduleTests
     {
         http.Request.Host = new HostString("ceh.example.test");
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        var structure = new VolunteerStructureService(db, TimeProvider.System);
+        var structure = new VolunteerStructureService(db, TimeProvider.System, VolunteerAssignmentGate.For(db));
         var actions = new OrganizerActionItemService(db, TimeProvider.System);
         var invite = new CalendarInviteEmailService(
             db, sender ?? new CapturingEmailSender(), new EmailContextAccessor(), TimeProvider.System);
@@ -88,6 +88,7 @@ public sealed class VolunteerMyScheduleTests
             new VolunteerShiftService(db, TimeProvider.System, actions),
             helpNotify: null!,                 // not reached by these handlers
             invite,
+            VolunteerAssignmentGate.For(db),
             NullLogger<MyScheduleModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
@@ -107,6 +108,18 @@ public sealed class VolunteerMyScheduleTests
         db.Events.Add(ev);
         await db.SaveChangesAsync();
         var eventId = ev.Id;
+
+        // §1295 — these cases drive the page's OWN behaviour, so the edition has volunteer task
+        // assignment released; the HELD edition (the shipped default) is covered by
+        // Held_assignment_hides_the_page_from_every_handler below.
+        db.FeatureSettings.Add(new CommunityHub.Core.Domain.FeatureSetting
+        {
+            EventId = eventId,
+            FeatureKey = VolunteerAssignmentGate.FeatureKey,
+            Enabled = true,
+            ReleasedToRingOverride = CommunityHub.Core.Settings.Ring.Broad,
+        });
+        await db.SaveChangesAsync();
 
         var vol = new Participant
         {
@@ -142,6 +155,45 @@ public sealed class VolunteerMyScheduleTests
         await db.SaveChangesAsync();
 
         return new Seed(vol, other, task.Id);
+    }
+
+    /// <summary>
+    /// §1295 — with volunteer task assignment HELD (the shipped default, and the state while
+    /// volunteers are being onboarded), this page does not exist for them: not the GET, and not
+    /// any of the POST handlers.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 The POSTs are the half worth pinning. Hiding the menu item is presentation; a route
+    /// stays reachable to anyone who kept the page open in a tab or typed the URL, and every
+    /// handler here writes something (task status, a help request to a supervisor, a shift
+    /// decision that signals a coordinator, an e-mailed invite). A gate on the GET alone would
+    /// leave all five writable.
+    /// </remarks>
+    [Fact]
+    public async Task Held_assignment_hides_the_page_from_every_handler()
+    {
+        using var db = NewDb();
+        var seed = await SeedAsync(db);
+
+        // Take the release away: back to the catalog default (off, Ring 1).
+        db.FeatureSettings.RemoveRange(db.FeatureSettings);
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(seed.Volunteer) };
+        var model = NewModel(db, http);
+
+        Assert.IsType<NotFoundResult>(await model.OnGetAsync(default));
+        Assert.IsType<NotFoundResult>(
+            await model.OnPostSetStatusAsync(seed.TaskId, VolunteerTaskStatus.Done, default));
+        Assert.IsType<NotFoundResult>(
+            await model.OnPostRaiseHelpAsync(seed.TaskId, "I need a hand", default));
+        Assert.IsType<NotFoundResult>(await model.OnPostConfirmAsync(seed.TaskId, default));
+        Assert.IsType<NotFoundResult>(await model.OnPostAddReminderAsync(seed.TaskId, default));
+
+        // Nothing was written by any of them.
+        Assert.False(await db.VolunteerHelpRequests.AnyAsync());
+        var task = await db.VolunteerTasks.FirstAsync(t => t.Id == seed.TaskId);
+        Assert.NotEqual(VolunteerTaskStatus.Done, task.Status);
     }
 
     [Fact]

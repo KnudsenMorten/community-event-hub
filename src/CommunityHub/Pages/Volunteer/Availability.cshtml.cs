@@ -3,7 +3,6 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
-using CommunityHub.Core.Integrations.Sessions;
 using CommunityHub.Core.Volunteers;
 using CommunityHub.Forms.Steps;
 using Microsoft.AspNetCore.Authorization;
@@ -20,14 +19,14 @@ namespace CommunityHub.Pages.Volunteer;
 /// extra lead-up days configured for volunteers (e.g. the packing day).
 /// Coordinators read this when assigning shifts so a volunteer is never scheduled
 /// outside their windows. On the FIRST save the availability is applied directly and
-/// emailed to the volunteer lead (operator 2026-06-23); a later EDIT is queued for
-/// organizer approval instead (§59). Self-service only — a volunteer edits
+/// emailed to the volunteer lead (operator 2026-06-23); a later EDIT is applied too and the
+/// lead is emailed the old→new (§1346; it used to be queued for approval, §59). Self-service only — a volunteer edits
 /// their own row via <see cref="ICurrentParticipantAccessor"/>; the client never
 /// supplies the id.
 ///
 /// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
 /// <c>_AvailabilityFields</c> partial and delegates load + persist + ALL side-effects (first
-/// submission applies + emails the lead; a later edit enqueues a delta-approval) to
+/// submission applies + emails the lead; a later edit applies + emails the old→new) to
 /// <see cref="VolunteerAvailabilityFormService"/>. The SAME service backs the inline wizard
 /// step (<c>VolunteerAvailabilityStepHandler</c>), so the standalone page and the wizard
 /// behave identically. The page is still deep-linked from My schedule, so its behaviour is
@@ -44,7 +43,6 @@ public class AvailabilityModel : PageModel
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly IEmailSender _email;
-    private readonly SyncDeltaQueueService _queue;
     private readonly VolunteerAvailabilityFormService? _service;
 
     public AvailabilityModel(
@@ -53,7 +51,6 @@ public class AvailabilityModel : PageModel
         EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions,
         IEmailSender email,
-        SyncDeltaQueueService queue,
         ILogger<AvailabilityModel> logger,
         VolunteerAvailabilityFormService? service = null)
     {
@@ -62,18 +59,17 @@ public class AvailabilityModel : PageModel
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _email = email;
-        _queue = queue;
         _service = service;
     }
 
     /// <summary>
     /// The shared submit-service. In production DI injects the registered instance; when the
-    /// page is constructed directly (e.g. the web tests pass the legacy 7-arg constructor) it
+    /// page is constructed directly (e.g. the web tests pass the legacy 6-arg constructor) it
     /// is built from the page's own dependencies so behaviour is identical.
     /// </summary>
     private VolunteerAvailabilityFormService Service =>
         _service ?? new VolunteerAvailabilityFormService(
-            _db, _cfg, _cfgOptions, _email, _queue,
+            _db, _cfg, _cfgOptions, _email,
             NullLogger<VolunteerAvailabilityFormService>.Instance);
 
     /// <summary>
@@ -127,8 +123,8 @@ public class AvailabilityModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         // Delegate persist + all side-effects to the shared service (same flow as the inline
-        // wizard step): first submission applies + emails the lead, a later edit enqueues a
-        // delta for organizer approval. The service ignores client-injected out-of-edition days.
+        // wizard step): first submission applies + emails the lead, a later edit applies + emails
+        // the lead the old→new (§1346). The service ignores client-injected out-of-edition days.
         Form = new VolunteerAvailabilityFormModel { Inputs = Inputs };
         await Service.SaveAsync(Form, me.EventId, me.ParticipantId, me.FullName, me.Email, ModelState, ct);
 

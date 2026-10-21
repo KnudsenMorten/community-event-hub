@@ -1,0 +1,269 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopEventReservationsModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Reservations — this event";
+    string Cadence(int w) => w switch { 0 => "Off", 1 => "Weekly", _ => $"Every {w} weeks" };
+    string Day(DateOnly? d) => d?.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) ?? "—";
+}
+
+<div class="card resv">
+    <h1>Reservations — this event</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>A reservation holds its items for one company: the booth shows <strong>RESERVED</strong> on the booth map and nobody else can
+           select it, in this shop or the webshop. The requester gets a reminder with what is reserved and the deadline, on the cadence
+           you set per reservation. When the deadline passes the requester is no longer reminded and you get one notice.
+           Release a reservation to put its items back on sale. (Next edition's carry-over: <a asp-page="/Organizer/ShopReservations">reservation rights</a>.)</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        @* §1312 — sponsors' reservation requests: Accept (sets deadline + reminders, reserves, mails them) or Deny. *@
+        <h2>Reservation requests (@Model.Requests.Count)</h2>
+        @if (Model.Requests.Count == 0) { <p>None waiting.</p> }
+        @foreach (var q in Model.Requests)
+        {
+            var o = q.Order;
+            <section id="request-@o.Id" class="resv-item is-request">
+                <h3>@q.Company <span class="resv-state">requested @o.ReservationRequestedAt!.Value.ToString("d MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture)</span></h3>
+                <p class="resv-meta">Asked by <strong>@(q.Who ?? "—")</strong>. Nothing is reserved until you accept.</p>
+                <ul>@foreach (var l in o.Lines) { <li>@l.ProductName@(l.Quantity > 1 ? $" × {l.Quantity}" : "")</li> }</ul>
+                <form method="post" asp-page-handler="Accept" class="resv-form">
+                    <input type="hidden" name="orderId" value="@o.Id" />
+                    <label>Deadline <input name="deadline" type="date" /></label>
+                    <label>Reminder
+                        <select name="reminderWeeks">
+                            <option value="1" selected>Weekly</option>
+                            <option value="2">Every 2 weeks</option>
+                            <option value="3">Every 3 weeks</option>
+                            <option value="4">Every 4 weeks</option>
+                            <option value="0">Off</option>
+                        </select>
+                    </label>
+                    <label>No reminder before <input name="remindFrom" type="date" /></label>
+                    <label class="wide">Internal note <input name="note" maxlength="2000" /></label>
+                    <div class="wide"><button type="submit" class="primary">Accept — reserve and send the reservation mail</button></div>
+                </form>
+                <form method="post" asp-page-handler="Deny" class="resv-form" onsubmit="return confirm('Deny this reservation request? They are told by e-mail; the cart stays theirs.');">
+                    <input type="hidden" name="orderId" value="@o.Id" />
+                    <label class="wide">Note to the sponsor (optional) <input name="note" maxlength="1000" /></label>
+                    <div class="wide"><button type="submit">Deny</button></div>
+                </form>
+            </section>
+        }
+
+        <h2>New reservation</h2>
+        <form method="post" asp-page-handler="Create" class="resv-form">
+            <label>Company
+                <select name="companyId">
+                    <option value="">— choose, or type a new one below —</option>
+                    @foreach (var c in Model.Companies) { <option value="@c.Id">@c.Name</option> }
+                </select>
+            </label>
+            <label>…or a new company <input name="newCompanyName" maxlength="200" placeholder="e.g. Red Hat" /></label>
+            @* §1312 — CHECKBOXES, not a multi-select (operator 2026-09-29, on a phone: "i could not select prod from dropdown" ·
+               "only select but no ok approve option to make res"). A <select multiple> opens the phone's own picker, which
+               offered no way to confirm; a tick list works the same on a phone and a desktop. *@
+            <fieldset class="wide resv-products">
+                <legend>What is reserved <span class="hint">(tick one or more — only items still available are listed)</span></legend>
+                <div class="resv-product-list">
+                    @foreach (var p in Model.Products)
+                    {
+                        <label class="resv-product"><input type="checkbox" name="productIds" value="@p.Id" />
+                            <span>@p.Name — @ShopPageModel.Eur(p.EffectivePriceEur)</span></label>
+                    }
+                </div>
+            </fieldset>
+            <label class="wide">Requester — pick one of the company's people, or type below
+                <select class="req-pick" data-for-company="new"><option value="">— choose the company first —</option></select>
+            </label>
+            <label>Requester name <input name="requesterName" maxlength="200" required /></label>
+            <label>Requester e-mail <input name="requesterEmail" type="email" maxlength="256" required /></label>
+            <label>Deadline <input name="deadline" type="date" /></label>
+            <label>Reminder
+                <select name="reminderWeeks">
+                    <option value="1" selected>Weekly</option>
+                    <option value="2">Every 2 weeks</option>
+                    <option value="3">Every 3 weeks</option>
+                    <option value="4">Every 4 weeks</option>
+                    <option value="0">Off</option>
+                </select>
+            </label>
+            <label>No reminder before <input name="remindFrom" type="date" /></label>
+            <label class="wide">Internal note <input name="note" maxlength="2000" /></label>
+            <label class="wide" style="display:flex;gap:8px;align-items:center;font-weight:normal;">
+                <input type="checkbox" name="stockAlreadyHeld" value="true" style="width:auto;" />
+                The webshop stock is already held (e.g. reserved from the other environment) — do not take it again
+            </label>
+            <div class="wide"><button type="submit" class="primary">Reserve</button></div>
+        </form>
+
+        <h2>Active reservations (@Model.Active.Count)</h2>
+        @if (Model.Active.Count == 0) { <p>None.</p> }
+        @foreach (var r in Model.Active)
+        {
+            var o = r.Order;
+            var overdue = o.ReservationDeadline is DateOnly dl && dl < Model.Today;
+            <section class="resv-item @(overdue ? "is-overdue" : "")">
+                <h3>@r.Company · @o.Number <span class="resv-state">@(o.Status == ShopOrderStatus.AwaitingSignature ? "sent for signature" : "reserved")</span></h3>
+                <ul>@foreach (var l in o.Lines) { <li>@l.ProductName@(l.Quantity > 1 ? $" × {l.Quantity}" : "")</li> }</ul>
+                <p class="resv-meta">Deadline <strong>@Day(o.ReservationDeadline)</strong>@(overdue ? " — passed" : "") ·
+                   Reminder: @Cadence(o.ReservationReminderWeeks)@(o.ReservationRemindFrom is DateOnly f ? $", not before {Day(f)}" : "") ·
+                   Last sent @Day(r.LastSent) · Next @(r.Next is null ? "none" : Day(r.Next)) ·
+                   Requester @(r.RequesterCanSignIn ? "can sign in and sign" : "has no sign-in yet")</p>
+                @if (o.HasOpenExtensionRequest)
+                {
+                    @* §1312 — the sponsor asked for more time: approve (the date asked for, or another) or deny. *@
+                    <div id="extension-@o.Id" class="resv-extension">
+                        <p><strong>More time requested</strong> by @(o.ExtensionRequestedByParticipantId is int w ? Model.People.GetValueOrDefault(w) ?? "—" : "—"):
+                           from @Day(o.ReservationDeadline) to <strong>@Day(o.ExtensionRequestedDeadline)</strong>.</p>
+                        <p style="white-space:pre-line;"><em>@o.ExtensionRequestReason</em></p>
+                        <form method="post" asp-page-handler="Extension" class="resv-form">
+                            <input type="hidden" name="orderId" value="@o.Id" /><input type="hidden" name="approve" value="true" />
+                            <label>New deadline <input name="deadline" type="date" value="@o.ExtensionRequestedDeadline?.ToString("yyyy-MM-dd")" /></label>
+                            <label>Note to the sponsor (optional) <input name="note" maxlength="1000" /></label>
+                            <div class="wide"><button type="submit" class="primary">Approve</button></div>
+                        </form>
+                        <form method="post" asp-page-handler="Extension" class="resv-form" onsubmit="return confirm('Deny the request? The deadline stays and they are told by e-mail.');">
+                            <input type="hidden" name="orderId" value="@o.Id" /><input type="hidden" name="approve" value="false" />
+                            <label class="wide">Note to the sponsor (optional) <input name="note" maxlength="1000" /></label>
+                            <div class="wide"><button type="submit">Deny</button></div>
+                        </form>
+                    </div>
+                }
+                <form method="post" asp-page-handler="Update" class="resv-form">
+                    <input type="hidden" name="orderId" value="@o.Id" />
+                    <label class="wide">Requester — pick one of the company's people, or type below
+                        <select class="req-pick" data-company="@o.SponsorCompanyId">
+                            <option value="">— pick a person —</option>
+                            @foreach (var p in Model.PeopleByCompany.GetValueOrDefault(o.SponsorCompanyId) ?? Array.Empty<(string Name, string Email, string Roles)>())
+                            {
+                                <option value="@p.Email" data-name="@p.Name" selected="@(string.Equals(p.Email, o.ReservationRequesterEmail, StringComparison.OrdinalIgnoreCase))">@p.Name — @p.Email@(p.Roles.Length > 0 ? $" ({p.Roles})" : "")</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Requester name <input name="requesterName" value="@o.ReservationRequesterName" maxlength="200" required /></label>
+                    <label>Requester e-mail <input name="requesterEmail" type="email" value="@o.ReservationRequesterEmail" maxlength="256" required /></label>
+                    <label>Deadline <input name="deadline" type="date" value="@o.ReservationDeadline?.ToString("yyyy-MM-dd")" /></label>
+                    <label>Reminder
+                        <select name="reminderWeeks">
+                            @foreach (var w in new[] { 1, 2, 3, 4, 0 })
+                            {
+                                <option value="@w" selected="@(o.ReservationReminderWeeks == w)">@Cadence(w)</option>
+                            }
+                        </select>
+                    </label>
+                    <label>No reminder before <input name="remindFrom" type="date" value="@o.ReservationRemindFrom?.ToString("yyyy-MM-dd")" /></label>
+                    <label class="wide">Internal note <input name="note" value="@o.ReservationNote" maxlength="2000" /></label>
+                    <div class="wide"><button type="submit">Save</button></div>
+                </form>
+                <div class="resv-actions">
+                    @if (!r.RequesterCanSignIn)
+                    {
+                        <form method="post" asp-page-handler="Access" onsubmit="return confirm('Give @o.ReservationRequesterEmail sign-in access as the signer of @r.Company? No welcome mail is sent.');">
+                            <input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Give the requester sign-in access</button>
+                        </form>
+                    }
+                    <form method="post" asp-page-handler="Remind"><input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Send reminder now</button></form>
+                    <a asp-page="/Organizer/ShopOrders" asp-route-Order="@o.Id">Open the order (send for signature, terms, PDF)</a>
+                    <form method="post" asp-page-handler="Release" onsubmit="return confirm('Release this reservation and put its items back on sale?');">
+                        <input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Release</button>
+                    </form>
+                </div>
+                @* §1312 — merge into another reservation of the SAME company, so one contract covers both (operator 2026-09-30:
+                   "i have two reservations for red hat, how i can merge them together into one contract"). Only offered when
+                   both are still reserved; the stock stays held and no mail is sent. *@
+                @{
+                    var mergeTargets = Model.Active.Select(x => x.Order)
+                        .Where(x => x.Id != o.Id && x.SponsorCompanyId == o.SponsorCompanyId && x.Status == ShopOrderStatus.Reserved)
+                        .ToList();
+                }
+                @if (o.Status == ShopOrderStatus.Reserved && mergeTargets.Count > 0)
+                {
+                    <form method="post" asp-page-handler="Merge" class="resv-merge"
+                          onsubmit="return confirm('Move everything in @o.Number into the chosen reservation? The items stay reserved (nothing goes back on sale), @o.Number is closed as merged, and no mail is sent.');">
+                        <input type="hidden" name="orderId" value="@o.Id" />
+                        <label>Merge @o.Number into
+                            <select name="intoOrderId" required>
+                                @foreach (var t in mergeTargets) { <option value="@t.Id">@t.Number</option> }
+                            </select>
+                        </label>
+                        <button type="submit">Merge — one contract for both</button>
+                    </form>
+                }
+            </section>
+        }
+
+        @if (Model.Closed.Count > 0)
+        {
+            <h2>Signed or released (@Model.Closed.Count)</h2>
+            <ul>
+                @foreach (var r in Model.Closed)
+                {
+                    <li>@r.Company · @r.Order.Number — @r.Order.Status@(string.IsNullOrEmpty(r.Order.CancelReason) ? "" : $" ({r.Order.CancelReason})")</li>
+                }
+            </ul>
+        }
+    }
+</div>
+<script id="resv-people" type="application/json">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    Model.PeopleByCompany.ToDictionary(kv => kv.Key, kv => kv.Value.Select(p => new { name = p.Name, email = p.Email, roles = p.Roles }))))</script>
+<script>
+(function () {
+    var people = {};
+    try { people = JSON.parse(document.getElementById("resv-people").textContent || "{}"); } catch (e) { }
+    function fill(sel) {
+        var form = sel.closest("form"), opt = sel.options[sel.selectedIndex];
+        if (!opt || !opt.value) return;
+        form.querySelector("[name=requesterName]").value = opt.getAttribute("data-name") || "";
+        form.querySelector("[name=requesterEmail]").value = opt.value;
+    }
+    document.querySelectorAll("select.req-pick").forEach(function (sel) { sel.addEventListener("change", function () { fill(sel); }); });
+    // New reservation: the list follows the chosen company.
+    var newPick = document.querySelector("select.req-pick[data-for-company=new]");
+    var company = document.querySelector("form.resv-form select[name=companyId]");
+    if (newPick && company) {
+        company.addEventListener("change", function () {
+            var list = people[company.value] || [];
+            newPick.innerHTML = "";
+            var first = document.createElement("option");
+            first.value = ""; first.textContent = list.length ? "— pick a person —" : "— nobody known for this company, type below —";
+            newPick.appendChild(first);
+            list.forEach(function (p) {
+                var o = document.createElement("option");
+                o.value = p.email; o.textContent = p.name + " — " + p.email + (p.roles ? " (" + p.roles + ")" : ""); o.setAttribute("data-name", p.name);
+                newPick.appendChild(o);
+            });
+        });
+    }
+})();
+</script>
+<style>
+    .resv-form { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px 16px; margin:8px 0 12px; }
+    .resv-form label { display:grid; gap:4px; font-weight:600; font-size:14px; }
+    .resv-form .wide { grid-column:1 / -1; }
+    .resv-form input, .resv-form select { font-size:16px; padding:8px 10px; min-width:0; }
+    .resv .hint { font-weight:normal; color:#6b7280; font-size:13px; }
+    .resv-item { border:1px solid #e5e7eb; border-left:4px solid #1565c0; border-radius:10px; padding:12px 14px; margin:0 0 14px; background:#fff; }
+    .resv-item.is-overdue { border-left-color:#b91c1c; }
+    .resv-item.is-request { border-left-color:#b45309; }
+    .resv-extension { border:1px dashed #b45309; background:#fff7ed; border-radius:8px; padding:8px 12px; margin:8px 0; }
+    .resv-item:target, .resv-extension:target { box-shadow:0 0 0 3px #fbbf24; }
+    .resv-item h3 { margin:0 0 6px; font-size:17px; }
+    .resv-state { font-size:13px; font-weight:600; color:#1565c0; }
+    .resv-meta { font-size:14px; color:#374151; }
+    .resv-actions { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; }
+    .resv-actions form { margin:0; }
+    .resv-merge { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:flex-end; margin:10px 0 0; padding-top:10px; border-top:1px dashed #e5e7eb; }
+    .resv-merge label { display:grid; gap:4px; font-weight:600; font-size:14px; }
+    .resv-merge select { font-size:16px; padding:8px 10px; }
+    .resv-products { border:1px solid #d1d5db; border-radius:8px; padding:8px 10px; margin:0; min-width:0; }
+    .resv-products legend { font-weight:600; font-size:14px; padding:0 4px; }
+    .resv-product-list { max-height:320px; overflow-y:auto; display:grid; gap:2px; }
+    .resv-form label.resv-product { display:flex; gap:10px; align-items:flex-start; font-weight:normal; font-size:15px; padding:8px 4px; border-bottom:1px solid #f3f4f6; cursor:pointer; }
+    .resv-form label.resv-product input { width:20px; height:20px; flex:0 0 auto; margin-top:1px; }
+</style>

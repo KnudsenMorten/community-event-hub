@@ -146,7 +146,8 @@ public sealed class SpeakerDetailsSaveDedupeTests
             email, new EmailContextAccessor(), TimeProvider.System,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EngineAlertSender>.Instance);
         var form = new SpeakerDetailsFormService(db, new FixedClock(), new ZohoChangeNotifier(alerts));
-        var model = new DetailsModel(accessor, form, sync).Bind(http);
+        var model = new DetailsModel(
+            accessor, form, sync, new CommunityHub.Core.Domain.SpeakerAccessService(db)).Bind(http);
         return (model, email);
     }
 
@@ -228,7 +229,8 @@ public sealed class SpeakerDetailsSaveDedupeTests
             Options.Create(new BackstageSpeakerBioSyncOptions { Enabled = true }),
             email, new FeatureGateService(db), new RingResolver(db));
         var model = new DetailsModel(accessor,
-            new SpeakerDetailsFormService(db, new FixedClock()), sync).Bind(http);
+            new SpeakerDetailsFormService(db, new FixedClock()), sync,
+            new CommunityHub.Core.Domain.SpeakerAccessService(db)).Bind(http);
 
         await model.OnPostSaveAsync(default);
 

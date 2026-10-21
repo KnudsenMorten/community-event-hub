@@ -29,7 +29,7 @@ public sealed class TvPurchaseTaskDataProvider : ITaskDataProvider
 {
     /// <summary>The participant-facing sentence for every "we do not know" path.</summary>
     private const string CannotCheck =
-        "We could not check your webshop orders right now, so we cannot tell you whether you have "
+        "We could not check your orders right now, so we cannot tell you whether you have "
         + "already booked a TV screen. Please check your order confirmation, or come back shortly.";
 
     /// <summary>
@@ -47,16 +47,13 @@ public sealed class TvPurchaseTaskDataProvider : ITaskDataProvider
     public const string Category = "TV Rental";
 
     private readonly SponsorPurchaseSummaryService _purchases;
-    private readonly WooCommerceOptions _options;
     private readonly ILogger<TvPurchaseTaskDataProvider> _log;
 
     public TvPurchaseTaskDataProvider(
         SponsorPurchaseSummaryService purchases,
-        WooCommerceOptions options,
         ILogger<TvPurchaseTaskDataProvider> log)
     {
         _purchases = purchases;
-        _options = options;
         _log = log;
     }
 
@@ -69,11 +66,8 @@ public sealed class TvPurchaseTaskDataProvider : ITaskDataProvider
             return TaskDataResult.Unavailable(CannotCheck, "no sponsor company on the context");
         }
 
-        if (!_options.Enabled)
-        {
-            return TaskDataResult.Unavailable(CannotCheck, "WooCommerce integration is disabled");
-        }
-
+        // §1312 — no "webshop integration disabled" gate any more: the old webshop's orders are stored in CEH, so the
+        // purchase summary always has them (removing the webshop settings must not turn every TV task into "cannot check").
         // 🔒 §687 — THE SAME SERVICE the organizer's Logistics TV panel reads. The sponsor is told
         // how many they booked; the operator is told how many to order from the venue. Those two
         // numbers must be the same number, and two independent queries over the same orders is
@@ -93,7 +87,7 @@ public sealed class TvPurchaseTaskDataProvider : ITaskDataProvider
         {
             return TaskDataResult.NotFound(
                 ":::callout info\n"
-                + "We checked your webshop orders: you have **not booked a TV screen** yet. "
+                + "We checked your orders: you have **not booked a TV screen** yet. "
                 + "If you want one, order it below.\n"
                 + ":::");
         }
@@ -103,7 +97,7 @@ public sealed class TvPurchaseTaskDataProvider : ITaskDataProvider
         var screens = quantity == 1 ? "**1 TV screen**" : $"**{quantity} TV screens**";
         return TaskDataResult.Found(
             ":::callout info\n"
-            + $"We checked your webshop orders: you have already booked {screens} for your booth. "
+            + $"We checked your orders: you have already booked {screens} for your booth. "
             + "You only need to order again if you want another one.\n"
             + ":::");
     }

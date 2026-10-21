@@ -146,7 +146,7 @@ public sealed class AlertCoverageTests
         // silently stop something the operator would only notice by its absence.
         // (BackstageSyncJob was here until §641 RETIRED it — a job with no [Function] attribute
         //  cannot run, so it has nothing to report and must not be declared.)
-        "ErpSyncCustomerContactJob",    // feature off / not configured ⇒ ERP and webshop drift apart
+        // (ErpSyncCustomerContactJob was here until Company Manager was REMOVED — same rule.)
         // (SponsorProvisioningStallJob was here until §819 RETIRED it — same rule as BackstageSyncJob
         //  above: a job that no longer exists has nothing to report and must not be declared.)
         // §824.21 — the SoMe announcement planner. Instrumented from birth: with no active edition
@@ -176,6 +176,10 @@ public sealed class AlertCoverageTests
         // nothing. "No reports have gone out" and "no session has settled yet" are indistinguishable
         // unless the job says which.
         "EvaluationReportPublishJob",
+        // §1268 — the evaluation session sync. Instrumented from birth: "every session already
+        // matches CEH" and "the job is not running" must not look the same, because a missed room
+        // move silently sends a kiosk's presses to the wrong session.
+        "EvaluationSessionSyncJob",
         // §754 — the signage agenda mirror. Instrumented from birth, and its silent-failure mode is
         // the most public one in the product: when this stops, the screens keep displaying the last
         // agenda they were given. That is the DESIGNED behaviour on a failed pull — which is exactly
@@ -261,7 +265,8 @@ public sealed class AlertCoverageTests
     /// </remarks>
     private static readonly string[] IntegrationsNeedingCredentialAlerts =
     {
-        "SharePoint", "Company Manager", "WooCommerce", "Sessionize", "LinkedIn", "e-conomic",
+        // §1312 — "WooCommerce" went with the webshop client (the webshop is closed), as "Company Manager" did.
+        "SharePoint", "Sessionize", "LinkedIn", "e-conomic",
     };
 
     /// <summary>
@@ -341,6 +346,9 @@ public sealed class AlertCoverageTests
             // mails CEH's own speakers. SharePoint is where the file LANDS, not a system this
             // synchronises with, so Platform is the honest group rather than a forgotten argument.
             "EvaluationReportPublishJob",
+            // §1268 — hub-internal: it copies CEH's own sessions into CEH's own evaluation tables.
+            // No external system is involved.
+            "EvaluationSessionSyncJob",
             // §765/§879 — hub-internal by the same test. They count CEH's own held speakers and
             // CEH's own pre-selection queue, and mail CEH's own ops mailbox. Zoho is what a held
             // speaker is blocked FROM, not a system either job talks to, so Platform is the honest

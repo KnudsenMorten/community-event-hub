@@ -28,7 +28,7 @@ public sealed class TaskDescriptionGenerationTests
             .UseInMemoryDatabase($"task-desc-{Guid.NewGuid():N}").Options);
 
     private static VolunteerStructureService NewSvc(CommunityHubDbContext db) =>
-        new(db, new FixedClock(), new HeuristicTaskGuidanceGenerator());
+        new(db, new FixedClock(), VolunteerAssignmentGate.For(db), new HeuristicTaskGuidanceGenerator());
 
     private static VolunteerStructureService.ActorContext Organizer(int id) =>
         new(id, $"org{id}@example.test", ParticipantRole.Organizer, EventId);

@@ -358,6 +358,14 @@ public class SessionsModel : PageModel
     /// arrive with the Sessionize import and there is no configured list of them, so the editable
     /// set is what the edition actually uses.
     /// </summary>
+    /// <summary>
+    /// 🛑 §1245 — NO LONGER USED BY THE GRID, and deliberately not revived. The Track field is a
+    /// TYPEABLE input with <see cref="KnownTracks"/> as a datalist, because a closed list built
+    /// from the tracks already in use cannot introduce a new one: "Community" was missing BECAUSE
+    /// no session used it, and no session could use it BECAUSE it was missing.
+    /// <para>Kept only for callers outside the grid; if none remain, delete it rather than wiring
+    /// the dropdown back in.</para>
+    /// </summary>
     public SelectList TrackOptions(string? current) => OptionsWithCurrent(KnownTracks, current);
 
     /// <summary>Distinct non-blank tracks in this edition, for the dropdown.</summary>
@@ -450,7 +458,7 @@ public class SessionsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
         await LoadAsync(me.EventId, ct);
         return Page();
     }

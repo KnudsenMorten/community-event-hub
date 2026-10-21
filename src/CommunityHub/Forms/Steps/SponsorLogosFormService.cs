@@ -53,8 +53,6 @@ public sealed class SponsorLogosFormService : IWizardFormService
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly SharePointUploadClient _sp;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorLogosFormService> _log;
     private readonly CommunityHub.Core.Email.IEmailSender? _notifyEmail;
@@ -62,8 +60,7 @@ public sealed class SponsorLogosFormService : IWizardFormService
 
     public SponsorLogosFormService(
         CommunityHubDbContext db, TimeProvider clock, EventEditionConfigLoader cfg,
-        EventConfigOptions cfgOptions, SharePointUploadClient sp, CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
+        EventConfigOptions cfgOptions, SharePointUploadClient sp,
         CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<SponsorLogosFormService> log,
         // §1074 — the wizard logo step never notified anyone. See TryUploadAsync.
@@ -76,8 +73,6 @@ public sealed class SponsorLogosFormService : IWizardFormService
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _sp = sp;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
         _notifyEmail = email;
         _emailCtx = emailCtx;
@@ -265,19 +260,9 @@ public sealed class SponsorLogosFormService : IWizardFormService
 
     private async Task<string?> ResolveSponsorNameAsync(string companyId, CancellationToken ct)
     {
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var cid))
-        {
-            try
-            {
-                var company = await _cm.GetCompanyAsync(cid, ct);
-                if (company is not null)
-                {
-                    var name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-                    if (!string.IsNullOrWhiteSpace(name)) return name;
-                }
-            }
-            catch (Exception ex) { _log.LogWarning(ex, "Sponsor logos inline step: Company Manager lookup failed for {Co}.", cid); }
-        }
-        return $"Company {companyId}";
+        // §1312 — CEH's own public name (Company Manager is retired).
+        if (await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) is { } local) return local;
+        // Without it the logo files were named company-ceh-14ca083d-logo-web-1.png (operator 2026-09-29).
+        return await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) ?? $"Company {companyId}";
     }
 }

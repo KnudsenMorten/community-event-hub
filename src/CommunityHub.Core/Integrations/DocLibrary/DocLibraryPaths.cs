@@ -99,6 +99,16 @@ public static class DocLibraryPaths
     public const string SponsorGraphicsSponsors = nameof(SponsorGraphicsSponsors);
     public const string SponsorGraphicsCategories = nameof(SponsorGraphicsCategories);
 
+    /// <summary>
+    /// §1305 — the CEH sponsor shop's product pictures, copied from the webshop. Operator 2026-09-26:
+    /// <i>"Use sharepoint to store pictures/products … Sponsors\Webshop\Products. Add it into the
+    /// current sharepoint repo settings."</i>
+    /// </summary>
+    public const string SponsorWebshopProducts = nameof(SponsorWebshopProducts);
+
+    /// <summary>§1305 — signed sponsor contracts (archive copies; the PDF can always be re-rendered).</summary>
+    public const string SponsorWebshopContracts = nameof(SponsorWebshopContracts);
+
     // ---- event: SoMe (§824.2A) ------------------------------------------------------------
     /// <summary>Graphics for Type 5 event posts.</summary>
     public const string EventSoMeGraphics = nameof(EventSoMeGraphics);
@@ -252,6 +262,22 @@ public static class DocLibraryPaths
             FileNamePattern: "{sponsorName}-exhibitor-wall-{version}.{ext}",
             CorrelationKey: "sponsor:{name} + version:{version}",
             Notes: "Any format. Reviewers are notified on each upload."),
+
+        new DocLibraryPathDefinition(
+            SponsorWebshopProducts, "Sponsors/Webshop/Products", "Sponsors",
+            DocLibraryDirection.Write | DocLibraryDirection.Read,
+            FileNamePattern: "{webshopProductId}-{slug}-{n}.{ext}",
+            CorrelationKey: "product:{webshopProductId} + picture:{n}",
+            Notes: "§1305 CEH sponsor shop. Written by the catalogue import (a copy of each webshop "
+                 + "product picture), read by the shop's picture endpoint."),
+
+        new DocLibraryPathDefinition(
+            SponsorWebshopContracts, "Sponsors/Webshop/Contracts", "Sponsors",
+            DocLibraryDirection.Write | DocLibraryDirection.Read,
+            FileNamePattern: "{orderNumber}-{company}-signed.pdf",
+            CorrelationKey: "order:{orderNumber}",
+            Notes: "§1305 CEH sponsor shop. The signed Event Sponsor Contract, written when the sponsor "
+                 + "signs. An archive copy: the contract is re-rendered from the order on demand."),
 
         new DocLibraryPathDefinition(
             SponsorLogoWeb, "Sponsors/Logo/Web", "Sponsors",

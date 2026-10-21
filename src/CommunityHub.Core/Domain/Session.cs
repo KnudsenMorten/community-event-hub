@@ -453,6 +453,19 @@ public class Session
     public string? BackstageSessionId { get; set; }
 
     /// <summary>
+    /// §1352 — the sponsor company this agenda session was created for (a bought sponsor slot).
+    /// Null for every other session. Set only by <c>SponsorAgendaSessionService</c>.
+    /// </summary>
+    public string? SponsorCompanyId { get; set; }
+
+    /// <summary>
+    /// §1352 — the bought slot this session stands for: <c>{companyId}|{product kind}|{timeslot}</c>, e.g.
+    /// <c>19|Long 60 min|3</c>. The idempotency key: one agenda session per bought slot, created once and
+    /// then kept in step with the sponsor's own details. Filtered-unique within an edition.
+    /// </summary>
+    public string? SponsorSlotKey { get; set; }
+
+    /// <summary>
     /// §302 (operator 2026-07-24, ONE-WAY sync decision): the hash of the last CEH↔Zoho
     /// field DIFF the ops mailbox was notified about for this linked session. Zoho's
     /// sessions API is create-only, so a CEH change (room, time, title …) on an

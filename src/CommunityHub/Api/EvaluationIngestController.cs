@@ -64,6 +64,13 @@ public sealed class EvaluationIngestController : ControllerBase
         [JsonPropertyName("deviceRecordId")] public string? DeviceRecordId { get; set; }
         [JsonPropertyName("rating")] public int Rating { get; set; }
         [JsonPropertyName("collectionTimestamp")] public DateTimeOffset? CollectionTimestamp { get; set; }
+        /// <summary>§1278 — optional follow-up codes. The built boxes never send them.</summary>
+        [JsonPropertyName("positivePoint")] public string? PositivePoint { get; set; }
+        [JsonPropertyName("improvementPoint")] public string? ImprovementPoint { get; set; }
+        /// <summary>§1354 — the capture policy the kiosk asked this vote under. The built boxes never send it.</summary>
+        [JsonPropertyName("policy")] public int? Policy { get; set; }
+        /// <summary>§1355 — the rating-button symbols the kiosk showed. The built boxes never send it.</summary>
+        [JsonPropertyName("symbols")] public int? Symbols { get; set; }
     }
 
     public sealed class ResponsesRequest
@@ -124,7 +131,8 @@ public sealed class EvaluationIngestController : ControllerBase
         var results = await _ingest.IngestAsync(
             device,
             records.Select(r => new EvaluationIngestService.IncomingRecord(
-                r.DeviceRecordId, r.Rating, r.CollectionTimestamp)).ToList(),
+                r.DeviceRecordId, r.Rating, r.CollectionTimestamp,
+                r.PositivePoint, r.ImprovementPoint, r.Policy, r.Symbols)).ToList(),
             body.FirmwareVersion, body.ClockSyncedAt, eventClosed, ct);
 
         return Ok(new

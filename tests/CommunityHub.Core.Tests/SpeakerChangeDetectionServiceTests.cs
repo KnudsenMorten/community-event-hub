@@ -10,12 +10,10 @@ using Xunit;
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// §38e/§58 SPEAKER change-detection engine (the speaker analogue of §38e sessions): a real
-/// Backstage name/tagline/bio/country/social change on a LINKED speaker ENQUEUES a Speaker
-/// ZohoToCeh Update delta and — §737.2 — AUTO-APPLIES it, because Zoho owns those fields.
-/// First-populate seeds the Backstage* baseline silently; §576 removed the stage-3 direction
-/// gate (it could never be satisfied); no source ⇒ graceful no-op; nothing is ever deleted.
-/// EF in-memory + a canned pull.
+/// §38e/§58 SPEAKER change-detection engine — 🔴 §1364: RETIRED, PERMANENTLY, IN CODE. CEH is the master for speaker
+/// data; the engine had auto-applied Zoho values into CEH (§737.2), which the operator rules out entirely. These tests
+/// pin that it reads nothing, writes nothing and enqueues nothing, and that an old queued Zoho→CEH row changes nothing
+/// on approve. Differences are reported instead by the speaker gap mail (SpeakerZohoGapReporter).
 /// </summary>
 public sealed class SpeakerChangeDetectionServiceTests
 {
@@ -111,274 +109,66 @@ public sealed class SpeakerChangeDetectionServiceTests
 
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public async Task First_populate_seeds_silently_and_never_enqueues()
+    // ============ §1364: ZOHO→CEH FOR SPEAKERS IS OFF, PERMANENTLY, IN CODE ============
+
+    /// <summary>
+    /// 🔴 THE POINT OF §1364: the old switch ON, a REAL Zoho change on a linked speaker — and nothing happens. Operator
+    /// 2026-10-20: "we have NO chg from zoho to hub. hub is master !!!". The engine had auto-applied 223 Zoho values.
+    /// </summary>
+    [Theory]
+    [InlineData(SessionSyncDirection.ZohoToCeh)]
+    [InlineData(SessionSyncDirection.CehToZoho)]
+    public async Task A_real_Zoho_change_writes_nothing_and_enqueues_nothing(SessionSyncDirection dir)
     {
         using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        // Nothing stored yet (all Backstage* null) ⇒ first populate.
-        await SeedSpeakerAsync(db, "bs-1", null, null, null);
-
-        var svc = NewService(db, Pull(
-            Sp("bs-1", "Sam Speaker", "Cloud Architect", "A bio.", "DK", "https://li/sam", "@sam")));
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.True(r.SourceAvailable);
-        Assert.Equal(1, r.Matched);
-        Assert.Equal(1, r.Seeded);
-        Assert.Equal(0, r.Changed);
-        Assert.Equal(0, r.Enqueued);
-        Assert.Empty(db.SyncDeltas);          // seed silently — no queue item
-
-        var p = db.SpeakerProfiles.Single();
-        Assert.Equal("Cloud Architect", p.BackstageTagline);
-        Assert.Equal("A bio.", p.BackstageBio);
-        Assert.Equal("DK", p.BackstageCountry);
-        Assert.NotNull(p.BackstageChangeCheckedAt);
-    }
-
-    [Fact]
-    public async Task Real_bio_or_tagline_change_enqueues_a_speaker_zohotoceh_update_and_AUTO_APPLIES_it()
-    {
-        // §737.2 — Zoho owns tagline/bio/country/socials, so an inbound update is applied without
-        // asking. The row is still WRITTEN (that is the record of what changed); it just skips
-        // Pending and lands on Applied, marked "(auto)".
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        var pid = await SeedSpeakerAsync(db, "bs-1", "Sam Speaker", "Old Tagline", "Old bio.");
-
-        var svc = NewService(db, Pull(
-            Sp("bs-1", "Sam Speaker", "New Tagline", "New bio.")));   // tagline + bio changed
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.Equal(1, r.Changed);
-        Assert.Equal(1, r.Enqueued);
-
-        var delta = Assert.Single(db.SyncDeltas);
-        Assert.Equal(SyncDeltaStatus.Applied, delta.Status);           // not Pending — nobody was asked
-        Assert.Equal(SyncDeltaQueueService.AutoDecider, delta.DecidedByEmail);
-        Assert.NotNull(delta.DecidedAt);
-        Assert.NotNull(delta.AppliedAt);
-        Assert.Equal(SyncDeltaEntityType.Speaker, delta.EntityType);
-        Assert.Equal(SyncDeltaChangeKind.Update, delta.ChangeKind);
-        Assert.Equal(SessionSyncDirection.ZohoToCeh, delta.Source);
-        Assert.Equal(pid.ToString(), delta.EntityId);
-
-        // The old→new diff SURVIVES on the applied row, so the queue still shows what changed.
-        Assert.Contains(delta.Changes, c => c.Field == SyncDeltaQueueService.FieldTagline
-                                            && c.OldValue == "Old Tagline" && c.NewValue == "New Tagline");
-        Assert.Contains(delta.Changes, c => c.Field == SyncDeltaQueueService.FieldBio
-                                            && c.OldValue == "Old bio." && c.NewValue == "New bio.");
-
-        // The CEH-owned fields carry the Zoho values, and the baseline moved with them so the
-        // NEXT pass diffs against what was applied (no re-detection of the same change).
-        var p = db.SpeakerProfiles.Single();
-        Assert.Equal("New Tagline", p.Tagline);
-        Assert.Equal("New bio.", p.Biography);
-        Assert.Equal("New Tagline", p.BackstageTagline);
-        Assert.Equal("New bio.", p.BackstageBio);
-    }
-
-    [Fact]
-    public async Task Auto_applied_change_is_not_re_detected_on_the_next_pass()
-    {
-        // The apply arm refreshes the Backstage* baseline; if it did not, every 5-minute run
-        // would re-apply and re-record the same change for ever.
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
+        await EnableFeatureAsync(db, enabled: true, direction: dir);
         await SeedSpeakerAsync(db, "bs-1", "Sam Speaker", "Old Tagline", "Old bio.");
+        var pulled = false;
+        var clock = new FixedClock(Now);
+        var svc = new SpeakerChangeDetectionService(db, NewZoho(), new ZohoOptions(), new FeatureGateService(db),
+            clock: clock,
+            pullOverride: _ => { pulled = true; return Task.FromResult(Pull(Sp("bs-1", "Samuel Speaker", "New Tagline", "New bio.", "DK"))); },
+            queue: new SyncDeltaQueueService(db, clock: clock));
 
-        var pull = Pull(Sp("bs-1", "Sam Speaker", "New Tagline", "New bio."));
-        var r1 = await NewService(db, pull).RunAsync(EventId);
-        var r2 = await NewService(db, pull).RunAsync(EventId);   // Zoho unchanged since
+        var r = await svc.RunAsync(EventId);
 
-        Assert.Equal(1, r1.Changed);
-        Assert.Equal(0, r2.Changed);
-        Assert.Equal(0, r2.Enqueued);
-        Assert.Single(db.SyncDeltas);
+        Assert.True(SpeakerChangeDetectionService.DisabledInCode);
+        Assert.True(r.DirectionInactive);
+        Assert.Contains("PERMANENTLY OFF", r.UnavailableReason);
+        Assert.False(pulled);                                   // returns before reading Zoho at all
+        Assert.Empty(db.SyncDeltas);
+        var p = db.SpeakerProfiles.Single();
+        Assert.Equal("Old Tagline", p.Tagline);                 // CEH untouched
+        Assert.Equal("Old bio.", p.Biography);
+        Assert.Null(p.Country);
+        Assert.Equal("Old Tagline", p.BackstageTagline);        // not even the snapshot moves
+        Assert.Null(p.BackstageChangeCheckedAt);
     }
 
+    /// <summary>An old Zoho→CEH speaker row still in the queue is acknowledged on approve — and CEH is not changed.</summary>
     [Fact]
-    public async Task EnqueueAsync_on_its_own_still_leaves_the_row_PENDING()
+    public async Task Approving_an_old_ZohoToCeh_speaker_row_changes_nothing_in_CEH()
     {
-        // 🔒 §737.2 — the auto-apply policy lives at the DETECTION call site, NOT in
-        // EnqueueAsync. Putting it in the queue helper turned 12 tests red because they use
-        // EnqueueAsync as an ARRANGE step and then approve/reject/list; it also made a
-        // queue-level policy fire from a low-level helper other code uses to STAGE a row.
         using var db = ScenarioFixture.NewDb();
         await EnableFeatureAsync(db, enabled: true);
         var pid = await SeedSpeakerAsync(db, "bs-1", "Sam Speaker", "Old Tagline", "Old bio.");
-
         var queue = new SyncDeltaQueueService(db, clock: new FixedClock(Now));
         var delta = await queue.EnqueueAsync(new SyncDelta
         {
-            EventId = EventId,
-            EntityType = SyncDeltaEntityType.Speaker,
-            EntityId = pid.ToString(),
-            EntityLabel = "Sam Speaker",
-            Source = SessionSyncDirection.ZohoToCeh,
-            ChangeKind = SyncDeltaChangeKind.Update,
-            Changes = new[] { new SyncFieldChange(SyncDeltaQueueService.FieldBio, "Old bio.", "New bio.") },
+            EventId = EventId, EntityType = SyncDeltaEntityType.Speaker,
+            EntityId = pid.ToString(System.Globalization.CultureInfo.InvariantCulture), EntityLabel = "Sam Speaker",
+            Source = SessionSyncDirection.ZohoToCeh, ChangeKind = SyncDeltaChangeKind.Update,
+            Changes = SyncDeltaQueueService.BuildSpeakerZohoChanges(
+                "Sam Speaker", "Old Tagline", "Old bio.", null, null, null,
+                "Samuel Speaker", "New Tagline", "New bio.", "DK", null, null),
         });
 
-        Assert.Equal(SyncDeltaStatus.Pending, delta.Status);
-        Assert.Null(delta.DecidedByEmail);
-        Assert.Equal("Old bio.", db.SpeakerProfiles.Single().Biography);   // nothing applied
-    }
+        var result = await queue.ApproveAsync(delta.Id, "org@example.test");
 
-    [Fact]
-    public async Task No_change_does_not_enqueue_but_stamps_check_time()
-    {
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        await SeedSpeakerAsync(db, "bs-1", "Sam Speaker", "Tagline", "Bio.", "DK");
-
-        var svc = NewService(db, Pull(
-            Sp("bs-1", "Sam Speaker", "Tagline", "Bio.", "DK")));   // identical
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.Equal(0, r.Changed);
-        Assert.Empty(db.SyncDeltas);
-        Assert.NotNull(db.SpeakerProfiles.Single().BackstageChangeCheckedAt);
-    }
-
-    [Fact]
-    public async Task Kill_switch_off_means_no_enqueue_even_on_change()
-    {
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: false); // killed
-        await SeedSpeakerAsync(db, "bs-1", "Sam", "Old", "Old bio.");
-
-        var svc = NewService(db, Pull(Sp("bs-1", "Sam", "New", "New bio.")));
-
-        var r = await svc.RunAsync(EventId);
-
-        // The change is still detected, but the kill switch suppresses enqueue.
-        Assert.Equal(1, r.Changed);
-        Assert.Equal(0, r.Enqueued);
-        Assert.Empty(db.SyncDeltas);
-    }
-
-    [Theory]
-    [InlineData(SessionSyncDirection.SessionizeToCeh)] // stage 1 = default
-    [InlineData(SessionSyncDirection.CehToZoho)]        // stage 2 = the permanent mode
-    [InlineData(SessionSyncDirection.ZohoToCeh)]        // stage 3 = deleted long ago
-    public async Task Engine_runs_whatever_the_stored_speaker_direction_says(SessionSyncDirection dir)
-    {
-        // 🔒 §576 — THE STAGE-3 GATE IS REMOVED; it could never be satisfied.
-        //
-        // Stage 3 was deleted long ago, so this comparison engine no-opped on every 5-minute run.
-        // That is the direct cause of §578: CEH held Per Larsen's country ("DK") and skills
-        // ("Microsoft Employee, Microsoft Expert"), Zoho had NEITHER, and nothing ever compared the
-        // two. `BackstageChangeCheckedAt` was still NULL in PROD — the proof it never once looked.
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true, direction: dir);
-        await SeedSpeakerAsync(db, "bs-1", "Sam", "Old", "Old bio.");
-
-        var svc = NewService(db, Pull(Sp("bs-1", "Sam", "New", "New bio.")));
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.False(r.DirectionInactive);
-        Assert.True(r.SourceAvailable);
-        Assert.Equal(1, r.Matched);
-        Assert.Equal(1, r.Changed);
-    }
-
-    [Fact]
-    public async Task Default_edition_with_no_setting_row_still_runs()
-    {
-        // §576 — a MISSING SessionSourceSetting row must not silently disable a comparison engine.
-        // Absence of configuration is not a decision to stop checking.
-        using var db = ScenarioFixture.NewDb();
-        db.Events.Add(new Event
-        {
-            Id = EventId,
-            CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true,
-            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
-        });
-        db.FeatureSettings.Add(new FeatureSetting
-        {
-            EventId = EventId,
-            FeatureKey = SpeakerChangeDetectionService.FeatureKey,
-            Enabled = true,
-        });
-        await db.SaveChangesAsync();
-        await SeedSpeakerAsync(db, "bs-1", "Sam", "Old", "Old bio.");
-
-        var svc = NewService(db, Pull(Sp("bs-1", "Sam", "New", "New bio.")));
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.False(r.DirectionInactive);
-        Assert.True(r.SourceAvailable);
-        Assert.Equal(1, r.Matched);
-    }
-
-    [Fact]
-    public async Task Unavailable_source_is_a_graceful_no_op()
-    {
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        await SeedSpeakerAsync(db, "bs-1", null, null, null);
-
-        var svc = NewService(db, BackstageSpeakersResult.Unavailable("speaker scope not granted"));
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.False(r.SourceAvailable);
-        Assert.Equal("speaker scope not granted", r.UnavailableReason);
-        Assert.Empty(db.SyncDeltas);
-        // No write happened — not even the first-populate seed.
-        Assert.Null(db.SpeakerProfiles.Single().BackstageChangeCheckedAt);
-    }
-
-    [Fact]
-    public async Task Zoho_speaker_not_linked_to_ceh_is_skipped_never_created_or_deleted()
-    {
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        // CEH has ONE linked speaker (bs-1); Zoho returns a DIFFERENT speaker id (bs-999).
-        await SeedSpeakerAsync(db, "bs-1", "Sam", "Tagline", "Bio.");
-
-        var svc = NewService(db, Pull(Sp("bs-999", "Stranger", "x", "y")));
-
-        var r = await svc.RunAsync(EventId);
-
-        Assert.Equal(0, r.Matched);
-        Assert.Equal(1, r.Unmatched);
-        Assert.Empty(db.SyncDeltas);
-        // The CEH speaker still exists and is untouched (never auto-deleted).
-        Assert.Single(db.SpeakerProfiles);
-        Assert.Equal("Tagline", db.SpeakerProfiles.Single().BackstageTagline);
-    }
-
-    [Fact]
-    public async Task After_first_populate_a_later_change_enqueues()
-    {
-        using var db = ScenarioFixture.NewDb();
-        await EnableFeatureAsync(db, enabled: true);
-        await SeedSpeakerAsync(db, "bs-1", null, null, null); // unseeded
-
-        // PASS 1: first populate — silent, seeds baseline, NO queue item.
-        var svc1 = NewService(db, Pull(Sp("bs-1", "Sam", "Tagline", "Bio.")));
-        var r1 = await svc1.RunAsync(EventId);
-        Assert.Equal(1, r1.Seeded);
-        Assert.Empty(db.SyncDeltas);
-        Assert.Equal("Tagline", db.SpeakerProfiles.Single().BackstageTagline);
-
-        // PASS 2: bio moves → a real CHANGE → ENQUEUED and auto-applied (§737.2).
-        var svc2 = NewService(db, Pull(Sp("bs-1", "Sam", "Tagline", "Updated bio.")));
-        var r2 = await svc2.RunAsync(EventId);
-
-        Assert.Equal(0, r2.Seeded);
-        Assert.Equal(1, r2.Changed);
-        Assert.Equal(1, r2.Enqueued);
-        var delta = Assert.Single(db.SyncDeltas);
-        Assert.Equal(SyncDeltaStatus.Applied, delta.Status);
-        Assert.Equal("Updated bio.", db.SpeakerProfiles.Single().BackstageBio);
+        Assert.False(result.Applied);
+        var p = db.SpeakerProfiles.Single();
+        Assert.Equal("Old Tagline", p.Tagline);
+        Assert.Equal("Old bio.", p.Biography);
+        Assert.Null(p.Country);
     }
 }

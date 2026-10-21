@@ -40,8 +40,6 @@ public class LeadsModel : PageModel
     private readonly CommunityHub.Core.Email.IEmailSender _emailSender;
     private readonly TimeProvider _clock;
     private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<LeadsModel> _logger;
     private readonly CommunityHub.Core.Email.IEmailContextAccessor? _emailContext;
 
@@ -54,8 +52,6 @@ public class LeadsModel : PageModel
         CommunityHub.Core.Email.IEmailSender emailSender,
         TimeProvider clock,
         CommunityHub.Core.Settings.FeatureGateService gate,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
         ILogger<LeadsModel> logger,
         // §707.7 — optional so existing constructions keep compiling; the web host registers it.
         CommunityHub.Core.Email.IEmailContextAccessor? emailContext = null)
@@ -69,8 +65,6 @@ public class LeadsModel : PageModel
         _emailSender = emailSender;
         _clock = clock;
         _gate = gate;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _logger = logger;
     }
 
@@ -151,7 +145,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         // §326bq (operator 2026-07-25: "sponsor leads is not active and should be disabled.
         // currently it resides inside zoho backstage and maybe it will be supported in ceh").

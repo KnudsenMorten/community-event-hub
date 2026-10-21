@@ -90,7 +90,7 @@ public class AuditTrailModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs) { AccessDenied = true; return Page(); }
 
         await LoadAsync(me.EventId, ct);
         return Page();
@@ -100,7 +100,7 @@ public class AuditTrailModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs) { AccessDenied = true; return Page(); }
 
         // Export the full filtered set (not just the page cap), newest-first.
         var rows = await BuildQuery(me.EventId).OrderByDescending(e => e.OccurredUtc).ToListAsync(ct);

@@ -56,8 +56,8 @@
         // way, per "still give sponsor the opportunity to see the state and go in a order more
         // furnitures".
         actionNote = Model.State == TaskState.Done
-            ? "✓ Order received — this task completed itself. You can still order more from the webshop above."
-            : "This task completes on its own once your webshop order is placed — there is nothing to tick off.";
+            ? "✓ Order received — this task completed itself. You can still order more with the button above."
+            : "This task completes on its own once your order is placed — there is nothing to tick off.";
         actionNoteClass = Model.State == TaskState.Done
             ? "task-actions__note--done"
             : "task-actions__note--pending";
@@ -268,7 +268,7 @@
             }
             else if (isPurchaseBacked)
             {
-                <text>— detected from your webshop order</text>
+                <text>— detected from your order</text>
             }
             @if (Model.DecisionAnswer is not null)
             {

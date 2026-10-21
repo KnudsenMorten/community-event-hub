@@ -411,7 +411,7 @@ volunteer — so the organizing team isn't the single point of contact for every
 
 - **A three-level work tree.** Organizers build **Categories** (broad areas like
   Registration or A/V), each split into **Subcategories**, each holding concrete
-  **Tasks**. Volunteers are assigned to tasks, and everything rolls up so a task
+  **Tasks** (subcategories became optional on 2026-09-23 — see below). Volunteers are assigned to tasks, and everything rolls up so a task
   always shows which subcategory and category it belongs to.
 - **Two owners per category — oversight and hands-on.** Each category has a
   **lead**, who is an organizer providing oversight, and a **supervisor**, who is a
@@ -438,6 +438,29 @@ volunteer — so the organizing team isn't the single point of contact for every
   the volunteer "My tasks" — works on a phone at the venue, and the hub home page
   surfaces each volunteer's assigned-task count and a link to their supervisor
   dashboard when they run a category.
+
+### Work structure: optional subcategories, assign through the queue, publish by ring *(✅ 2026-09-23)*
+
+The work structure now fits how organizers actually plan: tasks can sit directly in a category,
+and volunteers see their tasks only when the organizers decide to publish them.
+
+- **A task belongs to a category; a subcategory is optional.** Add tasks straight to a category,
+  or group them in subcategories you name yourself — *Monday*, *Tuesday*, *Wednesday*, or anything
+  else. The hub no longer creates "General" or "Imported plan" groups on its own, and the ones it
+  created before have been folded back so their tasks sit directly under their category.
+- **Removing a subcategory keeps the work.** Its tasks move up to the category, together with the
+  volunteers on them.
+- **Move tasks to either level.** Choosing a category puts the selected tasks directly under it;
+  choosing a subcategory puts them there.
+- **Collapse or expand a whole category** — settings and tasks together — by clicking its heading,
+  or all categories at once.
+- **Assigning queues; it does not tell the volunteer yet.** Assigning a volunteer from the work
+  structure (by an organizer or a category supervisor) puts them in the queue, and the task shows
+  them marked *not published*. Every organizer sees the same queue, including who queued each person.
+- **Publish when you are ready, ring by ring.** *Publish to volunteers* makes the queued tasks visible
+  and sends each volunteer one summary mail. Only volunteers inside the released ring of
+  *Volunteer task assignment* are published — publish to ring 2 and the ring 3 volunteers' tasks stay
+  queued and unseen until the ring is widened and you publish again.
 
 ### Volunteer "My schedule" — your whole day, in one place *(✅ 2026-06-15)*
 
@@ -551,6 +574,58 @@ assigned by accident.
   instructions, pre-requisites and expectations, plus their bucket's supervisor(s) and
   ELDK lead, so they know exactly what to do and who to ask.
 
+### Hotel nights — what the event pays, and what the guest pays *(✅ 2026-09-22)*
+
+Everyone who needs a room books their own dates, and the hub works out how much of that
+stay the event covers — so nobody is surprised at checkout and the hotel can split the bill.
+
+- **You set the standard once, per group.** In Settings, each group has an *included
+  nights* rule: a number of nights, the whole stay, or nothing. Out of the box:
+  master-class speakers 2 nights, pre-day-only speakers 2, main-day speakers 1, guest
+  speakers up to 6, sponsor-brought speakers nothing, volunteers 1, and organizers,
+  media and event partners their whole stay. Each row shows whether it is still the
+  built-in standard or something you chose, and how many people it applies to.
+- **One person can get more, without moving the rule.** Their own page has a single
+  **Extra nights** field with a note — "+2, agreed, two extra shifts". It adds to the
+  group's standard, so if you later change the standard they keep their extra on top.
+  Volunteers are handled this way by design: the rule covers the common case and the
+  field covers the ones who do more.
+- **Nobody is ever covered for more nights than they booked.** A six-night rule pays
+  three nights for someone who books three.
+- **The person is told while they book.** As they pick their dates, the hotel form says
+  how many nights the event covers, how many they have selected, and — if they go over —
+  that they pay the difference themselves, directly to the hotel. It updates live as they
+  change the dates, and it says so just as clearly when everything is covered.
+- **The hotel gets the split.** The rooming list each hotel receives now carries
+  *Nights — ELDK* and *Nights — own expenses* per guest, with totals, so the bill can be
+  divided without anyone emailing back and forth. The file is re-sent when coverage changes.
+- **So does the confirmation email**, so the guest's own record says the same thing.
+- **Organizers see it per person** on the hotel assignments list — covered against booked,
+  for every role, with the volunteers nobody has decided on yet flagged.
+
+### Onboard volunteers without handing out work yet *(✅ 2026-09-21)*
+
+Welcoming volunteers into the hub and giving them work are two separate decisions, and
+organizers control the second one on its own switch.
+
+- **One switch decides whether volunteers get work at all.** In *Settings → Features →
+  Volunteers*, **"Volunteer task assignment (who gets work)"** governs the whole
+  capability. While it is off, volunteers can be activated, welcomed, sign in and
+  complete their Get Started steps exactly as normal — but nobody can be put on a task,
+  and volunteers see no task surface at all.
+- **It holds every route, not just the obvious one.** Assigning from the organizer's
+  volunteer page, a bucket supervisor assigning from their own dashboard, committing an
+  allocation queue, committing an allocation scenario and importing the planning
+  spreadsheet are all refused the same way, with a message that names the switch to
+  change. Plans still import in full — the tasks and buckets land, only the people are
+  held — and the import says how many it held, so nothing is refused in silence.
+- **Release it gradually.** The switch carries a rollout ring: release it to your test
+  volunteers first, then a wider group, then everyone. Each step is a single change on
+  one page, and work staged in the meantime is kept, not lost — commit again once the
+  ring includes those people and it lands.
+- **Nothing half-shown.** A volunteer who is not yet included has no "My Schedule" menu
+  item and no page behind it, so the hub never shows an empty screen that looks broken.
+
 ### Onboarding lifecycle — from sign-up to set-up *(✅ 2026-06-15)*
 
 A clear path from "someone is interested" to "they're ready to go", with the
@@ -630,6 +705,27 @@ place each person in the right one, then manage the room block per hotel.
   environment all such mail is still safely redirected to the team inbox.
 - **Mobile-first and bilingual.** Both pages work on a phone and are available in
   English and Danish.
+- **People who wear two hats reach both of them.** *(✅ 2026-09-20)* Plenty of people do
+  more than one job at an event: an organizer who also presents, a volunteer whose
+  session gets accepted, somebody who bought a ticket and was later invited to speak.
+  Their profile keeps the role they joined with, and the speaker area now opens for
+  **anyone who actually has a speaker profile** — so they reach their own sessions,
+  speaker deadlines, uploads and evaluation results without anyone having to change
+  their role first. A short **Speaker** menu (My Session(s) + speaker tasks) appears
+  alongside the menu their own role already gives them, so nothing they had disappears.
+- **Cancelling a ticket no longer closes the wrong door.** *(✅ 2026-09-20)* If someone
+  bought an attendee ticket and later became a speaker, a volunteer or a sponsor
+  contact, cancelling that ticket now takes away the ticket only. Their sign-in stays
+  open, because they still have a reason to be in the hub. A plain attendee who cancels
+  is still signed out as before.
+- **Volunteers' availability changes take effect immediately.** *(✅ 2026-10-15, fix)* When a
+  volunteer changes their availability under **My Availability**, the change is saved at once
+  and the volunteer lead gets an e-mail showing what changed (before → now). Previously a
+  change waited for an organizer to approve it, and nothing told the volunteer — so when they
+  opened the form again they saw their old answers, and it looked as if the save had failed
+  (§1346). Changes that were already waiting have been applied. Volunteer availability no longer
+  needs approval anywhere, and the volunteer lead is e-mailed about every change, whether it
+  comes from **My Availability** or from the volunteer sign-up form.
 
 ## 4. Self-service forms — crew fill in their own details
 
@@ -1266,6 +1362,15 @@ follow-up automatically.
   item is gone, replaced by **Speaker Details** and **Help Promote** (the share-graphics
   page), and **My tasks** moved into a more sensible order. The old speaker form redirects to
   the new page.
+- **A speaker's full name is read back from the event platform.** *(✅ 2026-10-20, fix)* The hub now reads each
+  speaker's first name from the event platform as well as the last name, so a name changed there is noticed and copied
+  across with first and last name exactly as entered (a double first name or a multi-word last name stays intact).
+- **The hub is the master for speaker details, and you are told when the event platform differs.** *(✅ 2026-10-20)*
+  The speaker gap mail now compares tagline, bio, country, company and skills — not only whether they are missing — and
+  lists each field to fix as `Field (new value in Zoho from hub) -> value`, so the event platform can be set to match the hub by hand. A
+  value only the event platform has is listed the other way, `Field (new value in hub from Zoho) -> value`, so the hub can catch up.
+  *(✅ 2026-10-21)* The mail covers only people whose role is Speaker. Organizers, volunteers and sponsors who also speak
+  are left out: they never fill in the hub's speaker form, so the hub has no company or skills to compare.
 - **Richer speaker records from the import.** *(✅ 2026-06-24)* The hub now stores each
   speaker's **Zoho Backstage and Sessionize ids** and **first/last/full name**, and the
   Sessionize import pulls a speaker's **profile picture into the shared SharePoint store**
@@ -1433,6 +1538,46 @@ follow-up automatically.
 - **A cleaner sponsor menu.** *(✅ 2026-06-27)* The sponsor navigation is tidied to a **single "Event
   logistics" entry**, and the **deliverables %** has moved into the **Sponsor Tasks** page rather than
   standing as its own menu item, so the menu stays short and obvious (§145).
+- **Room for a longer social-media branding text — 900 characters.** *(✅ 2026-10-14)* The
+  text a sponsor gives us for social-media promotion can now be up to **900 characters** (was 600),
+  on both the company page and the get-started wizard, with a live counter (§1343).
+- **Sponsors set their own public company name.** *(✅ 2026-10-14)* The name shown on the event
+  website, in the app and in social-media posts can now be changed by the sponsor in **Get Started →
+  Company details** and on the **Company Details** page. It is the very same name organizers edit in
+  the companies list — whoever saves last wins — and the legal name on the contract and invoice is
+  never touched (§1344).
+- **Sponsor companies are tagged properly in social-media posts.** *(✅ 2026-10-15, fix)* A sponsor
+  announcement now tags the company on LinkedIn as a real, clickable mention. Before the fix, the tag
+  could show up as raw text in the published post. The sponsor's people are tagged as before,
+  whenever they follow the event's LinkedIn page (§1345).
+- **Withdrawn sponsors and test accounts stay out of social media.** *(✅ 2026-10-18, fix)* A sponsor
+  that has withdrawn is no longer planned for an announcement and is left out of its tier's post, and
+  any post already waiting for it is removed from the planner. Only the last-minute check at
+  publishing used to stop it. A sponsor post also never tags a test account, even when a real company
+  has test accounts attached to it (§1347).
+- **A cancelled booth no longer announces the old tier.** *(✅ 2026-10-18, fix)* When a sponsor's
+  booth order is cancelled, social media stops presenting them as a Gold, Diamond or Platinum sponsor.
+  They get no tier announcement, they are left out of the tier's group post and its animated graphic,
+  and any post already waiting is removed. The sponsor keeps everything else (§1348).
+- **See what every sponsor bought.** *(✅ 2026-10-19)* The organizer sponsor list shows each company's booth tier, its
+  sponsorship categories and every product it bought — from completed and signed orders only — and the Excel download
+  carries the same columns. Test, withdrawn and inactive companies are hidden by default; one tick shows them, marked.
+- **One public name, website and LinkedIn per sponsor.** *(✅ 2026-10-19, fix)* A sponsor's public name, website, LinkedIn
+  and X are kept in one place — the company page — and the public sponsor page, the app, social media and the event
+  platform all show that same value. The weekly "missing a website or LinkedIn" reminder no longer asks for links the hub
+  already has. The legal name used on contracts and invoices is separate and unchanged.
+- **Every sponsor's changes reach the event platform.** *(✅ 2026-10-19, fix)* The hub now paces its calls to the event
+  platform below the platform's request limit, backs off as soon as the platform says "too many", and takes the sponsors
+  in a different order each run — so a busy moment can delay a change by a few minutes but no longer leaves the same
+  companies out every time.
+- **Withdrawing a leftover company really removes it.** *(✅ 2026-10-20, fix)* A company that appears on the sponsor list
+  only because it still has tasks — no sponsor record, no contacts — is withdrawn by closing those tasks (kept, never
+  deleted), and it leaves the list. The "In progress" column can now be sorted like the other counts.
+- **A bought sponsor session is in the agenda straight away.** *(✅ 2026-10-19)* As soon as a sponsor's
+  session purchase is complete, its slot appears in the agenda in the right room and at the right time, so
+  attendees can plan around it. Until the sponsor has filled in the details, it reads
+  "*Sponsor name*: Session TBD". Once they submit their title, description and speakers, the agenda shows
+  those instead. Only real purchases count: a cancelled or test order never appears (§1352).
 
 ## 8. Sponsor leads — capture, screen and route booth leads
 
@@ -2680,6 +2825,47 @@ notification only when an organizer actually commits.
   **present id updates** the existing one — so bulk edits in a spreadsheet flow back cleanly without
   duplicating anything (§151). *(The 304-task data import itself is operator-run and not yet executed.)*
 
+### Volunteer planner — schedules by the clock, and tells you what it could not fill *(✅ 2026-09-22)*
+
+The auto-assign engine now understands **time**, not just "how available is this person overall".
+It matches each task's hours against the hours each volunteer actually said they could work, never
+puts anyone in two places at once, and reports every slot it could not staff — with the reason.
+
+- **It honours the hours people gave, not just the day.** Someone who answered "morning only" is no
+  longer offered an afternoon task. The morning, afternoon, full-day and evening answers each carry
+  real clock hours, taken from the availability form itself, so what the planner believes matches
+  what the volunteer read when they answered.
+- **A volunteer has to be there for the whole task.** Being available for part of a shift does not
+  count as covering it — somebody who has to leave halfway has not staffed the job.
+- **Nobody is booked into two overlapping tasks.** That includes assignments an organizer made by
+  hand: a manual assignment takes that person's time, and the planner works around it. Back-to-back
+  shifts are still fine — finishing at 12:00 and starting at 12:00 is one person's normal day.
+- **Each task carries a start and an end,** so its length is known and the workload can be spread by
+  **hours**, not by counting tasks. The hours come from the plan you already import; nothing has to
+  be re-entered.
+- **The hardest task is filled first.** Working through the list in the order it was created lets an
+  easy task use up the only person who could have done a difficult one. The planner fills the most
+  constrained work first, so a shortfall is a real shortage rather than an artefact of the order.
+- **It says what it could not fill, and why.** After each run the page lists every short task with
+  the reason — *nobody in scope said they work at that hour* (recruiting will not help; the hours
+  people were asked about would have to change) versus *everyone free is already on an overlapping
+  task* (more people would help). A plan that is 25% unstaffed no longer reports as "done".
+- **A worker roster decides who gets auto-planned.** Some volunteers are here to work and can be
+  scheduled all day; others are helping around sessions they want to attend. A new page under
+  Volunteers lists every active volunteer with what they answered per day, and you add the first
+  group to the roster. The planner draws from that list; everyone else is placed by hand. Taking
+  somebody off the roster only changes future runs — it never removes shifts they already hold.
+- **Buckets can name preferred volunteers.** Each bucket can list the people it would rather have,
+  in rank order, and they are considered first for its tasks. It is a preference, not a booking:
+  a preferred volunteer who is not free at that hour is still not assigned.
+- **Nothing is assigned without review.** The planner still only fills the draft queue, and only a
+  commit turns drafts into real assignments with the single batched notification.
+- **The availability form says when each day actually ends.** The pre-day now reads
+  *"whole day available — 07:00–18:30"* rather than only *"from 07:00"*, so the hours a full-day
+  answer commits to are on the page rather than implied. A day is only ever widened where the form
+  can say so — a window the planner honours but the form never mentioned would hold people to
+  something they never agreed to.
+
 ## 24. Richer session catalog — track, level, length and live filters *(✅ 2026-06-29)*
 
 - **Every session carries its track, level and real length.** Imported straight from the
@@ -3377,6 +3563,12 @@ have been told is a new problem, not a repeat, so it speaks up straight away. A 
 because a ticket was cancelled says nothing more, and a pool you have closed is never warned about at
 all.
 
+**No warning unless you ask for one** *(✅ 2026-10-08)*. A new pool no longer starts out flagged
+"running low": the warning level is **off (0) by default**, setting it to 0 now sticks, and a level
+at or above the pool's size never fires before anyone has claimed a ticket. Set a level on a pool
+when you want the heads-up. Going past what was paid for — or past an ad-hoc coupon's agreed cap — is
+always flagged, because that is tickets nobody has paid for.
+
 ## 70. New coupon codes announce themselves, and a prepaid pool can grow *(✅ 2026-08-04)*
 
 **A code you have not mapped no longer waits to be noticed.** The moment someone uses a promo code
@@ -3841,6 +4033,14 @@ code's max to 30 tickets* — alongside how many purchases make it up and what t
 **A block can grow, never shrink.** Each purchase is an invoiced agreement, so a total at or below
 today's is refused rather than quietly applied — with the current figure named so you can see what
 you are working from. Removing an allocation outright is still its own separate action.
+
+**…and a mistake can be corrected with a credit note** *(✅ 2026-10-20)*. **Reduce to** takes the new,
+lower total and records the difference as a correction — the original purchases and their invoices stay,
+and the pool's value goes down by what is credited. You make the credit note in the finance system and
+enter its number on the correction; until then, the billing reminder asks for it. A pool can never be
+reduced below the tickets people have already claimed, and the page tells you the new maximum to set
+on the promo code. A credit note made against one of the event platform's own invoices is recognised
+as a credit note, so it never replaces the invoice number on the purchase it credits *(✅ 2026-10-20, fix)*.
 
 **And the invoices are all in one place.** Every invoice raised against a coupon — both the ones
 created when tickets are claimed and the prepaid ones — is now listed on the coupon with its number
@@ -5851,3 +6051,514 @@ post publish as raw text, showing the tag markup to readers instead of the names
 All seven organizer mails about speakers and sessions awaiting a decision go to one shared list: the
 organizer inbox first, then any extra people you name. Adding or removing someone changes every one of those
 mails at once, and nobody is quietly left off.
+
+## 235. People who wear two hats reach both of them *(✅ 2026-09-20)*
+
+Plenty of people do more than one job at an event: an organizer who also presents, a volunteer whose session
+gets accepted, somebody who bought a ticket and was then invited to speak. Their profile keeps the role they
+joined with, and the speaker area now opens for **anyone who actually has a speaker profile** — so they reach
+their own sessions, deadlines, uploads and evaluation results without anyone changing their role first. A
+short **Speaker** menu appears alongside the menu their own role already gives them, so nothing they had
+disappears.
+
+And cancelling a ticket no longer closes the wrong door: if that person is also a speaker, a volunteer or a
+sponsor contact, the cancellation takes the ticket only — their sign-in stays open, because they still have a
+reason to be there. A plain attendee who cancels is signed out exactly as before.
+
+## 236. Catering numbers count each person once *(✅ 2026-09-20)*
+
+The main-day lunch figure counted some people twice — once as crew, and again through the ticket they held —
+which would have meant ordering well over a hundred lunches nobody was going to eat. Crew and ticket holders
+are now separated properly, so the headcount page, the lunch spreadsheet and the breakfast estimate all show
+the number you actually order against. Cancelled tickets count for nobody, and the pre-day is unchanged
+because only a two-day ticket admits you to it.
+
+If the same human appears twice in the system (two email addresses, two upstream systems), an organizer can
+**link the two records** from the people list. Everything that is bought per person — hotel, lunch, dinner,
+party, swag and awards — then counts them once, across every page and every export. The link is always a
+deliberate decision: nothing is merged automatically, similar names are only ever a suggestion, and a link
+that would drop a booking one of the two records holds is refused with an explanation rather than silently
+applied.
+
+## 237. Fewer, better organizer emails *(✅ 2026-09-20)*
+
+Four kinds of alert that asked you to act on something already done, invisible, or impossible have stopped:
+a reminder about a speaker you had already dealt with now goes quiet as soon as you approve it; a repeated
+warning that ignored its own six-hour limit now honours it even after a restart; speaker biographies no
+longer arrive with stray formatting codes in the text you are asked to copy; and a "this title changed"
+message that showed two identical-looking titles is gone — a difference that only exists in invisible spacing
+is no longer treated as a change at all.
+
+## 238. Session feedback on ordinary tablets *(✅ 2026-09-20)*
+
+Session feedback can now be collected on **any tablet or screen with a browser** as well as the purpose-built
+feedback boxes — same four faces, same colours, same scoring, same reports. A stand shows the four faces
+full-screen in landscape, shows the session currently running in that room as a large headline, and confirms
+each tap by highlighting the face that was pressed and a short *"THANK YOU !"* so people can see their answer
+landed. There is no waiting period between
+taps: at a busy door, consecutive taps are consecutive people.
+
+Setting one up needs no typing on the device: scan the on-screen code with the tablet's camera, tap **Enroll
+this device**, give it a name, and approve it from the organizer area — the screen starts working by itself.
+Each one can then be given a link it keeps, so it reconnects on its own if it is wiped or replaced, with no
+daily sign-in.
+
+**It keeps working when the venue Wi-Fi does not.** Every tap is saved on the device before anything is sent,
+and uploads when the network returns — including after a restart, because the page itself is stored on the
+device too. A screen that has been left alone for two days looks after itself: it reconnects, retries, and
+reloads quietly overnight, and it reports how many votes are still waiting so a stand that has silently
+stopped collecting can be spotted.
+
+*Fixed 2026-09-21:* the name you give a tablet when enrolling it is now the name it carries in the organizer
+list; the screen shows its **room** — read live, so a room linked after approval appears within a minute —
+together with the session running there, or *"No session right now"*; and the four buttons carry the same
+words as the feedback page (*Very happy · Happy · Somewhat unhappy · Unhappy*) instead of a "Neutral" label
+the scale deliberately does not have.
+
+*Also 2026-09-21:* when nothing is running, a tablet says so and counts down to the next session in its room —
+when feedback opens and when it closes. The session title and its speakers now sit on separate lines. Speakers
+receive a new copy of their results only when **their own** session's feedback changes, not every time someone
+presses a button in another room. And a session marked as a test only ever mails the organizers testing it.
+Tablets now pick up a new version of the page by themselves within a few minutes (while nobody is using them),
+devices can be renamed from the devices page, and everything about session feedback has its own **Session
+Evaluation** entry in the organizer menu.
+The devices page now shows each tablet or box by the **name you gave it** — already in the approval queue — with
+its serial underneath, in Danish time, and only the health figures that kind of device actually reports.
+Each tablet shows a small line at the bottom with its room, name, serial and a green **connected** light, so a
+stand that has lost its connection is visible at a glance. The session schedule is copied into the feedback
+system automatically every 10 minutes, so a room or time change reaches the tablets without anyone pressing a
+button. When editing a session, the end time now updates as you type the start.
+Feedback for a session stays open until 30 minutes after it ends, and the tablet says so ("Feedback open until
+…"). Between sessions the tablet shows only what is coming next and when feedback for it opens and closes. A
+speaker's report is sent once feedback has closed, never halfway through.
+After a tablet is approved it tells you to add the page to the Home Screen, and the Home Screen icon then opens as
+that same device (it no longer asks to be enrolled a second time). The "How this score works" box in the report now
+fits all its text.
+A tablet that loses Wi-Fi keeps showing the session and its speakers, and its status line turns red
+("disconnected") while votes are saved on the tablet. On the devices page, retired devices are hidden from the list,
+and Delete is only offered for a device that has not collected any feedback.
+
+**Two quick follow-up questions (2026-09-21).** After choosing a face, attendees are asked *"What was good?"* and
+*"What could be better?"* — one tap on a big button each, or Skip. The QR page offers the same choices next to the
+comment box. Speakers see the results in their report under *"What people picked"*, alongside what people wrote.
+
+**Feedback statistics, on-page results and "your post is live" (2026-09-21).** The Session feedback page breaks
+the event's feedback down per day, per session type and per track — with the score, the split of answers and how
+many responses came from feedback boxes, iPads and QR codes — and says when it was calculated. Each session's
+feedback can be read on the page itself (score, answers, what people picked, every comment), with the PDF one click
+away. Speakers and sponsors can be told when a social-media post about them has gone live, with a link straight to
+the post.
+
+## 239. Sponsor announcements tag the company first, found automatically *(✅ 2026-09-23)*
+
+A sponsor's announcement now tags the company itself, not only its people.
+
+- **The company is looked up for you.** The hub reads the company's LinkedIn page address and finds the
+  company on LinkedIn by itself, then remembers it — nobody has to copy an id from anywhere. If the company
+  changes its LinkedIn page address, it is looked up again.
+- **The company comes first in the Tag line, then the people:** *Tag: @Company @Signer @Coordinator*. The
+  opening sentence names the company, so it is tagged exactly once.
+- **Posts already planned pick this up** — every unpublished sponsor announcement was updated; published
+  posts are left as they went out.
+- **No empty "Tag:" line.** A sponsor with nobody to tag yet simply has no Tag line, and a company that
+  cannot be found yet is named in plain text rather than shown as a broken tag.
+
+## 240. Prepaid ticket invoices name the ticket type *(✅ 2026-09-24)*
+
+A prepaid ticket invoice now says which ticket was bought — for example *2-day (Pre-day + Main Event)* — on
+the line under the number of tickets, then a blank line, then the coupon:
+
+*Prepaid tickets: 6* · *Ticket Class: 2-day (Pre-day + Main Event)* · *(blank)* · *Coupon: …*
+
+The ticket type is looked up from the ticketing system when the invoice is created, so even the very first
+invoice for a brand-new prepaid pool carries it. If the ticket type genuinely cannot be found, the line is
+left out rather than showing an internal number.
+
+## 241. Booth tasks give the right furniture coupon code *(✅ 2026-09-24)*
+
+The booth-furniture task now shows the coupon codes the webshop actually accepts — for example
+*eldk-gold-booth-included* — so a sponsor can redeem their included chairs and table at checkout. The
+codes previously carried the edition number and did not match the shop.
+
+## 242. Evaluation tablets set up and locked by device management *(✅ 2026-09-25)*
+
+The session-feedback kiosk now runs on ordinary Android tablets managed by the organisation's device
+management (Microsoft Intune).
+
+**Setting a tablet up.** One shared QR code is scanned on a freshly reset tablet. The tablet then joins the
+venue Wi-Fi, installs the feedback app, and locks itself into a kiosk: the feedback screen opens by itself —
+also after a restart — and is the only thing an attendee can reach. The screen stays on while the tablet is
+charging, the sound is muted, and settings, notifications and the power menu are out of reach. Each tablet
+is named after its serial number, so the name on the device list matches the tablet in your hand.
+
+**Enrolling it with one tap.** An organiser taps the top-left corner of the kiosk five times and enters the
+organiser PIN. The setup screen lists the managed tablets by name; tapping the right one enrols it and
+approves it on the spot — nothing to type, nothing to approve afterwards. Then link it to its room on the
+organiser devices page. Only someone with the PIN can open setup, and repeated wrong PINs lock setup for
+15 minutes.
+
+**Re-onboarding.** Deleting (or revoking) a kiosk device on the organiser page sends that tablet back to its
+setup screen within a minute, ready to be enrolled again. Feedback it had not sent yet is kept and sent once
+it is back. Deleting a device that has not collected any feedback now works for every kiosk (it used to fail
+with an error page for tablets that had joined through the approval queue).
+
+**A clearer kiosk screen.** The bottom line shows the room, the tablet's name, a **Managed by Intune** note
+for managed tablets, and the connection state — on every screen, including the follow-up questions. A
+tablet that is not linked to a room says so, and where to fix it, instead of "No more sessions scheduled in
+this room". The texts say "tablet", not "iPad", and the internal device code is no longer shown.
+
+**Two feedback channels everywhere.** The organiser statistics, the summary page and the session reports
+count feedback from two channels: **kiosk** and **QR code**.
+
+**Physical rooms: one tablet per space, whatever the schedule calls it** *(✅ 2026-10-19)*. The schedule
+often names one space differently per day — a master-class room on the pre-day, the session room on the main
+day — and one big pre-day room may be split into two rooms the next day. On the devices page you now define
+the **physical rooms** where the tablets stand and tick the schedule rooms held in each (a combined pre-day room
+goes under both halves). A tablet is linked to its physical room and then shows, counts down to and collects
+for the right session by date and time, on every day of the event. The page warns about a schedule room no
+tablet covers, two rooms whose sessions clash in one space, and a room without a tablet.
+
+**Choose what attendees are asked — and compare** *(✅ 2026-10-19)*. A feedback capture policy decides what
+each channel asks: **rating only** (one tap — fastest when people queue up), **rating + 2 follow-up questions**,
+and on QR codes also **rating + a comment** or **rating + 2 questions + a comment**. Set a default for the
+tablets and a default for the QR codes; give a single tablet, or the QR codes of a single room, its own policy
+to try something side by side. Tablets switch within a minute. Every response remembers the policy it was given
+under, and the feedback statistics show each policy's responses, average rating and how often the extra
+questions were answered.
+
+**Faces, stars or points on the buttons** *(✅ 2026-10-19)*. The four rating buttons can show faces, stars (one to
+four) or points (1–4) — or two of them together — next to their colour and word. Set a default for the tablets
+and for the QR codes, or give a single tablet or room its own look; the statistics show which look was used.
+
+**See each tablet's battery** *(✅ 2026-10-19)*. The bottom line of the feedback screen shows the tablet's battery
+level and whether it is charging, and the devices page lists each tablet's battery, highlighted when it runs low.
+
+**Set test votes aside before the event** *(✅ 2026-10-19)*. One button on the feedback page sets every response
+collected so far as inactive: they are kept but no longer count in any score, statistic or report. Another
+button brings them back.
+
+**Maintenance mode for kiosk tablets** *(✅ 2026-10-19)*. To change Wi-Fi or other settings on a locked
+tablet, put it in the maintenance group in device management and restart it: the kiosk lock lifts. Take it out
+and restart again, and it is back in the kiosk.
+
+## 243. Social-media posts never go out with a missing speaker photo *(✅ 2026-09-25)*
+
+A speaker or track graphic is only made when **every** speaker on it has a photo. If a photo is missing, the
+graphic waits, and any post that uses it is held — it is never published with an empty face. The organisers
+get one critical e-mail per held post, naming it, so they can add the photo; once it is there the graphic is
+rebuilt with every face and the post goes out on its next run. Graphics that were made earlier with an empty
+face are rebuilt automatically.
+
+**Applied (same day):** when this went live every speaker and track graphic was rebuilt once — 72 in all — so
+graphics made earlier with an empty face were replaced; each rebuilt graphic is now named in the log.
+
+## 248. The public Sponsors page shows every name and logo *(✅ 2026-09-28)*
+
+The public list of sponsors now shows each company's real name and its logo. Six Gold sponsors appeared as "name not
+synced" although the hub knew their names, and logos were broken for every visitor, because they were linked straight to
+a storage place only the organizers can open. Logos are now delivered by the hub itself — on the public page and on a
+sponsor's own start page.
+
+## 247. Long speaker bios from Zoho are kept, and a job failure is reported as what it is *(✅ 2026-09-28)*
+
+A speaker bio edited in Zoho Backstage arrives as formatted text that can be much longer than the words themselves. The
+hub now stores it whole — before, one such bio made the speaker-change check fail on every run. And when a background job
+fails on its own data, the alert now names that job instead of claiming the database was unreachable, which also held back
+other jobs' alerts for six hours.
+
+## 246. Social-media reminders show the post as it will go out — text and picture *(✅ 2026-09-28)*
+
+Every mail the organizers get about a planned LinkedIn post now shows the post **exactly as it will publish**: the text with
+every placeholder filled in (the speaker names, track, dates and links — not "{TrackName}" or "{Speakers}"), and the
+**picture that will be posted, attached**, so it can be checked before it goes out. This covers the "publishes in about 5
+minutes — add the LinkedIn handle" alert, the "publishes within 24 hours" notice, the "auto-approved" notice and the
+"was published" confirmation. A missing value or a picture that cannot be read is called out in the mail.
+
+## 244. The sponsor shop inside the hub — offer, reservation, contract, all self-service *(✅ 2026-09-27)*
+
+Sponsors now buy, reserve and sign **inside the hub**, instead of in a separate webshop and a paper contract. Stock
+stays in step with the existing webshop both ways, so an item can never be sold twice.
+
+**Three clear stages — offer, reservation, confirmation.**
+- **Offer.** An organizer sends a potential sponsor an offer: the products and prices, and the draft contract as a
+  PDF. The mail says plainly that nothing is reserved yet — first come, first served — and links the sponsor
+  presentation. It has two buttons: **Order and sign**, and **Request a reservation**. Both go through a short
+  self-service registration, after which the offer is waiting in the cart.
+- **Reservation.** A sponsor can ask for their cart to be reserved — in the cart, signing comes first and the
+  reservation sits further down under **Need more time to take a decision?** (✅ 2026-09-29). The organizers get one mail with a direct link
+  and **accept** it (choosing the deadline and the reminder rhythm) or **deny** it. Accepted, the items are held for
+  that company — the booth shows as reserved on the booth map and in the webshop — and the reservation mail goes
+  out. Organizers can also create a reservation themselves, with its own requester, deadline and reminders.
+- **Confirmation.** The signer reads the whole contract in the hub and signs it online — drawn, typed or uploaded —
+  and everyone gets the signed contract as a PDF.
+
+**Self-service all the way.** The reservation mail has **Review and sign**, **Ask for more time** (when there is a
+deadline) and **Cancel reservation**. Asking for more time takes a date and a reason, and the organizers approve or
+deny it from a direct link; the deadline only moves when they approve. Cancelling puts the items straight back on
+sale. Replying to a mail is only needed for questions.
+
+**Deadlines you cannot miss.** When a reservation has a deadline, it is in the subject line and in a clearly marked
+box, with what happens after it: the products are released to other sponsors.
+
+**The right company, every time.**
+- Ordering, the contract and the invoice always use the **legal (billing) name**; the public name is used for
+  branding only.
+- A person who looks after several companies — a group's shared coordinator or finance lead — switches company in
+  the shop, and a contract link always opens on the company it belongs to.
+- Registration first checks whether the company is already known (by VAT number or e-mail domain) and joins it,
+  instead of creating a duplicate. A new company is created directly in the finance system, with the VAT number
+  checked first (EU numbers against the EU's VIES service); a number that fails is stopped and the organizers are
+  told, so they can help.
+- Companies from last year's shop are pre-loaded as **potential sponsors**: their people can sign in and order
+  without registering again, and nobody is e-mailed because of it.
+
+**Mails that read well everywhere.** Every shop mail to a sponsor copies the organizers. Buttons are sized to their
+text in every mail client (Outlook included), blocks have room around them, and amounts are written without a
+thousands separator (8150 €).
+
+**A price for one company only.** An organizer can agree a special price with one sponsor on a single line of their
+order — for example a session at 5000 € instead of the normal 8000 €. Only that company pays it; everyone else still
+sees the normal price. The offer, the cart and the contract show the normal price crossed out beside the agreed one.
+A price can be changed until the contract is signed. Organizers find the product catalogue as **Products** under
+Sponsor admin, and the public catalogue's pages (import, review, publish) as **Catalogue pages** right next to it *(✅ 2026-09-28)*.
+
+**A cleaner booth map** *(✅ 2026-09-28)*: the map no longer prints the booth number over each booth — the layout already
+shows it, and the extra label hid the tier ("Gold"). The number is still in the tooltip. Free booths have a clear green
+outline.
+
+**One picture upload.** A product has a single **Upload** for its picture: it adds one when the product has none and
+replaces the main picture when it has one.
+A replaced picture shows at once — it no longer shows the old picture for up to half an hour.
+
+**Signed contracts to the shared mailbox.** Every contract signed in the shop — with the signed PDF — also goes to the
+event's shared info mailbox, alongside the organizers.
+
+**Nothing is ordered until it is signed.** Opening the contract to sign, or sending it to the signer, no longer takes
+the items off the shelf: the items are ordered the moment the contract is signed, and if one sold out in the meantime
+the signing is stopped rather than overbooking. Only a reservation the organizers accepted holds items before signing.
+
+**A contract waiting for signature is chased with the contract itself** *(✅ 2026-09-28)*. Every day until it is signed,
+the signer gets the signing mail again — the button to read and sign, the items and the contract PDF — instead of a
+general "your order is waiting" note. This also covers contracts sent from a reservation, which were not reminded at all.
+
+**A reservation is announced as a reservation** *(✅ 2026-09-28)*. When a reservation takes the last booth or slot, the
+organizers get "Reserved — no longer available", naming the company and saying it is not signed yet (it comes back if
+the reservation is cancelled) — no longer "Sold out". It is still blocked for everyone else. "Sold out" is kept for a
+signed order, and names the buyer. *(Fixed 2026-09-29: signing a reservation now sends the "Sold out" mail too — before,
+only the "Reserved" mail ever went out for items a reservation had held.)*
+
+**Exhibitors from the shop reach the event app** *(fixed 2026-09-29)*. A company that registered through the sponsor shop
+is now created as an exhibitor in the event platform with its event coordinator as the contact — before, the create was
+rejected because no contact was sent.
+
+**Booths reach the event app straight away, and a refused booth is reported** *(fixed 2026-09-29)*. A new exhibitor
+gets its booth in the same run it is created, and if the event platform refuses the booth (for example a booth set up
+under a different booth category) the organizers get the platform's reason by mail instead of finding an empty booth.
+
+**Invoices in English, reading exactly like the webshop's** *(fixed 2026-09-29)*. Every invoice — sponsor shop, webshop and
+coupons — uses the English invoice layout, and the included booth furniture on a shop invoice is named by the same coupon
+code the webshop invoice shows.
+
+**Sponsors edit their own website, LinkedIn and X** *(✅ 2026-09-30)*. The website, LinkedIn and X/Twitter links are
+edited directly in the sponsor's Company details (Get Started and the company page) — and by the organizers on the
+company page: one field each, whoever saves last wins. The old webshop no longer overwrites them (it only fills a
+blank), and every link is stored as https:// (the event platform refuses anything else). LinkedIn and X are always
+sent to the event platform together, so one can no longer wipe the other.
+
+**Sponsor files you can find by name and by level** *(✅ 2026-10-01)*. Every sponsor promotion graphic now also has a copy
+with the sponsor's public name in the file name (in a "By name" folder beside the originals), and every exhibitor wall
+is also filed under Platinum, Diamond, Gold or Feature by the booth the sponsor bought (in each level, when a sponsor has
+booths of two levels). The copies refresh within minutes of an upload; the original files keep their names, so
+everything that reads them keeps working.
+
+**The daily signing reminder shows the contract's items and amounts** *(fixed 2026-10-01)*. The reminder a signer gets
+every day until they sign carried an empty contract and "0 €" totals; it now shows the items, the amounts and the full
+contract PDF, exactly like the first signing mail.
+
+**"Follow" goes to the event's LinkedIn page again** *(fixed 2026-10-01)*. The Follow button on the speakers' and
+sponsors' Social Media Announcements pages, and the follow link in the announcement e-mail, pointed at a LinkedIn
+address that does not exist. All of them now open the event's real company page — the same one the speakers' share
+text has always used.
+
+**Event partners have the organizer area** *(✅ 2026-10-01)*. Event partners (for example the venue's staff) now get the full
+organizer area — logistics, participants, sponsors and every other organizer page — next to their own partner menu.
+
+**Event partners see the organizer area read-only** *(✅ 2026-10-02)*. Partners can open every organizer page and download
+every export (attendee lists, dietary needs, rooming lists, badges and the rest), but cannot change anything there. A banner
+tells them so, and the buttons that would change something are switched off.
+
+**Ignore a discount code** *(✅ 2026-10-01)*. A coupon that is only a discount (for example 10 % for a community group, where
+the attendee pays the rest) can be set to **Ignore** on the coupon invoicing page: it is never invoiced, never shown as
+"needs a decision", never chased or mailed about, and it is listed apart under "Ignored codes" with a way to undo it.
+
+**The sponsor shop runs entirely in the hub** *(✅ 2026-10-01)*. The old webshop is closed, and the hub no longer reads
+or writes it: the hub counts the stock itself (a reservation or signed order takes it, a cancellation gives it back, and two
+sponsors can never buy the last unit at once), products, prices and pictures are maintained only in the hub, the swag
+catalogue shows the hub's own products and links to the hub's shop, and a swag credit is a hub credit. Every order
+bought in the old webshop is stored in the hub once, with its products, categories, prices and discounts, so sponsor
+tasks, purchase-driven tasks, invoicing of those orders, last edition's items, package availability and the order lists
+keep working exactly as before.
+
+**Company and contact details always match the accounting system** *(✅ 2026-10-01)*. Every sync compares every billing
+field of a company — legal name, VAT number, address, postcode, city, country, invoice e-mail, currency and VAT zone — and every
+contact's name, e-mail and phone with the accounting system, and updates the hub wherever they differ, an emptied field
+included. A contact whose e-mail is changed there keeps being the same person in the hub.
+
+**Invoices for customers without a postcode or city** *(fixed 2026-10-01)*. A sponsor-shop invoice for a customer whose
+accounting record has no postcode or city (an address kept on one line) was refused by the accounting system; the missing
+parts are now simply left out, so the invoice is created.
+
+**Agreed invoice date and payment days go on the invoice itself** *(✅ 2026-09-30)*. When special conditions set an
+invoice date and/or payment days for an order, the invoice is created straight away — dated the agreed day, with the
+agreed payment days as its payment term in the accounting system (a matching "net" term, or a due-date term for any
+other number of days). The contract says the same: "the invoice is dated …" and "… days net". Left blank, the invoice is
+dated the day it is created and uses the customer's standard terms.
+
+**The accounting system is the one source of every company's people and roles** *(✅ 2026-09-30)*. The contacts
+kept under each company in the accounting system — with their signer / event-coordinator roles — now reach the hub
+directly: at once when they are saved on the organizer's contacts page, and every 10 minutes. The old webshop's company
+module is no longer read or written anywhere. A signed sponsor's contacts become its linked users; a potential sponsor's
+contacts are only offered in the dropdowns (company page and order page) and become users when an organizer picks them
+— nobody is created or mailed just because they are in the accounting system. A role is never removed automatically:
+when the hub and the accounting system disagree (a signer or coordinator missing there, no signer or coordinator named,
+the same person under another e-mail) the company page shows a warning and the organizers get one mail about it.
+
+**Search the company list** *(✅ 2026-09-30)*. The organizer's company list has a search box — by legal or public name,
+company number, accounting customer number or VAT number — that works together with the sponsor / potential filter.
+
+**Tag only the company in its social-media posts** *(✅ 2026-09-30)*. A sponsor that prefers not to have its people
+tagged can be switched to company-only on the organizer's company page: its posts then mention the company on LinkedIn
+but not its signer or event coordinators. Every other sponsor keeps tagging its people, as before.
+
+**Merge two reservations into one contract** *(✅ 2026-09-30)*. When a company holds two reservations, one can be merged
+into the other from the reservations page: everything moves across at the same prices, nothing goes back on sale even for
+a moment, the earlier deadline is kept, and the emptied reservation is closed as merged — no mail to the sponsor. One
+contract then covers everything.
+
+**The organizers see every sponsor-shop mail and invoice** *(fixed 2026-09-30)*. Both organizer mailboxes are copied on
+every shop mail to a sponsor — offers, reservations and their reminders, signing requests and their reminders, signed
+contracts, cancellations, cart reminders — including the ones with a PDF or the booth map attached (those used to go
+without the copy). They also get a notice for every draft invoice created in the accounting system, and one with the
+reason when an order cannot be invoiced.
+
+**Reservations work on a phone, and show who can sign** *(fixed 2026-09-29)*. Choosing what to reserve is a tick list
+instead of a multi-select box (which gave no way to confirm on a phone), and the requester list shows every signer and event
+coordinator of the company, each labelled with their role.
+
+**Shop invoices match the contract line by line** *(✅ 2026-09-29)*. Every product is invoiced at its contract price, and
+the included booth furniture (named by its coupon code) and any swag credit each get their own discount line (1 × −amount)
+— exactly as the contract shows them, so the bookkeeper can tick each amount off.
+
+**Delete a draft invoice and it is rebuilt** *(fixed 2026-09-29)*. Whether a signed sponsor-shop order is invoiced is
+decided by the accounting system alone: if no draft or booked invoice carries the order's reference, the next run creates it
+again — delete a wrong draft and a corrected one appears, exactly as with webshop orders. Prepaid coupon ticket invoices
+work the same way (an invoice number typed in by hand is never touched), and a partner's own ticket purchase now keeps its
+invoice number too.
+
+**Withdrawn companies stay out of the way** *(✅ 2026-09-29)*. A withdrawn company is kept (nothing is deleted) but no
+longer shows in the organizer's companies list, the orders page or the company pick-list — e.g. a duplicate record.
+
+**You control every sponsor's public name** *(✅ 2026-09-29)*. The public name is filled in once, automatically, from the
+accounting name without its legal form ("Acme ApS" → "Acme") — and from then on it is yours: edit it in the companies
+list (a Public name column with Save on every row) and nothing automatic changes it again. It is the name on social media,
+the event platform, the website and the app; the legal name stays on the contract and the invoice.
+
+**One public name everywhere** *(fixed 2026-09-29)*. Every place that shows a sponsor publicly — social media posts, the
+event platform, the public sponsor list, the event assistant, upload and download file names — uses the sponsor's public
+name from the shop, never the legal name with its legal form; e-conomic contacts can be managed by sponsors who registered
+through the shop.
+
+**Public name and legal name kept apart for shop registrations** *(fixed 2026-09-29)*. A company that registers through
+the sponsor shop gets a public name without its legal form ("Acme" for "Acme ApS") — used everywhere public: the event
+website, the app, the event platform and social media. The legal name stays on the contract, the invoice and the
+accounting customer. An organizer's change to the public name on the company page now reaches all of those places.
+
+**Shop sponsors' uploads carry their company name** *(fixed 2026-09-29)*. Logos uploaded by a company that registered
+through the sponsor shop are named after the company (e.g. `acme-corp-logo-web-1.png`) and the upload notice names it,
+instead of an internal company number.
+
+**Orders list easier to read** *(✅ 2026-09-28)*: more room between the columns, and the status reads "Awaiting
+signature".
+
+**Confirm an order signed offline.** When a sponsor signs a printed or PDF contract, an organizer confirms the order with
+**Confirm order (signed offline)** — on the order page, or on the sponsor's cart when switched to that sponsor — and can
+attach the signed PDF, which is kept as the contract. The sponsor gets the same confirmation as after a digital
+signature.
+
+**Clearer registration.** Required fields in the sponsor registration are marked with a red **\***; optional ones carry no
+label at all. A company from **Northern Ireland** chooses United Kingdom and enters its VAT number with the **XI** prefix —
+that number is verified in the EU's VIES register like any EU number.
+
+**Safer company matching.** When the finance system gets a new sponsor with no webshop company, the existing webshop
+company with the same name is only taken over when it is the only one with that name and nothing the hub knows (another
+customer number, another CVR) says it is a different company. Otherwise the organizers are told, and no duplicate is made.
+
+**Link people from the list.** On the participants list, tick the rows that are the same person and press **Link selected
+as one person**. The row that holds everything (hotel, swag, lunch …) becomes the primary automatically; if no row can
+represent the others without losing something, nothing is linked and the reason is shown.
+
+**Your booth on the expo map.** The offer and the reservation mail now include the expo map with the offered or reserved
+booth clearly marked, so managers see exactly where they will stand. The booth map in the shop shows a booth as reserved
+only while a reservation actually holds it — a contract that is merely sent no longer blocks the booth.
+
+**The sponsor PowerPoint becomes the catalogue.** On the catalogue pages editor, organizers can **preview** and then
+**import** the edition's sponsor presentation straight from SharePoint: every titled slide becomes a page under its chapter,
+with its text, tables and pictures (scaled for the web), and each video slide links to its video. Slides that name who
+bought what, and the presentation's fixed prices, are left out — the shop shows the real, current prices. Imported pages
+arrive unpublished; **Publish all imported pages** puts them live after review, and a new import replaces only what an
+earlier import made.
+
+**The catalogue now matches the PowerPoint — with live numbers** *(✅ 2026-09-27)*:
+- **Live price and availability on every page.** Each package page shows its packages with today's price (discounts
+  included) and how many are left — "3 of 16 available · 2 reserved" — straight from the shop. Organizers can change which
+  packages a page shows.
+- **Booth photos where they belong.** The example booth photos appear on their tier's page, side by side with their
+  labels as captions, instead of on a separate page or one huge picture after another.
+- **Videos play in the page** instead of being a link.
+- **One Availability page — what sponsors ask for** *(✅ 2026-09-28)*. It replaces the presentation's hand-kept reservation
+  slides: the booth map (free booths clearly green) on top, then every package with its price, how many are left, and each
+  booth or timeslot as a coloured tag — green free, amber reserved, red sold — with the company that holds it, including
+  sales made in the old webshop. A clear switch at the top, **Show reserved & sold**, is off by default: the page then
+  shows only what is still available; switched on, it also shows what is reserved and sold, and by whom. Packages are
+  listed by name, so related ones sit together, and every package links to its page. Under each package a short line
+  says what the sponsor gets — for a session, leads for everyone who attends **and** everyone who bookmarked it; for a
+  master-class track, leads for every attendee of the class; for branding, who sees the logo and where. No amounts are ever
+  shown on the catalogue. It is always current — a refresh shows the latest, and an open page updates itself every minute.
+- **A page for every package.** A package the presentation has no page for (such as the fruit sponsorship) gets one from
+  its webshop description and picture, so nothing in the availability list is a dead end.
+- **A front page and the team.** The catalogue opens with the event, its dates and the venue; the team page shows each
+  person as a card with photo, name and role.
+- **Readable numbers.** The presentation's diagrams (the year-by-year numbers, the team, the opportunities overview) are
+  imported as text and tables instead of being missing or a photo of a screen.
+- **Leave out pages you do not want.** A page or a whole chapter removed once (the cover, the old logistics steps) stays
+  out on the next import.
+- **How to order.** The presentation's old "How to participate" (reserve by e-mail) is replaced by a page explaining how
+  ordering works now: register your company, sign in with a PIN, choose in the shop, reserve or order and sign online (or
+  on paper), pay, and follow Get Started — with the late-order surcharge taken from the edition's own rules.
+
+**Feature booths in the Booths tab too.** A branding package that includes a booth — such as the lounge sponsorship with
+booth E-27 — is now listed under **Booths** as well as under **Branding**, in the shop and in the public catalogue, so
+every available booth is in one place.
+
+## 245. "Something is missing" — marked for every role *(✅ 2026-09-27)*
+
+Every role now sees at a glance when something mandatory is left undone:
+
+- **Get Started** — an unfinished mandatory step is red, and the Get Started menu item shows a red **!**. This was
+  sponsors only; speakers, volunteers, crew, attendees and the rest now get the same. Optional steps (such as a
+  speaker's separate calendar e-mail) are never marked.
+- **Tasks** — the same red **!** appears on **My tasks** (and, for sponsors, **Sponsor tasks**) when a mandatory task is
+  past its due date and not done. Optional tasks never trigger it.
+
+## 249. Lower monitoring cost — quiet by default, full detail on demand *(✅ 2026-10-05)*
+
+The platform's background jobs no longer record every database statement and every outgoing web request around the
+clock. Monitoring cost for production dropped by roughly three quarters on the first day.
+
+- **Problems still show up.** Every warning, error and failure is still recorded, as is each job's own progress line, and
+  any database call that fails or takes a second or more.
+- **Full detail when you need it.** One setting turns detailed logging back on for an investigation, with no new release;
+  remove the setting again when you are done.
+- **Less background noise.** Routine performance counters and repetitive start-up messages from the jobs host are no
+  longer recorded.
+- **The test environment records nothing** unless switched on for an investigation.

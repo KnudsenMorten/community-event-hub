@@ -45,6 +45,7 @@ public sealed class CouponInvoiceJob
     private readonly CouponUsageReportService? _usageReports;
     private readonly Microsoft.Extensions.Configuration.IConfiguration? _config;
     private readonly CommunityHub.Core.Integrations.TestModeOptions? _testMode;
+    private readonly CouponPrepaidInvoiceNumberRefresher? _prepaidInvoices;
 
     public CouponInvoiceJob(
         CommunityHubDbContext db,
@@ -62,8 +63,11 @@ public sealed class CouponInvoiceJob
         CouponUsageReportService? usageReports = null,
         Microsoft.Extensions.Configuration.IConfiguration? config = null,
         // 🔴 §1119 — the host's own answer to "can I create an invoice at all?".
-        CommunityHub.Core.Integrations.TestModeOptions? testMode = null)
+        CommunityHub.Core.Integrations.TestModeOptions? testMode = null,
+        // §1312 — prepaid invoices: numbers kept current, and a deleted CEH draft raised again.
+        CouponPrepaidInvoiceNumberRefresher? prepaidInvoices = null)
     {
+        _prepaidInvoices = prepaidInvoices;
         _testMode = testMode;
         _usageReports = usageReports;
         _config = config;
@@ -210,6 +214,24 @@ public sealed class CouponInvoiceJob
             _log.LogInformation(
                 "§1119 CouponInvoiceJob: TestMode is on — invoicing sweep skipped, no problem mail.");
             return;
+        }
+
+        // 🔴 §1312 — PREPAID invoices follow e-conomic: numbers refreshed (a booked draft is renumbered), and a draft CEH
+        // raised that is gone from e-conomic is raised AGAIN (operator 2026-09-29: "make the same fix for the coupon prepaid
+        // invoice"). Before the coupon-invoicing switch below, because a prepaid invoice is created when a purchase is
+        // recorded, not by that sweep — and after TestMode, because it writes to e-conomic. Fail-soft: never stops the job.
+        if (_prepaidInvoices is not null)
+        {
+            try
+            {
+                var prepaid = await _prepaidInvoices.RefreshAsync(eventId.Value, ct);
+                await _draftNotices.NotifyAsync("Prepaid coupon tickets (re-created — the draft had been deleted)", prepaid.Recreated, ct);
+                foreach (var why in prepaid.RecreateProblems) _log.LogWarning("§1312 {Problem}", why);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _log.LogWarning(ex, "§1312 prepaid invoice refresh failed; the coupon job continues.");
+            }
         }
 
         if (!await _gate.IsFeatureEnabledAsync(FeatureKey, eventId.Value, ct))

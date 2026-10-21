@@ -190,8 +190,16 @@ public sealed class SessionBackstagePushService
         // moment to say so — the cheapest one, since the sessions API can never update it.
         if (s.IsCommonForAllTracks && trackSent)
         {
-            manual.Add("CLEAR the Track field — this session is Common for All Tracks "
-                + "(Backstage shows a track-less session that way)");
+            // 🔴 §1251 — THE ONE LINE HE MUST ACT ON, and the session is WRONG IN PUBLIC until he
+            // does. The track it went over with is a placeholder chosen only because Backstage
+            // refuses a track-less create; the session is Common for All Tracks and belongs under
+            // no track at all. Worded as an instruction with the consequence attached, because
+            // unlike the other entries in this list this one is not merely "unsendable" — it is
+            // incorrect, publicly, right now.
+            manual.Add("⚠️ CLEAR the Track field NOW — this session is Common for All Tracks and is "
+                + "currently showing under a placeholder track on the public agenda. It was given "
+                + "one only because Backstage refuses to create a session without a track; "
+                + "emptying the field is what makes it plenary");
         }
 
         // --- Genuinely absent, and only fixable BEFORE the create -------------------------
@@ -600,41 +608,69 @@ public sealed class SessionBackstagePushService
                 // round: a refused create returns HTTP 400 and writes NOTHING, so that one session
                 // is reported Failed with Zoho's own message and we learn the answer. Skipping, by
                 // contrast, is a permanent manual chore bought with an assumption.
-                string? trackId = null;
-                if (!s.IsCommonForAllTracks)
+                // 🔴 §1251 — a COMMON session is CREATED under a fallback track, not skipped.
+                //
+                // Operator 2026-09-20: *"you must create it to link the zoho id to ceh. that will
+                // not work if i create it manually"*. That is the deciding argument and it is about
+                // the LINK: a hand-made Backstage session never returns its id to CEH, so the two
+                // are never linked and every later check — drift diff, stale-link prune, change
+                // chaser — has nothing to hold. §1248's "create it by hand" traded the session's
+                // identity for the rest of the event to avoid a temporary wrong track.
+                //
+                // ⚠️ The wrong track IS public until he clears it; DescribeCreateGaps says so in
+                // the create mail. A deliberate trade, not a free fix.
+                // 🔒 Resolve-only, never create: inventing a track on a delete-less API is the one
+                // thing ruled out from the start. No fallback configured ⇒ skip as before.
+                var commonNeedsFallback = s.IsCommonForAllTracks && string.IsNullOrWhiteSpace(s.Track);
+                if (commonNeedsFallback)
                 {
-                    if (string.IsNullOrWhiteSpace(s.Track))
+                    var fallback = _zohoOptions.CommonSessionFallbackTrack;
+                    string? fallbackId = string.IsNullOrWhiteSpace(fallback)
+                        ? null
+                        : ResolveTrackId(fallback, (await _zoho.GetTracksAsync(token, ct)).ToList());
+                    if (fallbackId is null)
                     {
-                        failed++;
-                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null,
-                            "The session has no track — the Zoho create requires one."));
+                        skipped++;
+                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Skipped, null,
+                            string.IsNullOrWhiteSpace(fallback)
+                                ? SessionizeConventions.CommonTrackSkipReason
+                                : $"Common for all tracks — the configured fallback track "
+                                  + $"\"{fallback}\" does not exist in Backstage, and CEH will not "
+                                  + "create one. Create that track in Backstage (or correct "
+                                  + "Zoho:CommonSessionFallbackTrack) and it will be pushed."));
                         continue;
                     }
-                    string? trackError;
-                    (trackId, trackError) =
-                        await ResolveOrCreateTrackAsync(token, s.Track, trackCache, zohoWrites, ct);
-                    if (trackId is null)
-                    {
-                        failed++;
-                        items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null, trackError));
-                        continue;
-                    }
+                    trackCache[TargetTrackName(fallback)] = fallbackId;
                 }
-                else if (!string.IsNullOrWhiteSpace(s.Track))
+
+                string? trackId;
+                if (commonNeedsFallback)
                 {
-                    // 🔒 Ticked in the hub but still carrying a real track: that is §1011's original
-                    // case, and its decision stands — create WITH the track and tell him to clear it
-                    // in Backstage (`DescribeCreateGaps`). Only the track-LESS common session, which
-                    // is what the Sessionize `Common` marker now produces, goes over bare.
-                    string? trackError;
-                    (trackId, trackError) =
+                    // The fallback resolved above — an EXISTING Backstage track, never created.
+                    trackId = trackCache[TargetTrackName(_zohoOptions.CommonSessionFallbackTrack)];
+                }
+                else if (string.IsNullOrWhiteSpace(s.Track))
+                {
+                    // An ORDINARY session with no track is a real data gap, and fixable in CEH.
+                    failed++;
+                    items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null,
+                        "The session has no track — the Zoho create requires one."));
+                    continue;
+                }
+                else
+                {
+                    // A real track: resolve it, creating it in Backstage if missing (§299). This
+                    // also covers §1011's case — a session ticked Common in the hub that still
+                    // carries a track goes over WITH it, and the create mail says to clear it.
+                    var (resolved, trackError) =
                         await ResolveOrCreateTrackAsync(token, s.Track, trackCache, zohoWrites, ct);
-                    if (trackId is null)
+                    if (resolved is null)
                     {
                         failed++;
                         items.Add(new SessionPushResult(s.Id, s.Title, PushAction.Failed, null, trackError));
                         continue;
                     }
+                    trackId = resolved;
                 }
 
                 string? venueId = null;
@@ -923,7 +959,21 @@ public sealed class SessionBackstagePushService
             if (trackId is null)
                 return (false, trackError!, changes);
         }
-        else if (!session.IsCommonForAllTracks)
+        else if (session.IsCommonForAllTracks)
+        {
+            // §1251 — same fallback as the bulk pass, so the manual "push this one" button and the
+            // job cannot disagree about whether a common session is pushable.
+            var fallback = _zohoOptions.CommonSessionFallbackTrack;
+            if (string.IsNullOrWhiteSpace(fallback))
+                return (false, SessionizeConventions.CommonTrackSkipReason, changes);
+
+            trackId = ResolveTrackId(fallback, (await _zoho.GetTracksAsync(token, ct)).ToList());
+            if (trackId is null)
+                return (false, $"Common for all tracks — the configured fallback track "
+                    + $"\"{fallback}\" does not exist in Backstage, and CEH will not create one.",
+                    changes);
+        }
+        else
         {
             return (false, "The session has no track — the Zoho create requires one.", changes);
         }
@@ -1076,8 +1126,12 @@ public sealed class SessionBackstagePushService
         static string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "(empty)" : v!;
         var diffs = new List<string>();
 
+        // §1256d — compare as a READER sees it: two titles differing only by a double space are
+        // the same title everywhere they are rendered, so raising that as ACTION NEEDED asks for
+        // work that cannot change anything — and the mail's own HTML collapsed the difference, so
+        // the two values printed identically.
         if (!string.IsNullOrWhiteSpace(s.Title)
-            && !string.Equals(s.Title.Trim(), live.Title?.Trim(), StringComparison.Ordinal))
+            && TextComparison.DiffersVisibly(s.Title, live.Title))
             diffs.Add($"{ZohoFieldMap.Session.Title.GuiLabel}: '{Show(live.Title)}' → '{s.Title.Trim()}'");
 
         // §305: compare on the absolute instant; DISPLAY in Danish time (the operator

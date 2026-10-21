@@ -100,7 +100,14 @@ builder.Services.AddHealthChecks()
 if (!string.IsNullOrWhiteSpace(
         builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
 {
-    builder.Services.AddApplicationInsightsTelemetry();
+    // §1317 — performance counters off, and the outbound-HTTP metric series dropped
+    // (http.client.open_connections alone was ~100 MB/day on PROD). Nothing reads either — the
+    // Platform-health page queries requests, dependencies and exceptions. http.server.* stays.
+    builder.Services.AddApplicationInsightsTelemetry(o => o.EnablePerformanceCounterCollectionModule = false);
+    OpenTelemetry.Metrics.OpenTelemetryDependencyInjectionMetricsServiceCollectionExtensions
+        .ConfigureOpenTelemetryMeterProvider(builder.Services, metrics =>
+            OpenTelemetry.Metrics.MeterProviderBuilderExtensions.AddView(
+                metrics, "http.client.*", OpenTelemetry.Metrics.MetricStreamConfiguration.Drop));
 }
 
 // §392 — the organizer telemetry dashboard READS that same App Insights resource. Registered
@@ -528,6 +535,9 @@ builder.Services.AddRazorPages()
     .AddViewLocalization()
     // Unified AUDIT TRAIL (REQUIREMENTS §24): a global page filter auto-captures every
     // mutating user action. Type-activated per request so its scoped deps resolve.
+    // §1316: event partners see the organizer area read-only. Added FIRST so a refused change never reaches a handler
+    // (nothing changed, so the audit filter inside it records nothing either).
+    .AddMvcOptions(o => o.Filters.Add<CommunityHub.Auth.EventPartnerReadOnlyFilter>())
     .AddMvcOptions(o => o.Filters.Add<CommunityHub.Audit.AuditPageFilter>());
 
 // Audit trail writer (append-only, edition-scoped). Scoped — holds the DbContext.
@@ -653,11 +663,18 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.ImpersonationAuditService
 // §303b: ModifyOnBehalfService DELETED — "Switch to user" is the ONE act-as feature.
 // §304: pending-speaker approval (category + ring; Save activates → flows to Zoho).
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SpeakerApprovalService>();
+// §1295 — the ring gate every volunteer-assignment write path depends on (a constructor
+// dependency of VolunteerStructureService / AllocationScenarioService / VolunteerPlanImportService,
+// so it must be registered before them).
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAssignmentGate>();
 builder.Services.AddScoped<CommunityHub.Core.Domain.VolunteerStructureService>();
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerScheduleBuilder>();
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerShiftService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.VolunteerHelpNotificationService>();
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
+// §1296 — the single hotel-coverage authority (standards + per-person extra + the resolver).
+// Registered before the hotel services and the form service, all of which depend on it.
+builder.Services.AddScoped<CommunityHub.Core.Entitlements.HotelCoverageService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelManagementService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelRoomBlockService>();
@@ -679,6 +696,8 @@ builder.Services.AddScoped<CommunityHub.Core.Volunteers.OrganizerAllocationServi
 // safe before they touch the live assignment tables; auto-seeds a backfill on a drop-out.
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.AllocationScenarioService>();
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.AvailabilityAutoAssignEngine>();
+// §1297 — the curated WORKER roster the planner scopes to, and the per-bucket preferred volunteers.
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerPlanningRosterService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.CommitNotificationService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.ICommitNotificationService>(
     sp => sp.GetRequiredService<CommunityHub.Core.Email.CommitNotificationService>());
@@ -779,6 +798,10 @@ builder.Services.AddScoped<CommunityHub.Core.Participants.ParticipantChecklistBu
 // §134 Speaker Readiness: read-only aggregator that rolls up a speaker's "am I ready?"
 // signals (details/headshot/hotel/dinner/uploads/master-class/tasks) from existing data.
 builder.Services.AddScoped<CommunityHub.Core.Participants.SpeakerReadinessService>();
+// §1255 Capability-based speaker access: the speaker hub is gated on OWNING A SPEAKER PROFILE,
+// not on Participant.Role == Speaker, so an organizer / volunteer / attendee who also speaks
+// reaches her own sessions. See ParticipantCapabilities.
+builder.Services.AddScoped<CommunityHub.Core.Domain.SpeakerAccessService>();
 // §135 Sponsor Deliverables Tracker: read-only aggregator that rolls up a sponsor company's
 // lifecycle stages (onboarding/logo/booth-materials/booth-members/tasks) with done + overdue
 // vs deadline, from existing SponsorInfo / uploads / booth members / ParticipantTask data.
@@ -1030,6 +1053,7 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeVariableResolver>(
 // 🔒 Registered in BOTH hosts (see JobsServiceRegistration) — a service in one host only deploys
 // green and then fails on the first tick ([[ceh-di-two-hosts]]).
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMePostComposer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeMailPreview>();   // §1313 real text + picture in the SoMe organizer mails
 // §828 — the event-post deck importer (his markdown drop-box → the Type 5 post repo).
 // 🔒 WEB-ONLY, and for a stronger reason than the two above: the import is an OPERATOR ACTION
 // (he clicks it after landing a new deck), never a timer. §828.1's overwrite tick is a per-post
@@ -1175,7 +1199,9 @@ builder.Services.AddSingleton(sp =>
         credentialKey: CommunityHub.Core.Integrations.ZohoAccessTokenCache.CredentialKeyFor(
             zoho.ClientId, zoho.RefreshToken));
 });
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>();
+// §1361 — every Zoho API call is paced (one budget per process) and paused after "Request limit exceeded".
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>()
+    .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.ZohoRequestPacer());
 // Anonymous attendee telemetry (public "who's coming" page) — aggregate Zoho stats, cached.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.AttendeeTelemetryService>();
 // Pushes a sponsor's company overview/short-description into the Backstage
@@ -1192,7 +1218,6 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorCompanyMembersh
 // §1236 — which company a sponsor contact is acting for (the portal switcher). Scoped: it reads the
 // request's cookie and re-validates it against the contact's links on every read.
 builder.Services.AddScoped<CommunityHub.Sponsors.SponsorActingCompanyService>();
-builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorContactSyncService>();
 // Stage 4b: create/link Zoho sponsor + exhibitor records from webshop data. The
 // exhibitor-create seam (exhibitor_requests) — Live; CanCreate guards it when the
 // booth-category id isn't configured (then only sponsor create happens).
@@ -1215,8 +1240,6 @@ builder.Services.AddSingleton(backstageExhibitorWebOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.IBackstageExhibitorApi,
     CommunityHub.Core.Integrations.LiveBackstageExhibitorApi>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoProvisionService>();
-// §1158 — the one-time public-name sweep (organizer-triggered from SponsorAdmin; never on a timer).
-builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorPublicNameNormalizer>();
 // §1173 — carry a sponsor profile forward when a company re-registers under a new legal entity.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorProfileCarryForward>();
 // §1165 — the sponsor swag catalogue, read from the webshop products.
@@ -1225,6 +1248,50 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorSwagCatalogServ
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogCreditService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogHoldService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SwagCatalogAnnouncementService>();
+// §1305 — LIVE availability for the CEH sponsor shop: every page that shows stock asks the webshop.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopStockService>();
+// §1312 — the old webshop's orders, stored in CEH once (the webshop is closed); every reader of old orders uses this.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource, CommunityHub.Core.Integrations.Webshop.WebshopOrderArchiveSource>();
+// §1305 — the rest of the CEH sponsor shop (cart, contract, registration, reservations, catalogue).
+{
+    var shopOptions = new CommunityHub.Core.Config.ShopConfigOptions();
+    builder.Configuration.GetSection(CommunityHub.Core.Config.ShopConfigOptions.SectionName).Bind(shopOptions);
+    builder.Services.AddSingleton(shopOptions);
+    builder.Services.AddSingleton<CommunityHub.Core.Config.ShopConfigLoader>();
+    var captchaOptions = new CommunityHub.Core.Integrations.Webshop.ShopCaptchaOptions();
+    builder.Configuration.GetSection(CommunityHub.Core.Integrations.Webshop.ShopCaptchaOptions.SectionName).Bind(captchaOptions);
+    builder.Services.AddSingleton(captchaOptions);
+    builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Webshop.ShopCaptcha>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopSettings>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopCompanyService>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopOrderService>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopBoothMapPicture>();   // §1312 booth on the map in the offer / reservation mails
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopCatalogDeckImporter>();   // §1312 sponsor deck → catalogue
+    builder.Services.AddSingleton<CommunityHub.Core.Integrations.Webshop.ShopCatalogDeckImportRunner>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopPackageAvailability>();   // §1312 live package availability in the catalogue
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopMailer>();
+    // §1312 — e-conomic → hub people and roles, run at once when an organizer or sponsor saves e-conomic contacts.
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopErpRoleSyncService>();
+    builder.Services.AddSingleton<CommunityHub.Core.Integrations.Webshop.ShopContractPdfService>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopSigningService>();
+    // §1305 — the organizer's "Create the e-conomic draft invoice now" on /Organizer/ShopOrders (the hourly job runs in
+    // the jobs host). Uses the web host's live e-conomic client; creation still needs ExternalWrites:ErpShopInvoiceCreate.
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopDraftInvoiceService>();
+    // §1305 item 11 — AI booth detection on the expo layout (organizer button). One call per click, a big picture:
+    // bounded, so an unresponsive endpoint fails with a message rather than holding the request.
+    builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Webshop.ShopBoothDetector>(c => c.Timeout = TimeSpan.FromSeconds(110));
+    // Registration validates Danish CVRs; the web host had no validator registered before §1305 (only the
+    // ERP paths in the Jobs host used one). TryAdd, so a later host-wide registration wins.
+    Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton<
+        CommunityHub.Core.Integrations.Erp.ICvrValidator, CommunityHub.Core.Integrations.Erp.CvrValidator>(builder.Services);
+    builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Webshop.ShopVatChecker>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopRegistrationService>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopEntitlementService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopReservationService>(); // §1308
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopCompanyDirectoryService>(); // §1309
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopOrderSource>();
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopBoothMapService>();
+}
 builder.Services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadSyncService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadCaptureService>();
@@ -1294,18 +1361,7 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerSessionsService>()
 // DbContext); uses the ambient TimeProvider for the saved-at stamp.
 builder.Services.AddScoped<CommunityHub.Core.Attendees.AttendeePlanService>();
 
-// --- Company Manager (sponsor-side company + contacts source of truth) ----
-// Used by /Sponsor/Index to render a read-only "Sponsor details" card
-// pulled from the webshop (company name, website, LinkedIn, X) with a
-// button back to the configurator for updates.
-var cmOptions = new CommunityHub.Core.Integrations.CompanyManagerOptions();
-builder.Configuration.GetSection(CommunityHub.Core.Integrations.CompanyManagerOptions.SectionName).Bind(cmOptions);
-builder.Services.AddSingleton(cmOptions);
-// Bounded, jittered transient-fault retry (5xx/408/429/timeout) so a momentary
-// upstream blip from Company Manager doesn't surface as a hard failure (2026-06-27 incident).
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>()
-    .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
-    .AddCredentialFailureAlert("Company Manager");
+// 🗑 §1312 — Company Manager is retired (operator 2026-09-30: "we dont use company manager anymore").
 
 // --- Content Studio: WordPress + LinkedIn content connector & template engine (§31) --
 // DRAFT-ONLY: the WordPress connector always posts status=draft (operator validates
@@ -1386,9 +1442,13 @@ builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicConta
     CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>()
     .AddCredentialFailureAlert("e-conomic");
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
-// ERP→webshop reconcile (create missing webshop users + set defaults from ERP
-// contact roles + alert on missing roles).
-builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
+// 🔴 §1312 — the e-conomic CUSTOMER client on the WEB host too. Sponsor registration (ShopRegistrationService, a web page)
+// creates the e-conomic customer; the client was registered only on the Functions host, so on PROD the first real
+// registration (2026-09-27) silently skipped e-conomic (operator: "the registraion of balanceme newer hit erp … critical
+// bug, as erp is master for every registration"). Writes still pass the host's external-write guard (§340-H).
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicErpClient,
+    CommunityHub.Core.Integrations.Erp.LiveEconomicErpClient>()
+    .AddCredentialFailureAlert("e-conomic");
 
 // 🔴 §786.6 — THE FX PROVIDER, AND WHY IT IS REGISTERED HERE.
 //
@@ -1474,20 +1534,8 @@ else
         CommunityHub.Core.Email.NullSponsorErpCoordinatorSource>();
 }
 
-// --- WooCommerce (sponsor orders, displayed on /Sponsor/Index) ------------
-// Web-side WooCommerce client renders the "Sponsor orders" section on
-// /Sponsor/Index. Same shape as the Jobs / OneShot wiring.
-var wooOptions = new CommunityHub.Core.Integrations.WooCommerceOptions();
-builder.Configuration.GetSection(CommunityHub.Core.Integrations.WooCommerceOptions.SectionName).Bind(wooOptions);
-builder.Services.AddSingleton(wooOptions);
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.WooCommerceClient>()
-    // §649 — retry a WooCommerce 429 instead of failing the caller. Same reasoning as the Jobs
-    // host: read-only pulls, and the handler already classifies 429 as transient.
-    .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
-    .AddCredentialFailureAlert("WooCommerce");
-// In-memory cache for sponsor-orders rendering: WooCommerce + products
-// enrichment is ~2-3 seconds and the same sponsor will refresh the page
-// repeatedly. 5-minute TTL keyed on company id.
+// 🗑 §1312 — the WooCommerce client is gone: the old webshop is closed; its orders are stored in CEH (IWebshopOrderSource).
+// In-memory cache (sponsor-orders rendering and the other short-lived page caches).
 builder.Services.AddMemoryCache();
 
 // --- REQUIREMENTS §684 — the task-body model (definitions in code, bodies in Markdown) ----
@@ -1602,6 +1650,16 @@ builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationIngestService>
 // §753 — device self-service onboarding + the health-telemetry directive. Registered once and used
 // by BOTH the provisioning endpoint and the heartbeat, so the two cannot return different answers.
 builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationProvisioningService>();
+// §1259 — the web-kiosk option: pairing an iPad to an existing EvaluationDevice, and telling it
+// which session is running. Votes still go through the unchanged ingest contract.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationKioskService>();
+// §1303 — organizer PIN for kiosk setup + one-tap enrolment of Intune tablets. The PIN is an app
+// setting (EvaluationKiosk__Pin), never in the repo; the guard is a singleton so the attempt limit
+// holds across requests.
+builder.Services.Configure<CommunityHub.Core.Evaluation.EvaluationKioskOptions>(
+    builder.Configuration.GetSection(CommunityHub.Core.Evaluation.EvaluationKioskOptions.SectionName));
+builder.Services.AddSingleton<CommunityHub.Core.Evaluation.KioskPinGuard>();
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.IntuneKioskDirectory>();
 // §743 C3 — mirror CEH's sessions + rooms into the evaluation model, and backfill attribution.
 builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationSessionSyncService>();
 // §743 C7 — derive the satisfaction figures from the raw responses (nothing is stored).
@@ -1913,6 +1971,146 @@ app.MapGet("/speaker-photo/{file}", async (
     return photo is null
         ? Results.NotFound()
         : Results.File(photo.Content, photo.ContentType);
+}).AllowAnonymous();
+
+// §1305: a CEH shop product picture, streamed from its SharePoint copy with the app's own
+// credentials (a browser holds no SharePoint session). Bounded: only a picture row the catalogue
+// import created can be served — the id is looked up in ShopProductImages, never a path from the URL.
+// A picture not yet copied falls back to its webshop URL, which is public media.
+// ANONYMOUS for PUBLISHED products only: the public sponsor catalogue (§1305 item 10b) shows them, and the
+// same pictures are public in the webshop anyway. A private / draft / removed product's picture needs sign-in.
+app.MapGet("/shop-image/{id:int}", async (
+        int id,
+        HttpContext http,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore store,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+        CancellationToken ct) =>
+{
+    var img = await db.ShopProductImages.AsNoTracking()
+        .Where(i => i.Id == id)
+        .Select(i => new { i.SharePointItemId, i.ContentType, i.SourceUrl, i.Product.Status })
+        .FirstOrDefaultAsync(ct);
+    if (img is null) return Results.NotFound();
+    if (img.Status != CommunityHub.Core.Domain.ShopProductStatus.Published && http.User.Identity?.IsAuthenticated != true)
+        return Results.NotFound();
+    // A CEH-uploaded picture has no webshop URL to fall back to.
+    var fallback = img.SourceUrl.StartsWith(CommunityHub.Core.Domain.ShopProductImage.CehUploadPrefix, StringComparison.Ordinal)
+        ? Results.NotFound() : Results.Redirect(img.SourceUrl);
+    if (img.SharePointItemId is null || !store.CanRead) return fallback;
+
+    var bytes = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(
+        // §1312 — keyed on the upload too: a replaced picture overwrites the SAME SharePoint file (same item id), so a key of
+        // the item id alone kept serving the old bytes for 30 minutes (operator 2026-09-27: "i upload pic, but it doesnt
+        // work or replace anything"). Every upload gets a new SourceUrl.
+        cache, $"shop-image:{img.SharePointItemId}:{img.SourceUrl}", async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+        return await store.DownloadAsync(img.SharePointItemId, ct);
+    });
+    return bytes is null
+        ? fallback
+        : Results.File(bytes, img.ContentType ?? "image/jpeg");
+}).AllowAnonymous();
+
+// §1312 — a picture imported from the sponsor deck into the catalogue (ShopCatalogDeckImporter). Bounded: only a file
+// named catalog-* that exists in the shop's products folder — never a path from the URL. Anonymous, like the catalogue.
+// §1315 — a sponsor's web logo for the PUBLIC sponsors page, served through the hub: the stored SharePoint address answers 403
+// to anyone not signed in to the tenant (operator 2026-09-28: "this page is all screwed up"). Bounded: only the raster logo of
+// an ACTIVE sponsor of the active edition — never a path from the URL. Listing cached 10 min, the file 30 min.
+app.MapGet("/sponsor-logo/{companyId}", async (
+        string companyId,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore store,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+        CancellationToken ct) =>
+{
+    if (!store.CanRead) return Results.NotFound();
+    var logo = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+        db.SponsorInfos.Where(s => s.SponsorCompanyId == companyId && s.Status == CommunityHub.Core.Domain.SponsorStatus.Active
+                                   && db.Events.Any(e => e.Id == s.EventId && e.IsActive))
+            .Select(s => s.LogoRasterPath), ct);
+    if (CommunityHub.Core.Reminders.PublicSponsorsService.SharePointLocation(logo) is not { } at) return Results.NotFound();
+    var ext = Path.GetExtension(at.FileName).ToLowerInvariant();
+    var type = ext switch { ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".gif" => "image/gif", ".webp" => "image/webp", _ => null };
+    if (type is null) return Results.NotFound();
+
+    var files = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(cache, "sponsor-logo-files:" + at.Folder, async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
+        return (await store.ListAsync(at.Folder, ct)).ToDictionary(f => f.Name, f => f.ItemId, StringComparer.OrdinalIgnoreCase);
+    });
+    if (files is null || !files.TryGetValue(at.FileName, out var itemId))
+    {
+        // A logo uploaded after the listing was cached — list once more.
+        files = (await store.ListAsync(at.Folder, ct)).ToDictionary(f => f.Name, f => f.ItemId, StringComparer.OrdinalIgnoreCase);
+        Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, "sponsor-logo-files:" + at.Folder, files, TimeSpan.FromMinutes(10));
+        if (!files.TryGetValue(at.FileName, out itemId)) return Results.NotFound();
+    }
+    var bytes = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(cache, "sponsor-logo:" + itemId, async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+        return await store.DownloadAsync(itemId, ct);
+    });
+    return bytes is null ? Results.NotFound() : Results.File(bytes, type);
+}).AllowAnonymous();
+
+app.MapGet("/shop-catalog-image/{name}", async (
+        string name,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore store,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+        CancellationToken ct) =>
+{
+    if (!name.StartsWith(CommunityHub.Core.Integrations.Webshop.ShopCatalogDeckImporter.PicturePrefix, StringComparison.Ordinal)
+        || !name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || name.Contains('/') || name.Contains('\\')
+        || !store.CanRead
+        || !paths.TryResolve(CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorWebshopProducts, out var folder))
+        return Results.NotFound();
+    var files = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(cache, "shop-catalog-files:" + folder, async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+        return (await store.ListAsync(folder, ct)).ToDictionary(f => f.Name, f => f.ItemId, StringComparer.OrdinalIgnoreCase);
+    });
+    if (files is null || !files.TryGetValue(name, out var itemId))
+    {
+        // Just imported? The cached listing predates the picture — list once more.
+        files = (await store.ListAsync(folder, ct)).ToDictionary(f => f.Name, f => f.ItemId, StringComparer.OrdinalIgnoreCase);
+        Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, "shop-catalog-files:" + folder, files, TimeSpan.FromMinutes(5));
+        if (!files.TryGetValue(name, out itemId)) return Results.NotFound();
+    }
+    var bytes = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(cache, "shop-catalog-image:" + itemId, async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+        return await store.DownloadAsync(itemId, ct);
+    });
+    return bytes is null ? Results.NotFound() : Results.File(bytes, "image/jpeg");
+}).AllowAnonymous();
+
+// §1305 item 11 — the expo layout picture behind the booth map, from the SharePoint webshop folder (file name
+// in shop.<edition>.json → boothMap.imageFileName). Anonymous: the public sponsor catalogue shows the map.
+// Bounded to that one configured file in that one registered folder.
+app.MapGet("/shop-boothmap-image", async (
+        CommunityHub.Core.Integrations.Webshop.ShopSettings settings,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore store,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+        CancellationToken ct) =>
+{
+    var name = settings.Shop().BoothMap.ImageFileName;
+    if (string.IsNullOrWhiteSpace(name) || !store.CanRead
+        || !paths.TryResolve(CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorWebshopProducts, out var folder))
+        return Results.NotFound();
+    var bytes = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(cache, "shop-boothmap:" + name, async e =>
+    {
+        e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
+        var file = (await store.ListAsync(folder, ct))
+            .FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+        return file is null ? null : await store.DownloadAsync(file.ItemId, ct);
+    });
+    if (bytes is null) return Results.NotFound();
+    var type = name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
+    return Results.File(bytes, type);
 }).AllowAnonymous();
 
 // §153: DIRECT download of the speaker presentation template — streamed from SharePoint with the

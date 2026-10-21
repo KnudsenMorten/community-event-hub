@@ -53,7 +53,7 @@ public class SoMeTemplatesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Templates = await _templates.ListAsync(me.EventId, ct);
         // A warning survives the redirect: the save SUCCEEDED, and the wording is what needs saying.

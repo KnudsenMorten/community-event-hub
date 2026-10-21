@@ -20,6 +20,9 @@ public enum SoMeAnnouncementStage
 
     /// <summary>It publishes within 24 hours.</summary>
     DayBefore,
+
+    /// <summary>§1290 — it has gone live; the mail carries the link to the post.</summary>
+    Live,
 }
 
 /// <summary>What one notification pass did.</summary>
@@ -74,7 +77,26 @@ public sealed class SoMeAnnouncementNotifier
 
     /// <summary>The ledger key — post AND stage, so the two sends never collapse into one.</summary>
     public static string OccasionKeyFor(int postId, SoMeAnnouncementStage stage) =>
-        $"some-announcement:{postId}:{(stage == SoMeAnnouncementStage.Scheduled ? "scheduled" : "day-before")}";
+        $"some-announcement:{postId}:" + stage switch
+        {
+            SoMeAnnouncementStage.Scheduled => "scheduled",
+            SoMeAnnouncementStage.DayBefore => "day-before",
+            _ => "live",
+        };
+
+    /// <summary>§1290 — the live mail's own template and reminder type (its own ring and ledger rows).</summary>
+    public const string LiveMailKey = "some-post-live";
+
+    /// <summary>
+    /// §1290 — how far back a published post still earns a "your post is live" mail. 🔒 Bounded so
+    /// that switching the mail on for the first time, or a job outage, never mails people about
+    /// posts that went out weeks ago.
+    /// </summary>
+    public static readonly TimeSpan LiveLookback = TimeSpan.FromHours(48);
+
+    /// <summary>The public address of a published LinkedIn post (same form as the organizer mail).</summary>
+    public static string PostUrl(string externalPostId) =>
+        $"https://www.linkedin.com/feed/update/{externalPostId}";
 
     public async Task<SoMeAnnouncementNotifyResult> RunAsync(int eventId, CancellationToken ct = default)
     {
@@ -120,9 +142,27 @@ public sealed class SoMeAnnouncementNotifier
             }
         }
 
+        // ---- §1290 — the LIVE stage: published, with an id to link to, within the lookback ------
+        var liveSince = now - LiveLookback;
+        var live = await _db.SoMePosts
+            .Where(p => p.EventId == eventId
+                        && !p.IsDeleted
+                        && p.Status == SoMePostStatus.Published
+                        && p.PublishedAtUtc != null && p.PublishedAtUtc >= liveSince
+                        && p.ExternalPostId != null && p.ExternalPostId != ""
+                        && p.SubjectKey != null)
+            .ToListAsync(ct);
+
+        foreach (var post in live)
+        {
+            var audience = await AudienceForAsync(post, eventId, ct);
+            recipientCount += audience.Count;
+            foreach (var r in audience) due.Add(BuildLive(post, r));
+        }
+
         var sent = await _engine.SendDueAsync(eventId, due, ct);
 
-        var result = new SoMeAnnouncementNotifyResult(posts.Count, recipientCount, sent);
+        var result = new SoMeAnnouncementNotifyResult(posts.Count + live.Count, recipientCount, sent);
         _log?.LogInformation("SoMe announcement notices: {Result}.", result);
         return result;
     }
@@ -256,6 +296,32 @@ public sealed class SoMeAnnouncementNotifier
             MailKey: "some-announcement");
     }
 
+    /// <summary>§1290 — "your post is live", with the link to it.</summary>
+    private ReminderMessage BuildLive(SoMePost post, Recipient r)
+    {
+        var tokens = _templates.NewTokenSet(r.ParticipantId);
+        tokens["firstName"] = string.IsNullOrWhiteSpace(r.FullName) ? "there" : r.FullName!.Split(' ')[0];
+        tokens["announcementsPath"] = r.Path;
+        tokens["announcementSubject"] = SubjectLabel(post);
+        tokens["publishedWhen"] = SoMeDisplayTime.ToDanish(post.PublishedAtUtc!.Value)
+            .ToString("dddd dd MMM yyyy 'at' HH:mm");
+        tokens["postUrl"] = PostUrl(post.ExternalPostId!);
+        tokens["followBlock"] = FollowBlock(r.LinkedInStatus);
+
+        var rendered = _templates.Render(LiveMailKey, tokens);
+
+        return new ReminderMessage(
+            RecipientEmail: r.Email,
+            ReminderType: LiveMailKey,
+            OccasionKey: OccasionKeyFor(post.Id, SoMeAnnouncementStage.Live),
+            Subject: rendered.Subject,
+            HtmlBody: rendered.HtmlBody,
+            ParticipantId: r.ParticipantId,
+            RecipientName: r.FullName,
+            FeatureKey: FeatureKey,
+            MailKey: LiveMailKey);
+    }
+
     private static string SubjectLabel(SoMePost post) =>
         post.TemplateKind == SoMeTemplateKind.Sponsor
             ? "A post about your company"
@@ -275,7 +341,7 @@ public sealed class SoMeAnnouncementNotifier
     {
         const string invite =
             "<p style=\"margin:0 0 16px;\">Being mentioned is optional — if you'd like us to tag you, "
-            + "follow the <a href=\"https://www.linkedin.com/company/experts-live-denmark/\">Experts "
+            + "follow the <a href=\"" + EventLinkedInPage.Url + "\">Experts "
             + "Live Denmark</a> page on LinkedIn and we'll include you in posts about you.</p>";
 
         return status switch

@@ -28,6 +28,7 @@ public class VolunteerStructureModel : PageModel
     private readonly CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService _bulk;
     private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly CommunityHub.Core.Settings.RingResolver _rings;
+    private readonly CommunityHub.Core.Volunteers.VolunteerPlanningRosterService _roster;
 
     public VolunteerStructureModel(
         CommunityHubDbContext db,
@@ -35,7 +36,8 @@ public class VolunteerStructureModel : PageModel
         VolunteerStructureService svc,
         CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService bulk,
         CommunityHub.Core.Settings.FeatureGateService gate,
-        CommunityHub.Core.Settings.RingResolver rings)
+        CommunityHub.Core.Settings.RingResolver rings,
+        CommunityHub.Core.Volunteers.VolunteerPlanningRosterService roster)
     {
         _db = db;
         _participant = participant;
@@ -43,7 +45,12 @@ public class VolunteerStructureModel : PageModel
         _bulk = bulk;
         _gate = gate;
         _rings = rings;
+        _roster = roster;
     }
+
+    /// <summary>§1297 — CategoryId → the bucket's preferred volunteers, ranked.</summary>
+    public IReadOnlyDictionary<int, IReadOnlyList<(int ParticipantId, string Name, int Rank)>> Preferred
+    { get; private set; } = new Dictionary<int, IReadOnlyList<(int, string, int)>>();
 
     /// <summary>The task ids ticked in the bulk-select grid (posted form field).</summary>
     [BindProperty] public List<int> SelectedTaskIds { get; set; } = new();
@@ -83,7 +90,7 @@ public class VolunteerStructureModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
         await LoadAsync(me.EventId, ct);
@@ -143,33 +150,69 @@ public class VolunteerStructureModel : PageModel
     public Task<IActionResult> OnPostAppointSupervisorAsync(int categoryId, int? supervisorParticipantId, CancellationToken ct)
         => RunAsync(async a => { await _svc.AppointSupervisorAsync(a, categoryId, supervisorParticipantId, ct); return "Supervisor updated."; });
 
+    // §1297 — PREFERRED volunteers per bucket (Leth: "preferred volunteers per category are
+    // ranked higher"). A preference, not a reservation: it moves somebody to the front of the
+    // planner's candidate order for this bucket and never bypasses availability or overlap.
+    public Task<IActionResult> OnPostAddPreferredAsync(int categoryId, int? participantId, int rank, CancellationToken ct)
+        => RunAsync(async a =>
+        {
+            if (participantId is not int pid) return "Pick a volunteer first.";
+            await _roster.AddPreferredAsync(a, categoryId, pid, rank, ct);
+            return "Preferred volunteer recorded — the planner will rank them first for this bucket.";
+        });
+
+    public Task<IActionResult> OnPostRemovePreferredAsync(int categoryId, int participantId, CancellationToken ct)
+        => RunAsync(async a =>
+        {
+            await _roster.RemovePreferredAsync(a, categoryId, participantId, ct);
+            return "Preference removed.";
+        });
+
     public Task<IActionResult> OnPostCreateSubcategoryAsync(int categoryId, string name, string? description, CancellationToken ct)
         => RunAsync(async a => { await _svc.CreateSubcategoryAsync(a, categoryId, name, description, ct); return $"Subcategory '{name}' added."; });
 
     public Task<IActionResult> OnPostDeleteSubcategoryAsync(int subcategoryId, CancellationToken ct)
-        => RunAsync(async a => { await _svc.DeleteSubcategoryAsync(a, subcategoryId, ct); return "Subcategory removed."; });
+        => RunAsync(async a =>
+        {
+            await _svc.DeleteSubcategoryAsync(a, subcategoryId, ct);
+            return "Subcategory removed — its tasks now sit directly under the category.";
+        });
 
-    public Task<IActionResult> OnPostCreateTaskAsync(int subcategoryId, string title, string? description, DateOnly? due, string? shift, CancellationToken ct)
-        => RunAsync(async a => { await _svc.CreateTaskAsync(a, subcategoryId, title, description, due, shift, ct: ct); return $"Task '{title}' added."; });
+    /// <summary>§1299 — a task is created under a subcategory when one is chosen, otherwise
+    /// directly under the category. The subcategory is optional.</summary>
+    public Task<IActionResult> OnPostCreateTaskAsync(
+        int? subcategoryId, int? categoryId, string title, string? description, DateOnly? due, string? shift,
+        CancellationToken ct)
+        => RunAsync(async a =>
+        {
+            if (subcategoryId is int sid)
+                await _svc.CreateTaskAsync(a, sid, title, description, due, shift, ct: ct);
+            else if (categoryId is int cid)
+                await _svc.CreateTaskInCategoryAsync(a, cid, title, description, due, shift, ct: ct);
+            else
+                return "Pick a category first.";
+            return $"Task '{title}' added.";
+        });
 
     public Task<IActionResult> OnPostDeleteTaskAsync(int taskId, CancellationToken ct)
         => RunAsync(async a => { await _svc.DeleteTaskAsync(a, taskId, ct); return "Task removed."; });
 
-    [CommunityHub.Audit.Audit("Assigned a volunteer to a task", TargetType = "VolunteerTask")]
+    [CommunityHub.Audit.Audit("Queued a volunteer for a task", TargetType = "VolunteerTask")]
     public Task<IActionResult> OnPostAssignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
         => RunAsync(async a =>
         {
-            // RING-SCOPED (REQUIREMENTS §23a category 3): don't assign a volunteer who is
-            // above the volunteer-tasks feature's released ring. With the Broad default
-            // every volunteer is in scope; lower the ring in Settings to ring-test.
-            if (!await _gate.IsTargetInReleasedRingAsync("volunteer-tasks", a.EventId, volunteerParticipantId, _rings, ct))
-                return "That volunteer is above the volunteer-tasks feature's released ring (out of scope). Promote the ring in Settings to include them.";
+            // §1299 — Assign QUEUES (the shared volunteer queue); the volunteer sees nothing until
+            // the queue is published, and publishing is where the ring gates apply.
             await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct);
-            return "Volunteer assigned.";
+            return QueuedNotice;
         });
 
+    /// <summary>§1299 — said on every Assign, so nobody reads "assigned" as "the volunteer knows".</summary>
+    public const string QueuedNotice =
+        "Volunteer queued — not published yet. The volunteer sees nothing until the queue is published (Allocation → Publish).";
+
     public Task<IActionResult> OnPostUnassignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
-        => RunAsync(async a => { await _svc.UnassignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer unassigned."; });
+        => RunAsync(async a => { await _svc.UnassignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer removed from the task."; });
 
     /// <summary>
     /// BULK change-status across the ticked tasks (§20 universal CRUD + bulk). The
@@ -251,7 +294,7 @@ public class VolunteerStructureModel : PageModel
             else
             {
                 result = await _bulk.MoveAsync(actor.Value.EventId, SelectedTaskIds, targetId, ct);
-                landedIn = "the chosen sub-category";
+                landedIn = await _db.VolunteerSubcategories.Where(s => s.Id == targetId).Select(s => s.Category.Name + " → " + s.Name).FirstOrDefaultAsync(ct) ?? "the chosen sub-category";
             }
 
             var skipped = result.Skipped(requested);
@@ -286,11 +329,9 @@ public class VolunteerStructureModel : PageModel
             .OrderBy(c => c.Name)
             .SelectMany(c => new[]
                 {
-                    new SelectListItem(
-                        c.Subcategories.Count == 0
-                            ? $"{c.Name}  (whole category — creates “General”)"
-                            : $"{c.Name}  (whole category)",
-                        $"c:{c.Id}"),
+                    // §1299 — a category target means exactly the category: the tasks sit
+                    // directly under it, no subcategory is picked or invented.
+                    new SelectListItem($"{c.Name}  (category — no subcategory)", $"c:{c.Id}"),
                 }
                 .Concat(c.Subcategories
                     .OrderBy(s => s.Name)
@@ -312,5 +353,50 @@ public class VolunteerStructureModel : PageModel
             .Select(p => new SelectListItem(
                 string.IsNullOrWhiteSpace(p.FullName) ? p.Email : p.FullName, p.Id.ToString()))
             .ToList();
+
+        // §1297 — read straight from the context rather than through the roster service: this is
+        // the read path and the page's OnGet already gates on the organizer role. (The WRITE
+        // handlers go through the service, which enforces it server-side of its own accord.)
+        var prefs = await _db.VolunteerCategoryPreferences
+            .Where(p => p.EventId == eventId)
+            .Select(p => new
+            {
+                p.CategoryId,
+                p.ParticipantId,
+                p.Rank,
+                Name = p.Participant.FullName != "" ? p.Participant.FullName : p.Participant.Email,
+            })
+            .ToListAsync(ct);
+
+        Preferred = prefs
+            .GroupBy(p => p.CategoryId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<(int, string, int)>)g
+                    .OrderBy(p => p.Rank).ThenBy(p => p.Name)
+                    .Select(p => (p.ParticipantId, p.Name, p.Rank))
+                    .ToList());
+
+        // §1299 — who is QUEUED (not yet published) on each task, from the one shared volunteer
+        // queue, so the tree shows "who got what" before the volunteers can see it.
+        Queued = (await _db.TaskAllocationDrafts
+                .Where(d => d.EventId == eventId && d.TargetRole == ParticipantRole.Volunteer)
+                .Select(d => new { d.TaskId, d.ParticipantId })
+                .ToListAsync(ct))
+            .GroupBy(d => d.TaskId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)g.Select(x => x.ParticipantId).ToList());
+
+        PersonName = people.ToDictionary(
+            p => p.Id, p => string.IsNullOrWhiteSpace(p.FullName) ? p.Email : p.FullName);
     }
+
+    /// <summary>§1299 — TaskId → volunteers queued on it (not published).</summary>
+    public IReadOnlyDictionary<int, IReadOnlyList<int>> Queued { get; private set; }
+        = new Dictionary<int, IReadOnlyList<int>>();
+
+    /// <summary>ParticipantId → display name, for the assignee/queued pills.</summary>
+    public IReadOnlyDictionary<int, string> PersonName { get; private set; } = new Dictionary<int, string>();
+
+    public string NameOf(int participantId) =>
+        PersonName.TryGetValue(participantId, out var n) ? n : $"#{participantId}";
 }

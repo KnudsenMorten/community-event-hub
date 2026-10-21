@@ -59,6 +59,12 @@ public class BucketAllocationModel : PageModel
     public bool AiEnabled { get; private set; }
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
+    /// <summary>§1297 — the last auto-assign run's per-task shortfall, one line each.</summary>
+    public IReadOnlyList<string> Shortfall { get; private set; } = Array.Empty<string>();
+
+    /// <summary>How many volunteers are on the worker roster — shown so the scope choice is informed.</summary>
+    public int RosterCount { get; private set; }
+
     /// <summary>Tasks grouped by Bucket, each with live coverage (red/green).</summary>
     public List<BucketGroup> Buckets { get; private set; } = new();
     public List<SelectListItem> VolunteerOptions { get; private set; } = new();
@@ -80,9 +86,10 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
+        if (TempData["PlannerShortfall"] is string[] lines) Shortfall = lines;
         await LoadAsync(me, ct);
         return Page();
     }
@@ -108,6 +115,14 @@ public class BucketAllocationModel : PageModel
                       $"{result.AssignmentsLinked} people linked.";
             if (result.NamesUnmatched > 0)
                 msg += $" {result.NamesUnmatched} name(s) could not be matched to a volunteer.";
+            // §1295 — say when a MATCHED person was held by the assignment gate. Without this the
+            // import reads "0 people linked" with no reason, which is indistinguishable from a
+            // broken matcher (§767) and sends someone hunting a data problem that isn't there.
+            if (result.AssignmentsHeldOutOfRing > 0)
+                msg += $" {result.AssignmentsHeldOutOfRing} matched volunteer(s) were NOT assigned: "
+                     + "volunteer task assignment is not released to them (Settings → Features → "
+                     + "“Volunteer task assignment”). The tasks imported; re-import after "
+                     + "releasing it to link them.";
             return RedirectToPage(new { Msg = msg });
         }
         catch (Exception ex)
@@ -125,18 +140,30 @@ public class BucketAllocationModel : PageModel
     /// the proposals in the same red/green simulation and edits/commits them. SILENT — no
     /// email is sent for a proposal (only Commit notifies).
     /// </summary>
-    public async Task<IActionResult> OnPostRunAutoAssignAsync(CancellationToken ct)
+    public async Task<IActionResult> OnPostRunAutoAssignAsync(bool everyone, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try
         {
-            var seeded = await _engine.SeedProposalsAsync(Actor(me), ParticipantRole.Volunteer, me.ParticipantId, ct);
-            var msg = seeded == 0
-                ? "Auto-assign found nothing new to propose (tasks already covered or no matching availability)."
-                : $"Auto-assign proposed {seeded} assignment(s) from availability — review the queue below, then Commit.";
-            return RedirectToPage(new { Msg = msg });
+            var result = await _engine.SeedProposalsAsync(
+                Actor(me), ParticipantRole.Volunteer, me.ParticipantId,
+                everyone ? PlannerScope.Everyone : PlannerScope.WorkersOnly, ct);
+
+            // §1297 — the per-task shortfall survives the redirect. A count in the flash
+            // message says HOW MUCH is missing; only this list says WHICH tasks, and the
+            // reason is what tells an organizer whether to recruit or to re-ask about hours.
+            TempData["PlannerShortfall"] = result.Shortfalls
+                .Take(60)
+                .Select(s =>
+                    $"{s.Short} short — {s.TaskTitle}"
+                    + (s.Day is { } d ? $" · {d:ddd dd MMM}" : "")
+                    + (s.Window is { } w ? $" {w}" : "")
+                    + $" — {s.Explain()}")
+                .ToArray();
+
+            return RedirectToPage(new { Msg = result.Summarize() });
         }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
@@ -176,12 +203,12 @@ public class BucketAllocationModel : PageModel
             // gate like all prod mail and no-ops on an empty affected set.
             await _notify.NotifyCommitAsync(Actor(me), r.AffectedParticipantIds, ParticipantRole.Volunteer, ct);
 
-            var msg = $"Committed {r.Committed} allocation(s).";
+            var msg = $"Published {r.Committed} assignment(s) to volunteers.";
             if (r.SkippedDuplicate > 0) msg += $" {r.SkippedDuplicate} already assigned (skipped).";
             if (r.SkippedInactive > 0)
                 msg += $" {r.SkippedInactive} skipped — those volunteers were deactivated after being queued (re-activate them and re-draft to allocate them).";
             if (r.SkippedOutOfRing > 0)
-                msg += $" {r.SkippedOutOfRing} left in the queue — those volunteers are above the feature's released ring (out of scope). Promote the ring in Settings, then commit again to include them.";
+                msg += $" {r.SkippedOutOfRing} left in the queue, unpublished — those volunteers are outside the released ring. Widen the ring in Settings → Features → Volunteers, then publish again to include them.";
             return RedirectToPage(new { Msg = msg });
         }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
@@ -231,11 +258,11 @@ public class BucketAllocationModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var task = await _db.VolunteerTasks
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category).Include(t => t.Subcategory)
             .FirstOrDefaultAsync(t => t.Id == taskId && t.EventId == me.EventId, ct);
         if (task is null) return RedirectToPage(new { Msg = "Task not found." });
 
-        var g = await _guidance.GenerateAsync(task.Title, task.Subcategory.Category.Name, task.ResponsibleTeam, ct);
+        var g = await _guidance.GenerateAsync(task.Title, task.Category.Name, task.ResponsibleTeam, ct);
         await svc.UpdateTaskDetailsAsync(Actor(me), taskId,
             prerequisites: g.Prerequisites, expectations: g.Expectations,
             // keep the rest of the fields as-is
@@ -256,11 +283,11 @@ public class BucketAllocationModel : PageModel
 
         var tasks = await _db.VolunteerTasks
             .Where(t => t.EventId == me.EventId)
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category).Include(t => t.Subcategory)
             .ToListAsync(ct);
 
         Buckets = tasks
-            .GroupBy(t => t.Subcategory.Category)
+            .GroupBy(t => t.Category)
             .Select(g => new BucketGroup(
                 g.Key.Id, g.Key.Name, g.Key.EldkLeadName,
                 g.Select(t => new TaskCard(
@@ -279,5 +306,7 @@ public class BucketAllocationModel : PageModel
             .ToListAsync(ct);
 
         Draft = await _alloc.LoadDraftAsync(actor, ct);
+
+        RosterCount = await _db.VolunteerPlanningRoster.CountAsync(r => r.EventId == me.EventId, ct);
     }
 }

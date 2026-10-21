@@ -1,0 +1,63 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopReservationsModel
+@{
+    ViewData["Title"] = "Reservation rights";
+}
+
+<div class="card">
+    <h1>Reservation rights — next edition</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Returning sponsors may reserve what they had last edition (booths, sessions, branding) during the reservation window:
+           <strong>@(Model.Window.OpensOnDate?.ToString("yyyy-MM-dd") ?? "not set")</strong> to
+           <strong>@(Model.Window.ClosesOnDate?.ToString("yyyy-MM-dd") ?? "not set")</strong> (<code>shop.&lt;edition&gt;.json → reservation</code>).
+           While it is open, the signer and default event coordinator get a weekly reminder with a sign-in link until everything is reserved or declined.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        <h2>1 · Export (in the edition that is ending)</h2>
+        <form method="post" asp-page-handler="Export"><button type="submit">Download what every company had (both shops)</button></form>
+
+        <h2>2 · Import (in the new edition's environment)</h2>
+        <form method="post" asp-page-handler="Import" enctype="multipart/form-data" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="file" name="file" accept="application/json,.json" required />
+            <button type="submit">Import</button>
+        </form>
+        <p style="font-size:13px;color:#4b5563;">Creates the companies and their signer / event coordinator as candidates (nobody is a sponsor of the new
+           edition until they sign) and matches each item to this edition's product by booth, timeslot or name.</p>
+
+        <h2>Rights</h2>
+        @if (Model.Rights.Count == 0) { <p>Nothing imported.</p> }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table>
+                <thead><tr><th>Company</th><th>Had</th><th>Matched to</th><th>State</th></tr></thead>
+                <tbody>
+                @foreach (var r in Model.Rights)
+                {
+                    <tr>
+                        <td>@r.CompanyName</td>
+                        <td>@r.ProductName <div style="font-size:12px;color:#6b7280;">@r.SourceEdition</div></td>
+                        <td>
+                            <form method="post" asp-page-handler="Match" style="display:flex;gap:4px;">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <select name="productId" aria-label="Product for @r.ProductName">
+                                    <option value="">— none —</option>
+                                    @foreach (var p in Model.Products) { <option value="@p.Id" selected="@(r.MatchedProductId == p.Id)">@p.Name</option> }
+                                </select>
+                                <button type="submit">Save</button>
+                            </form>
+                        </td>
+                        <td>@(r.ClaimedAt is not null ? $"Reserved {r.ClaimedAt:yyyy-MM-dd}" : r.DeclinedAt is not null ? "Declined" : "Open")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+</div>

@@ -325,6 +325,17 @@ public class MonitorModel : PageModel
         var label = pool.TicketClassLabel ?? pool.TicketClassId;
         var result = await _prepaidInvoices.CreateForPurchaseAsync(
             rule, label, purchase.Id, extra, unitPrice.Value, ct);
+        if (result.DraftNumber is { } selfServiceDraft)
+        {
+            // §1312 — the number is STORED and the invoice marked as CEH's own, as on the organizer path: a partner's
+            // purchase left both empty, so its draft could neither be refreshed nor rebuilt if deleted.
+            purchase.ErpInvoiceNumber = selfServiceDraft.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            purchase.ErpInvoiceIsBooked = false;
+            purchase.ErpInvoiceRaisedByCeh = true;
+            purchase.ErpInvoiceConfirmedAt = now;
+            purchase.ErpInvoiceConfirmedByEmail = SelfServiceAuthor;
+            await _db.SaveChangesAsync(ct);
+        }
 
         return result.Created
             ? $"<strong>{extra}</strong> more ticket(s) added to <strong>{couponName}</strong> "

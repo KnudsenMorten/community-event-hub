@@ -47,6 +47,10 @@ public class FeedbackModel : PageModel
     [BindProperty] public int Rating { get; set; }
     [BindProperty] public string? Comment { get; set; }
 
+    /// <summary>§1278 — optional follow-up codes, sent with the rating (unknown codes are dropped).</summary>
+    [BindProperty] public string? PositivePoint { get; set; }
+    [BindProperty] public string? ImprovementPoint { get; set; }
+
     /// <summary>
     /// Honeypot. Hidden off-screen; a human never sees it, a bot fills every input. Any value ⇒
     /// silent success with no write, so a scripted submitter learns nothing from the response.
@@ -56,6 +60,25 @@ public class FeedbackModel : PageModel
     public int[] RatingOrder => EvaluationRatingLabels.Order;
     public static string LabelFor(int rating) => EvaluationRatingLabels.Label(rating);
     public static string ColourFor(int rating) => EvaluationRatingLabels.Colour(rating);
+
+    /// <summary>
+    /// §1355 — the drawn face for a rating, the same four mouths as the kiosk and the built box (broad smile,
+    /// smile, straight, frown), in near-black. Drawn, not emoji, so every phone shows the same face.
+    /// </summary>
+    public static Microsoft.AspNetCore.Html.HtmlString FaceSvg(int rating)
+    {
+        var mouth = rating switch
+        {
+            4 => "M24 56c8 20 44 20 52 0",
+            3 => "M29 60c7 11 35 11 42 0",
+            2 => "M31 63h38",
+            _ => "M27 70c8-18 44-18 52 0",
+        };
+        return new Microsoft.AspNetCore.Html.HtmlString(
+            "<svg viewBox=\"0 0 100 100\" aria-hidden=\"true\" class=\"fb-face\">"
+            + "<circle cx=\"34\" cy=\"38\" r=\"7\" fill=\"#17181a\"/><circle cx=\"66\" cy=\"38\" r=\"7\" fill=\"#17181a\"/>"
+            + $"<path d=\"{mouth}\" fill=\"none\" stroke=\"#17181a\" stroke-width=\"9\" stroke-linecap=\"round\"/></svg>");
+    }
 
     public async Task<IActionResult> OnGetAsync(string token, CancellationToken ct)
     {
@@ -109,7 +132,7 @@ public class FeedbackModel : PageModel
             return Page();
         }
 
-        var result = await _qr.SubmitAsync(Token, Rating, Comment, ct);
+        var result = await _qr.SubmitAsync(Token, Rating, Comment, PositivePoint, ImprovementPoint, ct);
 
         // 🔑 The window can close between rendering the form and posting it. The service re-checks,
         // and when it refuses the page must say so plainly rather than thank the attendee for

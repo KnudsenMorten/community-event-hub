@@ -48,7 +48,7 @@ public class VolunteerTasksExcelModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
         await Task.CompletedTask;
         return Page();
     }
@@ -57,7 +57,7 @@ public class VolunteerTasksExcelModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var bytes = await _excel.ExportAllAsync(me.EventId, ct);
         return File(bytes, VolunteerTaskExcelService.ContentType, "volunteer-tasks.xlsx");

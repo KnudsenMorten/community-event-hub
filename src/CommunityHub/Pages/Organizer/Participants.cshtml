@@ -138,6 +138,10 @@
                     <option value="test"        selected="@(Model.FlagFilter == "test")">Test users</option>
                     <option value="signer"      selected="@(Model.FlagFilter == "signer")">Signers</option>
                     <option value="coordinator" selected="@(Model.FlagFilter == "coordinator")">Event coordinators</option>
+                    @* §1257 — find a two-row human, and see who is already linked. Same filter,
+                       no new screen. "Same name" is a suggestion, never proof. *@
+                    <option value="samename"    selected="@(Model.FlagFilter == "samename")">Same name, two active rows</option>
+                    <option value="linked"      selected="@(Model.FlagFilter == "linked")">Linked duplicates (not counted)</option>
                 </select>
             </span>
             @* §735 (operator 2026-07-31: "add ability to filter on ring here") — the page already
@@ -208,7 +212,8 @@
                 <div class="bulk-bar"
                      style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
                             padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
-                    <button type="button" class="secondary js-bulk" data-handler="BulkDeactivate">Deactivate selected</button>
+                    <button type="button" class="secondary js-bulk" data-handler="BulkDeactivate"
+                            title="Same as each row's red Deactivate — also takes already-inactive rows off Pending speakers and every queue. Nothing is deleted.">Deactivate selected</button>
                     <button type="button" class="secondary js-bulk" data-handler="BulkReactivate">Activate selected</button>
                     <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                         <label for="BulkRole" style="margin:0;">Change persona to</label>
@@ -230,6 +235,10 @@
                         </select>
                         <button type="button" class="secondary js-bulk" data-handler="BulkSetRing">Apply ring</button>
                     </span>
+                    @* §1312 — operator 2026-09-27: link from the list, primary picked automatically ("easier to have a link button
+                       where i made the view"). *@
+                    <button type="button" class="secondary js-bulk" data-handler="BulkLinkSamePerson"
+                            title="Tick the rows that are the same human. The row that holds everything becomes the primary automatically; nothing a row holds is ever dropped.">Link selected as one person</button>
                 </div>
 
                 <div style="overflow-x:auto;">
@@ -334,7 +343,7 @@
                                    their WINNING active mirror row (§707.22a: newest LastSyncedAt,
                                    then Id). Zoho keeps that value current, so it is read, never
                                    copied onto the Participant. LAST in the chain: the sponsor rule is
-                                   locked (always the Company Manager public name) and a speaker's own
+                                   locked (always the CEH public name) and a speaker's own
                                    profile beats a ticket's billing company. *@
                                 else if (Model.AttendeeCompanyFor(p.Email) is { Length: > 0 } attendeeCompany)
                                 {
@@ -365,6 +374,14 @@
                                 @if (p.IsBoothMember) { <span class="pflag">Booth member</span> }
                                 @if (p.IsSigner) { <span class="pflag">Signer</span> }
                                 @if (p.IsEventCoordinator) { <span class="pflag">Coordinator</span> }
+                                @* §1257 — a linked duplicate is represented by its primary and is
+                                   excluded from every logistics count (hotel, swag, lunch, food,
+                                   expo and the Excel exports all read LogisticsAudience). Showing
+                                   it HERE is what makes that visible to the person ordering. *@
+                                @if (p.SamePersonAsId is int primaryId)
+                                {
+                                    <span class="pflag" title="Counted as one person with participant #@primaryId — excluded from hotel, swag, lunch and dinner counts">Linked → #@primaryId</span>
+                                }
                             </td>
                             <td>
                                 <details class="row-actions">
@@ -377,14 +394,51 @@
                                        title="Edit this person's name, email, persona and status">
                                         Edit / Modify
                                     </a>
-                                    <button type="submit" class="secondary"
-                                            asp-page-handler="ToggleActive"
-                                            asp-route-participantId="@p.Id"
-                                            asp-route-ActiveFilter="@Model.ActiveFilter"
-                                            asp-route-RoleFilter="@Model.RoleFilter"
-                                            asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter">
-                                        @(CommunityHub.Pages.Organizer.ParticipantsModel.IsActive(p) ? "Deactivate" : "Activate")
-                                    </button>
+                                    @* §1294 — ONE "Deactivate" on the row: the red one below. This toggle
+                                       used to read "Deactivate" on active rows too, so an active row
+                                       offered two Deactivate buttons that did subtly different things
+                                       (operator 2026-09-21: "we need to fix the name of this, as it is
+                                       confusing"). It now only ever activates. *@
+                                    @if (!CommunityHub.Pages.Organizer.ParticipantsModel.IsActive(p))
+                                    {
+                                        <button type="submit" class="secondary"
+                                                asp-page-handler="ToggleActive"
+                                                asp-route-participantId="@p.Id"
+                                                asp-route-ActiveFilter="@Model.ActiveFilter"
+                                                asp-route-RoleFilter="@Model.RoleFilter"
+                                                asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter"
+                                                title="Let @p.FullName sign in again">
+                                            Activate
+                                        </button>
+                                    }
+                                    @* §1257b — LINK / UNLINK this row as one human with another.
+                                       Direction matters and is chosen HERE, where both rows are on
+                                       screen: the row that holds the hotel/swag/lunch/dinner must
+                                       be the PRIMARY, and the guard refuses any link that would
+                                       drop one of those from the order. *@
+                                    @if (p.SamePersonAsId is not null)
+                                    {
+                                        <button type="submit" class="secondary"
+                                                asp-page-handler="UnlinkSamePerson"
+                                                asp-route-participantId="@p.Id"
+                                                title="Count this row on its own again">
+                                            Unlink
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <span style="display:inline-flex;gap:4px;align-items:center;">
+                                            <input type="number" name="primaryId" min="1" placeholder="same as #"
+                                                   style="width:96px;padding:5px 6px;border:1px solid #c4c8d4;border-radius:6px;"
+                                                   title="The OTHER row's ID — the one that keeps the hotel, swag, lunch and dinner" />
+                                            <button type="submit" class="secondary"
+                                                    asp-page-handler="LinkSamePerson"
+                                                    asp-route-participantId="@p.Id"
+                                                    title="Mark THIS row as a duplicate of the ID you typed (that row stays the counted one)">
+                                                Link as duplicate
+                                            </button>
+                                        </span>
+                                    }
                                     <!-- PRIMARY action: full impersonation. Re-issues the
                                          session AS this person and lands on their own hub, so
                                          the organizer sees the WHOLE app from their seat.
@@ -444,6 +498,9 @@
                                     <button type="button" class="js-delete-participant"
                                             data-pid="@p.Id" data-pname="@p.FullName"
                                             style="background:none;border:1px solid #e0b4b4;color:#b91c1c;cursor:pointer;padding:6px 10px;border-radius:6px;"
+                                            title="@(CommunityHub.Pages.Organizer.ParticipantsModel.IsActive(p)
+                                                ? "Stops sign-in and takes them off every list and queue. Nothing is deleted."
+                                                : "Already inactive — this also takes them off Pending speakers and every other queue, so imports and reminders leave them alone. Nothing is deleted.")"
                                             aria-haspopup="dialog">
                                         Deactivate
                                     </button>
@@ -504,7 +561,9 @@
         <div class="modal-card"
              style="background:#fff;border-radius:10px;max-width:440px;width:100%;
                     padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
-            <h3 id="deleteModalTitle" style="margin-top:0;">Delete participant?</h3>
+            @* §1256e — the heading and the typed word must agree with what the action DOES.
+               This dialog deactivates; it deletes nothing, as its own body has always said. *@
+            <h3 id="deleteModalTitle" style="margin-top:0;">Deactivate participant?</h3>
             <p id="deleteModalBody">
                 You are about to deactivate <strong id="deleteModalName"></strong>.
                 They can no longer sign in and they leave every active list, but
@@ -519,7 +578,7 @@
                 @* §334: the real guard is the SERVER check in OnPostDeleteAsync — this box is
                    only how a human supplies the phrase. *@
                 <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
-                    CommunityHub.Core.Organizer.TypedConfirmation.DeletePhrase,
+                    CommunityHub.Core.Organizer.TypedConfirmation.DeactivatePhrase,
                     "Deactivates the person. Nothing is deleted — their rows are kept and they can be reactivated.",
                     InputId: "deleteModalPhrase"))" />
                 <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">

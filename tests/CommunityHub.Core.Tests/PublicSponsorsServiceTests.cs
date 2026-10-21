@@ -147,6 +147,31 @@ public sealed class PublicSponsorsServiceTests
     }
 
     [Fact]
+    public async Task A_sponsor_without_an_upload_folder_is_named_from_what_the_hub_holds_and_its_logo_goes_through_the_hub()
+    {
+        // §1315 — operator 2026-09-28, the public Sponsors page: "(name not synced — CM id 102)" for six Gold sponsors whose
+        // name WAS on the sponsor row / shop company, and every SharePoint logo a broken image (403 for the public).
+        using var db = TestDb.New();
+        var evt = NewEvent(active: true);
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+        const string sp = "https://tenant.sharepoint.com/sites/X/Shared%20Documents/General/Events/ELDK%202027/EventHub/Sponsors/Logo/Web/";
+        db.SponsorInfos.Add(new SponsorInfo { EventId = evt.Id, SponsorCompanyId = "102", Tier = BoothTier.Gold, CompanyName = "Fellowmind", LogoRasterPath = sp + "fellowmind-logo-web-1.png" });
+        db.SponsorInfos.Add(new SponsorInfo { EventId = evt.Id, SponsorCompanyId = "41", Tier = BoothTier.Gold, LogoRasterPath = sp + "arrow.svg" });
+        db.ShopCompanies.Add(new ShopCompany { EventId = evt.Id, SponsorCompanyId = "41", PublicName = "ARROW", LegalName = "ARROW ECS DENMARK A/S" });
+        await db.SaveChangesAsync();
+
+        var byId = (await new PublicSponsorsService(db).BuildAsync())!.Groups.Single().Sponsors.ToDictionary(s => s.CompanyId);
+
+        Assert.Equal("Fellowmind", byId["102"].Name);
+        Assert.Equal("ARROW", byId["41"].Name);
+        Assert.Equal("/sponsor-logo/102", byId["102"].LogoPath);          // through the hub, not the 403 SharePoint address
+        Assert.Null(byId["41"].LogoPath);                                  // an SVG is never served — monogram instead
+        Assert.Equal(("General/Events/ELDK 2027/EventHub/Sponsors/Logo/Web", "fellowmind-logo-web-1.png"),
+            PublicSponsorsService.SharePointLocation(sp + "fellowmind-logo-web-1.png"));
+    }
+
+    [Fact]
     public async Task Name_resolves_through_fallback_chain_when_no_company_name()
     {
         using var db = TestDb.New();

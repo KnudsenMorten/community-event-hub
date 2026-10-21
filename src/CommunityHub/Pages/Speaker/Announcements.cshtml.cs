@@ -49,7 +49,10 @@ public class AnnouncementsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Speaker) { AccessDenied = true; return Page(); }
+        // §1255 — capability, not role (see ParticipantCapabilities).
+        if (!await CommunityHub.Core.Domain.ParticipantCapabilities.HasSpeakerHubAccessAsync(
+                _db, me.EventId, me.ParticipantId, me.Role, ct))
+        { AccessDenied = true; return Page(); }
 
         Announcements = await _query.ForSpeakerAsync(me.EventId, me.ParticipantId, ct);
         LinkedInStatus = await _db.Participants

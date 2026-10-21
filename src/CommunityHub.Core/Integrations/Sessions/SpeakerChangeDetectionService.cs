@@ -116,6 +116,23 @@ public sealed class SpeakerChangeDetectionService
         // auto-applies, never creates, never deletes. The feature kill switch below still governs
         // whether anything is enqueued.
 
+        // 🔴🔴 §1364 — ZOHO→CEH FOR SPEAKERS IS OFF PERMANENTLY, IN CODE, WITH NO SWITCH. DO NOT ADD ONE.
+        //
+        // Operator 2026-10-20: *"ceh owns the flow always ceh to zoho, newer opposite. oneway always"* · *"hub is the master.
+        // speakers can edit hub and we get notify to manually chg zoho"* · *"remove this from code so we dont fuck up
+        // again"*. This engine had auto-applied 223 Zoho values into CEH speaker profiles (2026-07-31 → 2026-10-20),
+        // overwriting speakers' own edits and breaking 3 names; the recovery took a point-in-time restore.
+        //
+        // The same shape as §1020 for sessions: the engine is kept (re-enabling is a DEPLOY, never a toggle), but it
+        // returns before reading anything. Differences between CEH and Backstage are REPORTED by the §1364 gap mail
+        // (SpeakerZohoGapReporter, CEH as master) and fixed in Backstage by hand.
+        if (DisabledInCode)
+        {
+            return Result.Inactive(
+                "Zoho→CEH speaker sync is PERMANENTLY OFF in code (§1364) — CEH is the master; differences are mailed by "
+                + "the speaker gap report. There is no setting for this; re-enabling it is a deploy.");
+        }
+
         // Pull the current speakers. Unavailable ⇒ no-op (never fake / never enqueue).
         var pull = await PullAsync(ct);
         if (!pull.IsAvailable)
@@ -183,11 +200,18 @@ public sealed class SpeakerChangeDetectionService
             // Always stamp the check time (proof the engine ran) — not a content write.
             profile.BackstageChangeCheckedAt = now;
 
+            // 🔴 §1363 — until 2026-10-20 the first name was read from a field Zoho leaves blank, so every stored baseline is
+            // the LAST name alone ("Christoffersen"). That is the reader's mistake, not a change in Zoho: correct the
+            // baseline QUIETLY, or the first pass after the fix would auto-apply 83 "name changed" deltas.
+            if (IsLastNameOnlyBaseline(profile.BackstageName, current))
+                profile.BackstageName = current.Name;
+
             var fieldChanges = SyncDeltaQueueService.BuildSpeakerZohoChanges(
                 profile.BackstageName, profile.BackstageTagline, profile.BackstageBio,
                 profile.BackstageCountry, profile.BackstageLinkedIn, profile.BackstageTwitter,
                 current.Name, current.Tagline, current.Bio,
-                current.Country, current.LinkedIn, current.Twitter);
+                current.Country, current.LinkedIn, current.Twitter,
+                current.FirstName, current.LastName);
 
             if (fieldChanges.Count == 0) continue; // nothing changed
 
@@ -236,6 +260,18 @@ public sealed class SpeakerChangeDetectionService
 
         return new Result(true, null, matched, seeded, changed, unmatched, Enqueued: enqueued);
     }
+
+    /// <summary>§1364 — Zoho→CEH speaker detection/apply is off in code. A const, not a setting: nobody can turn it on.</summary>
+    public const bool DisabledInCode = true;
+
+    /// <summary>
+    /// §1363 — TRUE when the stored Backstage name is the one the old reader produced: Zoho's last name alone, while Zoho
+    /// also holds a first name. Only then is the baseline corrected without a delta.
+    /// </summary>
+    public static bool IsLastNameOnlyBaseline(string? stored, BackstageSpeaker current) =>
+        !string.IsNullOrWhiteSpace(current.FirstName)
+        && !string.IsNullOrWhiteSpace(current.LastName)
+        && SyncDeltaQueueService.TextEquals(stored, current.LastName);
 
     /// <summary>Pull the current Backstage speakers (test seam overrides the live call).</summary>
     private async Task<BackstageSpeakersResult> PullAsync(CancellationToken ct)

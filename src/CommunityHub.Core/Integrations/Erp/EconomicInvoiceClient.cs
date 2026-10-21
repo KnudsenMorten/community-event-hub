@@ -72,7 +72,27 @@ public sealed record EconomicDraftInvoice(
     /// <summary>
     /// §811(c) — the SECOND employee reference (<c>references.salesPerson</c>). Null omits it.
     /// </summary>
-    int? SalesPersonEmployeeNumber = null);
+    int? SalesPersonEmployeeNumber = null,
+    /// <summary>
+    /// §1305 — true for a CEH SHOP order's invoice: it is then allowed by
+    /// <see cref="ExternalSystems.ErpShopInvoiceCreate"/> instead of <see cref="ExternalSystems.ErpInvoiceCreate"/>.
+    /// Every other invoice leaves it false and keeps the §1119 ceiling.
+    /// </summary>
+    bool CehShopOrder = false,
+    /// <summary>
+    /// §1312 — an AGREED payment term that overrules the customer's own (a CEH shop order with agreed payment days).
+    /// Null keeps the customer's terms (§811a).
+    /// </summary>
+    EconomicPaymentTermsChoice? PaymentTerms = null);
+
+/// <summary>§1312 — one payment term from e-conomic's <c>/payment-terms</c>.</summary>
+public sealed record EconomicPaymentTerm(int Number, string Name, string? Type, int? DaysOfCredit, string? Self);
+
+/// <summary>
+/// §1312 — the term an invoice is sent with. <c>DueDate</c> is sent only for a <c>dueDate</c>-type term
+/// (e-conomic's "Forfaldsdato"), which requires the invoice to carry the date itself.
+/// </summary>
+public sealed record EconomicPaymentTermsChoice(int Number, string? Self, DateOnly? DueDate = null);
 
 /// <summary>
 /// §795.4 — one invoice in e-conomic, as the coupon page needs it: which CEH reference it carries,
@@ -86,10 +106,10 @@ public sealed record EconomicDraftInvoice(
 /// number" is how a partner ends up looking for an invoice that does not exist under that number —
 /// and it is also the signal that there is still work to do (§795.3).
 /// </param>
-public sealed record EconomicInvoiceReference(string Reference, int Number, bool IsBooked)
+public sealed record EconomicInvoiceReference(string Reference, int Number, bool IsBooked, bool IsCreditNote = false)
 {
     /// <summary>How it is written for a person: <c>invoice 20147 (booked)</c> / <c>draft 1042</c>.</summary>
-    public string Display => IsBooked ? $"invoice {Number} (booked)" : $"draft {Number}";
+    public string Display => IsCreditNote ? $"credit note {Number}" : IsBooked ? $"invoice {Number} (booked)" : $"draft {Number}";
 }
 
 /// <summary>
@@ -129,6 +149,10 @@ public interface IEconomicInvoiceClient
 
     /// <summary>Creates the draft; returns e-conomic's draftInvoiceNumber.</summary>
     Task<int> CreateDraftInvoiceAsync(EconomicDraftInvoice invoice, CancellationToken ct = default);
+
+    /// <summary>§1312 — the agreement's payment terms (read-only). Empty when unknown.</summary>
+    Task<IReadOnlyList<EconomicPaymentTerm>> ListPaymentTermsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<EconomicPaymentTerm>>(Array.Empty<EconomicPaymentTerm>());
 }
 
 /// <summary>
@@ -242,7 +266,13 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
                 // exactly why EconomicInvoiceReference records which one this is.
                 var number = Int(row, booked ? "bookedInvoiceNumber" : "draftInvoiceNumber") ?? 0;
 
-                found.Add(new EconomicInvoiceReference(value!, number, booked));
+                // 🔴 §1362 — crediting an invoice in e-conomic COPIES its references, so the credit note carries the same
+                // marker as the invoice it credits (live 2026-10-20: invoice 199 and credit note 203 both "CouponPrepaid-8").
+                // A credit note is a booked invoice with a negative amount; it is flagged so nobody takes it for the invoice.
+                var credit = booked && row.TryGetProperty("netAmount", out var net)
+                             && net.ValueKind == JsonValueKind.Number && net.GetDecimal() < 0m;
+
+                found.Add(new EconomicInvoiceReference(value!, number, booked, credit));
             }
         }
 
@@ -308,6 +338,19 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
         return null;
     }
 
+    public async Task<IReadOnlyList<EconomicPaymentTerm>> ListPaymentTermsAsync(CancellationToken ct = default)
+    {
+        if (!CanWrite) return Array.Empty<EconomicPaymentTerm>();
+        var list = new List<EconomicPaymentTerm>();
+        foreach (var row in await PagedGetAsync($"{Base}/payment-terms?pagesize=1000", ct))
+        {
+            if (Int(row, "paymentTermsNumber") is not int number) continue;
+            list.Add(new EconomicPaymentTerm(number, Str(row, "name") ?? string.Empty,
+                Str(row, "paymentTermsType"), Int(row, "daysOfCredit"), Str(row, "self")));
+        }
+        return list;
+    }
+
     public async Task<int> CreateDraftInvoiceAsync(EconomicDraftInvoice invoice, CancellationToken ct = default)
     {
         // 🔴 §1119 — INVOICES ARE CREATED IN PRODUCTION ONLY, AND THIS IS THE ONLY METHOD THAT
@@ -330,12 +373,12 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
         // 🔒 Reads stay live on DEV, deliberately — §1037: *"as a general rule, importing into ceh is
         // 100% fine - but sending data out from dev is controlled"*. Looking up a customer or listing
         // what is already invoiced changes nothing in e-conomic; creating a draft does.
-        if (!await _writes.AllowAsync(
-                ExternalSystems.ErpInvoiceCreate, nameof(CreateDraftInvoiceAsync), ct))
+        var ceiling = invoice.CehShopOrder ? ExternalSystems.ErpShopInvoiceCreate : ExternalSystems.ErpInvoiceCreate;
+        if (!await _writes.AllowAsync(ceiling, nameof(CreateDraftInvoiceAsync), ct))
         {
             throw new InvalidOperationException(
                 "e-conomic draft invoice refused: this host may not CREATE invoices "
-                + "(Integrations:ExternalWrites:ErpInvoiceCreate, or the "
+                + $"(Integrations:ExternalWrites:{ExternalSystems.ConfigKeyFor(ceiling)}, or the "
                 + "Integrations:AllowExternalWrites default — §1119). Invoicing happens on PROD only.");
         }
 
@@ -390,9 +433,6 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
         var recipient = new Dictionary<string, object?>
         {
             ["name"] = c.Name,
-            ["address"] = c.Address,
-            ["zip"] = c.Zip,
-            ["city"] = c.City,
             ["country"] = string.IsNullOrWhiteSpace(c.Country) ? "DK" : c.Country,
             ["vatZone"] = new Dictionary<string, object?>
             {
@@ -412,6 +452,13 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
         }
 
         if (!string.IsNullOrWhiteSpace(c.Ean)) recipient["ean"] = c.Ean;
+
+        // 🔴 §1312 — an address part the customer does not have is LEFT OUT, never sent as null: the schema types them as
+        // optional strings, and a null is a 400 "Expected String but got Null. Path 'recipient.zip'" (operator 2026-10-01,
+        // SquaredUp ELDK27-0009 — a UK customer whose whole address sits on one line, with no zip / city).
+        if (!string.IsNullOrWhiteSpace(c.Address)) recipient["address"] = c.Address;
+        if (!string.IsNullOrWhiteSpace(c.Zip)) recipient["zip"] = c.Zip;
+        if (!string.IsNullOrWhiteSpace(c.City)) recipient["city"] = c.City;
 
         // 🔴 §811(c) — BOTH employee references are populated. Operator 2026-08-04: *"ref is Morten
         // Waltorp Knudsen, ref 2 is Martin Byskov"* … *"both must be mentioned"* … *"or opporsite"*.
@@ -475,7 +522,7 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
             return line;
         }).ToList();
 
-        return new Dictionary<string, object?>
+        var payload = new Dictionary<string, object?>
         {
             ["currency"] = invoice.Currency,
             ["customer"] = new Dictionary<string, object?>
@@ -508,10 +555,13 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
             // from their e-conomic record on this very run (`GetCustomerAsync`). CEH never picks a
             // term itself and has no default of its own. If an invoice shows terms he does not want,
             // the customer record is where they live — change it there and the next invoice follows.
+            //
+            // §1312 — the one exception: a CEH shop order with AGREED payment days sends the agreed term instead, so the
+            // invoice says what the signed contract says (operator 2026-09-30: "erp invoicing must match this").
             ["paymentTerms"] = new Dictionary<string, object?>
             {
-                ["paymentTermsNumber"] = c.PaymentTermsNumber,
-                ["self"] = c.PaymentTermsSelf,
+                ["paymentTermsNumber"] = invoice.PaymentTerms?.Number ?? c.PaymentTermsNumber,
+                ["self"] = invoice.PaymentTerms is { } pt ? pt.Self : c.PaymentTermsSelf,
             },
             ["recipient"] = recipient,
             ["notes"] = new Dictionary<string, object?>
@@ -522,6 +572,8 @@ public sealed class LiveEconomicInvoiceClient : IEconomicInvoiceClient
             ["references"] = references,
             ["lines"] = lines,
         };
+        if (invoice.PaymentTerms?.DueDate is DateOnly due) payload["dueDate"] = due.ToString("yyyy-MM-dd");
+        return payload;
     }
 
     private static string? Str(JsonElement e, string name) =>

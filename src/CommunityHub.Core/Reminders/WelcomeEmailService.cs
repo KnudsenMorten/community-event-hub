@@ -264,6 +264,72 @@ public sealed class WelcomeEmailService
         return true;
     }
 
+    /// <summary>
+    /// §1307 — the SPEAKER welcome for someone whose role is not Speaker but who speaks (a volunteer or organizer with a
+    /// categorised speaker profile). Operator 2026-09-26: <i>"so she will get speaker emails, welcome mails as speaker,
+    /// etc. But i don't her counted double"</i>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Its OWN once-ever ledger key, <c>welcome-speaker-hat:{id}</c> — the volunteer welcome
+    /// (<c>welcome:{id}</c>) is already recorded for her and must neither block this one nor be replaced by it.</para>
+    /// <para>Same gates as the speaker welcome: category set (the same decision that releases the Zoho push), the
+    /// welcome-email feature on, and the mail's own ring in the transport. A ring-dropped send is not recorded, so it
+    /// re-sends when the ring widens.</para>
+    /// </remarks>
+    public async Task<bool> SendSpeakerHatWelcomeAsync(int participantId, CancellationToken ct = default)
+    {
+        var participant = await _db.Participants.Include(p => p.Event).FirstOrDefaultAsync(p => p.Id == participantId, ct);
+        if (participant is null || !participant.IsActive || !CommunityHub.Core.Data.SpeakerHat.Roles.Contains(participant.Role))
+            return false;
+
+        var profile = await _db.SpeakerProfiles
+            .Where(sp => sp.EventId == participant.EventId && sp.ParticipantId == participant.Id)
+            .Select(sp => new { sp.ContactEmailOverride, sp.Category })
+            .FirstOrDefaultAsync(ct);
+        if (profile?.Category is not SpeakerCategory category) return false;
+
+        var occasionKey = $"welcome-speaker-hat:{participant.Id}";
+        if (await _db.SentReminders.AnyAsync(s => s.EventId == participant.EventId && s.ReminderType == ReminderType
+                                                  && s.OccasionKey == occasionKey, ct))
+            return false;
+        if (_gate is not null && !await _gate.IsFeatureEnabledAsync("welcome-email", participant.EventId, ct))
+            return false;
+
+        var toEmail = Domain.SpeakerProfile.EffectiveEmailFor(participant.Email, profile.ContactEmailOverride);
+        var tokens = _templates.NewTokenSet(participant.Id);
+        tokens["firstName"] = string.IsNullOrWhiteSpace(participant.FullName) ? "there" : participant.FullName.Split(' ')[0];
+        tokens["communityName"] = participant.Event.CommunityName;
+        tokens["eventDisplayName"] = participant.Event.DisplayName;
+        tokens["eventCode"] = participant.Event.Code;
+        tokens["roleName"] = FriendlyRoleName(ParticipantRole.Speaker);
+        tokens["roleGuidance"] = RoleGuidance(ParticipantRole.Speaker);
+        tokens["roleLine"] = WelcomeWithLoginEmailService.RoleLine(ParticipantRole.Speaker);
+        tokens["sponsorRole"] = string.Empty;
+        var mailKey = CommunityHub.Core.Email.WelcomeVariants.TemplateKeyFor(ParticipantRole.Speaker, category) ?? TemplateName;
+        var fileKey = CommunityHub.Core.Email.WelcomeVariants.TemplateFileKeyFor(mailKey);
+        tokens["speakerIntroHtml"] = CommunityHub.Core.Email.WelcomeVariants.SpeakerIntroHtml(category, participant.Event.DisplayName);
+
+        var rendered = _templates.Render(fileKey, tokens);
+        using (_context?.Set(new EmailContext(
+            ReminderType, participant.EventId, participant.Id, participant.FullName,
+            TemplateName: mailKey, FeatureKey: "welcome-email", Welcome: true)))
+        {
+            await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, ct);
+        }
+        if (_outcome is not null && !_outcome.LastSendDelivered) return false;
+
+        _db.SentReminders.Add(new SentReminder
+        {
+            EventId = participant.EventId,
+            RecipientEmail = participant.Email,
+            ReminderType = ReminderType,
+            OccasionKey = occasionKey,
+            SentAt = _clock.GetUtcNow(),
+        });
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
     private static string FriendlyRoleName(ParticipantRole role) => role switch
     {
         ParticipantRole.Organizer => "organizer",

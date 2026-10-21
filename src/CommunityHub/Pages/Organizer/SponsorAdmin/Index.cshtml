@@ -26,6 +26,17 @@
     {
         new("/Organizer/SponsorAdmin/Tasks", "Sponsor tasks", "Catalog of tasks every sponsor company has to complete; create, delete, or shift deadlines.", "sponsor-tasks"),
         new("/Organizer/SponsorAdmin/Leads", "Sponsor leads", "Leads, inquiries, and booth-meeting requests pulled daily from Zoho CRM; view per sponsor and download as CSV.", "sponsor-leads"),
+        @* §1305 — the new CEH sponsor shop (DEV-only until approved): orders from BOTH shops, special
+           conditions, registrations, and links to the catalogue, booth map, reservations and catalogue pages. *@
+        @* §1309 — the company directory: sponsor vs potential sponsor, pre-load, join requests. *@
+        new("/Organizer/ShopCompanies", "Companies", "Who is a sponsor and who is only a potential sponsor, the pre-load from the old webshop (no e-mails), and join requests to approve.", "sponsor-webshop"),
+        @* §1308 — organizer reservations for THIS edition (operator 2026-09-27: "re-introduce reservations for this event"). *@
+        new("/Organizer/ShopEventReservations", "Reservations — this event", "Hold a booth or products for a company (shown RESERVED, not selectable), with a requester, a deadline and a reminder cadence per reservation.", "sponsor-webshop"),
+        @* §1312 — operator 2026-09-27: "you need to add the product catalog in the sponsor view for organizers". *@
+        new("/Organizer/WebshopCatalog", "Products", "The webshop catalogue: prices and discounts, pictures, hidden/private products and categories.", "sponsor-webshop"),
+        @* §1312 — operator 2026-09-28: "where in sponsors in organizer interface do i find this link" → "yes add the tile". *@
+        new("/Organizer/ShopCatalogPages", "Catalogue pages", "The public sponsor catalogue: import the sponsor PowerPoint, review and publish the pages, edit text, and set the live availability pages.", "sponsor-webshop"),
+        new("/Organizer/ShopOrders", "Sponsor shop (new)", "Orders from both the webshop and the new CEH shop, special conditions per order, registered companies — and the catalogue, booth map, reservation rights and public catalogue pages.", "sponsor-webshop"),
         @* §1085 — status FIRST, and it is the same board every other role uses (deep-linked to the
            sponsor filter). The operator had two sponsor status boards and trusted neither; there is
            now one, and it reads the sponsor's own wizard instead of re-counting tasks. *@
@@ -52,9 +63,7 @@
         // `BreadcrumbHubCardCoverageTests.PrimaryHubOverrides` records it). These are the shortcut,
         // exactly like the pre-selection queue on the Volunteers hub (§1146b).
         new("/Organizer/EconomicContacts", "Sponsor contacts (finance system)",
-            "Create, edit and remove a sponsor's contacts and their Signer / Event Coordinator roles. The finance system is the master — changes flow from here to the webshop and the hub."),
-        new("/Organizer/SponsorWebshopCompany", "Sponsor webshop company & defaults",
-            "Edit a sponsor's Company Manager record — default signer, default event coordinator, internal notes. A coordinator change cascades to the hub and Zoho."),
+            "Create, edit and remove a sponsor's contacts and their Signer / Event Coordinator roles. The finance system is the master — changes flow from here to the hub at once."),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

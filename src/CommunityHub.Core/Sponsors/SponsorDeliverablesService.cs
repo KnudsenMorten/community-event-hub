@@ -107,6 +107,9 @@ public sealed class SponsorDeliverablesService
                  && s.Title != null && s.Title != "" && s.Abstract != null && s.Abstract != "" && s.Speakers.Any(), ct);
         var signals = BuildSignals(info, members, materials, wallFile, logoAudit, wallAudit, tasks, sessionRelevant, sessionDone);
 
+        // 🔴 §1312 — no name passed (the sponsor pages resolved it only through Company Manager) ⇒ CEH's own name, never the
+        // raw id: a company registered in the CEH shop read "ceh-14ca083d" on its Deliverables page.
+        companyName ??= await Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct);
         return SponsorDeliverablesCalculator.Compute(
             companyId, companyName ?? companyId, IsExhibitor(info, members, materials, wallFile, wallAudit, tasks),
             today, signals);

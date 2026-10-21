@@ -33,18 +33,18 @@ public sealed class ShipmentPurchasesTaskDataProvider : CategoryPurchasesTaskDat
     protected override string Category => "Package Handling";
 
     protected override string CannotCheckMessage =>
-        "We could not check your webshop orders right now, so we cannot show which shipment "
+        "We could not check your orders right now, so we cannot show which shipment "
         + "services you have already bought. Please check your order confirmation, or come back "
         + "shortly.";
 
     protected override string NothingBoughtMarkup =>
         ":::callout info\n"
-        + "**No shipment order detected** — we found nothing in your webshop orders under "
+        + "**No shipment order detected** — we found nothing in your orders under "
         + "**Package Handling**.\n\n"
         + "That is fine if you are not shipping anything to your booth, or are using your own "
         + "freight company.\n"
         + ":::";
 
     protected override string BoughtLeadIn =>
-        "We checked your webshop orders — you have already booked these shipment services:";
+        "We checked your orders — you have already booked these shipment services:";
 }

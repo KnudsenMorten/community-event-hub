@@ -38,20 +38,15 @@ public sealed class SponsorCoordinatorFormService : IWizardFormService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly SponsorZohoSyncService _zohoSync;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorCoordinatorFormService> _log;
 
     public SponsorCoordinatorFormService(
         CommunityHubDbContext db, TimeProvider clock, SponsorZohoSyncService zohoSync,
-        CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         ILogger<SponsorCoordinatorFormService> log)
     {
         _db = db;
         _clock = clock;
         _zohoSync = zohoSync;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
     }
 
@@ -164,22 +159,8 @@ public sealed class SponsorCoordinatorFormService : IWizardFormService
 
     private async Task<string?> ResolveSponsorNameAsync(string companyId, CancellationToken ct)
     {
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var cid))
-        {
-            try
-            {
-                var company = await _cm.GetCompanyAsync(cid, ct);
-                if (company is not null)
-                {
-                    var name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-                    if (!string.IsNullOrWhiteSpace(name)) return name;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Sponsor coordinator inline step: Company Manager lookup failed for {Co}.", cid);
-            }
-        }
-        return $"Company {companyId}";
+        // §1312 — CEH's own public name (Company Manager is retired).
+        if (await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) is { } local) return local;
+        return await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) ?? $"Company {companyId}";
     }
 }

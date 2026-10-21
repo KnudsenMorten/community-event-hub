@@ -438,6 +438,69 @@ public sealed class CouponInvoicingPoolPageTests
         Assert.Empty(await db.CouponPrepaidPurchases.ToListAsync());
     }
 
+    // ---------------------------------------------------------------------
+    //  §1362 — reducing a pool: a correction backed by a credit note
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// 🔴 Operator 2026-10-20: *"i need to reduce coupons for apento by -9 as it was a mistake … i will prepare
+    /// creditnote in erp"*. A NEGATIVE correction row: the original purchase and its invoice stay, nothing is invoiced.
+    /// </summary>
+    [Fact]
+    public async Task Reducing_a_pool_adds_a_correction_and_keeps_the_history()
+    {
+        using var db = NewDb();
+        var (org, pool) = await SeedAsync(db);
+        var first = await db.CouponPrepaidPurchases.SingleAsync();
+        first.ErpInvoiceNumber = "198";
+        first.UnitPriceDkk = 3000m;
+        await db.SaveChangesAsync();
+
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.PoolAllocationId = pool.Id;
+        model.PoolReduceTotal = 3;
+        model.PoolErpInvoiceNumber = " 205 ";
+        model.PoolPurchaseNotes = "Ordered by mistake";
+
+        Assert.IsType<RedirectToPageResult>(await model.OnPostReducePoolAsync(default));
+
+        var purchases = await db.CouponPrepaidPurchases.OrderBy(p => p.Id).ToListAsync();
+        Assert.Equal(2, purchases.Count);
+        Assert.Equal(5, purchases[0].Quantity);
+        Assert.Equal("198", purchases[0].ErpInvoiceNumber);        // the original invoice is untouched
+        var correction = purchases[1];
+        Assert.Equal(-2, correction.Quantity);
+        Assert.Equal("205", correction.ErpInvoiceNumber);          // the credit note
+        Assert.Equal(3000m, correction.UnitPriceDkk);              // the value nets down by what is credited
+        Assert.False(correction.ErpInvoiceRaisedByCeh);             // never "raised again" by the §1312 refresher
+        Assert.Equal("Ordered by mistake", correction.Notes);
+        Assert.Contains("max in Backstage to 3", model.Flash);
+
+        await model.OnGetAsync(default);
+        var balance = Assert.Single(Assert.Single(model.Rows, r => r.CouponName == "PARTNER-X").Pools).Balance;
+        Assert.Equal(3, balance.Purchased);
+        Assert.Equal(2, balance.Remaining);                         // one claimed
+        Assert.True(balance.IsBilled);
+    }
+
+    [Theory]
+    [InlineData(0)]   // one ticket is already claimed on the pool
+    [InlineData(5)]   // not lower than today
+    [InlineData(9)]   // that is an increase
+    public async Task A_reduction_below_the_claimed_tickets_or_not_lower_is_refused(int target)
+    {
+        using var db = NewDb();
+        var (org, pool) = await SeedAsync(db);
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.PoolAllocationId = pool.Id;
+        model.PoolReduceTotal = target;
+
+        await model.OnPostReducePoolAsync(default);
+
+        Assert.NotNull(model.FlashError);
+        Assert.Single(await db.CouponPrepaidPurchases.ToListAsync());
+    }
+
     /// <summary>An unbilled prepaid pool is surfaced at the top, like an unmapped coupon.</summary>
     [Fact]
     public async Task An_unbilled_prepaid_pool_needs_attention()
@@ -539,8 +602,32 @@ public sealed class CouponInvoicingPoolPageTests
         Assert.IsType<RedirectToPageResult>(await model.OnPostSetPoolThresholdAsync(default));
         Assert.IsType<RedirectToPageResult>(await model.OnPostSetPoolInvoiceAsync(default));
         Assert.IsType<RedirectToPageResult>(await model.OnPostClosePoolAsync(reopen: false, default));
+        Assert.IsType<RedirectToPageResult>(await model.OnPostReducePoolAsync(default));
         Assert.IsType<RedirectToPageResult>(await model.OnPostRemovePoolAsync(default));
         Assert.IsType<RedirectToPageResult>(await model.OnPostDeleteAsync(default));
+    }
+
+    /// <summary>
+    /// 🔴 §1341 — operator 2026-10-08: *"when i click 0 and set, it returns to 5 again"*. 0 was folded
+    /// into null ("use the default"), so switching the warning off silently restored it. 0 is kept;
+    /// only a blank field means the default.
+    /// </summary>
+    [Fact]
+    public async Task Warn_at_zero_is_kept_and_blank_means_the_default()
+    {
+        using var db = NewDb();
+        var (org, pool) = await SeedAsync(db);
+
+        var model = NewModel(db, new DefaultHttpContext { User = Session(org) });
+        model.PoolAllocationId = pool.Id;
+
+        model.PoolThreshold = 0;
+        Assert.IsType<RedirectToPageResult>(await model.OnPostSetPoolThresholdAsync(default));
+        Assert.Equal(0, (await db.CouponPrepaidAllocations.SingleAsync(a => a.Id == pool.Id)).LowBalanceThreshold);
+
+        model.PoolThreshold = null;
+        Assert.IsType<RedirectToPageResult>(await model.OnPostSetPoolThresholdAsync(default));
+        Assert.Null((await db.CouponPrepaidAllocations.SingleAsync(a => a.Id == pool.Id)).LowBalanceThreshold);
     }
 
     /// <summary>The flash survives the redirect and is shown by the following GET.</summary>
@@ -675,6 +762,27 @@ public sealed class CouponInvoicingPoolPageTests
         // alerts all read them as integers.
         Assert.Equal(1, (int)CouponBillingType.AllocatedPrepaymentByCustomer);
         Assert.Equal(2, (int)CouponBillingType.ClaimableAdHocPaymentByCustomer);
+
+        // §1312 — the Ignore choice (operator 2026-10-01: "would be nice with Ignore option"), stored as a NEW value.
+        Assert.Equal("Ignore — a discount code, nothing to bill", CouponInvoicingModel.DisplayName(CouponBillingType.Ignored));
+        Assert.Equal(4, (int)CouponBillingType.Ignored);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "CommunityHub.sln"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("repo root not found");
+    }
+
+    /// <summary>§1312 — ignored codes are listed apart (collapsed), with a "Stop ignoring" button, never in the main list.</summary>
+    [Fact]
+    public void Ignored_codes_are_listed_apart_with_a_way_back()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot(), "src", "CommunityHub", "Pages", "Organizer", "CouponInvoicing.cshtml"));
+        Assert.Contains("Model.Rows.Where(x => x.BillingType != CouponBillingType.Ignored)", page);
+        Assert.Contains("Ignored codes (@ignored.Count)", page);
+        Assert.Contains("Stop ignoring", page);
     }
 
     // ---------------------------------------------------------------------

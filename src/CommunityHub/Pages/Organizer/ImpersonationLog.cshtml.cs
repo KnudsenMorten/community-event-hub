@@ -31,7 +31,7 @@ public class ImpersonationLogModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs)
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs)
         {
             AccessDenied = true;
             return Page();

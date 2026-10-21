@@ -50,8 +50,13 @@ public class GraphicsModel : PageModel
         _linkedInPublish = linkedInPublish;
     }
 
-    public static readonly ParticipantRole[] EligibleRoles =
-        { ParticipantRole.Speaker };
+    /// <summary>
+    /// §1255 — speaker-hub access by CAPABILITY (a SpeakerProfile exists), not by
+    /// <c>Participant.Role</c>. See <see cref="ParticipantCapabilities"/>.
+    /// </summary>
+    private Task<bool> MayUseSpeakerHubAsync(CurrentParticipant me, CancellationToken ct) =>
+        ParticipantCapabilities.HasSpeakerHubAccessAsync(
+            _db, me.EventId, me.ParticipantId, me.Role, ct);
 
     /// <summary>
     /// §437: LinkedIn's composer with NOTHING prefilled — deliberately no <c>url=</c> and no
@@ -112,7 +117,7 @@ public class GraphicsModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         var result = await _linkedInPublish.PublishAsync(
             me.EventId, me.ParticipantId, graphicAssetId, me.FullName, me.Email, ct);
@@ -134,7 +139,7 @@ public class GraphicsModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         CanPost = _graphics.CanPostToSocial;
         CanPublishToLinkedIn = await _linkedInPublish.IsOfferedAsync(me.EventId, ct);

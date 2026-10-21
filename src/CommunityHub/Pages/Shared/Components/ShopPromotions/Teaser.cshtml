@@ -1,0 +1,72 @@
+@model CommunityHub.ViewComponents.ShopPromotionsView
+@using CommunityHub.Pages.Sponsor.Shop
+@* §1305 — the teaser bar: available branding options, sessions and swag, running left to right. ONE copy of the list
+   (operator 2026-09-26: "show each once"): it enters from the left edge, crosses the bar and leaves on the right, then
+   starts again. Hover or focus pauses it; with reduced motion it is a plain scrollable row.
+   It sits under the site menu on every sponsor page (operator 2026-09-26: "goal is to sell more"): a discount shows the
+   normal price struck through, 3 or fewer left says so, "Grab it" opens the shop, and ✕ hides it for this browser
+   session only — it is back on the next visit. *@
+@{
+    var seconds = Math.Max(18, Model.Items.Count * 6);
+}
+<section class="shop-teaser" id="shop-teaser" aria-label="Still available: branding, sessions and swag">
+    <span class="shop-teaser-label">Still available</span>
+    <div class="shop-teaser-window">
+        <ul class="shop-teaser-list" style="animation-duration:@(seconds)s;">
+            @foreach (var i in Model.Items)
+            {
+                var p = i.Product;
+                <li>
+                    <a href="@i.Href">
+                        <span class="shop-teaser-name">@p.Name</span>
+                        <partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="p" />
+                        @if (p.ManageStock && p.StockQuantity is int left && left is > 0 and <= 3)
+                        {
+                            <span class="shop-teaser-few">Only @left left</span>
+                        }
+                    </a>
+                </li>
+            }
+        </ul>
+    </div>
+    <a class="shop-teaser-grab" href="/Sponsor/Shop">Grab it &rarr;</a>
+    <button type="button" class="shop-teaser-close" aria-label="Hide the teaser bar for now" title="Hide for now">&times;</button>
+</section>
+<style>
+    .shop-teaser { display:flex; align-items:stretch; border:1px solid #bcd3ee; border-radius:10px; overflow:hidden; margin:8px 0 12px; background:#fff; }
+    .shop-teaser[hidden] { display:none; }
+    .shop-teaser-label { background:#1565c0; color:#fff; font-weight:700; font-size:13px; padding:8px 12px; display:flex; align-items:center; white-space:nowrap; position:relative; z-index:1; }
+    .shop-teaser-window { overflow:hidden; flex:1; position:relative; min-height:38px; }
+    .shop-teaser-list { position:absolute; top:0; left:0; display:flex; list-style:none; margin:0; padding:0; width:max-content;
+                        animation-name:shopteaser; animation-timing-function:linear; animation-iteration-count:infinite; }
+    .shop-teaser:hover .shop-teaser-list, .shop-teaser:focus-within .shop-teaser-list { animation-play-state:paused; }
+    .shop-teaser-list li a { display:flex; gap:8px; align-items:baseline; padding:8px 18px; white-space:nowrap; text-decoration:none; color:#1a1a2e; border-right:1px solid #e5e7eb; font-size:14px; }
+    .shop-teaser-list li a:hover { background:#eef4fb; }
+    .shop-teaser-name { font-weight:600; }
+    .shop-teaser-few { background:#b91c1c; color:#fff; font-size:12px; font-weight:700; padding:1px 7px; border-radius:999px; }
+    .shop-teaser-grab { background:#d97706; color:#fff !important; font-weight:700; font-size:14px; padding:8px 14px; display:flex; align-items:center;
+                        white-space:nowrap; text-decoration:none; position:relative; z-index:1; }
+    .shop-teaser-grab:hover { background:#b45309; }
+    .shop-teaser-close { background:#f1f5f9; color:#475569; border:none; border-left:1px solid #e5e7eb; font-size:20px; line-height:1; padding:0 12px;
+                         cursor:pointer; position:relative; z-index:1; border-radius:0; min-width:0; }
+    .shop-teaser-close:hover { background:#e2e8f0; }
+    /* Left to right, once: from fully outside on the left to fully outside on the right. */
+    @@keyframes shopteaser { from { left:0; transform:translateX(-100%); } to { left:100%; transform:translateX(0); } }
+    @@media (max-width:480px) { .shop-teaser-label { font-size:12px; padding:8px; } .shop-teaser-grab { padding:8px 10px; font-size:13px; } }
+    @@media (prefers-reduced-motion: reduce) {
+        .shop-teaser-list { animation:none; position:static; }
+        .shop-teaser-window { overflow-x:auto; }
+    }
+</style>
+<script>
+(function () {
+    var bar = document.getElementById('shop-teaser');
+    if (!bar) return;
+    var key = 'ceh-shop-teaser-hidden';
+    try { if (sessionStorage.getItem(key) === '1') bar.hidden = true; } catch (e) { }
+    bar.querySelector('.shop-teaser-close').addEventListener('click', function () {
+        bar.hidden = true;
+        try { sessionStorage.setItem(key, '1'); } catch (e) { }
+    });
+})();
+</script>

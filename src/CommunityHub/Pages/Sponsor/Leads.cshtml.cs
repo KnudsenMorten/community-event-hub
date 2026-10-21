@@ -83,7 +83,7 @@ public class LeadsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         // Sponsors see their own; Organizers can view too (read-only).
-        if (me.Role != ParticipantRole.Sponsor && me.Role != ParticipantRole.Organizer)
+        if (me.Role != ParticipantRole.Sponsor && !me.Role.HasOrganizerAccess())
         {
             AccessDenied = true;
             return Page();

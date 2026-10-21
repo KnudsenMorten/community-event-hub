@@ -333,6 +333,14 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
         return new StoredFile(path, webUrl, itemId);
     }
 
+    /// <summary>§1312 — the server-side copy (see <see cref="ISharePointFileStore.CopyToFolderAsync"/>).</summary>
+    public async Task<bool> CopyToFolderAsync(
+        string itemId, string relativeFolder, string fileName, CancellationToken ct = default)
+    {
+        await EnsureMayWriteAsync(nameof(CopyToFolderAsync), ct);
+        return await _client.CopyItemAsync(_options.SiteUrl, _options.DriveName, itemId, relativeFolder, fileName, ct);
+    }
+
     public async Task DeleteFromFolderAsync(
         string relativeFolder, string fileName, CancellationToken ct = default)
     {

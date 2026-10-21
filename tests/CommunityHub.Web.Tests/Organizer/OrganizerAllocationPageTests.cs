@@ -90,6 +90,15 @@ public sealed class OrganizerAllocationPageTests
             Id = EventId, Code = "OA27", CommunityName = "C", DisplayName = "OA 2027",
             StartDate = Day1, EndDate = Day1, IsActive = true,
         });
+        // §1295 — these page tests assert COMMIT behaviour, so the edition has volunteer task
+        // assignment released. The held state is covered in Core by VolunteerAssignmentGateTests.
+        db.FeatureSettings.Add(new FeatureSetting
+        {
+            EventId = EventId,
+            FeatureKey = CommunityHub.Core.Volunteers.VolunteerAssignmentGate.FeatureKey,
+            Enabled = true,
+            ReleasedToRingOverride = Ring.Broad,
+        });
         await db.SaveChangesAsync();
         return db;
     }
@@ -286,13 +295,24 @@ public sealed class OrganizerAllocationPageTests
     private static BucketAllocationModel NewBucketModel(
         CommunityHubDbContext db, Participant me, ICommitNotificationService notify)
         => new(db, new FakeAccessor(Session(me)), VolSvc(db),
-               new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), new FixedClock()),
+               new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), new FixedClock(), VolunteerAssignmentGate.For(db)),
                new VolunteerPlanParser(),
                new HeuristicTaskGuidanceGenerator(),
                Engine(db), notify, NullLogger<BucketAllocationModel>.Instance)
         {
             PageContext = new PageContext(),
+            // §1297 — the page carries the planner's per-task shortfall across the redirect in
+            // TempData, so the model needs one even in a unit test.
+            TempData = new Microsoft.AspNetCore.Mvc.ViewFeatures.TempDataDictionary(
+                new Microsoft.AspNetCore.Http.DefaultHttpContext(), new NullTempDataProvider()),
         };
+
+    private sealed class NullTempDataProvider : Microsoft.AspNetCore.Mvc.ViewFeatures.ITempDataProvider
+    {
+        public IDictionary<string, object?> LoadTempData(Microsoft.AspNetCore.Http.HttpContext context)
+            => new Dictionary<string, object?>();
+        public void SaveTempData(Microsoft.AspNetCore.Http.HttpContext context, IDictionary<string, object?> values) { }
+    }
 
     [Fact]
     public async Task Bucket_RunAutoAssign_seeds_volunteer_proposals()
@@ -304,7 +324,10 @@ public sealed class OrganizerAllocationPageTests
         AddTask(db, "ELDK-Volunteers", needed: 1);   // volunteer-routed team
 
         var model = NewBucketModel(db, org, new CountingNotifier());
-        var result = await model.OnPostRunAutoAssignAsync(default);
+        // §1297 — `everyone: true` is what the page's scope checkbox posts. These fixtures have no
+        // worker roster (an empty roster falls back to everyone anyway); passing it explicitly
+        // keeps the test independent of that fallback.
+        var result = await model.OnPostRunAutoAssignAsync(everyone: true, default);
 
         Assert.IsType<RedirectToPageResult>(result);
         var proposals = await db.TaskAllocationDrafts

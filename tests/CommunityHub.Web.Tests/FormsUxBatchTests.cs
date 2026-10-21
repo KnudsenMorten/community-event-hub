@@ -132,7 +132,8 @@ public sealed class FormsUxBatchTests
         new HotelModel(
             new HotelFormService(db, new FixedClock(),
                 new OrganizerActionItemService(db, new FixedClock()),
-                Loc(), NullLogger<HotelFormService>.Instance),
+                Loc(), NullLogger<HotelFormService>.Instance,
+                new CommunityHub.Core.Entitlements.HotelCoverageService(db, new FixedClock())),
             Accessor(http))
         .Bind(http);
 

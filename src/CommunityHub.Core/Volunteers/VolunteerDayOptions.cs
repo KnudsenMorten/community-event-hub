@@ -35,12 +35,24 @@ public static class VolunteerDayOptions
     /// <see cref="IsExclusive"/> marks the "all-or-nothing" choices (Full day /
     /// Not able to help) whose selection clears every other choice client-side.
     /// </summary>
+    /// <param name="Window">
+    /// §1297 — the option's hours as TYPED clock times, for the planner. <c>null</c> means
+    /// "no stated hours" (packing day, and the generic fallback set), which the matcher
+    /// reads as "available for anything that day" — see <see cref="DayWindow"/>.
+    /// <para>🔒 <b>This exists so nothing ever parses <see cref="Sub"/> or <see cref="Slot"/>
+    /// to recover the hours.</b> The Slot is a STORAGE identity and stale ones survive in
+    /// the database on purpose (a row saved as <c>[Morning 9–12]</c> still resolves to the
+    /// pre-day's <c>Morning 7–12</c> by Level fallback). Reading hours out of the stored
+    /// string would therefore schedule someone against a window that no longer exists.
+    /// Always go through <see cref="Resolve"/> to get the CURRENT option, then read this.</para>
+    /// </param>
     public sealed record Option(
         string Slot,
         string Title,
         string? Sub,
         VolunteerAvailabilityLevel Level,
-        bool IsExclusive);
+        bool IsExclusive,
+        TimeWindow? Window = null);
 
     // --- Reusable option fragments -----------------------------------------
     /// <summary>
@@ -53,10 +65,17 @@ public static class VolunteerDayOptions
     /// serves other editions and test fixtures. Those days have no known check-in time, and printing
     /// an invented one on a form a volunteer commits against is worse than printing none.
     /// </remarks>
-    private static Option Full(string? startsAt = null) =>
+    /// <param name="sub">
+    /// §1297a — an explicit display line, for a day whose full-day window does NOT simply run to
+    /// the afternoon option's end. 🔒 Used so a widened window is VISIBLE on the form rather than
+    /// only true inside the planner: a volunteer reading "from 07:00" next to "Afternoon 12–18"
+    /// reasonably concludes the day ends at 18:00, and quietly scheduling them to 18:30 would be
+    /// holding them to something the page never said.
+    /// </param>
+    private static Option Full(string? startsAt = null, TimeWindow? window = null, string? sub = null) =>
         new("Full day", "Full day",
-            startsAt is null ? "whole day available" : $"whole day available — from {startsAt}",
-            VolunteerAvailabilityLevel.Full, true);
+            sub ?? (startsAt is null ? "whole day available" : $"whole day available — from {startsAt}"),
+            VolunteerAvailabilityLevel.Full, true, window);
 
     /// <summary>
     /// §1134 — the morning window now differs PER DAY (operator 2026-08-25: setup 09:00, pre-day
@@ -71,11 +90,16 @@ public static class VolunteerDayOptions
     /// volunteer who saved <c>[Morning 9–12]</c> still re-selects Morning, and their next save
     /// re-tags the note with the new window. Nothing is lost and nothing has to be migrated.
     /// </remarks>
-    private static Option Morning(string hours) =>
-        new($"Morning {hours}", "Morning", hours, VolunteerAvailabilityLevel.Half, false);
+    private static Option Morning(string hours, TimeWindow? window = null) =>
+        new($"Morning {hours}", "Morning", hours, VolunteerAvailabilityLevel.Half, false, window);
 
-    private static Option Afternoon(string hours) =>
-        new($"Afternoon {hours}", "Afternoon", hours, VolunteerAvailabilityLevel.Half, false);
+    private static Option Afternoon(string hours, TimeWindow? window = null) =>
+        new($"Afternoon {hours}", "Afternoon", hours, VolunteerAvailabilityLevel.Half, false, window);
+
+    /// <summary>A clock time written the way the day sets below read best: <c>At(6, 40)</c>.</summary>
+    private static TimeOnly At(int hour, int minute = 0) => new(hour, minute);
+
+    private static TimeWindow Window(TimeOnly from, TimeOnly to) => new(from, to);
 
     private static Option NotAble() =>
         new("Not able to help", "Not able to help", "I cannot help this day", VolunteerAvailabilityLevel.Unavailable, true);
@@ -117,9 +141,17 @@ public static class VolunteerDayOptions
     /// moved at any point. That is the whole reason the display could be changed three times in an
     /// afternoon on a live form without consequence.</para>
     /// </remarks>
+    /// <remarks>
+    /// <para>🔴 §1297 — <b>this option is <c>Half</c> but it means EVENING, and that is exactly
+    /// why it carries an explicit window.</b> A planner reading "Half ⇒ morning or afternoon"
+    /// would schedule these people into the main-day morning, which is precisely when they are
+    /// attending the conference. The 17:00–21:00 window is the main day's pack-down block, which
+    /// is what "can help in the evening" was written for.</para>
+    /// </remarks>
     private static Option AttendingCanHelpEvening() =>
         new("Attending conference — can help evening", "Attending conference",
-            "can help in the evening", VolunteerAvailabilityLevel.Half, false);
+            "can help in the evening", VolunteerAvailabilityLevel.Half, false,
+            Window(At(17), At(21)));
 
     /// <summary>
     /// The ordered options for a given day. ELDK27 days have curated sets; any
@@ -128,6 +160,12 @@ public static class VolunteerDayOptions
     /// </summary>
     public static IReadOnlyList<Option> For(DateOnly day)
     {
+        // 🔒 §1297 — the packing day is BINARY and carries NO window, deliberately. Operator
+        // 2026-09-22: *"packing day is a few tasks where people will be there all time · there
+        // are no 50/50 split that day · think of it as full day, either they come or not."*
+        // ⇒ "Yes" means present for whatever runs, so the planner does no hour-matching here.
+        // Giving it a 09:00–14:00 window would make the day's own task (*Pack attendee bags*,
+        // 09:00–15:00) unfillable by the 17 people who said yes to exactly it.
         if (day == PackingDay)
             return new[]
             {
@@ -137,16 +175,56 @@ public static class VolunteerDayOptions
 
         // §1134 — per-day START TIMES (operator 2026-08-25, in his words): "Setup day kan godt være
         // 09:00 / Check-in pre-day: 07:00 / Check-in mainday day: 06:40".
+        //
+        // 🔒 §1297 — SETUP DAY STARTS 09:00 AND STAYS THERE. It was briefly widened to 08:00 on
+        // 2026-09-22 because 18 of Monday's 31 task slots start at 08:00 (`Mount Expo Walls` 14
+        // people, `Mount Light Rollups` 4) and a 09:00 form can never staff them. The operator
+        // reverted it the same day: *"monday - move it to 9am (move back), so it matches. we dont
+        // start 8am on monday."*
+        //
+        // ⚠️ So the 08:00 starts are a TASK-DATA question, not a form question — the volunteers do
+        // not arrive at 08:00, whatever those rows say. Do not "fix" this by widening the form
+        // again; the planner reporting those slots as unstaffable is the correct and useful answer.
+        //
+        // §1297 — each option now also carries its hours as a TYPED window for the planner.
+        // 🔑 The windows are DERIVED FROM THE DISPLAY, not invented: "Full day" spans that
+        // day's morning start to its afternoon end, which is what a volunteer reading
+        // "whole day available — from 09:00" next to "Afternoon 12–17" understands it to mean.
         if (day == MonSetup)
-            return new[] { Full("09:00"), Morning("9–12"), Afternoon("12–17"), NotAble() };
+            return new[]
+            {
+                Full("09:00", Window(At(9), At(17))),
+                Morning("9–12", Window(At(9), At(12))),
+                Afternoon("12–17", Window(At(12), At(17))),
+                NotAble(),
+            };
 
+        // §1297a — the PRE-DAY full day runs to 18:30, not 18:00 (operator 2026-09-22, choosing
+        // *"widen the pre-day instead"* over moving the two tasks that overrun it: *Appreciation
+        // Bags* 17:00–18:30 and *Prepare cloakroom number-tags (900)* 17:50–18:30).
+        //
+        // 🔒 ONLY "Full day" widened. Afternoon deliberately stays 12–18:
+        //   1. It is not needed — 17 people answered Full day on the pre-day against 4 slots.
+        //   2. ⚠️ Its Slot embeds the hours ("Afternoon 12–18") and the Slot is the STORED
+        //      identity. Changing it would strand the 2 saved afternoon rows, and the Level
+        //      fallback resolves an unknown Half slot to the FIRST Half option — Morning. Two
+        //      people who said afternoon would silently become morning. Widening what is not
+        //      needed would cost exactly the answers we are trying to honour.
         if (day == PreDay)
-            return new[] { Full("07:00"), Morning("7–12"), Afternoon("12–18"), Attending(), NotAble() };
+            return new[]
+            {
+                Full("07:00", Window(At(7), At(18, 30)), "whole day available — 07:00–18:30"),
+                Morning("7–12", Window(At(7), At(12))),
+                Afternoon("12–18", Window(At(12), At(18))),
+                Attending(), NotAble(),
+            };
 
         if (day == MainDay)
             return new[]
             {
-                Full("06:40"), Morning("6:40–12"), Afternoon("12–17"),
+                Full("06:40", Window(At(6, 40), At(17))),
+                Morning("6:40–12", Window(At(6, 40), At(12))),
+                Afternoon("12–17", Window(At(12), At(17))),
                 AttendingCanHelpEvening(), NotAble(),
             };
 
@@ -227,4 +305,37 @@ public static class VolunteerDayOptions
     /// <summary>Human-readable availability label for lead emails (slot if tagged, else the Level name).</summary>
     public static string DisplayLabel(DateOnly day, VolunteerAvailabilityLevel level, string? note)
         => Resolve(day, level, note).Slot;
+
+    /// <summary>
+    /// §1297 — what a stored <c>(Day, Level, Note)</c> row means in CLOCK terms: the single
+    /// entry point the planner uses to turn an availability answer into hours.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>It resolves the option first, then reads the option's typed window</b> —
+    /// never the stored string. Two things make that mandatory:</para>
+    /// <list type="bullet">
+    /// <item><b>Stale slot tags are normal.</b> Rows saved as <c>[Morning 9–12]</c> still exist
+    /// against the pre-day and the main day, whose morning windows are now 7–12 and 6:40–12.
+    /// <see cref="Resolve"/> maps them onto the CURRENT option by Level fallback; parsing the
+    /// stored hours would schedule those two people against a window nobody offers.</item>
+    /// <item><b>The Level alone is ambiguous.</b> Morning, Afternoon and "Attending — can help
+    /// evening" are all <c>Half</c>. Only the resolved option distinguishes them, and getting
+    /// that wrong puts an evening helper on a 06:40 check-in.</item>
+    /// </list>
+    ///
+    /// <para>⚠️ The RESOLVED option's Level decides presence, not the stored one. They agree by
+    /// construction (the fallback matches on Level), and where an exact slot match wins, the
+    /// option is the authority on what that answer means.</para>
+    /// </remarks>
+    public static DayWindow WindowFor(DateOnly day, VolunteerAvailabilityLevel level, string? note)
+    {
+        var option = Resolve(day, level, note);
+
+        // Absent (Unavailable) and present-but-attending (Blocked) are both "cannot be
+        // given work on this day" — the planner needs no finer distinction than that.
+        if (option.Level is VolunteerAvailabilityLevel.Unavailable or VolunteerAvailabilityLevel.Blocked)
+            return DayWindow.Absent;
+
+        return option.Window is { } w ? new DayWindow(true, w) : DayWindow.AllDay;
+    }
 }

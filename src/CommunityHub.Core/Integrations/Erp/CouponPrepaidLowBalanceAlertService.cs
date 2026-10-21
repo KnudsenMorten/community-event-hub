@@ -83,7 +83,8 @@ public sealed class CouponPrepaidLowBalanceAlertService
         public int Remaining => Cap - Claimed;
         public bool IsOverCap => Remaining < 0;
         public bool IsExhausted => Remaining == 0;
-        public bool IsLow => Remaining <= CouponPrepaidBalance.DefaultLowBalanceThreshold;
+        // §1341 — same rule as a pool: with the default level of 0 a cap warns only once it is passed.
+        public bool IsLow => CouponPrepaidBalance.IsLowAt(Remaining, Cap, CouponPrepaidBalance.DefaultLowBalanceThreshold);
     }
 
     /// <summary>

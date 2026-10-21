@@ -86,7 +86,7 @@ public sealed class SoMeBundleBuildService
     /// <summary>What one sweep did. Zeroes are a valid, logged outcome.</summary>
     /// <param name="TrackBundles">Track GIFs built.</param>
     /// <param name="SponsorBundles">Sponsor tier/type GIFs built.</param>
-    /// <param name="TracksSkippedNoPhoto">Tracks where NOT ONE speaker had a photo.</param>
+    /// <param name="TracksSkippedNoPhoto">Tracks held because a speaker has no photo (§1304: ANY missing face, not only all).</param>
     /// <param name="Inert">True when nothing could run at all (no store / no template).</param>
     /// <param name="SessionGraphics">§767 phase 2 — per-session PNG/GIFs (re)built.</param>
     /// <param name="SponsorGraphics">§767 phase 2 — per-sponsor PNGs (re)built.</param>
@@ -94,7 +94,7 @@ public sealed class SoMeBundleBuildService
     /// Sessions the generator did NOT touch because the operator had already uploaded artwork for
     /// them. Counted, never silent: it is the difference between "nothing to do" and "held back".
     /// </param>
-    /// <param name="SessionsSkippedNoPhoto">Sessions where NOT ONE speaker had a photo.</param>
+    /// <param name="SessionsSkippedNoPhoto">Sessions held because a speaker has no photo (§1304: ANY missing face, not only all).</param>
     /// <param name="TrackGraphicsRetired">
     /// §1214 — track graphics un-released because their track no longer has any sessions. The file
     /// is kept; the track returning releases it again.
@@ -158,6 +158,7 @@ public sealed class SoMeBundleBuildService
             PhotosFolder, photos.ById.Count, photos.BySlug.Count);
 
         var unmatched = new List<string>();
+        _rebuiltNames.Clear();
 
         // 🔴 §1178 — resolved ONCE for the whole sweep and handed to both builders, so a track GIF and
         // a session graphic can never disagree about which sessions are announceable. An array, not
@@ -183,9 +184,18 @@ public sealed class SoMeBundleBuildService
         {
             // NAMED, not counted: "3 speakers had no photo" sent the last investigation to the wrong
             // half of the system. A name and an id can be looked up in the folder in ten seconds.
-            _log.LogInformation(
+            _log.LogWarning(
                 "§767 bundles: no photo matched for {Count} speaker(s): {Speakers}.",
                 unmatched.Distinct().Count(), string.Join(", ", unmatched.Distinct().Take(30)));
+        }
+
+        // §1304 — operator: "tell which files were rebuild". NAMED, like the unmatched list: a count
+        // of rebuilt graphics cannot be checked against the company page; a list can.
+        if (_rebuiltNames.Count > 0)
+        {
+            _log.LogInformation(
+                "§1304 bundles: rebuilt {Count} speaker graphic(s): {Rebuilt}.",
+                _rebuiltNames.Count, string.Join("; ", _rebuiltNames.Take(200)));
         }
 
         // 🔑 REBUILT vs ALREADY CURRENT, not one merged number. The merged one said "7 track GIF(s)"
@@ -393,10 +403,20 @@ public sealed class SoMeBundleBuildService
                 frames.Add((photo, speaker.Name));
             }
 
-            if (frames.All(f => f.Photo is null or { Length: 0 }))
+            // 🔴 §1304 — ANY missing face holds the graphic, not only ALL of them. A partly blank
+            // graphic reached the company page (the Azure Master Class post, 2026-09-25). The
+            // existing graphic is un-released, so a queued post is held by the "graphic missing"
+            // gate instead of publishing the blank ring.
+            var trackKey = GraphicStableKey.ForTrackGraphic(Slug(track.Key));
+            var missingFaces = frames.Where(f => f.Photo is null or { Length: 0 }).Select(f => f.Name).ToList();
+            if (missingFaces.Count > 0)
             {
-                // Every frame would be an empty ring. Waiting beats publishing a row of blanks.
                 noPhoto++;
+                if (await RetireIncompleteAsync(eventId, trackKey, ct))
+                    _log.LogWarning(
+                        "§1304 face gate: track '{Track}' graphic UN-RELEASED — no photo for {Speakers}. "
+                        + "Its posts are held until every speaker has a photo.",
+                        track.Key, string.Join(", ", missingFaces));
                 continue;
             }
 
@@ -404,16 +424,19 @@ public sealed class SoMeBundleBuildService
             // exactly what "when chg happens like add or remove of speaker they must be build" asks
             // for, with nothing to remember to trigger.
             var hash = HashOf(
-                DesignVersion, "track", track.Key,
+                DesignVersion, FaceGateVersion, "track", track.Key,
                 string.Join("|", speakers.Select(s => $"{s.ParticipantId}:{s.Name}")));
 
             // §1214(b) — kept so an organizer-overridden asset can be compared against the line-up
             // it would have if the engine still owned it.
             hashes[Slug(track.Key)] = hash;
 
+            var faceGated = await WasFaceGatedAsync(eventId, trackKey, ct);
             var outcome = await _graphics.GenerateTrackBundleAsync(
                 eventId, Slug(track.Key), track.Key, template, frames, eventLogo, hash, ct: ct);
             if (outcome.Rendered) built++; else current++;
+            if (outcome.Rendered) _rebuiltNames.Add($"track '{track.Key}' → {outcome.Asset.FileName}");
+            if (outcome.Rendered && faceGated) await ReReleaseAsync(outcome.Asset, ct);
         }
 
         // 🔴 §1214 — AFTER the builds, so a track rebuilt on this very sweep is in the live set and
@@ -516,10 +539,17 @@ public sealed class SoMeBundleBuildService
                 frames.Add((photo, speaker.Name));
             }
 
-            if (frames.All(f => f.Photo is null or { Length: 0 }))
+            // 🔴 §1304 — ANY missing face holds the graphic (see the track loop above).
+            var sessionKey = GraphicStableKey.ForSessionGraphic(session.Id);
+            var missingFaces = frames.Where(f => f.Photo is null or { Length: 0 }).Select(f => f.Name).ToList();
+            if (missingFaces.Count > 0)
             {
-                // Every frame would be an empty ring. Waiting beats publishing a row of blanks.
                 noPhoto++;
+                if (await RetireIncompleteAsync(eventId, sessionKey, ct))
+                    _log.LogWarning(
+                        "§1304 face gate: session #{SessionId} '{Title}' graphic UN-RELEASED — no photo for "
+                        + "{Speakers}. Its posts are held until every speaker has a photo.",
+                        session.Id, session.Title, string.Join(", ", missingFaces));
                 continue;
             }
 
@@ -531,10 +561,13 @@ public sealed class SoMeBundleBuildService
                 session.Id, session.Title,
                 speakers.Select(s => (s.ParticipantId, s.Name)));
 
+            var faceGated = await WasFaceGatedAsync(eventId, sessionKey, ct);
             var outcome = await _graphics.GenerateSessionBundleAsync(
                 eventId, session.Id, session.Title ?? string.Empty, template, frames,
                 eventLogo, hash, ct: ct);
             if (outcome.Rendered) built++; else current++;
+            if (outcome.Rendered) _rebuiltNames.Add($"session #{session.Id} '{session.Title}' → {outcome.Asset.FileName}");
+            if (outcome.Rendered && faceGated) await ReReleaseAsync(outcome.Asset, ct);
         }
 
         return (built, current, noPhoto, uploadedIds.Count);
@@ -633,8 +666,12 @@ public sealed class SoMeBundleBuildService
         // TIER groupings. ⚠️ Type groupings (beverage, ice-cream, …) are the SECOND grouping over the
         // same sponsors and come from the webshop category (§767 decision 2) — not yet wired, and
         // deliberately absent rather than faked from the package.
+        // 🔴 §1348 — a lapsed booth tier gets no frame in the tier GIF. Its SINGLE graphic above is
+        // kept: that file also feeds the branding surfaces, which are not a tier announcement.
+        var lapsed = await TestDataScope.LapsedBoothTierSponsorCompanyIdsAsync(_db, eventId, ct);
         foreach (var tier in sponsors
-                     .Where(s => !string.IsNullOrWhiteSpace(s.CompanyName))
+                     .Where(s => !string.IsNullOrWhiteSpace(s.CompanyName)
+                                 && (s.SponsorCompanyId == null || !lapsed.Contains(s.SponsorCompanyId)))
                      .GroupBy(s => s.SponsorPackage)
                      .OrderByDescending(g => g.Key))
         {
@@ -962,6 +999,62 @@ public sealed class SoMeBundleBuildService
     public const string DesignVersion = "768.0";
 
     /// <summary>
+    /// 🔴 §1304 — part of the SPEAKER graphic hashes (track + session) only. Operator 2026-09-25:
+    /// <i>"we just released a some post with one face missing"</i> (the Azure Master Class speaker
+    /// post). Two defects let it through: a graphic was rendered when SOME speakers had no matched
+    /// photo (a blank ring), and the hash held no photo, so the graphic was never rebuilt once the
+    /// photo was there. Adding this bumps every speaker graphic ONCE — which is exactly what replaces
+    /// the blank ones already live. Not in <see cref="DesignVersion"/>: sponsor graphics start
+    /// un-released, and a rebuild must not send every one of them back for approval.
+    /// </summary>
+    public const string FaceGateVersion = "1304";
+
+    /// <summary>§1304 — the speaker graphics rebuilt by the current sweep, by name (reset per sweep).</summary>
+    private readonly List<string> _rebuiltNames = new();
+
+    /// <summary>
+    /// §1304 — written into <see cref="GraphicAsset.InputHash"/> when the face gate UN-RELEASES a
+    /// speaker graphic whose line-up now has a speaker without a photo. It is the marker that lets the
+    /// sweep re-release its OWN retirement once every face is there — and only that: a graphic an
+    /// organizer un-released by hand never carries it, so it is never re-released behind his back.
+    /// </summary>
+    public const string FaceGateRetiredHash = "face-gate:incomplete";
+
+    /// <summary>
+    /// §1304 — a speaker graphic whose line-up has a speaker without a photo must not be published:
+    /// un-release the existing generated graphic (Released → Generated) and mark it. Organizer-owned
+    /// artwork and graphics that are not currently released are left alone. Returns true when it
+    /// retired one.
+    /// </summary>
+    internal async Task<bool> RetireIncompleteAsync(int eventId, string stableKey, CancellationToken ct)
+    {
+        var asset = await _db.GraphicAssets
+            .FirstOrDefaultAsync(g => g.EventId == eventId && g.StableKey == stableKey, ct);
+        if (asset is null || asset.IsOrganizerOverridden
+            || asset.Status != GraphicAssetStatus.Released) return false;
+
+        asset.Status = GraphicAssetStatus.Generated;
+        asset.InputHash = FaceGateRetiredHash;
+        asset.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>§1304 — true when the face gate retired this graphic (so a complete rebuild re-releases it).</summary>
+    private Task<bool> WasFaceGatedAsync(int eventId, string stableKey, CancellationToken ct) =>
+        _db.GraphicAssets.AnyAsync(
+            g => g.EventId == eventId && g.StableKey == stableKey && g.InputHash == FaceGateRetiredHash, ct);
+
+    private async Task ReReleaseAsync(GraphicAsset asset, CancellationToken ct)
+    {
+        var tracked = await _db.GraphicAssets.FirstAsync(g => g.Id == asset.Id, ct);
+        tracked.Status = GraphicAssetStatus.Released;
+        tracked.ReleasedAt = DateTimeOffset.UtcNow;
+        tracked.ReleasedByEmail = GraphicsService.AutoReleasedBy;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
     /// §6.2 — the input hash of ONE SESSION's promo graphic.
     /// </summary>
     /// <remarks>
@@ -983,7 +1076,7 @@ public sealed class SoMeBundleBuildService
     public static string SessionGraphicInputHash(
         int sessionId, string? title, IEnumerable<(int ParticipantId, string Name)> speakers) =>
         HashOf(
-            DesignVersion, "session", sessionId.ToString(), title ?? string.Empty,
+            DesignVersion, FaceGateVersion, "session", sessionId.ToString(), title ?? string.Empty,
             string.Join("|", speakers
                 .GroupBy(s => s.ParticipantId)
                 .OrderBy(g => g.Key)

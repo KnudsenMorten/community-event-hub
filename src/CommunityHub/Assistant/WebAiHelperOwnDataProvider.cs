@@ -166,8 +166,8 @@ public sealed class WebAiHelperOwnDataProvider : IAiHelperOwnDataProvider
                 .Select(a => new
                 {
                     a.Task.Title,
-                    Category = a.Task.Subcategory.Category.Name,
-                    Subcategory = a.Task.Subcategory.Name,
+                    Category = a.Task.Category.Name,
+                    Subcategory = a.Task.Subcategory != null ? a.Task.Subcategory.Name : null,
                     a.Task.DueDate,
                     a.Task.Shift,
                     a.Task.TimeEnd,

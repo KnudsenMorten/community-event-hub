@@ -18,7 +18,7 @@ namespace CommunityHub.Core.Tests.Scenario;
 public sealed class VolunteerBucketsScenarioTests
 {
     private static VolunteerStructureService NewStructure(CommunityHub.Core.Data.CommunityHubDbContext db)
-        => new(db, ScenarioFixture.Clock);
+        => new(db, ScenarioFixture.Clock, VolunteerAssignmentGate.For(db));
 
     private static VolunteerAllocationService NewAllocation(CommunityHub.Core.Data.CommunityHubDbContext db)
         => new(db, ScenarioFixture.Clock,
@@ -144,7 +144,7 @@ public sealed class VolunteerBucketsScenarioTests
 
         var parser = new VolunteerPlanParser();
         var plan = parser.Parse(FakePlanCsv);
-        var importer = new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), ScenarioFixture.Clock);
+        var importer = new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), ScenarioFixture.Clock, VolunteerAssignmentGate.For(db));
 
         var result = await importer.ImportAsync(seed.EventId, plan);
 
@@ -173,7 +173,7 @@ public sealed class VolunteerBucketsScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var parser = new VolunteerPlanParser();
         var plan = parser.Parse(FakePlanCsv);
-        var importer = new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), ScenarioFixture.Clock);
+        var importer = new VolunteerPlanImportService(db, new HeuristicTaskGuidanceGenerator(), ScenarioFixture.Clock, VolunteerAssignmentGate.For(db));
 
         await importer.ImportAsync(seed.EventId, plan);
         var second = await importer.ImportAsync(seed.EventId, plan);
@@ -408,6 +408,7 @@ public sealed class VolunteerBucketsScenarioTests
         var task = await svc.CreateTaskAsync(org, sub.Id, "Print badges", null, null, null,
             instructions: "Use the desk printer; stack by role.");
         await svc.AssignVolunteerAsync(org, task.Id, seed.VolunteerId);
+        await NewAllocation(db).CommitAsync(org); // §1299 — Assign queues; publish makes it visible
 
         // Volunteer's "my tasks" view.
         var myTasks = await svc.LoadMyTasksAsync(seed.EventId, seed.VolunteerId);

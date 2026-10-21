@@ -56,6 +56,33 @@ public sealed class EconomicContactAdminService
         return _client.CreateContactAsync(customerNumber, input, ct);
     }
 
+    /// <summary>
+    /// §1309 — create the contact, or — when the customer already has a contact with this e-mail — UPDATE that one, merging
+    /// the role into its notes. The retired registration webhook de-duplicated contacts by e-mail within the customer; CEH's
+    /// registration must do the same, or a customer found by CVR gets its signer / coordinator a second time.
+    /// </summary>
+    public async Task<int> CreateOrUpdateByEmailAsync(
+        int customerNumber, string name, string? email, string? phone,
+        bool signer, bool eventCoordinator, CancellationToken ct = default)
+    {
+        var e = (email ?? string.Empty).Trim();
+        if (e.Length > 0)
+        {
+            var existing = (await _client.ListContactsAsync(customerNumber, ct))
+                .FirstOrDefault(c => string.Equals(c.Email?.Trim(), e, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                // Merge, never downgrade: a role the contact already has is kept.
+                await UpdateAsync(customerNumber, existing.ContactNumber, string.IsNullOrWhiteSpace(existing.Name) ? name : existing.Name,
+                    e, string.IsNullOrWhiteSpace(phone) ? existing.Phone : phone,
+                    signer || EconomicContactNotesRoles.IsSigner(existing.Notes),
+                    eventCoordinator || EconomicContactNotesRoles.IsEventCoordinator(existing.Notes), existing.Notes, ct);
+                return existing.ContactNumber;
+            }
+        }
+        return await CreateAsync(customerNumber, name, email, phone, signer, eventCoordinator, ct);
+    }
+
     /// <summary>Update a contact in e-conomic, merging the role into its existing notes.</summary>
     public Task UpdateAsync(
         int customerNumber, int contactNumber, string name, string? email, string? phone,

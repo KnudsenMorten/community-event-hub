@@ -183,9 +183,10 @@ public sealed class CouponDraftInvoiceService
                 await _db.SaveChangesAsync(ct);
             }
 
-            if (rule.BillingType == CouponBillingType.NoInvoicing)
+            if (rule.BillingType is CouponBillingType.NoInvoicing or CouponBillingType.Ignored)
             {
-                // A DECISION, not a gap — never reported as a problem and never alerted on.
+                // A DECISION, not a gap — never reported as a problem and never alerted on (§1312: an ignored discount
+                // code neither).
                 continue;
             }
 

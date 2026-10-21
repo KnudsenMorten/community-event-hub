@@ -77,7 +77,7 @@ public class OrganizerAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
         await LoadAsync(me, ct);
@@ -96,11 +96,11 @@ public class OrganizerAllocationModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try
         {
-            var seeded = await _engine.SeedProposalsAsync(Actor(me), ParticipantRole.Organizer, me.ParticipantId, ct);
-            var msg = seeded == 0
-                ? "Auto-assign found nothing new to propose (tasks already covered or no matching availability)."
-                : $"Auto-assign proposed {seeded} assignment(s) from availability — review the queue below, then Commit.";
-            return RedirectToPage(new { Msg = msg });
+            // §1297 — Everyone, not the worker roster: the roster is a VOLUNTEER scope
+            // (workers vs. conference attendees) and organizers are not on it.
+            var result = await _engine.SeedProposalsAsync(
+                Actor(me), ParticipantRole.Organizer, me.ParticipantId, PlannerScope.Everyone, ct);
+            return RedirectToPage(new { Msg = result.Summarize() });
         }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
@@ -170,11 +170,11 @@ public class OrganizerAllocationModel : PageModel
 
         var tasks = await _db.VolunteerTasks
             .Where(t => t.EventId == me.EventId)
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category).Include(t => t.Subcategory)
             .ToListAsync(ct);
 
         Buckets = tasks
-            .GroupBy(t => t.Subcategory.Category)
+            .GroupBy(t => t.Category)
             .Select(g => new BucketGroup(
                 g.Key.Id, g.Key.Name, g.Key.EldkLeadName,
                 g.Select(t => new TaskCard(

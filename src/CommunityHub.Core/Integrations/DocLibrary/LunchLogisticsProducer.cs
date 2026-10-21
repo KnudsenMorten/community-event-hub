@@ -123,8 +123,11 @@ public sealed class LunchLogisticsProducer
             BuildBreakfast(
                 LogisticsFileNames.Breakfast(eventShortName, LogisticsDay.MainDay),
                 "Breakfast — main day", mainDayHeads,
-                "Every active participant in the edition plus every attendee holding a ticket — "
-                + "CEH holds no main-day sign-up."),
+                // §1258 — say which participants, because "every active participant" is what the
+                // double count hid behind: a ticket holder's login row is NOT a second head.
+                "Every active crew member (speakers, sponsors, organizers — excluding anyone who "
+                + "holds a ticket, who is counted with the attendees) plus every attendee holding "
+                + "a ticket — CEH holds no main-day sign-up."),
         ];
     }
 
@@ -228,7 +231,11 @@ public sealed class LunchLogisticsProducer
     /// </remarks>
     private async Task<IReadOnlyList<Cover>> MainDayCoversAsync(int eventId, CancellationToken ct)
     {
-        var rows = await LogisticsAudience.Countable(_db.Participants, eventId)
+        // 🔴 §1258 — CREW ONLY: anyone holding a live ticket is counted on the attendee side of
+        // this very file, so listing their participant login here as well bought the caterer a
+        // second meal for the same person. Measured 2026-09-20: 137 of 260 "crew" rows were
+        // attendee logins that each also held a ticket.
+        var rows = await LogisticsAudience.CountableCrew(_db.Participants, _db.Attendees, eventId)
             .Select(p => new { p.Id, p.FullName, p.Email, p.Role })
             .ToListAsync(ct);
 

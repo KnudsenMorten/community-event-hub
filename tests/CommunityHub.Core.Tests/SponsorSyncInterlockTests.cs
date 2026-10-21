@@ -15,9 +15,9 @@ namespace CommunityHub.Core.Tests;
 /// <para>🔒 <b>Two sponsor syncs writing the same records is DATA LOSS, not inefficiency.</b> Zoho
 /// hard-caps contact-e-mail updates at 3, and his warning was explicit: <i>"the sponsor object and
 /// exhibitor goes into a stale state so we cannot update it anymore and have to delete it, which is
-/// a disaster as leads will be lost"</i>. The legacy <c>BackstageSyncJob</c> is disabled by a config
-/// switch today, but "today" is exactly the assumption that rots — so the interlock is structural
-/// and these tests keep it that way.</para>
+/// a disaster as leads will be lost"</i>. The legacy <c>BackstageSyncJob</c> was disabled by a config
+/// switch, then retired (§641), then deleted (§1312) — but "it is off" is exactly the assumption that
+/// rots, so the interlock is structural and these tests keep it that way.</para>
 /// </remarks>
 public class SponsorSyncInterlockTests
 {
@@ -56,18 +56,20 @@ public class SponsorSyncInterlockTests
     /// <summary>
     /// 🔒 §641 — retiring a job means removing its <c>[Function]</c> attribute, NOT just its catalog
     /// row. A class that still carries the attribute would keep being scheduled by the host while
-    /// being invisible on the Jobs page — strictly worse than before.
+    /// being invisible on the Jobs page — strictly worse than before. §1312 (2026-10-01) went further
+    /// and deleted the class; this pins that it stays gone and that no Jobs-host function carries its name.
     /// </summary>
     [Fact]
     public void The_retired_legacy_job_can_no_longer_be_SCHEDULED()
     {
-        var run = typeof(CommunityHub.Jobs.BackstageSyncJob)
-            .GetMethod("Run", BindingFlags.Public | BindingFlags.Instance);
+        var jobs = ReconcileJob.Assembly;
+        Assert.Null(jobs.GetType("CommunityHub.Jobs.BackstageSyncJob"));
 
-        Assert.NotNull(run);
-        Assert.Null(run!.GetCustomAttribute<Microsoft.Azure.Functions.Worker.FunctionAttribute>());
-        Assert.DoesNotContain(run.GetParameters(),
-            p => p.GetCustomAttribute<Microsoft.Azure.Functions.Worker.TimerTriggerAttribute>() is not null);
+        var functionNames = jobs.GetTypes()
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            .Select(m => m.GetCustomAttribute<Microsoft.Azure.Functions.Worker.FunctionAttribute>()?.Name)
+            .Where(n => n is not null);
+        Assert.DoesNotContain("BackstageSyncJob", functionNames);
     }
 
     /// <summary>

@@ -10,9 +10,8 @@ namespace CommunityHub.Core.Tests;
 /// <para>Operator 2026-09-01: <i>"add option to provide a coupon/discount code i provide them with a
 /// euro value"</i> — and, asked who should create the coupon, <b>CEH through the Woo API</b>.</para>
 ///
-/// <para>🔑 <b>CEH is never the thing that decides a discount is valid.</b> The shop applies it at
-/// checkout, so everything tested here is about the RECORD being honest — a credit CEH shows that
-/// the shop has never heard of is a promise that fails in front of the sponsor.</para>
+/// <para>🔴 §1312 (2026-10-01): the old webshop is closed, so the credit lives in CEH only — the CEH shop
+/// spends it on swag lines when the sponsor orders. No webshop coupon is created any more.</para>
 ///
 /// <para>NO real customer names.</para>
 /// </summary>
@@ -123,5 +122,58 @@ public sealed class SwagCatalogCreditTests
     public void No_edition_code_still_produces_a_prefixed_code()
     {
         Assert.StartsWith("swag-swag-", SwagCatalogCreditService.NewCode("", "Contoso"));
+    }
+
+    // --- granting -------------------------------------------------------------------------
+
+    private static SwagCatalogCreditService Service(CommunityHub.Core.Data.CommunityHubDbContext db, string? categoryName)
+    {
+        var json = categoryName is null
+            ? "{ \"_schema\": \"test\" }"
+            : $"{{ \"swagCatalog\": {{ \"categoryName\": \"{categoryName}\" }} }}";
+        var path = Path.Combine(Path.GetTempPath(), $"swag-credit-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, json);
+        return new SwagCatalogCreditService(db, new CommunityHub.Core.Config.SponsorConfigLoader(),
+            new CommunityHub.Core.Config.SponsorConfigOptions { SponsorConfigPath = path },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SwagCatalogCreditService>.Instance);
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — operator 2026-10-01: "ceh ows the webshop functionality 100%". A credit is created in CEH only: the row is
+    /// stored with its code and amount and NO webshop coupon, and the service has no way to reach the closed webshop at all
+    /// (the CEH shop spends the credit on swag lines and gives it back on a cancel — SponsorShopOrderTests).
+    /// </summary>
+    [Fact]
+    public async Task A_credit_is_created_in_CEH_without_any_webshop_call()
+    {
+        using var db = CommunityHub.Core.Tests.Scenario.ScenarioFixture.NewDb();
+
+        var r = await Service(db, "Attendee Bag Catalog").GrantAsync(
+            1, "ceh-contoso01", "Contoso", 500m, Today.AddDays(30), "org@example.test", "agreed at the call",
+            new[] { "buyer@contoso.test" }, "ELDK27");
+
+        Assert.True(r.Ok, r.Error);
+        var row = Assert.Single(db.SwagCatalogCredits);
+        Assert.Equal(500m, row.Amount);
+        Assert.Equal("ceh-contoso01", row.SponsorCompanyId);
+        Assert.StartsWith("eldk27-swag-contoso-", row.Code);
+        Assert.Null(row.WooCouponId);                                   // no webshop coupon behind it
+        Assert.True(row.IsLiveOn(Today));
+        Assert.All(typeof(SwagCatalogCreditService).GetConstructors().SelectMany(c => c.GetParameters()), p =>
+            Assert.True(p.ParameterType != typeof(HttpClient),
+                $"SwagCatalogCreditService takes a {p.ParameterType.Name} — the closed webshop must not be reachable."));
+    }
+
+    /// <summary>🔒 Still refused without a configured catalogue category, so a credit is never spendable on anything.</summary>
+    [Fact]
+    public async Task A_credit_is_refused_and_nothing_stored_when_no_catalog_category_is_configured()
+    {
+        using var db = CommunityHub.Core.Tests.Scenario.ScenarioFixture.NewDb();
+
+        var r = await Service(db, null).GrantAsync(1, "ceh-contoso01", "Contoso", 500m, null, "org@example.test", null, null, "ELDK27");
+
+        Assert.False(r.Ok);
+        Assert.Contains("swagCatalog.categoryName", r.Error);
+        Assert.Empty(db.SwagCatalogCredits);
     }
 }

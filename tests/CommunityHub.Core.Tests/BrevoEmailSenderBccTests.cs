@@ -109,6 +109,28 @@ public sealed class BrevoEmailSenderBccTests
             StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// §1312 — the attachments send carries its CC (the shop's contract mails copy the organizer), and each CC is
+    /// ring-gated exactly like on the plain send: an out-of-ring CC is dropped, the primary still goes.
+    /// </summary>
+    [Fact]
+    public async Task Attachment_send_carries_its_cc_and_ring_gates_each_cc()
+    {
+        await using var h = await Harness.CreateAsync(Ring.Ring1, bccAllTo: string.Empty);
+        await h.SeedSpeakerAsync("signer@in.test", Ring.Ring0);
+        await h.SeedSpeakerAsync("copy@in.test", Ring.Ring0);
+        await h.SeedSponsorAsync("broad@out.test", Ring.Broad);
+
+        await h.Sender.SendWithAttachmentsAsync("signer@in.test", "S", "<p>h</p>",
+            new[] { new EmailAttachment("c.pdf", new byte[] { 1 }, "application/pdf") },
+            new[] { "copy@in.test", "broad@out.test" });
+
+        var msg = Assert.Single(h.Sent);
+        Assert.Contains(msg.To, a => a.Address == "signer@in.test");
+        Assert.Contains(msg.CC, a => a.Address == "copy@in.test");
+        Assert.DoesNotContain(msg.CC, a => a.Address == "broad@out.test");
+    }
+
     // ---- test harness -------------------------------------------------------
 
     private sealed class Harness : IAsyncDisposable

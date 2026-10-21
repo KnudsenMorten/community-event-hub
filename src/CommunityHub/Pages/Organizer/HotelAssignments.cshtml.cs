@@ -27,38 +27,45 @@ public class HotelAssignmentsModel : PageModel
 
     public HotelAssignmentsModel(
         ICurrentParticipantAccessor participant, HotelManagementService hotels, CommunityHubDbContext db,
-        CommunityHub.Core.Settings.FeatureGateService gate, CommunityHub.Core.Settings.RingResolver rings)
+        CommunityHub.Core.Settings.FeatureGateService gate, CommunityHub.Core.Settings.RingResolver rings,
+        CommunityHub.Core.Entitlements.HotelCoverageService coverage)
     {
         _participant = participant;
         _hotels = hotels;
         _db = db;
         _gate = gate;
         _rings = rings;
+        _coverage = coverage;
     }
 
-    /// <summary>§299 6.3 — each speaker profile's (category, organizer-entered guest nights), by participant id.</summary>
-    public IReadOnlyDictionary<int, (SpeakerCategory? Category, int? GuestFundedNights)> SpeakerCategoryByPid { get; private set; }
-        = new Dictionary<int, (SpeakerCategory?, int?)>();
-
-    /// <summary>§299 C5 — derived presenting days per speaker (from linked sessions).</summary>
-    public IReadOnlyDictionary<int, SpeakerDays> DaysBySpeaker { get; private set; }
-        = new Dictionary<int, SpeakerDays>();
+    private readonly CommunityHub.Core.Entitlements.HotelCoverageService _coverage;
 
     /// <summary>
-    /// §299 6.3 — ELDK-funded hotel nights for a SPEAKER occupant: Community = one
-    /// night per DISTINCT presenting day (derived from linked sessions); Guest =
-    /// the organizer-entered nights (individual agreement); Sponsor-category or
-    /// uncategorized = 0. Null for non-speakers (the day-linked rule is
-    /// speaker-specific).
+    /// §1296 — the resolved hotel coverage for every occupant on the page, by participant id.
     /// </summary>
-    public int? FundedNights(HotelOccupant o)
-    {
-        if (o.Role != ParticipantRole.Speaker) return null;
-        // A miss leaves the default (null, null) tuple = uncategorized ⇒ 0 nights.
-        SpeakerCategoryByPid.TryGetValue(o.ParticipantId, out var v);
-        var days = DaysBySpeaker.TryGetValue(o.ParticipantId, out var d) ? d : SpeakerDays.None;
-        return SpeakerDayScope.FundedHotelNights(v.Category, days, v.GuestFundedNights);
-    }
+    /// <remarks>
+    /// 🔑 Replaces the speaker-only <c>FundedNights</c> this page used to compute inline. That
+    /// version returned <c>null</c> for volunteers, organizers, media and event partners — so the
+    /// one page an organizer plans hotels on could not answer the question for four of the seven
+    /// roles staying in the rooms.
+    /// </remarks>
+    public IReadOnlyDictionary<int, CommunityHub.Core.Entitlements.ParticipantHotelCoverage> CoverageByPid
+    { get; private set; } = new Dictionary<int, CommunityHub.Core.Entitlements.ParticipantHotelCoverage>();
+
+    /// <summary>The coverage for one occupant, or null when it does not apply to them.</summary>
+    public CommunityHub.Core.Entitlements.ParticipantHotelCoverage? CoverageFor(HotelOccupant o) =>
+        CoverageByPid.TryGetValue(o.ParticipantId, out var c) && c.Class is not null ? c : null;
+
+    /// <summary>
+    /// §1296 — true when this VOLUNTEER is still running on the class standard with nothing added.
+    /// Volunteers are individual by nature (operator: <i>"some we cover 1 and some we cover 2 and
+    /// some we cover more"</i>), so "nobody has set this one yet" is a state worth seeing BEFORE
+    /// they book and are told they owe a night that was always going to be covered.
+    /// </summary>
+    public bool IsVolunteerOnStandard(HotelOccupant o) =>
+        o.Role == ParticipantRole.Volunteer
+        && CoverageByPid.TryGetValue(o.ParticipantId, out var c)
+        && c.OnStandard;
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -74,7 +81,7 @@ public class HotelAssignmentsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         await LoadAsync(me.EventId, ct);
         return Page();
@@ -121,11 +128,9 @@ public class HotelAssignmentsModel : PageModel
     {
         AllHotels = await _hotels.ListHotelsAsync(eventId, ct);
         Groups = await _hotels.GroupByHotelAsync(eventId, ct);
-        SpeakerCategoryByPid = (await _db.SpeakerProfiles
-                .Where(s => s.EventId == eventId)
-                .Select(s => new { s.ParticipantId, s.Category, s.GuestFundedNights })
-                .ToListAsync(ct))
-            .ToDictionary(s => s.ParticipantId, s => (s.Category, s.GuestFundedNights));
-        DaysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
+        // §1296 — coverage for EVERY occupant, not just speakers, resolved in one pass.
+        var ids = Groups.SelectMany(g => g.Occupants).Select(o => o.ParticipantId).Distinct().ToList();
+        CoverageByPid = await _coverage.ResolveManyAsync(eventId, ids, ct);
     }
 }

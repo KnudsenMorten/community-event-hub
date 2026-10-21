@@ -3,6 +3,7 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Domain.Evaluation;
 using CommunityHub.Core.Evaluation;
 using CommunityHub.Core.Tests.Scenario;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace CommunityHub.Core.Tests;
@@ -58,6 +59,33 @@ public sealed class EvaluationIngestServiceTests
     private static EvaluationIngestService.IncomingRecord Rec(
         string id, int rating = 4, DateTimeOffset? at = null) =>
         new(id, rating, at ?? Now.AddMinutes(-5));
+
+    // =====================================================================
+    //  §1278 — follow-up answers
+    // =====================================================================
+
+    [Fact]
+    public async Task A_record_carries_its_follow_up_codes_and_an_unknown_one_is_dropped()
+    {
+        var (db, device, _) = await SeedAsync();
+        var svc = NewService(db, new FixedClock(Now));
+
+        var results = await svc.IngestAsync(device, new[]
+        {
+            new EvaluationIngestService.IncomingRecord("r-fu", 2, Now.AddMinutes(-5),
+                PositivePoint: " GREAT-DEMOS ", ImprovementPoint: "made-up"),
+            Rec("r-plain"),   // a built box: no follow-ups at all
+        }, "1.0", null, false);
+
+        Assert.All(results, r => Assert.Equal(EvaluationIngestService.RecordStatus.Accepted, r.Status));
+        var withFu = await db.EvaluationResponses.SingleAsync(r => r.DeviceRecordId == "r-fu");
+        Assert.Equal(2, withFu.Rating);                       // the rating stands regardless
+        Assert.Equal("great-demos", withFu.PositivePoint);    // normalised
+        Assert.Null(withFu.ImprovementPoint);                 // unknown ⇒ dropped, never stored
+        var plain = await db.EvaluationResponses.SingleAsync(r => r.DeviceRecordId == "r-plain");
+        Assert.Null(plain.PositivePoint);
+        Assert.Null(plain.ImprovementPoint);
+    }
 
     // =====================================================================
     //  Credential

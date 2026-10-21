@@ -149,15 +149,18 @@ public sealed class SponsorLeadsController : ControllerBase
 
         var stamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var csv = sb.ToString();
+        // §1312 — the download is named after the company ("leads-master-packager-…"), not its internal id (audit 2026-09-29).
+        var who = await CommunityHub.Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, sponsorCompanyId, ct) is { } nm
+                  && CommunityHub.Uploads.SponsorUploadNaming.Slug(nm) is { Length: > 0 } slug ? slug : sponsorCompanyId;
 
         // ?format=xlsx -> same data as the CSV, packaged as an Excel workbook.
         if (string.Equals(format, "xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            var xlsxName = $"leads-{sponsorCompanyId}-{stamp}.xlsx";
+            var xlsxName = $"leads-{who}-{stamp}.xlsx";
             return File(CsvToXlsx.Build(csv, "Sponsor leads"), CsvToXlsx.ContentType, xlsxName);
         }
 
-        var fileName = $"leads-{sponsorCompanyId}-{stamp}.csv";
+        var fileName = $"leads-{who}-{stamp}.csv";
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
     }
 

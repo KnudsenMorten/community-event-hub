@@ -88,7 +88,7 @@ public sealed class VolunteerScheduleBuilder
 
         // Resolve the go-to people per bucket once (LoadSupervisorsAsync also folds
         // in the legacy single-supervisor column).
-        var catIds = tasks.Select(t => t.Subcategory.CategoryId).Distinct().ToList();
+        var catIds = tasks.Select(t => t.CategoryId).Distinct().ToList();
 
         var eldkLeadByCat = await _db.VolunteerCategories
             .Where(c => c.EventId == eventId && catIds.Contains(c.Id))
@@ -109,12 +109,12 @@ public sealed class VolunteerScheduleBuilder
         var entries = tasks
             .Select(t =>
             {
-                var catId = t.Subcategory.CategoryId;
+                var catId = t.CategoryId;
                 return new VolunteerScheduleEntry(
                     t.Id,
                     t.Title,
-                    t.Subcategory.Category?.Name ?? string.Empty,
-                    t.Subcategory.Name,
+                    t.Category?.Name ?? string.Empty,
+                    t.Subcategory?.Name ?? string.Empty,
                     t.DueDate,
                     string.IsNullOrWhiteSpace(t.Shift) ? null : t.Shift,
                     string.IsNullOrWhiteSpace(t.TimeEnd) ? null : t.TimeEnd,

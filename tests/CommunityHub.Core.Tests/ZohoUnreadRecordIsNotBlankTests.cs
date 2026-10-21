@@ -71,10 +71,9 @@ public sealed class ZohoUnreadRecordIsNotBlankTests
             ClientSecret = "secret",
             RefreshToken = "refresh",
         };
-        var cmOptions = new CompanyManagerOptions { Enabled = false };
         return new SponsorZohoSyncService(
             new ZohoClient(new HttpClient(handler), zohoOptions, NullLogger<ZohoClient>.Instance),
-            db, zohoOptions, new CompanyManagerClient(new HttpClient(handler), cmOptions), cmOptions,
+            db, zohoOptions,
             NullLogger<SponsorZohoSyncService>.Instance);
     }
 

@@ -330,16 +330,21 @@ public sealed class CouponDraftInvoiceServiceTests
     /// 🔒 `NoInvoicing` is a DECISION, not a gap: silent, and never alerted on. Keeping it distinct
     /// from Unmapped is the entire point of having both values.
     /// </summary>
-    [Fact]
-    public async Task NoInvoicing_is_silent_and_is_not_reported_as_a_problem()
+    /// <para>🔴 §1312 — an IGNORED discount code too (operator 2026-10-01: "a coupon that must not be imported into ceh … we
+    /// give 10% discount to a community group"): never invoiced, never "needs a decision", never reported.</para>
+    [Theory]
+    [InlineData(CouponBillingType.NoInvoicing)]
+    [InlineData(CouponBillingType.Ignored)]
+    public async Task NoInvoicing_and_Ignored_are_silent_and_are_not_reported_as_a_problem(CouponBillingType type)
     {
         using var db = NewDb();
         await SeedOrderAsync(db);
-        db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
+        var rule = new CouponInvoicingSetting
         {
             EventId = EventId, CouponName = "PARTNER-X",
-            BillingType = CouponBillingType.NoInvoicing,
-        });
+            BillingType = type,
+        };
+        db.CouponInvoicingSettings.Add(rule);
         await db.SaveChangesAsync();
 
         var client = new FakeInvoiceClient(customer: Customer());
@@ -348,6 +353,8 @@ public sealed class CouponDraftInvoiceServiceTests
         Assert.Empty(client.Created);
         Assert.Empty(result.UnmappedCoupons);
         Assert.Empty(result.Problems);
+        Assert.False(rule.NeedsAttention);
+        Assert.False(rule.IsInvoiceable);
     }
 
     /// <summary>Idempotency: a claim already on a booked or draft invoice is never billed twice.</summary>

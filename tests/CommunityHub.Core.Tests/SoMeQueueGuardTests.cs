@@ -143,6 +143,69 @@ public sealed class SoMeQueueGuardTests
     }
 
     /// <summary>
+    /// 🔴 §1347 — a WITHDRAWN sponsor's queued post leaves the planner. Operator 2026-10-18: a
+    /// withdrawn sponsor was "going out tomorrow as a gold sponsor".
+    /// </summary>
+    [Fact]
+    public async Task A_post_for_a_withdrawn_sponsor_is_removed()
+    {
+        using var db = NewDb();
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "77", CompanyName = "Gone Ltd",
+            SponsorPackage = SponsorPackage.Gold, Status = SponsorStatus.Withdrawn,
+        });
+        db.SoMePosts.Add(Post(8, "sponsor:77", kind: SoMeTemplateKind.Sponsor));
+        await db.SaveChangesAsync();
+
+        var result = await new SoMeQueueGuard(db).EnforceAsync(EventId);
+
+        Assert.Equal(1, result.Removed);
+        Assert.Contains("withdrawn", result.Reasons.Single());
+        Assert.True((await db.SoMePosts.AsNoTracking().FirstAsync(p => p.Id == 8)).IsDeleted);
+    }
+
+    /// <summary>An ACTIVE sponsor's post survives — the failure that would cost a paying sponsor.</summary>
+    [Fact]
+    public async Task A_post_for_an_active_sponsor_survives()
+    {
+        using var db = NewDb();
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "78", CompanyName = "Real Ltd",
+            SponsorPackage = SponsorPackage.Gold, Status = SponsorStatus.Active,
+            HasCurrentBoothOrder = true,
+        });
+        db.SoMePosts.Add(Post(9, "sponsor:78", kind: SoMeTemplateKind.Sponsor));
+        await db.SaveChangesAsync();
+
+        Assert.Equal(0, (await new SoMeQueueGuard(db).EnforceAsync(EventId)).Removed);
+    }
+
+    /// <summary>
+    /// 🔴 §1348 — a Gold sponsor whose booth order was cancelled loses its queued "Gold sponsor" post.
+    /// Operator 2026-10-18: <i>"2linkit as gold sponsor is test data"</i>.
+    /// </summary>
+    [Fact]
+    public async Task A_post_for_a_sponsor_whose_booth_tier_lapsed_is_removed()
+    {
+        using var db = NewDb();
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "12", CompanyName = "Lapsed Ltd",
+            SponsorPackage = SponsorPackage.Gold, Status = SponsorStatus.Active,
+            HasCurrentBoothOrder = false,
+        });
+        db.SoMePosts.Add(Post(10, "sponsor:12", kind: SoMeTemplateKind.Sponsor));
+        await db.SaveChangesAsync();
+
+        var result = await new SoMeQueueGuard(db).EnforceAsync(EventId);
+
+        Assert.Equal(1, result.Removed);
+        Assert.Contains("booth tier lapsed", result.Reasons.Single());
+    }
+
+    /// <summary>
     /// Idempotent: a second pass removes nothing, so the planner job can run every tick without
     /// re-reporting the same removals for ever.
     /// </summary>

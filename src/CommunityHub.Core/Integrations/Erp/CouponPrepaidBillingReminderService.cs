@@ -114,6 +114,9 @@ public sealed class CouponPrepaidBillingReminderService
             // ⚠️ Named as a TOP-UP when it is one: "25 more" is a different conversation with the
             // partner, and a different invoice, than the original 50.
             var topUp = a.Purchases.Count > 1 ? " <em>(top-up)</em>" : string.Empty;
+            // §1362 — a correction is waiting for a CREDIT NOTE number, not an invoice: say so, or he goes looking for
+            // an invoice for minus nine tickets.
+            if (CouponPoolReduction.IsCorrection(p)) topUp = " <em>(correction — enter the credit-note number)</em>";
             return "<li><strong>"
                  + System.Net.WebUtility.HtmlEncode(a.CouponInvoicingSetting!.CouponName)
                  + "</strong> — " + p.Quantity + " × "

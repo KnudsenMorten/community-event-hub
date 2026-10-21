@@ -51,7 +51,7 @@ public sealed class TaskBodyPlainTextRenderer : TaskBodyRenderer
     }
 
     protected override void Button(TaskButton block, StringBuilder sb, TaskRenderContext context) =>
-        sb.Append(block.Label).Append(": ").Append(context.ResolveText(block.Href)).Append("\n\n");
+        sb.Append(context.ResolveText(block.Label)).Append(": ").Append(context.ResolveText(block.Href)).Append("\n\n");
 
     protected override void Callout(TaskCallout block, StringBuilder sb, TaskRenderContext context)
     {

@@ -239,6 +239,35 @@ public sealed class LiveLinkedInPostPublisherTests
             LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw));
     }
 
+    /// <summary>
+    /// 🔴 §1345 — a COMPANY mention survives escaping like a person mention. Live 2026-10-15: the
+    /// first sponsor post's Tag line read "@[glueckkanja](urn:li:organization:587463)" as raw text,
+    /// because only <c>urn:li:person:</c> spans were passed through.
+    /// </summary>
+    [Fact]
+    public void A_company_mention_survives_escaping()
+    {
+        var raw = "Tag: @[glueckkanja](urn:li:organization:587463) @[Kasper Larsen](urn:li:person:NrfHR5tPrF) | Ann (CTO)";
+
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw);
+
+        Assert.Contains("@[glueckkanja](urn:li:organization:587463)", escaped);
+        Assert.Contains("@[Kasper Larsen](urn:li:person:NrfHR5tPrF)", escaped);
+        Assert.Contains(@"\| Ann \(CTO\)", escaped);
+    }
+
+    /// <summary>§1345 — an organization id is numeric; anything else is prose and stays escaped.</summary>
+    [Theory]
+    [InlineData("@[glueckkanja](urn:li:organization:glueckkanja)")]
+    [InlineData("@[glueckkanja](urn:li:organization:)")]
+    public void Only_a_numeric_organization_urn_counts_as_a_company_mention(string raw)
+    {
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw);
+
+        Assert.DoesNotContain("@[", escaped);
+        Assert.Contains(@"\@", escaped);
+    }
+
     [Fact]
     public void Text_with_no_mention_escapes_exactly_as_before()
     {

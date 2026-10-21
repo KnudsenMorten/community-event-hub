@@ -509,6 +509,9 @@ public sealed class SessionImportService
         string? inCeh, string? inSessionize)
     {
         if (string.IsNullOrWhiteSpace(inSessionize)) return;
+        // 🔒 §1265 — a TEST session is moved on purpose (e.g. to "now", to try the kiosk). Telling
+        // the organizer list that it no longer matches Sessionize is noise about a deliberate act.
+        if (session.UsedForTesting) return;
         if (string.Equals(
                 Integrations.RichTextCompare.Comparable(inCeh),
                 Integrations.RichTextCompare.Comparable(inSessionize),

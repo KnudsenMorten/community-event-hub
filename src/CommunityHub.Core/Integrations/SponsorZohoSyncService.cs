@@ -22,8 +22,6 @@ public sealed class SponsorZohoSyncService
     private readonly ZohoClient _zoho;
     private readonly CommunityHubDbContext _db;
     private readonly ZohoOptions _options;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorZohoSyncService> _log;
 
     // RULE (operator 2026-07-23): every CEH-made Zoho write must notify info@expertslive.dk
@@ -33,7 +31,6 @@ public sealed class SponsorZohoSyncService
 
     public SponsorZohoSyncService(
         ZohoClient zoho, CommunityHubDbContext db, ZohoOptions options,
-        CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         ILogger<SponsorZohoSyncService> log,
         Email.ZohoChangeNotifier? zohoChanges = null,
         TimeProvider? clock = null)
@@ -41,8 +38,6 @@ public sealed class SponsorZohoSyncService
         _zoho = zoho;
         _db = db;
         _options = options;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
         _zohoChanges = zohoChanges;
         _clock = clock ?? TimeProvider.System;
@@ -199,13 +194,8 @@ public sealed class SponsorZohoSyncService
 
         try
         {
-            // Webshop reconcile: the WEBSITE always comes from the webshop (§1125 — it OVERWRITES,
-            // because §1081 made the webshop authoritative for it); LinkedIn/Twitter stay §41b
-            // FILL-BLANK. CEH values are still pushed back to a BLANK webshop field.
-            //
-            // 🔑 Runs BEFORE the Zoho push, so a website corrected in the webshop reaches Backstage
-            // on this same pass rather than a sync later.
-            if (await ReconcileWithWebshopAsync(info, ct)) changedIds = true;
+            // 🔴 §1312 — no webshop (Company Manager) reconcile any more: website, LinkedIn and X are CEH's (operator
+            // 2026-09-30: "we dont use company manager anymore"), and nothing is written back to the old webshop.
 
             // The contact email is sent to Zoho ONLY when it actually CHANGED vs the last
             // value we pushed (Zoho hard-caps email updates at 3 — a no-op resend burns one).
@@ -603,9 +593,8 @@ public sealed class SponsorZohoSyncService
             {
                 if (string.IsNullOrWhiteSpace(info.ZohoExhibitorId))
                 {
-                    var exhibitors = await _zoho.GetExhibitorsAsync(token!, ct);
-                    var match = exhibitors.FirstOrDefault(e => NameEq(e.CompanyName, companyName));
-                    if (match is not null) { info.ZohoExhibitorId = match.Id; changedIds = true; }
+                    var exId = await MatchExhibitorAsync(token!, eventId, companyId, companyName, ct);
+                    if (exId is not null) { info.ZohoExhibitorId = exId; changedIds = true; }
                 }
                 if (!string.IsNullOrWhiteSpace(info.ZohoExhibitorId))
                 {
@@ -822,8 +811,15 @@ public sealed class SponsorZohoSyncService
                                 // which other field happened to differ this run.
                                 companyName: companyName,
                                 websiteUrl: wantsWebsite ? info.WebsiteUrl : null,
-                                linkedInUrl: wantsLinkedIn ? info.LinkedInUrl : null,
-                                twitterUrl: wantsTwitter ? info.TwitterUrl : null);
+                                // 🔴 §1312 — company_social_pages is ONE object in Zoho and a PUT REPLACES it whole. Sending
+                                // only the half that needed filling wiped the other half, and the next run pushed that one
+                                // back — alone — wiping the first: CodeTwo's LinkedIn and X swapped places every run and
+                                // mailed "Pushed … Social Pages (LinkedIn)" every 5–10 minutes (operator 2026-09-30:
+                                // "it keeps sending mails about codetwo, like the comparison between ceh and zoho is not
+                                // correct"). Measured: 14:05 Zoho held only LinkedIn, 14:12 only X. So whenever either
+                                // link is pushed, BOTH go; only the one that changed is announced.
+                                linkedInUrl: wantsLinkedIn || wantsTwitter ? info.LinkedInUrl : null,
+                                twitterUrl: wantsLinkedIn || wantsTwitter ? info.TwitterUrl : null);
 
                             if (exOutcome == ZohoClient.ZohoWriteOutcome.Written)
                             {
@@ -1254,9 +1250,8 @@ public sealed class SponsorZohoSyncService
         {
             try
             {
-                var exhibitors = await _zoho.GetExhibitorsAsync(token!, ct);
-                var match = exhibitors.FirstOrDefault(e => NameEq(e.CompanyName, companyName));
-                if (match is not null) { info.ZohoExhibitorId = match.Id; await _db.SaveChangesAsync(ct); }
+                var exId = await MatchExhibitorAsync(token!, eventId, companyId, companyName, ct);
+                if (exId is not null) { info.ZohoExhibitorId = exId; await _db.SaveChangesAsync(ct); }
             }
             catch (Exception ex) { _log.LogWarning(ex, "Booth sync: exhibitor lookup failed for {Co}.", companyId); }
         }
@@ -1472,9 +1467,14 @@ public sealed class SponsorZohoSyncService
     public async Task<BulkResult> MigrateCoordinatorsAndResyncAsync(
         int eventId, CancellationToken ct = default)
     {
-        var infos = await _db.SponsorInfos
-            .Where(s => s.EventId == eventId)
-            .ToListAsync(ct);
+        // §1361 — ROTATED, so no company is always last in line. With a fixed order, Zoho's request limit refused the
+        // same tail every run (Egiss, Truesec, Master Packager, VirtualMetric, SquaredUp) and their changes never arrived.
+        var infos = RotateForRun(
+            await _db.SponsorInfos
+                .Where(s => s.EventId == eventId)
+                .OrderBy(s => s.SponsorCompanyId)
+                .ToListAsync(ct),
+            _clock.GetUtcNow());
 
         // Fetch ONE Zoho token for the whole run (avoids per-company token rate-limit).
         string? token = null;
@@ -1514,23 +1514,6 @@ public sealed class SponsorZohoSyncService
             string name = localNames.TryGetValue(info.SponsorCompanyId, out var localName)
                 ? localName
                 : SponsorCompanyName.UnresolvedName(info.SponsorCompanyId);
-            CompanyManagerCompany? company = null;
-            if (_cmOptions.Enabled && int.TryParse(info.SponsorCompanyId, out var cid))
-            {
-                try { company = await _cm.GetCompanyAsync(cid, ct); } catch { /* fail-soft */ }
-                if (company is not null)
-                    name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-
-                // §597.4 — ONE rule for the coordinator, shared with the per-company path: follow
-                // CM's DEFAULT pointer when it changes, fill blanks when it has not. This was a
-                // fill-blank-only migrate, which meant CEH took the coordinator once and could never
-                // notice him changing the default in CM afterwards.
-                if (company is not null && await SyncDefaultCoordinatorAsync(info, company, cid, ct))
-                {
-                    await _db.SaveChangesAsync(ct);
-                    filled++;
-                }
-            }
 
             var r = await SyncAsync(eventId, info.SponsorCompanyId, name, ct,
                 accessToken: token, notifyZohoChange: false);
@@ -1633,161 +1616,6 @@ public sealed class SponsorZohoSyncService
         return new BulkResult(infos.Count, filled, sponsorsSynced, exhibitorsSynced, failed, notes, skipped, skipNotes);
     }
 
-    /// <summary>
-    /// FILL-BLANK reconcile of social/web fields between the webshop (Company Manager)
-    /// and CEH (SponsorInfo) — REQUIREMENTS §41b. NEVER overwrites a non-blank value.
-    ///   • CEH ← webshop: a field blank in CEH is pulled from the webshop company
-    ///     (website/linkedin/twitter; description is CEH-only on the webshop side).
-    ///   • webshop ← CEH: a field blank in the webshop is pushed from CEH.
-    /// Returns true if any CEH field changed (caller persists). Description has no
-    /// webshop counterpart, so only the three URLs reconcile with the webshop.
-    /// </summary>
-    private async Task<bool> ReconcileWithWebshopAsync(Domain.SponsorInfo info, CancellationToken ct)
-    {
-        if (!_cmOptions.Enabled || !int.TryParse(info.SponsorCompanyId, out var cid)) return false;
-
-        CompanyManagerCompany? company;
-        try { company = await _cm.GetCompanyAsync(cid, ct); }
-        catch (Exception ex) { _log.LogWarning(ex, "Reconcile: GetCompany failed for {Co}.", info.SponsorCompanyId); return false; }
-        if (company is null) return false;
-
-        var cehChanged = false;
-
-        // §597.4 — follow CM's DEFAULT EVENT COORDINATOR. Runs on every sync, not just the
-        // one-time migrate, because he changes the default in CM and CEH has to notice.
-        if (await SyncDefaultCoordinatorAsync(info, company, cid, ct)) cehChanged = true;
-
-        // CEH ← webshop.
-        //
-        // 🔴 §1125 — THE WEBSITE OVERWRITES; the other two stay §41b fill-blank.
-        //
-        // The webshop is AUTHORITATIVE for the website (§1081) and the CEH input is read-only, so a
-        // fill-blank rule here meant CEH took the value once and then ignored every correction —
-        // while the page told the sponsor it would sync automatically. See WebshopOwnedFields for
-        // the full reasoning, including why a BLANK webshop value does not blank CEH.
-        // §1126 — all THREE overwrite now (operator: *"linkedin + twitter is also coming from
-        // webshop … it must also overwrite as webshop is authoritative"*).
-        if (WebshopOwnedFields.ApplyAll(
-                info, company.WebsiteUrl, company.LinkedInUrl, company.TwitterUrl))
-            cehChanged = true;
-
-        // webshop ← CEH: push a CEH value to a blank webshop field (only the keys we fill).
-        var push = new Dictionary<string, object?>();
-        if (!string.IsNullOrWhiteSpace(info.WebsiteUrl) && string.IsNullOrWhiteSpace(company.WebsiteUrl))
-            push["web_address"] = info.WebsiteUrl;
-        if (!string.IsNullOrWhiteSpace(info.LinkedInUrl) && string.IsNullOrWhiteSpace(company.LinkedInUrl))
-            push["linkedin_url"] = info.LinkedInUrl;
-        if (!string.IsNullOrWhiteSpace(info.TwitterUrl) && string.IsNullOrWhiteSpace(company.TwitterUrl))
-            push["twitter_url"] = info.TwitterUrl;
-        if (push.Count > 0)
-        {
-            try { await _cm.UpdateCompanyAsync(cid, push, ct); }
-            catch (Exception ex) { _log.LogWarning(ex, "Reconcile: UpdateCompany failed for {Co}.", info.SponsorCompanyId); }
-        }
-
-        return cehChanged;
-    }
-
-    /// <summary>
-    /// §597.4 — carry Company Manager's <b>Default Event Coordinator</b> through to
-    /// <c>SponsorInfo.EventCoordinator*</c>. Returns true when CEH values changed.
-    /// </summary>
-    /// <remarks>
-    /// <para>His rule, in his words: *"default comes from CM (default event coordinator)"*, and
-    /// *"the DEFAULT decides only the Zoho record"* — everyone with coordinator status still gets
-    /// the mails (§597.3).</para>
-    ///
-    /// <para><b>Two ownerships, reconciled by the POINTER.</b> The values are CEH's once a human
-    /// edits them on Company Details; the CHOICE of which contact is default is CM's. So:</para>
-    /// <list type="bullet">
-    /// <item><b>Pointer CHANGED</b> (or first ever read with nothing stored) ⇒ he made a deliberate
-    /// decision in CM. Re-read the person and overwrite. This is the case the old fill-blank-only
-    /// code could never see, and §597.4's whole remaining ◻.</item>
-    /// <item><b>Pointer UNCHANGED</b> ⇒ fill blanks only, exactly as before. A hub edit is never
-    /// silently reverted by a routine sync.</item>
-    /// <item><b>Pointer CLEARED in CM</b> (0/absent) ⇒ change NOTHING. An unset default is not an
-    /// instruction to wipe the contact, and wiping it would push a blank contact to Zoho.</item>
-    /// </list>
-    ///
-    /// <para>🔒 The <see cref="Domain.SponsorInfo.ZohoContactEmail"/> guard is deliberately NOT
-    /// touched here. Zoho caps contact-e-mail updates at 3 and a burnt cap loses an exhibitor's
-    /// leads (§596.1) — so this decides WHAT the contact is, and that guard alone still decides
-    /// whether an e-mail is worth spending an attempt on.</para>
-    ///
-    /// <para>Fail-soft throughout: a CM outage must leave the existing contact standing, never
-    /// blank it.</para>
-    /// </remarks>
-    /// <summary>
-    /// §597.4 — the decision alone, as a pure rule so it can be tested without Company Manager,
-    /// Zoho or a database. Should CEH (re-)read the default coordinator from CM?
-    /// </summary>
-    /// <param name="storedPointer">The CM user id CEH last recorded as the default, or null.</param>
-    /// <param name="cmPointer">The company's current CM default-coordinator user id (0 = unset).</param>
-    /// <param name="cehCoordinatorEmpty">True when CEH holds no coordinator at all.</param>
-    public static bool ShouldReadCoordinator(int? storedPointer, int cmPointer, bool cehCoordinatorEmpty)
-    {
-        // 🔒 Unset in CM is NOT an instruction to wipe. Blanking the contact here would push an
-        // empty contact to Zoho and spend one of the 3 capped e-mail attempts doing it (§596.1).
-        if (cmPointer <= 0) return false;
-
-        // He changed the default in CM — a deliberate decision, and the case the old
-        // fill-blank-only code could never see.
-        if (storedPointer != cmPointer) return true;
-
-        // Same default as last time: fill only if CEH has nothing, so a hub edit on Company Details
-        // is never silently reverted by a routine sync.
-        return cehCoordinatorEmpty;
-    }
-
-    private async Task<bool> SyncDefaultCoordinatorAsync(
-        Domain.SponsorInfo info, CompanyManagerCompany company, int cid, CancellationToken ct)
-    {
-        var pointer = company.EventCoordinationDefaultContactUserId;
-        var pointerChanged = pointer > 0 && info.CmDefaultCoordinatorUserId != pointer;
-
-        if (!ShouldReadCoordinator(info.CmDefaultCoordinatorUserId, pointer, CoordinatorEmpty(info)))
-            return false;
-
-        CompanyManagerCoordinator? coord;
-        try { coord = await _cm.GetDefaultCoordinatorAsync(cid, ct); }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "§597.4: could not resolve the default coordinator for company {Co} — the existing "
-                + "contact is left standing.", info.SponsorCompanyId);
-            return false;
-        }
-
-        // Resolved to nothing (an orphaned pointer). Same rule: never blank a good contact.
-        if (coord is null || string.IsNullOrWhiteSpace(coord.Email))
-        {
-            _log.LogWarning(
-                "§597.4: company {Co} points at CM user {UserId} as default event coordinator, but "
-                + "that user resolved to no usable contact — CEH left unchanged.",
-                info.SponsorCompanyId, pointer);
-            return false;
-        }
-
-        var before = info.EventCoordinatorEmail;
-
-        info.EventCoordinatorFirstName = NullIf(coord.FirstName);
-        info.EventCoordinatorLastName = NullIf(coord.LastName);
-        info.EventCoordinatorEmail = NullIf(coord.Email);
-        info.EventCoordinatorPhone = NullIf(coord.Phone);
-        info.EventCoordinatorCompanyName = NullIf(coord.CompanyName);
-        info.CmDefaultCoordinatorUserId = pointer;
-
-        if (pointerChanged && !string.IsNullOrWhiteSpace(before)
-            && !string.Equals(before, info.EventCoordinatorEmail, StringComparison.OrdinalIgnoreCase))
-        {
-            _log.LogInformation(
-                "§597.4: company {Co} default event coordinator changed in Company Manager — contact "
-                + "moved from {Before} to {After} (CM user {UserId}).",
-                info.SponsorCompanyId, before, info.EventCoordinatorEmail, pointer);
-        }
-
-        return true;
-    }
 
     /// <summary>
     /// §553 — clear a stored Zoho sponsor/exhibitor id that a DEFINITE read says is gone, so the
@@ -1940,6 +1768,30 @@ public sealed class SponsorZohoSyncService
         string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// §1312 — bootstrap a company's Zoho EXHIBITOR id by name, with the same guard the sponsor record has (§1159): never a
+    /// record another company already holds, and "cannot tell" instead of "take the first" when several unclaimed records
+    /// share the name. It took <c>FirstOrDefault</c> by name, so two booth companies with one public name (a group's
+    /// country entities) would both point at one exhibitor, and each sync would overwrite the other's booth members,
+    /// description and links. Ids assigned earlier in the same run (tracked, not yet saved) count as claimed.
+    /// </summary>
+    private async Task<string?> MatchExhibitorAsync(
+        string token, int eventId, string companyId, string companyName, CancellationToken ct)
+    {
+        var exhibitors = await _zoho.GetExhibitorsAsync(token, ct);
+        var claimed = (await _db.SponsorInfos.IgnoreQueryFilters()
+                .Where(s => s.EventId == eventId && s.SponsorCompanyId != companyId && s.ZohoExhibitorId != null)
+                .Select(s => s.ZohoExhibitorId!).ToListAsync(ct))
+            .Concat(_db.SponsorInfos.Local
+                .Where(s => s.EventId == eventId && s.SponsorCompanyId != companyId && !string.IsNullOrWhiteSpace(s.ZohoExhibitorId))
+                .Select(s => s.ZohoExhibitorId!))
+            .ToHashSet(StringComparer.Ordinal);
+        var match = ZohoRecordMatch.ByName(exhibitors.Select(e => (e.Id, e.CompanyName)), companyName, claimed);
+        if (match.RefusalReason is not null)
+            _log.LogWarning("Zoho sync: {Co} exhibitor — {Reason}", companyName, match.RefusalReason);
+        return match.Id;
+    }
+
+    /// <summary>
     /// §1153 — should this run push the company name to Zoho?
     /// </summary>
     /// <param name="inZoho">The name as it currently stands in Zoho (null when it could not be read).</param>
@@ -1960,6 +1812,18 @@ public sealed class SponsorZohoSyncService
     /// </remarks>
     public static bool ShouldPushName(string? inZoho, string? ours) =>
         ShouldPushName(inZoho, ours, companyId: null);
+
+    /// <summary>
+    /// §1361 — the companies in a run start at a different place each 10-minute slot (a stable order, rotated), so a
+    /// run cut short by Zoho's request limit never starves the same companies twice in a row.
+    /// </summary>
+    public static List<T> RotateForRun<T>(IReadOnlyList<T> ordered, DateTimeOffset now)
+    {
+        if (ordered.Count <= 1) return ordered.ToList();
+        var slot = now.ToUnixTimeSeconds() / 600;
+        var start = (int)(slot % ordered.Count);
+        return ordered.Skip(start).Concat(ordered.Take(start)).ToList();
+    }
 
     /// <summary>
     /// 🔴 §1237 — …and NEVER push a value that is not a name. Passing <paramref name="companyId"/>

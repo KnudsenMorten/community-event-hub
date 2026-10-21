@@ -49,6 +49,25 @@ public class BoothMemberAllowanceTests
         Assert.Equal(expected, spec!.BoothMembersIncluded);
     }
 
+    /// <summary>
+    /// 🔴 §1302 — the booth coupon codes are the webshop's GENERIC codes, with no edition number.
+    /// Operator 2026-09-24: *"the coupon is wrong - it says eldk27-..... but it is generic eldk-"*.
+    /// A code the webshop does not have is a sponsor who cannot redeem their included furniture.
+    /// </summary>
+    [Theory]
+    [InlineData("feature", "eldk-feature-booth-included")]
+    [InlineData("gold", "eldk-gold-booth-included")]
+    [InlineData("diamond", "eldk-diamond-booth-included")]
+    [InlineData("platinum", "eldk-platinum-booth-included")]
+    public void The_booth_coupon_is_the_generic_webshop_code(string tier, string expected)
+    {
+        var tiers = LoadShippedConfig().BoothWallSpecs?.Tiers;
+
+        Assert.NotNull(tiers);
+        Assert.True(tiers!.TryGetValue(tier, out var spec), $"No '{tier}' tier in boothWallSpecs.");
+        Assert.Equal(expected, spec!.Coupon);
+    }
+
     [Fact]
     public void Every_tier_states_an_allowance_so_none_silently_reads_as_zero()
     {

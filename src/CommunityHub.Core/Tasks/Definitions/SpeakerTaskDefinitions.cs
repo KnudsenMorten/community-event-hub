@@ -150,7 +150,7 @@ public static class SpeakerTaskDefinitions
         new TaskDefinition(
             Key: "speaker.preview-presentation",
             Audience: TaskAudience.For(ParticipantRole.Speaker)
-                .Except(TaskAudiencePredicate.IsSponsorCategorySpeaker),
+                .Except(TaskAudiencePredicate.IsSponsorCategorySpeaker, TaskAudiencePredicate.IsPanelOnlySpeaker),
             Title: "Upload preview presentation",
             Due: new TaskDue.FromSpeakerConfig("preview-presentation"),
             Reminders: TaskReminderCadence.Standard,
@@ -159,9 +159,11 @@ public static class SpeakerTaskDefinitions
 
         new TaskDefinition(
             Key: "speaker.final-presentation",
-            // 🔑 NO exclusion — §456's single exception. An exhibitor speaker still owns their
+            // 🔑 No SPONSOR exclusion — §456's single exception. An exhibitor speaker still owns their
             // final deck; it is the one deliverable of theirs the organizers need.
-            Audience: TaskAudience.For(ParticipantRole.Speaker),
+            // §1307 — but a panel-only speaker has no deck at all: panels are discussions.
+            Audience: TaskAudience.For(ParticipantRole.Speaker)
+                .Except(TaskAudiencePredicate.IsPanelOnlySpeaker),
             Title: "Upload final presentation",
             Due: new TaskDue.FromSpeakerConfig("final-presentation"),
             Reminders: TaskReminderCadence.Standard,

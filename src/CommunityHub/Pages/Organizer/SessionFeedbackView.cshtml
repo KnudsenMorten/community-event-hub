@@ -1,0 +1,131 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionFeedbackViewModel
+@using CommunityHub.Core.Evaluation
+@using CommunityHub.Pages.Organizer
+@{
+    ViewData["Title"] = Model.Data?.SessionTitle ?? "Session feedback";
+}
+
+@* §1291 — one session's feedback on the page. Mobile-first: one column, bars that shrink. *@
+<style>
+    .fv-hero { display:flex; gap:18px; align-items:center; background:#f3f4f6; border-radius:14px; padding:16px 18px; border-left:7px solid var(--band); flex-wrap:wrap; }
+    .fv-score { font-size:56px; font-weight:800; line-height:1; color:var(--band); }
+    .fv-row { display:grid; grid-template-columns: minmax(120px, 170px) 1fr auto; gap:10px; align-items:center; margin:6px 0; }
+    .fv-bar { height:12px; background:#f1f5f9; border-radius:6px; overflow:hidden; }
+    .fv-bar > span { display:block; height:100%; border-radius:6px; }
+    .fv-cols { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:18px; }
+    .fv-pick { display:grid; grid-template-columns: 1fr 70px auto; gap:8px; align-items:center; margin:4px 0; font-size:14px; }
+    .fv-quote { border-left:4px solid #1d4ed8; padding:6px 12px; margin:10px 0; background:#f8fafc; border-radius:0 8px 8px 0; }
+    .fv-meta { color:#64748b; font-size:13px; }
+</style>
+
+@if (Model.AccessDenied)
+{
+    <div class="card"><p class="error">@Localizer["Common.OrganizersOnly"]</p></div>
+}
+else if (Model.Data is { } d)
+{
+    var s = d.Score;
+    var dist = s.Distribution;
+    var band = s.Score is double bs ? CommunityHub.Core.Evaluation.EvaluationRatingLabels.Colour(bs >= 80 ? 4 : bs >= 60 ? 3 : bs >= 40 ? 2 : 1) : "#64748b";
+    <div class="card">
+        <p style="margin:0 0 8px;"><a asp-page="/Organizer/SessionFeedback">&larr; All sessions</a></p>
+        <h1 style="margin:0;">@d.SessionTitle</h1>
+        <p class="fv-meta" style="margin:4px 0 0;">
+            @SessionFeedbackViewModel.Danish(d.ScheduledStart, "ddd dd MMM HH:mm")–@SessionFeedbackViewModel.Danish(d.ScheduledEnd, "HH:mm")
+            @if (!string.IsNullOrWhiteSpace(d.Room)) { <text> &middot; @d.Room</text> }
+            @if (!string.IsNullOrWhiteSpace(d.TrackName)) { <text> &middot; @d.TrackName</text> }
+        </p>
+        <p class="fv-meta" style="margin:2px 0 14px;">
+            @if (d.WindowOpensAt is { } wo && d.WindowClosesAt is { } wc)
+            {
+                <text>Feedback open @SessionFeedbackViewModel.Danish(wo, "HH:mm")–@SessionFeedbackViewModel.Danish(wc, "HH:mm") &middot; </text>
+            }
+            <strong>@s.Responses</strong> response(s): @d.DeviceResponses from kiosks, @d.QrResponses by QR code
+        </p>
+
+        <div class="fv-hero" style="--band:@band;">
+            @if (s.Score is double score)
+            {
+                <div class="fv-score">@Math.Round(score).ToString("0")</div>
+                <div>
+                    <div style="font-weight:700;font-size:17px;">Satisfaction score &middot; @s.Band (@SatisfactionScore.BandRange(s.Score) of 100)</div>
+                    <div class="fv-meta">@(dist.Four + dist.Three) of the @s.Responses people who answered were happy or very happy</div>
+                </div>
+            }
+            else
+            {
+                <div>
+                    <div style="font-weight:700;font-size:17px;">Not enough responses yet</div>
+                    <div class="fv-meta">@s.Responses of @SatisfactionScore.MinimumResponses needed before a score is shown.</div>
+                </div>
+            }
+        </div>
+
+        <h2 style="font-size:17px;margin:20px 0 6px;">How people answered</h2>
+        @foreach (var (label, n, rating) in new[]
+        {
+            (EvaluationRatingLabels.Label(4), dist.Four, 4), (EvaluationRatingLabels.Label(3), dist.Three, 3),
+            (EvaluationRatingLabels.Label(2), dist.Two, 2), (EvaluationRatingLabels.Label(1), dist.One, 1),
+        })
+        {
+            var peak = Math.Max(1, new[] { dist.Four, dist.Three, dist.Two, dist.One }.Max());
+            <div class="fv-row">
+                <span>@label</span>
+                <div class="fv-bar"><span style="width:@((100d * n / peak).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%;background:@EvaluationRatingLabels.Colour(rating);"></span></div>
+                <span style="white-space:nowrap;"><strong>@n</strong> <span class="fv-meta">(@SessionFeedbackViewModel.Pct(n, s.Responses)%)</span></span>
+            </div>
+        }
+
+        @{
+            var good = d.PositivePoints ?? Array.Empty<EvaluationReportService.FollowUpCount>();
+            var better = d.ImprovementPoints ?? Array.Empty<EvaluationReportService.FollowUpCount>();
+        }
+        @if (good.Count > 0 || better.Count > 0)
+        {
+            <h2 style="font-size:17px;margin:22px 0 6px;">What people picked</h2>
+            <div class="fv-cols">
+                @foreach (var (question, list, colour) in new[]
+                {
+                    (EvaluationFollowUps.PositiveQuestion, good, EvaluationRatingLabels.Colour(3)),
+                    (EvaluationFollowUps.ImprovementQuestion, better, EvaluationRatingLabels.Colour(2)),
+                })
+                {
+                    <div>
+                        <h3 style="font-size:15px;margin:0 0 4px;">@question</h3>
+                        @if (list.Count == 0)
+                        {
+                            <p class="fv-meta">Nobody picked one.</p>
+                        }
+                        @{ var most = Math.Max(1, list.Count == 0 ? 1 : list.Max(p => p.Count)); }
+                        @foreach (var p in list)
+                        {
+                            <div class="fv-pick">
+                                <span>@p.Label</span>
+                                <div class="fv-bar"><span style="width:@((100d * p.Count / most).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%;background:@colour;"></span></div>
+                                <strong>@p.Count</strong>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <h2 style="font-size:17px;margin:22px 0 6px;">What people wrote</h2>
+        @if (d.Comments.Count == 0)
+        {
+            <p class="fv-meta">No written comments. They can only arrive through the QR page — the room devices have buttons, not a keyboard.</p>
+        }
+        @foreach (var c in d.Comments)
+        {
+            <div class="fv-quote">&ldquo;@c&rdquo;</div>
+        }
+
+        <p style="margin-top:22px;">
+            <a class="btn" target="_blank" rel="noopener"
+               asp-page="/Organizer/SessionFeedback" asp-page-handler="Report"
+               asp-route-evaluationSessionId="@Model.EvaluationSessionId">&#128196; Open as PDF</a>
+        </p>
+        <p class="fv-meta">Calculated @SessionFeedbackViewModel.Danish(d.GeneratedAt, "ddd dd MMM HH:mm") (Danish time).</p>
+    </div>
+}

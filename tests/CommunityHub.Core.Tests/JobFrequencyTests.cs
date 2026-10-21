@@ -221,47 +221,6 @@ public sealed class JobFrequencyTests
             + "the inconsistency §878 removed: " + string.Join(" | ", unsettable));
     }
 
-    [Fact]
-    public void The_erp_customer_and_contact_sync_runs_every_ten_minutes()
-    {
-        // §510 converted this job to an interval-driven cadence (a 5-minute base TICK plus
-        // DefaultIntervalMinutes) and deliberately kept 30 so the conversion changed no behaviour.
-        //
-        // §595 — the operator has now chosen otherwise: *"it must run every 10 min"*. This is the
-        // job he was looking for on /Organizer/Jobs: the ERP (e-conomic) CUSTOMER + CONTACT sync
-        // into Company Manager / the webshop. He explicitly distinguished it from the webshop ORDER
-        // pull — *"but the webshop pull is different job … there is a different job that handles
-        // the customer + contact sync from erp"* — so WooCommercePullJob must NOT move with it.
-        var erp = JobCatalog.Find("ErpSyncCustomerContactJob");
-        Assert.NotNull(erp);
-        Assert.True(erp!.IsIntervalDriven);
-        Assert.Equal(10, erp.DefaultIntervalMinutes);
-
-        // The pin that keeps the two jobs from being conflated again.
-        //
-        // 🔒 §869.3 — THIS PIN NOW ASSERTS THE CADENCE, NOT THE CRON. It used to read
-        // `Assert.Equal("0 */15 * * * *", pull.Cron)`, which was a fair proxy while the webshop
-        // pull was cron-driven: its cron WAS its cadence. §869.3 converted it (he asked three times
-        // for every job to be re-timeable from the page), so the cron is now the shared 5-minute
-        // base tick and the 15 minutes live in DefaultIntervalMinutes.
-        //
-        // ⚠️ So the proxy would have failed while the invariant it protects was perfectly intact.
-        // Assert the invariant DIRECTLY instead — the webshop ORDER pull did not move to the ERP
-        // sync's 10 minutes. That is what §595 actually bought, and the next conversion cannot
-        // break this form of it by accident.
-        // ⚰️ §878.5 — THE "THEY MUST DIFFER" HALF OF THIS PIN IS RETIRED, DELIBERATELY.
-        // §595 kept the webshop pull at 15 while the ERP sync moved to 10, so the pin asserted they
-        // were NOT equal. Operator 2026-08-05: *"default for all are every 10 min"* — he has now
-        // set ONE default across the whole catalog, so both are 10 and the difference he was
-        // protecting no longer exists as a default. What §595 actually bought — that these are two
-        // DIFFERENT JOBS he can time independently — survives, and is now enforced by the page
-        // itself: each has its own box. Asserting inequality here would fail on a value he chose.
-        var pull = JobCatalog.Find("WooCommercePullJob");
-        Assert.NotNull(pull);
-        Assert.True(pull!.IsIntervalDriven);
-        Assert.NotSame(erp, pull);
-    }
-
     // ---------- what the Jobs page states ----------
 
     private static JobStatusRow Row(JobDescriptor job, int minInterval) =>

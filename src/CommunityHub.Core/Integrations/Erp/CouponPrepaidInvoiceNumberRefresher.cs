@@ -1,4 +1,5 @@
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -41,14 +42,18 @@ public sealed class CouponPrepaidInvoiceNumberRefresher
     private readonly IEconomicInvoiceClient _invoices;
     private readonly ILogger<CouponPrepaidInvoiceNumberRefresher>? _log;
 
+    private readonly CouponPrepaidInvoiceService? _create;
+
     public CouponPrepaidInvoiceNumberRefresher(
         CommunityHubDbContext db,
         IEconomicInvoiceClient invoices,
-        ILogger<CouponPrepaidInvoiceNumberRefresher>? log = null)
+        ILogger<CouponPrepaidInvoiceNumberRefresher>? log = null,
+        CouponPrepaidInvoiceService? create = null)
     {
         _db = db;
         _invoices = invoices;
         _log = log;
+        _create = create;
     }
 
     /// <summary>What one refresh pass changed, for the page banner and the tests.</summary>
@@ -58,6 +63,12 @@ public sealed class CouponPrepaidInvoiceNumberRefresher
     public sealed record RefreshResult(int Updated, int Checked, string? Problem = null)
     {
         public static RefreshResult Skipped(string why) => new(0, 0, why);
+
+        /// <summary>§1312 — drafts created AGAIN because CEH's own invoice had disappeared from e-conomic.</summary>
+        public IReadOnlyList<CreatedDraftInvoice> Recreated { get; init; } = Array.Empty<CreatedDraftInvoice>();
+
+        /// <summary>§1312 — purchases whose invoice is gone but could not be recreated, with the reason.</summary>
+        public IReadOnlyList<string> RecreateProblems { get; init; } = Array.Empty<string>();
     }
 
     /// <summary>
@@ -72,10 +83,12 @@ public sealed class CouponPrepaidInvoiceNumberRefresher
             return RefreshResult.Skipped("e-conomic is not configured on this host.");
         }
 
-        // Only purchases CEH itself invoiced can be refreshed, and only those with a number to
-        // correct. A purchase still awaiting its number is the §795.2 chase's job, not this one.
+        // §1312 — EVERY purchase, not only numbered ones: a partner's self-service purchase had its draft created but its
+        // number never stored, so it was never refreshed. A purchase is matched only by CEH's own reference, so a number an
+        // organizer typed (an invoice CEH did not make) is still left exactly as it is.
         var purchases = await _db.CouponPrepaidPurchases
-            .Where(p => p.Allocation.EventId == eventId && p.ErpInvoiceNumber != null)
+            .Include(p => p.Allocation)
+            .Where(p => p.Allocation.EventId == eventId)
             .ToListAsync(ct);
         if (purchases.Count == 0) return new RefreshResult(0, 0);
 
@@ -94,23 +107,37 @@ public sealed class CouponPrepaidInvoiceNumberRefresher
         var byReference = new Dictionary<string, EconomicInvoiceReference>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in live)
         {
+            // 🔴 §1362 — a credit note carries the marker of the invoice it credits; taking it wrote credit note 203 over
+            // invoice 199 on the purchase it credits. The purchase's number is its INVOICE's, never the credit note's.
+            if (r.IsCreditNote) continue;
             if (!string.IsNullOrWhiteSpace(r.Reference)) byReference[r.Reference.Trim()] = r;
         }
 
         var updated = 0;
         var checkedCount = 0;
+        var recreated = new List<CreatedDraftInvoice>();
+        var recreateProblems = new List<string>();
+        var marked = false;
         foreach (var p in purchases)
         {
-            // The marker CEH wrote when it raised the invoice. No match ⇒ this purchase's number
-            // was typed in by a human (or the invoice is not in either list) ⇒ leave it alone.
+            // The marker CEH wrote when it raised the invoice.
             if (!byReference.TryGetValue(
                     CouponPrepaidInvoiceService.ReferenceFor(p.Id), out var found))
             {
+                // 🔴 §1312 — CEH's OWN invoice is gone from e-conomic (drafts AND booked): the draft was deleted, so it
+                // is raised again (operator 2026-09-29: "make the same fix for the coupon prepaid invoice"). 🔒 Only a
+                // purchase CEH itself invoiced, and never on an EMPTY answer — the agreement always holds invoices, so an
+                // empty list is a read that failed quietly, not "everything was deleted". A typed number: left alone.
+                if (p.ErpInvoiceRaisedByCeh && live.Count > 0 && _create is not null)
+                    await RecreateAsync(p, recreated, recreateProblems, ct);
                 continue;
             }
 
             checkedCount++;
             var current = found.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // Its reference is CEH's ⇒ CEH raised it: marks every invoice made before the flag existed. Bookkeeping, not a
+            // number change, so it is saved without counting as "updated".
+            if (!p.ErpInvoiceRaisedByCeh) { p.ErpInvoiceRaisedByCeh = true; marked = true; }
             if (string.Equals(p.ErpInvoiceNumber, current, StringComparison.Ordinal)
                 && p.ErpInvoiceIsBooked == found.IsBooked)
             {
@@ -122,10 +149,40 @@ public sealed class CouponPrepaidInvoiceNumberRefresher
                 p.Id, p.ErpInvoiceNumber, current, found.IsBooked);
             p.ErpInvoiceNumber = current;
             p.ErpInvoiceIsBooked = found.IsBooked;
+
             updated++;
         }
 
-        if (updated > 0) await _db.SaveChangesAsync(ct);
-        return new RefreshResult(updated, checkedCount);
+        if (updated > 0 || marked || recreated.Count > 0 || recreateProblems.Count > 0) await _db.SaveChangesAsync(ct);
+        return new RefreshResult(updated, checkedCount) { Recreated = recreated, RecreateProblems = recreateProblems };
+    }
+
+    /// <summary>§1312 — raise a CEH prepaid invoice again, from what the purchase recorded.</summary>
+    private async Task RecreateAsync(
+        CouponPrepaidPurchase p, List<CreatedDraftInvoice> recreated, List<string> problems, CancellationToken ct)
+    {
+        // Loaded here, not Included in the scan: an Include of the (required) coupon setting is an INNER join, and a
+        // purchase whose setting row is missing would silently drop out of the whole refresh.
+        var rule = p.Allocation is null ? null : await _db.CouponInvoicingSettings
+            .FirstOrDefaultAsync(s => s.Id == p.Allocation.CouponInvoicingSettingId, ct);
+        if (rule is null || p.UnitPriceDkk is not { } price || price <= 0m || p.Quantity <= 0)
+        {
+            problems.Add($"Prepaid purchase {p.Id}: its invoice is gone from e-conomic but the purchase has no coupon or price to raise it again.");
+            return;
+        }
+        var label = p.Allocation!.TicketClassLabel ?? p.Allocation.TicketClassId;
+        var result = await _create!.CreateForPurchaseAsync(rule, label, p.Id, p.Quantity, price, ct);
+        if (result.DraftNumber is { } draft)
+        {
+            _log?.LogWarning("§1312 prepaid purchase {Purchase}: invoice {Old} is no longer in e-conomic — raised again as draft {New}.",
+                p.Id, p.ErpInvoiceNumber, draft);
+            p.ErpInvoiceNumber = draft.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            p.ErpInvoiceIsBooked = false;
+            if (result.Created_ is { } created) recreated.Add(created);
+        }
+        else if (result.Problem is { } why)
+        {
+            problems.Add($"Prepaid purchase {p.Id} ('{rule.CouponName}'): the invoice is gone from e-conomic and could not be raised again — {why}");
+        }
     }
 }

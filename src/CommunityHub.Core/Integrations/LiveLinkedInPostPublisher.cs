@@ -541,12 +541,16 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
     }
 
     /// <summary>
-    /// A well-formed person mention. The display name may not contain brackets, and the id is
-    /// restricted to LinkedIn's short-URN charset, so a stray "@[" in prose cannot be mistaken
-    /// for a mention and smuggle unescaped text past §326k.
+    /// A well-formed person or company mention. The display name may not contain brackets, and the
+    /// id is restricted to LinkedIn's short-URN charset (person) or digits (organization), so a stray
+    /// "@[" in prose cannot be mistaken for a mention and smuggle unescaped text past §326k.
+    /// <para>🔴 §1345 — the company form was missing: §1300's <c>{SponsorCompanyMention}</c> emits
+    /// <c>@[Name](urn:li:organization:{id})</c>, which this did not recognise, so it was escaped as
+    /// prose and the first sponsor post (glueckkanja, 2026-10-15) showed the raw markup.</para>
     /// </summary>
     private static readonly Regex MentionSpan = new(
-        @"@\[(?<name>[^\[\]]+)\]\((?<urn>urn:li:person:[A-Za-z0-9_-]+)\)", RegexOptions.Compiled);
+        @"@\[(?<name>[^\[\]]+)\]\((?<urn>urn:li:person:[A-Za-z0-9_-]+|urn:li:organization:[0-9]+)\)",
+        RegexOptions.Compiled);
 
     private static string? HeaderValue(HttpResponseMessage resp, string name) =>
         resp.Headers.TryGetValues(name, out var v) ? v.FirstOrDefault() : null;

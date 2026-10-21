@@ -314,7 +314,11 @@ public sealed class SessionManagementService
         // 🔒 A TITLE is never blanked. Everything downstream is keyed on it for a human — the ops
         // mails, the agenda, the speaker's own page — and a session with no title reads as data
         // loss. The other fields legitimately clear: removing a wrong tag or level IS an edit.
-        if (title is not null && !string.IsNullOrWhiteSpace(title)) session.Title = title.Trim();
+        // §1256d — runs of whitespace are COLLAPSED, not just trimmed. A stray double space is
+        // invisible everywhere a title is rendered, but it made the Zoho comparison report a
+        // change and mail "ACTION NEEDED" hourly with two values that printed identically.
+        if (title is not null && !string.IsNullOrWhiteSpace(title))
+            session.Title = Integrations.TextComparison.CollapseWhitespace(title);
         if (sessionAbstract is not null)
             session.Abstract = string.IsNullOrWhiteSpace(sessionAbstract) ? null : sessionAbstract.Trim();
         if (track is not null)

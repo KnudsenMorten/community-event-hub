@@ -418,6 +418,30 @@ public sealed class SoMeApprovalGateTests
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// 🔴 §1304 — the face gate un-releases a speaker graphic missing a photo; the gate must then
+    /// HARD-BLOCK the post, and the dispatcher must recognise that reason as a graphic block — the
+    /// critical e-mail fires only on <c>SoMeDispatchService.IsGraphicBlock</c>, so if the gate's
+    /// sentence drifted, the post would still be held but nobody would be told.
+    /// </summary>
+    [Fact]
+    public async Task An_un_released_speaker_graphic_hard_blocks_and_is_recognised_as_a_graphic_block()
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: "Welcome!");
+        await SeedSessionAsync(db, id: 30, type: SessionType.TechnicalSession, speakerCount: 2);
+        var graphic = await db.GraphicAssets.SingleAsync(g => g.StableKey == "session:30");
+        graphic.Status = GraphicAssetStatus.Generated;               // what the face gate does
+        graphic.InputHash = CommunityHub.Core.Integrations.Graphics.SoMeBundleBuildService.FaceGateRetiredHash;
+        await db.SaveChangesAsync();
+
+        var reason = await new SoMeApprovalGate(db).BlockedReasonAsync(SessionPost(30));
+
+        Assert.NotNull(reason);
+        Assert.True(SoMeDispatchService.IsGraphicBlock(reason!), $"not recognised: {reason}");
+        Assert.False(SoMeDispatchService.IsGraphicBlock("missing abstract — add it on the Sessions page"));
+    }
+
     [Fact]
     public async Task Turning_a_post_OFF_is_never_blocked()
     {

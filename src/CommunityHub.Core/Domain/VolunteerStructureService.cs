@@ -30,6 +30,7 @@ public sealed class VolunteerStructureService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly ITaskGuidanceGenerator _guidance;
+    private readonly VolunteerAssignmentGate _assignmentGate;
 
     /// <summary>
     /// <paramref name="guidance"/> is injected by DI (the registered
@@ -37,12 +38,20 @@ public sealed class VolunteerStructureService
     /// can auto-generate a blank §151 Description from the title. It is optional so
     /// existing two-arg constructions (tests, schedule builders) keep compiling; when
     /// not supplied it falls back to the always-on heuristic generator.
+    ///
+    /// <para>🔒 §1295 — <paramref name="assignmentGate"/> is deliberately REQUIRED, unlike the
+    /// optional dependencies around it. It is the ring gate on assignment, and an optional gate is
+    /// one a future construction site silently drops: that is precisely how the supervisor
+    /// dashboard came to assign volunteers with no ring check while the organizer page had one.
+    /// Tests can build it in one call — <see cref="VolunteerAssignmentGate.For"/>.</para>
     /// </summary>
     public VolunteerStructureService(
-        CommunityHubDbContext db, TimeProvider clock, ITaskGuidanceGenerator? guidance = null)
+        CommunityHubDbContext db, TimeProvider clock, VolunteerAssignmentGate assignmentGate,
+        ITaskGuidanceGenerator? guidance = null)
     {
         _db = db;
         _clock = clock;
+        _assignmentGate = assignmentGate;
         _guidance = guidance ?? new HeuristicTaskGuidanceGenerator();
     }
 
@@ -76,7 +85,7 @@ public sealed class VolunteerStructureService
     /// appointed supervisor of exactly that category.</summary>
     public async Task<bool> CanManageCategoryAsync(ActorContext actor, int categoryId, CancellationToken ct = default)
     {
-        if (actor.Role == ParticipantRole.Organizer) return true;
+        if (actor.Role.HasOrganizerAccess()) return true;
         if (actor.Role != ParticipantRole.Volunteer) return false;
         // A supervisor manages the bucket — via the legacy single column OR the
         // multi-supervisor join table (Buckets feature). Either grant suffices.
@@ -115,7 +124,7 @@ public sealed class VolunteerStructureService
 
     private static void RequireOrganizer(ActorContext actor)
     {
-        if (actor.Role != ParticipantRole.Organizer)
+        if (!actor.Role.HasOrganizerAccess())
             throw new VolunteerAccessDeniedException("Organizer role required.");
     }
 
@@ -344,7 +353,20 @@ public sealed class VolunteerStructureService
             s => s.Id == subcategoryId && s.EventId == actor.EventId, ct);
         if (sub is null) return false;
         await RequireManageCategoryAsync(actor, sub.CategoryId, ct);
-        _db.VolunteerSubcategories.Remove(sub); // cascades to tasks/assignments
+
+        // §1299 — removing a subcategory MOVES its tasks up to the category; it no longer deletes
+        // them. A subcategory is now only a grouping (e.g. "Monday"), so dropping the grouping must
+        // not drop the work and its assignments. The FK is ClientSetNull, so this is done explicitly
+        // rather than left to the database.
+        var tasks = await _db.VolunteerTasks
+            .Where(t => t.EventId == actor.EventId && t.SubcategoryId == sub.Id)
+            .ToListAsync(ct);
+        foreach (var t in tasks)
+        {
+            t.SubcategoryId = null;
+            t.CategoryId = sub.CategoryId;
+        }
+        _db.VolunteerSubcategories.Remove(sub);
         await _db.SaveChangesAsync(ct);
         return true;
     }
@@ -369,7 +391,43 @@ public sealed class VolunteerStructureService
         var sub = await _db.VolunteerSubcategories.FirstOrDefaultAsync(
             s => s.Id == subcategoryId && s.EventId == actor.EventId, ct)
             ?? throw new VolunteerValidationException("Subcategory not found in this edition.");
-        await RequireManageCategoryAsync(actor, sub.CategoryId, ct);
+        return await CreateTaskCoreAsync(actor, sub.CategoryId, sub.Id, title, description, due, shift,
+            resourcesNeeded, criticality, responsibleTeam, eldkLeadName, prerequisites, expectations,
+            instructions, timeEnd, ct);
+    }
+
+    /// <summary>
+    /// §1299 — create a task directly under a CATEGORY, with no subcategory. A subcategory is an
+    /// optional grouping; a task no longer needs one.
+    /// </summary>
+    public async Task<VolunteerTask> CreateTaskInCategoryAsync(
+        ActorContext actor, int categoryId, string title, string? description,
+        DateOnly? due, string? shift,
+        int resourcesNeeded = 0,
+        VolunteerTaskCriticality criticality = VolunteerTaskCriticality.Unspecified,
+        string? responsibleTeam = null,
+        string? eldkLeadName = null,
+        string? prerequisites = null,
+        string? expectations = null,
+        string? instructions = null,
+        string? timeEnd = null,
+        CancellationToken ct = default)
+    {
+        var cat = await _db.VolunteerCategories.FirstOrDefaultAsync(
+            c => c.Id == categoryId && c.EventId == actor.EventId, ct)
+            ?? throw new VolunteerValidationException("Category not found in this edition.");
+        return await CreateTaskCoreAsync(actor, cat.Id, null, title, description, due, shift,
+            resourcesNeeded, criticality, responsibleTeam, eldkLeadName, prerequisites, expectations,
+            instructions, timeEnd, ct);
+    }
+
+    private async Task<VolunteerTask> CreateTaskCoreAsync(
+        ActorContext actor, int categoryId, int? subcategoryId, string title, string? description,
+        DateOnly? due, string? shift, int resourcesNeeded, VolunteerTaskCriticality criticality,
+        string? responsibleTeam, string? eldkLeadName, string? prerequisites, string? expectations,
+        string? instructions, string? timeEnd, CancellationToken ct)
+    {
+        await RequireManageCategoryAsync(actor, categoryId, ct);
 
         title = (title ?? string.Empty).Trim();
         if (title.Length < 2) throw new VolunteerValidationException("Task title is required.");
@@ -380,7 +438,8 @@ public sealed class VolunteerStructureService
         var task = new VolunteerTask
         {
             EventId = actor.EventId,
-            SubcategoryId = sub.Id,
+            CategoryId = categoryId,
+            SubcategoryId = subcategoryId,
             Title = title,
             Description = Clean(description),
             DueDate = due,
@@ -421,7 +480,7 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
 
         static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
@@ -437,6 +496,9 @@ public sealed class VolunteerStructureService
         task.Expectations = Clean(expectations);
         task.Instructions = Clean(instructions);
         task.TimeEnd = Clean(timeEnd);
+        // §1297 — the typed planner window is a projection of the text; re-derive it here so
+        // the two can never drift apart.
+        VolunteerTaskWindow.SyncTypedTimes(task);
         task.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return true;
@@ -475,12 +537,13 @@ public sealed class VolunteerStructureService
         CancellationToken ct = default)
     {
         var task = await _db.VolunteerTasks
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category)
+            .Include(t => t.Subcategory)
             .FirstOrDefaultAsync(t => t.Id == taskId && t.EventId == actor.EventId, ct);
         if (task is null) return false;
         // Organizer anywhere, or the bucket's supervisor — the shared definition is
         // editable by any organizer, never restricted to whoever created the task.
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
 
         title = (title ?? string.Empty).Trim();
         if (title.Length < 2) throw new VolunteerValidationException("Task title is required.");
@@ -496,7 +559,7 @@ public sealed class VolunteerStructureService
         if (string.IsNullOrWhiteSpace(description))
         {
             var g = await _guidance.GenerateAsync(
-                title, task.Subcategory.Category.Name, responsibleTeam ?? task.ResponsibleTeam, ct);
+                title, task.Category.Name, responsibleTeam ?? task.ResponsibleTeam, ct);
             task.Description = Clean(g.Description) ?? Clean(g.Expectations);
         }
         else
@@ -513,6 +576,7 @@ public sealed class VolunteerStructureService
         task.EldkLeadName = Clean(eldkLeadName);
         task.TimeEnd = Clean(timeEnd);
         task.Shift = Clean(shift);
+        VolunteerTaskWindow.SyncTypedTimes(task);   // §1297 — typed window follows the text.
         task.DueDate = dueDate;
         task.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
@@ -531,7 +595,7 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
 
         var now = _clock.GetUtcNow();
         task.Status = VolunteerTaskStatus.Done;
@@ -548,7 +612,7 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
 
         task.Status = VolunteerTaskStatus.Open;
         task.CompletedAt = null;
@@ -562,7 +626,7 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
         _db.VolunteerTasks.Remove(task);
         await _db.SaveChangesAsync(ct);
         return true;
@@ -579,7 +643,7 @@ public sealed class VolunteerStructureService
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
 
-        var canManage = await CanManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        var canManage = await CanManageCategoryAsync(actor, task.CategoryId, ct);
         if (!canManage)
         {
             // Plain volunteer: only their own assigned task.
@@ -608,7 +672,7 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
 
         var vol = await _db.Participants.FirstOrDefaultAsync(
             p => p.Id == volunteerParticipantId && p.EventId == actor.EventId, ct);
@@ -616,16 +680,34 @@ public sealed class VolunteerStructureService
         if (vol.Role != ParticipantRole.Volunteer)
             throw new VolunteerValidationException("Only volunteers can be assigned to volunteer tasks.");
 
+        if (!vol.IsActive)
+            throw new VolunteerValidationException(
+                "That volunteer is deactivated — re-activate them before allocating shifts.");
+
+        // 🔒 §1299 — Assign QUEUES; it never publishes. Operator 2026-09-23: *"assignment from the
+        // work structure goes in the queue, so the organizers can see who got what tasks … volunteers
+        // dont see their assignments until we publish them."* The row written here is a Manual
+        // TaskAllocationDraft in the edition's ONE shared volunteer queue — invisible to the volunteer
+        // (every volunteer surface reads VolunteerTaskAssignment only). Publishing is the queue's
+        // Commit, which is where the ring gates live (the queue's released ring AND the §1295
+        // assignment switch), so this path no longer writes past them. Queueing itself is internal
+        // and is deliberately not ring-gated: staging somebody who is not yet released is the point.
         var already = await _db.VolunteerTaskAssignments.AnyAsync(
             a => a.TaskId == taskId && a.ParticipantId == volunteerParticipantId, ct);
-        if (already) return true; // idempotent
+        if (already) return true; // already published — idempotent
 
-        _db.VolunteerTaskAssignments.Add(new VolunteerTaskAssignment
+        var queued = await _db.TaskAllocationDrafts.AnyAsync(
+            d => d.TaskId == taskId && d.ParticipantId == volunteerParticipantId, ct);
+        if (queued) return true; // already queued (by anyone) — idempotent
+
+        _db.TaskAllocationDrafts.Add(new TaskAllocationDraft
         {
             EventId = actor.EventId,
+            OwnerParticipantId = actor.ParticipantId,
             TaskId = taskId,
             ParticipantId = volunteerParticipantId,
-            AssignedByEmail = actor.Email,
+            TargetRole = ParticipantRole.Volunteer,
+            Source = DraftSource.Manual,
             CreatedAt = _clock.GetUtcNow(),
         });
         await _db.SaveChangesAsync(ct);
@@ -637,7 +719,18 @@ public sealed class VolunteerStructureService
     {
         var task = await TaskWithCategoryAsync(taskId, actor.EventId, ct);
         if (task is null) return false;
-        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        await RequireManageCategoryAsync(actor, task.CategoryId, ct);
+
+        // §1299 — a person still in the queue is un-queued (nothing was ever published to them).
+        var draft = await _db.TaskAllocationDrafts.FirstOrDefaultAsync(
+            d => d.TaskId == taskId && d.ParticipantId == volunteerParticipantId
+                 && d.EventId == actor.EventId, ct);
+        if (draft is not null)
+        {
+            _db.TaskAllocationDrafts.Remove(draft);
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
 
         var row = await _db.VolunteerTaskAssignments.FirstOrDefaultAsync(
             a => a.TaskId == taskId && a.ParticipantId == volunteerParticipantId, ct);
@@ -665,7 +758,7 @@ public sealed class VolunteerStructureService
 
         var assigned = await _db.VolunteerTaskAssignments.AnyAsync(
             a => a.TaskId == taskId && a.ParticipantId == actor.ParticipantId, ct);
-        var canManage = await CanManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+        var canManage = await CanManageCategoryAsync(actor, task.CategoryId, ct);
         if (!assigned && !canManage)
             throw new VolunteerAccessDeniedException(
                 "Only a volunteer assigned to the task can ask for help on it.");
@@ -677,7 +770,7 @@ public sealed class VolunteerStructureService
         {
             EventId = actor.EventId,
             TaskId = taskId,
-            CategoryId = task.Subcategory.CategoryId,
+            CategoryId = task.CategoryId,
             RequestedByParticipantId = actor.ParticipantId,
             Message = message,
             Status = VolunteerHelpStatus.Open,
@@ -729,6 +822,7 @@ public sealed class VolunteerStructureService
             .Include(c => c.LeadParticipant)
             .Include(c => c.SupervisorParticipant)
             .Include(c => c.Subcategories).ThenInclude(s => s.Tasks)
+            .Include(c => c.Tasks) // §1299 — incl. the tasks directly under the category
             .OrderBy(c => c.Name)
             .ToListAsync(ct);
 
@@ -742,10 +836,11 @@ public sealed class VolunteerStructureService
     public async Task<List<VolunteerTask>> LoadAllTasksAsync(int eventId, CancellationToken ct = default) =>
         await _db.VolunteerTasks
             .Where(t => t.EventId == eventId)
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Category)
+            .Include(t => t.Subcategory)
             .Include(t => t.Assignments)
-            .OrderBy(t => t.Subcategory.Category.Name)
-            .ThenBy(t => t.Subcategory.Name)
+            .OrderBy(t => t.Category.Name)
+            .ThenBy(t => t.Subcategory == null ? "" : t.Subcategory.Name)
             .ThenBy(t => t.Title)
             .ToListAsync(ct);
 
@@ -756,6 +851,7 @@ public sealed class VolunteerStructureService
         await _db.VolunteerCategories
             .Where(c => c.EventId == eventId && c.SupervisorParticipantId == participantId)
             .Include(c => c.Subcategories).ThenInclude(s => s.Tasks)
+            .Include(c => c.Tasks)
             .OrderBy(c => c.Name)
             .ToListAsync(ct);
 
@@ -771,9 +867,10 @@ public sealed class VolunteerStructureService
 
         return await _db.VolunteerTasks
             .Where(t => t.EventId == eventId && taskIds.Contains(t.Id))
-            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
-            .OrderBy(t => t.Subcategory.Category.Name)
-            .ThenBy(t => t.Subcategory.Name)
+            .Include(t => t.Category)
+            .Include(t => t.Subcategory)
+            .OrderBy(t => t.Category.Name)
+            .ThenBy(t => t.Subcategory == null ? "" : t.Subcategory.Name)
             .ThenBy(t => t.Title)
             .ToListAsync(ct);
     }
@@ -791,6 +888,7 @@ public sealed class VolunteerStructureService
 
     private Task<VolunteerTask?> TaskWithCategoryAsync(int taskId, int eventId, CancellationToken ct) =>
         _db.VolunteerTasks
+            .Include(t => t.Category)
             .Include(t => t.Subcategory)
             .FirstOrDefaultAsync(t => t.Id == taskId && t.EventId == eventId, ct);
 }

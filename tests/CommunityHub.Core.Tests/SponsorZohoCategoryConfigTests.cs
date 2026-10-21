@@ -136,4 +136,17 @@ public sealed class SponsorZohoCategoryConfigTests
         Assert.Empty(mapper.MapProduct("Extra Staff Tickets"));
         Assert.Empty(mapper.MapProduct("Ticket Packages"));
     }
+
+    /// <summary>
+    /// Operator 2026-09-26: "we also need any sponsors to be added into zoho as swag sponsor if they buy something from
+    /// the swag catalog". A swag-catalogue item (webshop category "Swags", in either shop) maps to the Swag sponsor
+    /// heading, as the free-swag "Swag Sponsor" product always did.
+    /// </summary>
+    [Fact]
+    public void Buying_from_the_swag_catalogue_makes_the_company_a_swag_sponsor_in_Zoho()
+    {
+        var mapper = new SponsorZohoCategoryMapper(SponsorConfig());
+        Assert.Contains("Swag sponsor", mapper.MapProduct("Swags"));
+        Assert.Contains("Swag sponsor", mapper.MapProduct("Swag Sponsor"));
+    }
 }

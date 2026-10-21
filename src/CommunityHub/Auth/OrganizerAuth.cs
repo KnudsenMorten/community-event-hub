@@ -28,5 +28,5 @@ public static class OrganizerAuth
     /// every secretary-token session — returns false.
     /// </summary>
     public static bool IsRealOrganizer(CurrentParticipant? me) =>
-        me is not null && me.Role == ParticipantRole.Organizer && !me.IsActingAs;
+        me is not null && me.Role.HasOrganizerAccess() && !me.IsActingAs;   // §1312 — event partners too
 }

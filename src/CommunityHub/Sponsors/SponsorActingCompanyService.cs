@@ -62,10 +62,21 @@ public sealed class SponsorActingCompanyService
         }
         if (ids.Count == 0) return Array.Empty<SponsorCompanyOption>();
 
-        var names = await _db.SponsorInfos
+        // §1309 — a POTENTIAL sponsor's record is hidden by the sponsor query filter (IsSponsor = false), so without
+        // IgnoreQueryFilters a contact of several potential sponsors (operator 2026-09-27: "arrow have same event
+        // coordinator in all 4 countries") saw "Company ceh-…" instead of the names. The shop's own company name is the
+        // fallback for a company that has no sponsor record at all.
+        var names = await _db.SponsorInfos.IgnoreQueryFilters()
             .Where(s => s.EventId == eventId && ids.Contains(s.SponsorCompanyId))
             .Select(s => new { s.SponsorCompanyId, s.CompanyName })
             .ToListAsync(ct);
+        // The shop's label (public name — legal/billing company (country)) WINS: several companies can share a public name
+        // ("ARROW" in four countries — operator 2026-09-27: "use the billing name in the registration, switch company, cart").
+        var shopLabels = (await _db.ShopCompanies
+                .Where(c => c.EventId == eventId && ids.Contains(c.SponsorCompanyId)).ToListAsync(ct))
+            .ToDictionary(c => c.SponsorCompanyId, c => c.LegalLabel);
+        names = names.Where(n => !shopLabels.ContainsKey(n.SponsorCompanyId))
+            .Concat(shopLabels.Select(kv => new { SponsorCompanyId = kv.Key, CompanyName = (string?)kv.Value })).ToList();
 
         return ids
             .Select(id => new SponsorCompanyOption(

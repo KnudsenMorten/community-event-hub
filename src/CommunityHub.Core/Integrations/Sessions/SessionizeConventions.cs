@@ -93,6 +93,29 @@ public static class SessionizeConventions
         && string.Equals(track.Trim(), CommonTrackName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// 🔴 §1248 — why a COMMON-for-all-tracks session with no track is SKIPPED rather than pushed.
+    /// </summary>
+    /// <remarks>
+    /// <para>✅ <b>PROVEN, 2026-09-20.</b> Backstage answers a track-less create with
+    /// <c>HTTP 400 — "`track` is a required parameter"</c>. §1240d removed this skip on the
+    /// argument that the requirement had never been verified — it has now, by trying it. The
+    /// attempt cost one failed pass and wrote nothing, which is why it was worth making; but the
+    /// original behaviour was right and this is it, restored with the evidence attached.</para>
+    ///
+    /// <para>🔑 The state a common session needs — a session with NO track — is one Backstage
+    /// stores happily (§1011 live-verified: 16 of 25 live sessions are track-less) and its CREATE
+    /// API simply cannot produce. So it is created by hand, once, with the Track field left empty.
+    /// ⚠️ SKIPPED and not FAILED, because a failure line that no CEH edit could ever clear would
+    /// arrive on every pass for ever — the §594 failure.</para>
+    /// </remarks>
+    public const string CommonTrackSkipReason =
+        "Common for all tracks — NOT pushed. Backstage requires a track when a session is created "
+        + "(verified: HTTP 400 \"`track` is a required parameter\"), but a common session must have "
+        + "NO track, which is how Backstage displays it. The API cannot produce that state. "
+        + "⇒ Create this one by hand in Backstage and leave its Track field empty. "
+        + "(CEH will never create a \"" + CommonTrackName + "\" track.)";
+
+    /// <summary>
     /// The error line when somebody has typed the <see cref="CommonTrackName"/> marker into a hub
     /// session's Track field, where it would otherwise be created as a real Backstage track.
     /// </summary>

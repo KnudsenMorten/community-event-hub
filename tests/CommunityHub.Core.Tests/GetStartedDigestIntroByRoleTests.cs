@@ -41,12 +41,28 @@ public sealed class GetStartedDigestIntroByRoleTests
     {
         var intro = GetStartedDigestBuilder.IntroFor(ParticipantRole.Sponsor, "Experts Live Denmark 2027", "ELDK27");
 
-        // §1227b — the operator's exact sponsor wording.
-        Assert.Equal(
-            "Your <strong>Get Started</strong> checklist for <strong>Experts Live Denmark 2027 (ELDK27)</strong> "
-            + "still has open tasks. It's shared across your company, so a colleague can pick up any step — "
-            + "each one only needs completing once.",
-            intro);
+        // §1227b — the shared-checklist sentence stays; §1312 (operator 2026-09-27) adds his own opening and the TIP.
+        Assert.Contains("Our records show that your <strong>Get Started</strong> onboarding for "
+                        + "<strong>Experts Live Denmark 2027 (ELDK27)</strong> is not complete yet.", intro);
+        Assert.Contains("It's shared across your company, so a colleague can pick up any step — each one only needs "
+                        + "completing once.", intro);
+        Assert.Contains("<strong>TIP:</strong>", intro);
+    }
+
+    /// <summary>
+    /// §1312 — operator 2026-09-27: "can we optimize the weekly get started reminder mail for sponsors, so we can improve what
+    /// is missing and the consequence of this". Each open sponsor step says what it costs; the mail asks to whitelist the
+    /// sender, and states the real cadence.
+    /// </summary>
+    [Fact]
+    public void A_sponsor_reminder_names_the_consequence_the_whitelist_and_the_real_cadence()
+    {
+        Assert.Contains("social-media sponsor announcements", GetStartedDigestBuilder.SponsorConsequence("company"));
+        Assert.Contains("signage", GetStartedDigestBuilder.SponsorConsequence("logos"));
+        Assert.Null(GetStartedDigestBuilder.SponsorConsequence("unknown-step"));
+        Assert.Contains("please whitelist info@example.test", GetStartedDigestBuilder.SponsorPreambleHtml("info@example.test"));
+        Assert.Contains("every 2 days", GetStartedDigestBuilder.SponsorOutroHtml(2));
+        Assert.Contains("every week", GetStartedDigestBuilder.SponsorOutroHtml(7));
     }
 
     [Fact]

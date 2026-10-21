@@ -30,11 +30,8 @@ public sealed class SponsorGetStartedReportTests
 
     private static SponsorGetStartedReport NewReport(CommunityHubDbContext db)
     {
-        var cmOptions = new CompanyManagerOptions();
         var wizard = new SponsorWizardService(
             db,
-            new CompanyManagerClient(new HttpClient(), cmOptions),
-            cmOptions,
             new EconomicContactAdminService(new NoEconomicClient()),
             NullLogger<SponsorWizardService>.Instance);
 

@@ -55,8 +55,11 @@ public sealed class EconomicErpOptions
     ///
     /// <para>🔑 §767's rule, again: <b>list what is actually there before matching on a name.</b>
     /// This default was inferred from the script rather than read from the API.</para>
+    /// <para>🔴 §1312 — ENGLISH for every invoice (CEH shop, webshop, coupons). Operator 2026-09-29: <i>"language for the
+    /// invoice template must be english … not danish. use english as default template for all"</i>. Listed live the same
+    /// day: layouts 21 'Danish', 23 'English', 24 'Allerede betalt'.</para>
     /// </remarks>
-    public string InvoiceLayoutNameLike { get; set; } = "Danish";
+    public string InvoiceLayoutNameLike { get; set; } = "English";
 
     /// <summary>§786: the employee behind "Our reference" on the invoice.</summary>
     /// <remarks>
@@ -253,17 +256,74 @@ public sealed class LiveEconomicErpClient : IEconomicErpClient
         if (!CanWrite) return null;
         if (!string.IsNullOrWhiteSpace(customer.ErpCustomerNumber)) return customer.ErpCustomerNumber;
 
-        // Legacy dedupe rule: full paged list, name match (trim, case-insensitive).
+        // §1305 — the CVR FIRST, then the legacy name rule. The registration webhook matched on NAME only,
+        // so "Contoso ApS" and "Contoso A/S" became two customers; a validated CVR identifies a company.
+        // Both are checked in the same single pass over the (already fully paged) list.
         var wanted = customer.Name.Trim();
+        var wantedCvr = NormaliseCvr(customer.CorporateIdentificationNumber);
+        var rows = await PagedGetAsync($"{_options.ApiBaseUrl.TrimEnd('/')}/customers?pagesize=1000", ct);
+        string? byName = null;
+        foreach (var row in rows)
+        {
+            if (!row.TryGetProperty("customerNumber", out var num)) continue;
+            if (wantedCvr is not null
+                && row.TryGetProperty("corporateIdentificationNumber", out var c)
+                && c.ValueKind == System.Text.Json.JsonValueKind.String
+                && NormaliseCvr(c.GetString()) == wantedCvr)
+                return num.GetRawText().Trim('"');
+            if (byName is null && row.TryGetProperty("name", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(n.GetString()?.Trim(), wanted, StringComparison.OrdinalIgnoreCase))
+                byName = num.GetRawText().Trim('"');
+        }
+        return byName;
+    }
+
+    public async Task<string?> FindCustomerNumberByCvrAsync(string? cvr, CancellationToken ct)
+    {
+        if (!CanWrite) return null;
+        var wanted = NormaliseCvr(cvr);
+        if (wanted is null) return null;
+        var wantedPrefix = CountryPrefix(cvr);
         var rows = await PagedGetAsync($"{_options.ApiBaseUrl.TrimEnd('/')}/customers?pagesize=1000", ct);
         foreach (var row in rows)
         {
-            if (row.TryGetProperty("name", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(n.GetString()?.Trim(), wanted, StringComparison.OrdinalIgnoreCase)
-                && row.TryGetProperty("customerNumber", out var num))
-                return num.GetRawText().Trim('"');
+            if (!row.TryGetProperty("customerNumber", out var num)) continue;
+            if (!row.TryGetProperty("corporateIdentificationNumber", out var c) || c.ValueKind != System.Text.Json.JsonValueKind.String) continue;
+            var raw = c.GetString();
+            if (NormaliseCvr(raw) != wanted) continue;
+            var theirPrefix = CountryPrefix(raw);
+            if (wantedPrefix is not null && theirPrefix is not null && wantedPrefix != theirPrefix) continue;
+            return num.GetRawText().Trim('"');
         }
         return null;
+    }
+
+    /// <summary>§1312 — one customer's billing identity, read-only (GET /customers/{number}).</summary>
+    public async Task<ErpCustomer?> GetCustomerAsync(string customerNumber, CancellationToken ct)
+    {
+        if (!CanWrite || !int.TryParse(customerNumber?.Trim(), out var n)) return null;
+        using var resp = await _http.SendAsync(Request(HttpMethod.Get, $"{_options.ApiBaseUrl.TrimEnd('/')}/customers/{n}"), ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        var c = doc.RootElement;
+        static string? Str(System.Text.Json.JsonElement e, string name) =>
+            e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+        var zone = c.TryGetProperty("vatZone", out var vz) && vz.TryGetProperty("vatZoneNumber", out var vzn) && vzn.TryGetInt32(out var z)
+            ? z.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+        return new ErpCustomer(
+            CompanyId: string.Empty, Name: Str(c, "name") ?? string.Empty,
+            CorporateIdentificationNumber: Str(c, "corporateIdentificationNumber"),
+            Currency: Str(c, "currency"), VatZone: zone, Email: Str(c, "email"),
+            ErpCustomerNumber: n.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Address: Str(c, "address"), Zip: Str(c, "zip"), City: Str(c, "city"), Country: Str(c, "country"));
+    }
+
+    /// <summary>The two-letter country prefix of a VAT number ("DK", "SE"), or null.</summary>
+    private static string? CountryPrefix(string? raw)
+    {
+        var s = raw?.Trim().Replace(" ", "");
+        return s is { Length: > 2 } && char.IsLetter(s[0]) && char.IsLetter(s[1]) ? s[..2].ToUpperInvariant() : null;
     }
 
     public async Task<string> CreateCustomerAsync(ErpCustomer customer, CancellationToken ct)
@@ -287,6 +347,13 @@ public sealed class LiveEconomicErpClient : IEconomicErpClient
         if (!string.IsNullOrWhiteSpace(customer.Email)) payload["email"] = customer.Email!.Trim();
         if (!string.IsNullOrWhiteSpace(customer.CorporateIdentificationNumber))
             payload["corporateIdentificationNumber"] = customer.CorporateIdentificationNumber!.Trim();
+        // §1305 — the address block, as the registration webhook sent it (create only).
+        if (!string.IsNullOrWhiteSpace(customer.Address)) payload["address"] = customer.Address!.Trim();
+        if (!string.IsNullOrWhiteSpace(customer.Zip)) payload["zip"] = customer.Zip!.Trim();
+        if (!string.IsNullOrWhiteSpace(customer.City)) payload["city"] = customer.City!.Trim();
+        if (!string.IsNullOrWhiteSpace(customer.Country)) payload["country"] = customer.Country!.Trim();
+        if (!string.IsNullOrWhiteSpace(customer.Phone)) payload["telephoneAndFaxNumber"] = customer.Phone!.Trim();
+        if (!string.IsNullOrWhiteSpace(customer.Website)) payload["website"] = customer.Website!.Trim();
 
         using var resp = await _http.SendAsync(
             Request(HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/customers", payload), ct);
@@ -365,4 +432,17 @@ public sealed class LiveEconomicErpClient : IEconomicErpClient
             + "Creating it from CEH as well would double-invoice; deliberately not implemented here (§323).");
 
     private static string Clip(string v) => v.Length <= 400 ? v : v[..400] + "…";
+
+    /// <summary>
+    /// §1305 — a CVR for comparison: letters/digits only, upper-case, without a leading 2-letter country
+    /// prefix (e-conomic stores the bare national number; "DK12345678" and "12345678" are one company).
+    /// Null when blank.
+    /// </summary>
+    public static string? NormaliseCvr(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var s = new string(raw.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        if (s.Length > 2 && char.IsLetter(s[0]) && char.IsLetter(s[1]) && char.IsDigit(s[2])) s = s[2..];
+        return s.Length == 0 ? null : s;
+    }
 }

@@ -86,6 +86,21 @@ public static class ScenarioSeed
         db.Events.Add(evt);
         await db.SaveChangesAsync(ct);
 
+        // §1295 — the scenario seed models a FULLY RELEASED edition, so volunteer task assignment
+        // is switched on and released to Broad here. Without this row the catalog default applies
+        // (OFF, Ring 1) and every volunteer assignment in these scenarios is refused — which is
+        // the new gate working, not a broken seed. A scenario that wants the HELD state clears or
+        // lowers this row explicitly (see VolunteerAssignmentGateTests).
+        db.FeatureSettings.Add(new FeatureSetting
+        {
+            EventId = evt.Id,
+            FeatureKey = CommunityHub.Core.Volunteers.VolunteerAssignmentGate.FeatureKey,
+            Enabled = true,
+            ReleasedToRingOverride = CommunityHub.Core.Settings.Ring.Broad,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(ct);
+
         Participant Add(string email, string name, ParticipantRole role,
             string? companyId = null, bool active = true)
         {

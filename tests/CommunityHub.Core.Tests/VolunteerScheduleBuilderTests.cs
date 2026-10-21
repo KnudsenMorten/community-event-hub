@@ -96,7 +96,7 @@ public sealed class VolunteerScheduleBuilderTests
     }
 
     private static VolunteerScheduleBuilder NewBuilder(CommunityHubDbContext db) =>
-        new(db, new VolunteerStructureService(db, TimeProvider.System));
+        new(db, new VolunteerStructureService(db, TimeProvider.System, VolunteerAssignmentGate.For(db)));
 
     [Fact]
     public async Task Schedule_lists_all_assigned_tasks_with_supervisor_and_eldk_lead()

@@ -168,6 +168,28 @@ public sealed class OrganizerActingAsAuthzTests
         Assert.True(OrganizerAuth.IsRealOrganizer(me));
     }
 
+    /// <summary>
+    /// §1312 — an EVENT PARTNER has the full organizer area (operator 2026-10-01: "i need all event partners to have access in
+    /// the organizer pages … full access is fine"); a role without it (Media) still has none.
+    /// </summary>
+    [Theory]
+    [InlineData(ParticipantRole.EventPartner, true)]
+    [InlineData(ParticipantRole.Media, false)]
+    [InlineData(ParticipantRole.Sponsor, false)]
+    public void An_event_partner_session_has_organizer_access(ParticipantRole role, bool expected)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "7"),
+            new(ClaimTypes.Email, "partner@example.test"),
+            new(ClaimTypes.Name, "Partner"),
+            new(ClaimTypes.Role, role.ToString()),
+            new("EventId", EventId.ToString()),
+        };
+        var me = CurrentParticipant.FromPrincipal(ContextOf(claims).User);
+        Assert.Equal(expected, OrganizerAuth.IsRealOrganizer(me));
+    }
+
     // ---------------------------------------------------------------------
     //  Settings kill-switch toggle  (Settings.OnPostToggleAsync)
     // ---------------------------------------------------------------------

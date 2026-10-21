@@ -20,7 +20,7 @@ public enum PresentationKind
 /// <param name="PreviewFileName">The stored preview deck, or null.</param>
 /// <param name="FinalFileName">The stored final deck, or null.</param>
 public sealed record PresentationSessionSlot(
-    int SessionId, string Title, string? PreviewFileName, string? FinalFileName);
+    int SessionId, string Title, string? PreviewFileName, string? FinalFileName, bool IsPanel = false);
 
 /// <summary>One kind's DEADLINE state for the speaker (due date + Done) — §322.</summary>
 public sealed record PresentationTaskInfo(PresentationKind Kind, DateOnly? DueDate, bool TaskDone);
@@ -247,7 +247,7 @@ public sealed class SpeakerPresentationService
         // §428: the ONE shared "is this my session?" predicate — see SpeakerSessionScope.
         var sessions = await _db.Sessions
             .MineAsSpeaker(eventId, participantId)
-            .Select(s => new { SessionId = s.Id, s.Title })
+            .Select(s => new { SessionId = s.Id, s.Title, IsPanel = s.Type == SessionType.PanelDiscussion })
             .OrderBy(s => s.Title)
             .ToListAsync(ct);
 
@@ -257,7 +257,8 @@ public sealed class SpeakerPresentationService
         return sessions.Select(s => new PresentationSessionSlot(
                 s.SessionId, s.Title,
                 Latest(preview, s.SessionId)?.Name,
-                Latest(final, s.SessionId)?.Name))
+                Latest(final, s.SessionId)?.Name,
+                s.IsPanel))
             .ToList();
     }
 

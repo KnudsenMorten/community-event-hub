@@ -134,6 +134,53 @@ public sealed class SponsorMentionVariableTests
     }
 
     /// <summary>
+    /// 🔴 §1347 — a TEST contact on a real company is never tagged. Operator 2026-10-18: a Gold
+    /// sponsor's post was about to go out "including tagging some test users".
+    /// </summary>
+    [Fact]
+    public async Task A_test_contact_on_a_real_sponsor_is_not_mentioned()
+    {
+        using var db = NewDb();
+        var ev = await SeedAsync(db,
+            ("Ann Signer", true, false, "urn:li:person:AAA"),
+            ("Test Signer", true, false, "urn:li:person:TTT"),
+            ("Test Coord", false, true, "urn:li:person:TCC"));
+        foreach (var p in db.Participants.Where(p => p.FullName.StartsWith("Test")))
+        {
+            p.IsTestUser = true;
+        }
+        await db.SaveChangesAsync();
+
+        var v = await new SoMeVariableResolver(db).SponsorValuesAsync(ev, Company);
+
+        Assert.Equal("@[Ann Signer](urn:li:person:AAA)", v["SponsorSigner"]);
+        Assert.Null(v["SponsorEventCoordinators"]);
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — CodeTwo asked "to remove that and only tag their company on linkedin": with the company's
+    /// "tag our people" switch off, neither signer nor coordinator is mentioned, and the company mention stays.
+    /// </summary>
+    [Fact]
+    public async Task A_sponsor_that_opted_out_has_only_its_company_tagged()
+    {
+        using var db = NewDb();
+        var ev = await SeedAsync(db,
+            ("Ann Signer", true, false, "urn:li:person:AAA"),
+            ("Cara Coord", false, true, "urn:li:person:CCC"));
+        var info = db.SponsorInfos.Single();
+        info.SoMeTagContacts = false;
+        info.LinkedInOrganizationId = "12345";
+        await db.SaveChangesAsync();
+
+        var v = await new SoMeVariableResolver(db).SponsorValuesAsync(ev, Company);
+
+        Assert.Null(v["SponsorSigner"]);
+        Assert.Null(v["SponsorEventCoordinators"]);
+        Assert.Contains("12345", v["SponsorCompanyMention"]);
+    }
+
+    /// <summary>
     /// The template must carry the operator's layout: a BLANK line after the sponsor text, then
     /// "Tag:" with both variables — and both must be tokens the resolver knows, or §824.15 would
     /// publish the literal braces into a live post.
@@ -143,9 +190,10 @@ public sealed class SponsorMentionVariableTests
     {
         var body = SoMeTemplateCatalog.DefaultBody(SoMeTemplateKind.Sponsor);
 
-        Assert.Contains("Tag: {SponsorSigner} {SponsorEventCoordinators}", body);
+        // §1300 — the company is tagged FIRST in the Tag line, then the people.
+        Assert.Contains("Tag: {SponsorCompanyMention} {SponsorSigner} {SponsorEventCoordinators}", body);
         // A blank line immediately before the Tag line.
-        Assert.Contains("\n\nTag: {SponsorSigner}", body.Replace("\r\n", "\n"));
+        Assert.Contains("\n\nTag: {SponsorCompanyMention}", body.Replace("\r\n", "\n"));
         Assert.Contains("{SponsorSigner}", SoMeTemplateCatalog.KnownVariables);
         Assert.Contains("{SponsorEventCoordinators}", SoMeTemplateCatalog.KnownVariables);
     }

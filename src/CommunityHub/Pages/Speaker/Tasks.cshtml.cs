@@ -92,6 +92,14 @@ public class TasksModel : PageModel
             : CommunityHub.Content.OrganizerContact.Fallback;
     }
 
+    /// <summary>
+    /// §1255 — speaker-hub access by CAPABILITY (a SpeakerProfile exists), not by
+    /// <c>Participant.Role</c>. See <see cref="CommunityHub.Core.Domain.ParticipantCapabilities"/>.
+    /// </summary>
+    private Task<bool> MayUseSpeakerHubAsync(CurrentParticipant me, CancellationToken ct) =>
+        CommunityHub.Core.Domain.ParticipantCapabilities.HasSpeakerHubAccessAsync(
+            _db, me.EventId, me.ParticipantId, me.Role, ct);
+
     public bool NotSpeaker { get; private set; }
     public List<ParticipantTask> Tasks { get; private set; } = new();
 
@@ -149,7 +157,9 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Speaker) { NotSpeaker = true; return Page(); }
+        // §1255 — capability, not role: a speaker who is also an organizer / volunteer /
+        // attendee must still see her speaker deadlines (see ParticipantCapabilities).
+        if (!await MayUseSpeakerHubAsync(me, ct)) { NotSpeaker = true; return Page(); }
 
         // Ensure this speaker's deadline tasks exist (idempotent), then load them.
         try { await _seeder.SeedAsync(me.EventId, ct); } catch { /* tolerate seed hiccup */ }
@@ -323,7 +333,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Speaker) return RedirectToPage();
+        if (!await MayUseSpeakerHubAsync(me, ct)) return RedirectToPage();
         if (_presentations is null) return RedirectToPage();
 
         var presentationKind = string.Equals(kind, "final", StringComparison.OrdinalIgnoreCase)

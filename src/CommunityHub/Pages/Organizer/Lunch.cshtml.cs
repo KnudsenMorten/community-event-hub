@@ -75,7 +75,7 @@ public class LunchModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var evt = await _db.Events
             .Where(e => e.Id == me.EventId)
@@ -100,10 +100,10 @@ public class LunchModel : PageModel
             .Where(l => l.EventId == me.EventId)
             .Join(_db.Participants, l => l.ParticipantId, p => p.Id, (l, p) => new
             {
-                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser,
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser, p.SamePersonAsId,
                 l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay, l.Notes
             })
-            .Where(x => x.IsActive && !x.IsTestUser)
+            .Where(x => x.IsActive && !x.IsTestUser && x.SamePersonAsId == null) // §1307 — a linked duplicate counts as one
             .ToListAsync(ct);
 
         // (Rows are assembled AFTER the auto-count set is known — see below, §326bv: the

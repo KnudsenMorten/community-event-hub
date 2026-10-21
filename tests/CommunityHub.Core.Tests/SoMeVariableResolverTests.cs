@@ -160,9 +160,10 @@ public sealed class SoMeVariableResolverTests
         await SeedEditionAsync(db);
         db.SponsorInfos.AddRange(
             new SponsorInfo { EventId = EventId, SponsorCompanyId = "1", CompanyName = "Alpha",
-                              SponsorPackage = SponsorPackage.Gold, LinkedInOrganizationId = "111" },
+                              SponsorPackage = SponsorPackage.Gold, LinkedInOrganizationId = "111",
+                              HasCurrentBoothOrder = true },
             new SponsorInfo { EventId = EventId, SponsorCompanyId = "2", CompanyName = "Beta",
-                              SponsorPackage = SponsorPackage.Gold },
+                              SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = true },
             new SponsorInfo { EventId = EventId, SponsorCompanyId = "3", CompanyName = "Gamma",
                               SponsorPackage = SponsorPackage.Silver });
         await db.SaveChangesAsync();
@@ -173,6 +174,26 @@ public sealed class SoMeVariableResolverTests
         // Mixed on purpose: tagging is per sponsor, so one post can carry both forms.
         Assert.Equal("@[Alpha](urn:li:organization:111) | Beta", v["SponsorList"]);
         Assert.DoesNotContain("Gamma", v["SponsorList"]!);   // a different tier
+    }
+
+    /// <summary>
+    /// 🔴 §1348 — a Gold sponsor whose booth order was cancelled is not listed as Gold (2linkIT).
+    /// </summary>
+    [Fact]
+    public async Task A_sponsor_whose_booth_tier_lapsed_is_not_listed_in_the_tier()
+    {
+        using var db = NewDb();
+        await SeedEditionAsync(db);
+        db.SponsorInfos.AddRange(
+            new SponsorInfo { EventId = EventId, SponsorCompanyId = "1", CompanyName = "Alpha",
+                              SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = true },
+            new SponsorInfo { EventId = EventId, SponsorCompanyId = "12", CompanyName = "Lapsed",
+                              SponsorPackage = SponsorPackage.Gold, HasCurrentBoothOrder = false });
+        await db.SaveChangesAsync();
+
+        var v = await new SoMeVariableResolver(db).SponsorTierValuesAsync(EventId, SponsorPackage.Gold);
+
+        Assert.Equal("Alpha", v["SponsorList"]);
     }
 
     [Fact]

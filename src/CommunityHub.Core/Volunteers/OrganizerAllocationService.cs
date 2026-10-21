@@ -54,7 +54,7 @@ public sealed class OrganizerAllocationService
 
     private static void RequireOrganizer(VolunteerStructureService.ActorContext actor)
     {
-        if (actor.Role != ParticipantRole.Organizer)
+        if (!actor.Role.HasOrganizerAccess())
             throw new VolunteerAccessDeniedException("Organizer role required for allocation.");
 
         // §337 DEFENCE IN DEPTH — see the twin guard in VolunteerAllocationService. Role

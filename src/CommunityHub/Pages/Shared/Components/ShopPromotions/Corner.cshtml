@@ -1,0 +1,66 @@
+@model CommunityHub.ViewComponents.ShopPromotionsView
+@* §1305 — the commercial corner: the organizer's (up to) three promoted products, one at a time with picture and price,
+   changing every few seconds (pauses on hover/focus; dots jump to one). With reduced motion all of them are listed. *@
+@* Operator 2026-09-26: "dont like the word recommended. make it more selling like from a webshop, great opportunity with
+   great value … extra exposure". *@
+<aside class="shop-corner" aria-label="Great opportunities" data-interval="4000">
+    <div class="shop-corner-head">&#9733; Great opportunity</div>
+    @for (var n = 0; n < Model.Items.Count; n++)
+    {
+        var i = Model.Items[n];
+        <a class="shop-corner-slide @(n == 0 ? "is-on" : "")" href="@i.Href" data-slide="@n">
+            @if (i.ImageId is int img) { <img src="/shop-image/@img" alt="" loading="lazy" /> }
+            <span class="shop-corner-name">@i.Product.Name</span>
+            <span class="shop-corner-price"><partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="i.Product" /></span>
+            <span class="shop-corner-pitch">Extra exposure for your brand — great value</span>
+            <span class="shop-corner-cta">Grab it before it's gone &rarr;</span>
+        </a>
+    }
+    @if (Model.Items.Count > 1)
+    {
+        <div class="shop-corner-dots">
+            @for (var n = 0; n < Model.Items.Count; n++)
+            {
+                <button type="button" class="@(n == 0 ? "is-on" : "")" data-go="@n" aria-label="Show @Model.Items[n].Product.Name"></button>
+            }
+        </div>
+    }
+</aside>
+<style>
+    .shop-corner { border:2px solid #f59e0b; border-radius:12px; background:#fffbeb; padding:10px; display:grid; gap:8px; }
+    .shop-corner-head { font-weight:800; color:#fff; background:#d97706; text-transform:uppercase; font-size:13px; letter-spacing:.05em;
+                        padding:5px 10px; border-radius:6px; justify-self:start; }
+    .shop-corner-pitch { font-size:14px; color:#92400e; font-weight:600; }
+    .shop-corner-slide { display:none; gap:6px; text-decoration:none; color:#1a1a2e; }
+    .shop-corner-slide.is-on { display:grid; animation:shopcornerin .35s ease-out; }
+    .shop-corner-slide img { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:8px; background:#fff; }
+    .shop-corner-name { font-weight:700; font-size:15px; line-height:1.25; }
+    .shop-corner-price { font-weight:700; }
+    .shop-corner-cta { background:#1565c0; color:#fff; font-weight:700; font-size:14px; padding:8px 10px; border-radius:8px; text-align:center; }
+    .shop-corner-dots { display:flex; gap:6px; justify-content:center; }
+    .shop-corner-dots button { width:10px; height:10px; border-radius:50%; border:1px solid #92400e; background:transparent; padding:0; cursor:pointer; }
+    .shop-corner-dots button.is-on { background:#92400e; }
+    @@keyframes shopcornerin { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+    @@media (prefers-reduced-motion: reduce) { .shop-corner-slide { display:grid; } .shop-corner-dots { display:none; } }
+</style>
+<script>
+(function () {
+    document.querySelectorAll('.shop-corner').forEach(function (box) {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        var slides = box.querySelectorAll('.shop-corner-slide'), dots = box.querySelectorAll('.shop-corner-dots button');
+        if (slides.length < 2) return;
+        var at = 0, paused = false, every = parseInt(box.dataset.interval || '4000', 10);
+        function show(n) {
+            at = (n + slides.length) % slides.length;
+            slides.forEach(function (s, i) { s.classList.toggle('is-on', i === at); });
+            dots.forEach(function (d, i) { d.classList.toggle('is-on', i === at); });
+        }
+        dots.forEach(function (d) { d.addEventListener('click', function () { show(parseInt(d.dataset.go, 10)); }); });
+        box.addEventListener('mouseenter', function () { paused = true; });
+        box.addEventListener('mouseleave', function () { paused = false; });
+        box.addEventListener('focusin', function () { paused = true; });
+        box.addEventListener('focusout', function () { paused = false; });
+        setInterval(function () { if (!paused) show(at + 1); }, every);
+    });
+})();
+</script>

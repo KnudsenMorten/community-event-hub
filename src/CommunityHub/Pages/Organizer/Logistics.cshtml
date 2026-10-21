@@ -27,9 +27,17 @@
 {
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>
     {
+        // §1296b — the three hotel tiles SHARED one description ("Manage the hotel list, then
+        // assign participants to rooms and check-in/out dates."), so the hub showed the same
+        // sentence three times and none of them described the tile you were about to open.
+        // Each now says what its own page does.
         new("/Organizer/Hotels", Localizer["Nav.OrgHotels"].Value, Localizer["OrgLogistics.Hotels"].Value),
-        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.Hotels"].Value, "hotel-assignment"),
-        new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.Hotels"].Value),
+        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.HotelAssignments"].Value, "hotel-assignment"),
+        new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.RoomBlocks"].Value),
+        // §1296 — the included hotel nights per rule. ALSO linked from Settings (where he asked for
+        // it), but this is the hub somebody is already on when they think about hotel nights, and
+        // it is where he went looking for it.
+        new("/Organizer/Settings/HotelNights", "Hotel nights we cover", "How many nights Experts Live Denmark pays per group — speakers, volunteers, organizers, media, event partners — before anything agreed with one person. Extra nights for an individual live on their own page under People."),
         new("/Organizer/Swag", Localizer["Nav.OrgSwag"].Value, Localizer["OrgLogistics.Swag"].Value),
         new("/Organizer/TravelReimbursements", Localizer["Nav.OrgTravel"].Value, Localizer["OrgLogistics.Travel"].Value, "travel-reimbursement-email"),
         new("/Organizer/Lunch", Localizer["Nav.OrgLunch"].Value, Localizer["OrgLogistics.Lunch"].Value),

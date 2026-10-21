@@ -119,6 +119,20 @@ public interface IEmailSender
         string htmlBody,
         IReadOnlyCollection<EmailAttachment> attachments,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// §1312 — the attachments send WITH CC recipients (the shop's contract mails copy the organizer, operator
+    /// 2026-09-27: "add the account … to any webshop emails … just add to CC"). Each CC is ring-gated + redirected
+    /// like any CC. The default drops the CC so test doubles keep compiling; <see cref="BrevoEmailSender"/> overrides it.
+    /// </summary>
+    Task SendWithAttachmentsAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        IReadOnlyCollection<string>? cc,
+        CancellationToken cancellationToken = default)
+        => SendWithAttachmentsAsync(toEmail, subject, htmlBody, attachments, cancellationToken);
 }
 
 /// <summary>

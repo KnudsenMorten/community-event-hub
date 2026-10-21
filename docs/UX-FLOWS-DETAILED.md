@@ -69,7 +69,7 @@
 | Initial onboarding of sponsor | all sponsors | first-order date +14d (`contractPlus`) | ✓ |
 | Brochures, competition flyer or swags for attendee bags | all sponsors | event −30d → ~10 Jan 2027 | – |
 | **Event App Game — Extra Exposure Opportunity** (donate a prize, logo exposure) | all sponsors | event −55d → ~16 Dec 2026 | – |
-| Submit session description | session sponsors | event −135d → ~27 Sep 2026 | ✓ |
+| Submit session description | session sponsors | event −100d → 1 Nov 2026 | ✓ |
 | **Upload sponsor wall design in vector format** (versioned SharePoint upload, organizers notified) | booth | event −71d → ~30 Nov 2026 | ✓ |
 | Choose your booth layout (table, chairs — tier coupon code) | booth | event −71d → ~30 Nov 2026 | ✓ |
 | Register booth members (enables lead scanning) | booth | event −40d → ~31 Dec 2026 | ✓ |

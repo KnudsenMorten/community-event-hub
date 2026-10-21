@@ -1,6 +1,7 @@
 @page
 @model CommunityHub.Pages.Organizer.CouponInvoicingModel
 @using CommunityHub.Core.Domain
+@using CommunityHub.Core.Integrations.Erp
 @{
     ViewData["Title"] = "Coupon invoicing";
 }
@@ -176,7 +177,8 @@
     </div>
 }
 
-@foreach (var r in Model.Rows)
+@* §1312 — an IGNORED discount code is listed apart, below (operator 2026-10-01: "would be nice with Ignore option"). *@
+@foreach (var r in Model.Rows.Where(x => x.BillingType != CouponBillingType.Ignored))
 {
     <div class="ci-card @(r.NeedsAttention ? "attention" : "")">
         <div class="ci-name">@r.CouponName</div>
@@ -305,6 +307,10 @@
                                 <input type="hidden" name="PoolPurchaseId" value="@buy.Id" />
                                 <span style="min-width:150px;">
                                     <strong>@buy.Quantity</strong> ticket(s)
+                                    @if (CouponPoolReduction.IsCorrection(buy))
+                                    {
+                                        <span class="ci-chip">correction</span>
+                                    }
                                     <span class="ci-meta">&middot; @buy.CreatedAt.UtcDateTime.ToString("dd MMM yyyy")</span>
                                     @* §992 — what this purchase was WORTH. Null on anything bought
                                        before the price was captured, and on a hand-raised invoice. *@
@@ -317,10 +323,10 @@
                                     }
                                 </span>
                                 <div>
-                                    <label for="pin-@buy.Id">e-conomic invoice no.</label>
+                                    <label for="pin-@buy.Id">@(CouponPoolReduction.IsCorrection(buy) ? "e-conomic credit note no." : "e-conomic invoice no.")</label>
                                     <input id="pin-@buy.Id" type="text" name="PoolErpInvoiceNumber"
                                            value="@(buy.ErpInvoiceNumber ?? "")" maxlength="60"
-                                           placeholder="not billed yet" style="width:150px;" />
+                                           placeholder="@(CouponPoolReduction.IsCorrection(buy) ? "not credited yet" : "not billed yet")" style="width:150px;" />
                                 </div>
                                 <button type="submit" class="btn">Save invoice no.</button>
                                 @if (!buy.IsBilled)
@@ -366,7 +372,7 @@
                         <form method="post" asp-page-handler="SetPoolThreshold" class="ci-grid" style="margin:0;">
                             <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
                             <div>
-                                <label for="pt-@p.AllocationId">Warn at</label>
+                                <label for="pt-@p.AllocationId" title="0 = no running-low warning (the default). A pool past what was paid for is always flagged.">Warn at</label>
                                 <input id="pt-@p.AllocationId" type="number" name="PoolThreshold" min="0"
                                        value="@p.LowBalanceThreshold" style="width:80px;" />
                             </div>
@@ -437,6 +443,43 @@
                             order links already sent out keep working.
                         </p>
                     </div>
+
+                    @* §1362 — REDUCE: a correction row with a negative quantity, backed by a credit note made in
+                       e-conomic by hand. Operator 2026-10-20: *"i need to reduce coupons for apento by -9 as it was
+                       a mistake"*. History and invoice numbers stay; nothing is invoiced. *@
+                    @if (purchasedTotal > p.Claimed)
+                    {
+                        <div class="ci-block" style="margin:8px 0 0;">
+                            <h4>Reduce this pool &mdash; a correction, credited by hand</h4>
+                            <form method="post" asp-page-handler="ReducePool" class="ci-grid" style="margin-top:0;">
+                                <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
+                                <div>
+                                    <label for="red-@p.AllocationId">Reduce to (new total)</label>
+                                    <input id="red-@p.AllocationId" type="number" name="PoolReduceTotal"
+                                           min="@Math.Max(0, p.Claimed)" max="@(purchasedTotal - 1)"
+                                           style="width:110px;" />
+                                </div>
+                                <div>
+                                    <label for="redcn-@p.AllocationId">Credit note no. (optional)</label>
+                                    <input id="redcn-@p.AllocationId" type="text" name="PoolErpInvoiceNumber"
+                                           maxlength="60" style="width:140px;" />
+                                </div>
+                                <div>
+                                    <label for="rednote-@p.AllocationId">Reason</label>
+                                    <input id="rednote-@p.AllocationId" type="text" name="PoolPurchaseNotes"
+                                           maxlength="200" placeholder="e.g. ordered by mistake" style="width:200px;" />
+                                </div>
+                                <button type="submit" class="btn">Reduce</button>
+                            </form>
+                            <p class="ci-meta" style="margin:6px 0 0;">
+                                Adds a correction row with a negative number of tickets &mdash; earlier purchases and their
+                                invoices are kept. <strong>No invoice or credit note is created</strong>: make the credit
+                                note in e-conomic and enter its number here or on the row. Never below the
+                                <strong>@p.Claimed</strong> ticket(s) already claimed. Then set the promo code&rsquo;s
+                                max in Backstage to the new total.
+                            </p>
+                        </div>
+                    }
                 }
                 <div class="ci-meta" style="margin-top:4px;">
                     Cancelled tickets return to the pool automatically &mdash; the balance is worked
@@ -604,8 +647,8 @@
                     <input id="pinv-@r.Setting.Id" type="text" name="PoolErpInvoiceNumber" maxlength="60" style="width:140px;" />
                 </div>
                 <div>
-                    <label for="pt-@r.Setting.Id">Warn at</label>
-                    <input id="pt-@r.Setting.Id" type="number" name="PoolThreshold" min="0" placeholder="5" style="width:90px;" />
+                    <label for="pt-@r.Setting.Id" title="0 = no running-low warning (the default). A pool past what was paid for is always flagged.">Warn at</label>
+                    <input id="pt-@r.Setting.Id" type="number" name="PoolThreshold" min="0" placeholder="0" style="width:90px;" />
                 </div>
                 <button type="submit" class="btn">Create Invoice</button>
             </form>
@@ -1019,6 +1062,31 @@
             </div>
         }
     </div>
+}
+
+@{ var ignored = Model.Rows.Where(x => x.BillingType == CouponBillingType.Ignored).ToList(); }
+@if (ignored.Count > 0)
+{
+    <details class="ci-card">
+        <summary><strong>Ignored codes (@ignored.Count)</strong> &mdash; discount codes CEH never bills, chases or mails about</summary>
+        <table style="margin-top:10px;border-collapse:collapse;">
+            @foreach (var r in ignored)
+            {
+                <tr>
+                    <td style="padding:6px 16px 6px 0;"><strong>@r.CouponName</strong></td>
+                    <td style="padding:6px 16px 6px 0;" class="ci-meta">@(r.ClaimCount > 0 ? $"{r.ClaimCount} claim(s)" : "no claims yet")</td>
+                    <td style="padding:6px 0;">
+                        <form method="post" asp-page-handler="Save" style="margin:0;">
+                            <input type="hidden" name="SettingId" value="@(r.Setting?.Id ?? 0)" />
+                            <input type="hidden" name="CouponName" value="@r.CouponName" />
+                            <input type="hidden" name="BillingType" value="@CouponBillingType.Unmapped" />
+                            <button type="submit">Stop ignoring</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </table>
+    </details>
 }
 
 @* ⚰️ §787.13 — the CSV paste box is GONE. Operator: "are we not using api integr and a db table

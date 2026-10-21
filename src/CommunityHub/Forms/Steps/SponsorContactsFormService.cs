@@ -49,18 +49,14 @@ public sealed class SponsorContactsFormService : IWizardFormService
 {
     private readonly CommunityHubDbContext _db;
     private readonly EconomicContactAdminService _erp;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorContactsFormService> _log;
 
     public SponsorContactsFormService(
-        CommunityHubDbContext db, EconomicContactAdminService erp, CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions, ILogger<SponsorContactsFormService> log)
+        CommunityHubDbContext db, EconomicContactAdminService erp,
+        ILogger<SponsorContactsFormService> log)
     {
         _db = db;
         _erp = erp;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
     }
 
@@ -72,14 +68,9 @@ public sealed class SponsorContactsFormService : IWizardFormService
     /// unavailable (integration off, no ERP link, or a lookup hiccup).</summary>
     private async Task<int?> ErpNumberAsync(string companyId, CancellationToken ct)
     {
-        if (!_cmOptions.Enabled || !_erp.CanWrite || !int.TryParse(companyId, out var cid)) return null;
-        try
-        {
-            var company = await _cm.GetCompanyAsync(cid, ct);
-            if (company is not null && int.TryParse(company.ErpCustomerNumber, out var erp) && erp > 0) return erp;
-        }
-        catch (Exception ex) { _log.LogWarning(ex, "Sponsor contacts step: ERP number lookup failed for {Co}.", companyId); }
-        return null;
+        if (!_erp.CanWrite) return null;
+        // §1312 — the e-conomic number from CEH's own company record (Company Manager is retired).
+        return await Core.Integrations.Webshop.ShopCompanyErp.CustomerNumberAsync(_db, companyId, ct);
     }
 
     public async Task<SponsorContactsModel> LoadAsync(int eventId, int participantId, CancellationToken ct)

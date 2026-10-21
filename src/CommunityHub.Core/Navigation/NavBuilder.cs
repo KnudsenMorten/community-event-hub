@@ -10,7 +10,7 @@ namespace CommunityHub.Core.Navigation;
 ///   1. the participant / "My event" group (Home, profile, tasks, resources +
 ///      the self-service forms each role is entitled to), always visible;
 ///   2. the organizer / "Organizer area" management group, returned ONLY for
-///      <see cref="ParticipantRole.Organizer"/>. A non-organizer never receives
+///      a role with organizer access (organizers and, §1312, event partners). Nobody else receives
 ///      the management items, so the gate is genuinely server-side (not CSS).
 ///
 /// Routes are never renamed or removed here — this only regroups + relocates the
@@ -39,6 +39,13 @@ public static class NavBuilder
     /// (a non-supervisor volunteer would otherwise hit a dead-end empty page). The
     /// caller (the layout) computes this for volunteers only; it is ignored for
     /// every other role.
+    /// </param>
+    /// <param name="volunteerAssignmentsVisible">
+    /// §1295 — true when the <c>volunteer-my-assignments</c> feature is released to THIS volunteer
+    /// (<see cref="Volunteers.VolunteerAssignmentGate.MaySeeOwnAssignmentsAsync"/>), which is what
+    /// puts "My Schedule" in their menu. The caller (the layout) computes it for volunteers only;
+    /// it is ignored for every other role. Defaults to FALSE — the page itself answers 404 when the
+    /// feature is not released, so a nav that guessed would advertise a dead end.
     /// </param>
     /// <param name="isExhibitor">
     /// True when the signed-in SPONSOR has a physical booth (SponsorInfo.HasBooth).
@@ -73,12 +80,23 @@ public static class NavBuilder
     /// page, evaluation QR codes and their ratings. Pairs with §458 (no Help-Promote TASK) and
     /// §461 (the same actions hidden on the My Sessions cards) so the three surfaces agree.
     /// </param>
-    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false, bool speakerHasMasterClass = false, bool attendeeIsTwoDay = false, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false)
+    /// <param name="hasSpeakerCapability">
+    /// §1255 — true when this participant OWNS A SPEAKER PROFILE while holding a different
+    /// <see cref="ParticipantRole"/>: an organizer who also speaks, a volunteer accepted in
+    /// Sessionize, an attendee who became a speaker. Their role is never overwritten by the
+    /// import, so the role-shaped menu below would leave them with no door into the speaker hub
+    /// they have sessions, tasks and deadlines in. Adds a small "Speaker" section (My Sessions +
+    /// the speaker task list) to whatever menu their own role already gives them — deliberately
+    /// NOT the whole speaker menu, which would collide with the role's own items.
+    /// Ignored when the role IS <see cref="ParticipantRole.Speaker"/> (that menu is complete).
+    /// </param>
+    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false, bool speakerHasMasterClass = false, bool attendeeIsTwoDay = false, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false)
     {
-        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory) };
+        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible) };
 
-        // Server-side management gate: only an organizer ever gets these items.
-        if (role == ParticipantRole.Organizer)
+        // Server-side management gate: only a role with organizer access ever gets these items (§1312: organizers AND event
+        // partners — operator 2026-10-01: "i need all event partners to have access in the organizer pages").
+        if (role.HasOrganizerAccess())
         {
             groups.Add(BuildManagementGroup());
         }
@@ -91,7 +109,7 @@ public static class NavBuilder
     /// per-role visibility exactly (no route added or dropped) — Home, My tasks,
     /// My profile, Resources, then the role-specific hubs + self-service forms.
     /// </summary>
-    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor, bool speakerHasMasterClass, bool attendeeIsTwoDay, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false)
+    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor, bool speakerHasMasterClass, bool attendeeIsTwoDay, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false)
     {
         var items = new List<NavItem>
         {
@@ -389,7 +407,12 @@ public static class NavBuilder
             // form rather than two that can disagree.
             items.Add(new("/Forms/Wizard?step=availability", "Nav.MyAvailability"));
             // §47: relabelled "My Assignments" (was "My schedule"); volunteer-only key.
-            items.Add(new("/volunteer/myschedule", "Nav.MyAssignments"));
+            // 🔒 §1295 — only when the volunteer-my-assignments feature is released to THIS
+            // volunteer. Defaults to FALSE so the item is absent unless the caller has actually
+            // asked the gate: a nav that fails open would put a menu item on every onboarding
+            // volunteer pointing at a page that answers 404.
+            if (volunteerAssignmentsVisible)
+                items.Add(new("/volunteer/myschedule", "Nav.MyAssignments"));
             // Supervisor dashboard: shown ONLY to volunteers who actually supervise a
             // bucket (operator 2026-06-21). A non-supervisor volunteer would otherwise
             // see a menu item that lands on a "you are not a supervisor" dead end.
@@ -496,12 +519,26 @@ public static class NavBuilder
             // §176: the EXTERNAL webshop item confirms before leaving — the buyer logs in to
             // the external webshop with their own email + password (Redirect=Webshop renders
             // the "lost your password" hint and a confirm() before navigating).
-            items.Add(new("https://expertslive.dk/sponsor", "Nav.SponsorBuyServices", SectionKey: Webshop, External: true, Redirect: ExternalRedirectKind.Webshop));
+            // §1305 — hidden once the CEH shop is open for the viewer: one place to buy, not two.
+            items.Add(new("https://expertslive.dk/sponsor", "Nav.SponsorBuyServices", SectionKey: Webshop, External: true, Redirect: ExternalRedirectKind.Webshop,
+                HiddenWhenFeatureKey: "sponsor-webshop"));
             // Orders + Linked-contacts are sections of the SAME /Sponsor page, so
             // they're one menu entry (operator 2026-06-23). This one is IN-HUB — no
             // Redirect marker, or every click would warn about an external login that
             // never happens.
-            items.Add(new("/Sponsor", "Nav.SponsorOrders", SectionKey: Webshop));
+            // §1305 — the new CEH sponsor shop, beside the old webshop (both run for ELDK27). Gated by
+            // `sponsor-webshop` (off by default, DEV-only until approved), so it is absent until switched on.
+            items.Add(new("/Sponsor/Shop", "Nav.SponsorShop", SectionKey: Webshop, FeatureKey: "sponsor-webshop"));
+            // §1305 — straight into the right shelf for the three things sponsors come back for (operator 2026-09-26:
+            // "make 3 new menu items - Order Furniture and Become a Swag Sponsor and Buy more Exhibitor tickets … it
+            // should point directly to the category for easy ordering").
+            items.Add(new("/Sponsor/Shop?Group=Furniture", "Nav.SponsorShopFurniture", SectionKey: Webshop, FeatureKey: "sponsor-webshop"));
+            items.Add(new("/Sponsor/SwagCatalog", "Nav.SponsorShopSwag", SectionKey: Webshop, FeatureKey: "sponsor-webshop"));
+            items.Add(new("/Sponsor/Shop?Group=BoothOptions&Find=staff", "Nav.SponsorShopStaffTickets", SectionKey: Webshop, FeatureKey: "sponsor-webshop"));
+            // §1305 — "Previous Orders" LAST, below a separator (operator 2026-09-26: "previous orders comes at the bottom
+            // with separator before - browse webshop must be top"). While the CEH shop is on it opens the combined list.
+            items.Add(new("/Sponsor", "Nav.SponsorOrders", SectionKey: Webshop, HiddenWhenFeatureKey: "sponsor-webshop", SeparatorBefore: true));
+            items.Add(new("/Sponsor/Shop/Orders", "Nav.SponsorOrders", SectionKey: Webshop, FeatureKey: "sponsor-webshop", SeparatorBefore: true));
 
             // 🔒 §707.44 — "Company Details" is REMOVED FROM THE NAV. Operator 2026-07-30:
             // *"yesterday we decided to retire the company details view … but it is still shown in
@@ -766,6 +803,18 @@ public static class NavBuilder
         // get a separate page.
         items.Add(new("/Contact", "Nav.ContactOrganizers"));
 
+        // §1255 — a participant who holds a SPEAKER PROFILE but a different role gets a small
+        // "Speaker" section: their sessions and their speaker task list. Added AFTER Contact so it
+        // cannot disturb any existing item's position (NavModel.Sections takes a section's place in
+        // the bar from where its first item appears), and deliberately only two leaves — merging
+        // the full speaker menu into an organizer's or volunteer's menu would duplicate items that
+        // role already has. Everything else is reachable from /Speaker itself.
+        if (hasSpeakerCapability && role is not ParticipantRole.Speaker)
+        {
+            items.Add(new("/Speaker", "Nav.MySessions", SectionKey: "Nav.SectionSpeaker"));
+            items.Add(new("/Speaker/Tasks", "Nav.MyTasks", SectionKey: "Nav.SectionSpeaker"));
+        }
+
         // No heading on the primary group — it IS the primary nav.
         return new NavGroup(HeadingKey: null, Items: items, IsManagement: false);
     }
@@ -825,6 +874,12 @@ public static class NavBuilder
             // anything broken?") — "who still owes me something?" is asked just as often.
             new("/Organizer/ParticipantStatus", "Nav.OrgParticipantStatus"),
             new("/Organizer/Content", "Nav.OrgSessionsHub"),
+            // §1265 — A DIRECT ENTRY (operator 2026-09-21: *"i dont have any menu in organizer gui
+            // with all the sessin eval mgmt stuff"*). Session feedback sat on the Sessions hub and
+            // Evaluation Devices on Setup (§784.7(B)), and neither hub says "evaluation". Same
+            // precedent as §1086/§646/§1120: a page worked often during the event gets a menu entry;
+            // nothing is moved. The page itself links to Devices and the kiosk.
+            new("/Organizer/SessionFeedback", "Nav.OrgSessionEvaluation"),
             new("/Organizer/Comms", "Nav.OrgComms"),
             new("/Organizer/SoMe", "Nav.OrgSoMe"),
             new("/Organizer/SponsorAdmin/Index", "Nav.OrgSponsorsHub"),

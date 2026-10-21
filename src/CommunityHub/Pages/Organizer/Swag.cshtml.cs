@@ -38,7 +38,7 @@ public class SwagModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         await LoadAggregatesAsync(me.EventId, ct);
         return Page();
@@ -77,10 +77,10 @@ public class SwagModel : PageModel
             .Where(s => s.EventId == me.EventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser,
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser, p.SamePersonAsId,
                 s.WantsPolo, s.PoloSize, s.WantsGift, s.WantsCredlyBadge, s.Notes,
             })
-            .Where(x => x.IsActive && !x.IsTestUser)
+            .Where(x => x.IsActive && !x.IsTestUser && x.SamePersonAsId == null) // §1307 — a linked duplicate counts as one
             .ToListAsync(ct);
 
         var (categoryByPid, daysBySpeaker) = await LoadSpeakerPoloInputsAsync(me.EventId, ct);
@@ -213,12 +213,12 @@ public class SwagModel : PageModel
             .Where(s => s.EventId == eventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.Id, p.Role, p.IsActive, p.IsTestUser,
+                p.Id, p.Role, p.IsActive, p.IsTestUser, p.SamePersonAsId,
                 s.WantsPolo, s.PoloSize,
 
                 s.WantsGift, s.WantsCredlyBadge,
             })
-            .Where(x => x.IsActive && !x.IsTestUser)
+            .Where(x => x.IsActive && !x.IsTestUser && x.SamePersonAsId == null) // §1307 — a linked duplicate counts as one
             .ToListAsync(ct);
 
         // Â§299 6.3 â same category + derived-days polo rule the vendor sheet uses, so

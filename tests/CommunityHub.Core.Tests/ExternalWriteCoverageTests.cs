@@ -54,6 +54,9 @@ public sealed class ExternalWriteCoverageTests
             + "publishing content. The content path is LiveLinkedInPostPublisher, which IS gated.",
         ["EmailTemplateOverrideStore.cs"] =
             "Local persistence, not a third-party call.",
+        ["ShopCaptcha.cs"] =
+            "§1305 — POSTs a captcha token to Cloudflare Turnstile's siteverify endpoint to VERIFY it. A "
+            + "read-shaped check that changes nothing anywhere; the same answer is right on every host.",
         ["EconomicContactAdminService.cs"] =
             "Delegates to LiveEconomicContactAdminClient; the client is where the gate belongs.",
         ["LiveEconomicContactAdminClient.cs"] =
@@ -74,6 +77,9 @@ public sealed class ExternalWriteCoverageTests
         ["AiHelperAssistant.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
         ["LlmTaskGuidanceGenerator.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
         ["SoMeIntroGenerator.cs"] = "Azure OpenAI inference — sends a prompt, mutates nothing.",
+        ["ShopBoothDetector.cs"] =
+            "§1305 — Azure OpenAI inference: sends the expo layout picture and the booth numbers, reads back "
+            + "rectangles. Mutates nothing outside CEH (the booth spots it saves are CEH rows); no personal data.",
         ["SoMeTextEligibilityJudge.cs"] =
             "Azure OpenAI inference (§1060(l)) — sends a session title + abstract and reads back a "
             + "0/1 verdict. Mutates nothing outside CEH, exactly as SoMeIntroGenerator above; the "

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using CommunityHub.Core.Integrations;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -125,6 +126,23 @@ public sealed class ZohoExhibitorUpdatePayloadTests
     {
         Assert.Equal(80, ZohoExhibitorLimits.ShortDescription);
         Assert.Equal(1000, ZohoExhibitorLimits.Overview);
+    }
+
+    /// <summary>
+    /// §1343 — the social-media branding text is CEH's own limit (900, raised from 600), and the DB
+    /// column must be at least as wide as the form allows, or a full-length text 500s on save.
+    /// </summary>
+    [Fact]
+    public void Social_branding_text_allows_900_and_the_column_is_as_wide_as_the_form()
+    {
+        Assert.Equal(900, ZohoExhibitorLimits.SocialBrandingText);
+
+        using var db = new CommunityHub.Core.Data.CommunityHubDbContext(
+            new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<CommunityHub.Core.Data.CommunityHubDbContext>()
+                .UseInMemoryDatabase($"social-len-{System.Guid.NewGuid():N}").Options);
+        var column = db.Model.FindEntityType(typeof(CommunityHub.Core.Domain.SponsorInfo))!
+            .FindProperty(nameof(CommunityHub.Core.Domain.SponsorInfo.SocialMediaIntro))!;
+        Assert.Equal(ZohoExhibitorLimits.SocialBrandingText, column.GetMaxLength());
     }
 
     // ---------------------------------------------------------------------

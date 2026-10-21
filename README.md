@@ -26,7 +26,7 @@ It is built to be **evergreen**. The codebase is generic (`CommunityHub`); every
 | **Organizer** | A command center that ranks what needs attention today, a live dashboard, one status board for every role with filters and chase lists, fast searchable grids with bulk actions, "switch to user" to see the hub as someone else, pre-selection and onboarding queues, catering and hotel numbers you can order against, the Email Center and full e-mail log, per-feature switches and release rings, background-job health and cadence, exports and printable run-sheets, a searchable audit log, and the social-media campaign planner. |
 | **Speaker** | A Get-Started wizard for everything the event needs from them, one task list with due dates, their sessions and public profile, promotion graphics ready to share, the posts the hub has planned about their session, logistics forms (hotel, dinner, lunch, gift, travel reimbursement where eligible), and session feedback delivered after the talk. |
 | **Volunteer** | Sign-up and availability in their own words, a pre-selection path to becoming active, their assignments with who to ask, a help channel to their supervisor, and the same logistics forms where they apply. |
-| **Sponsor** | Their company's tasks generated from what they bought, uploads that complete the task when the file arrives, company details, their webshop orders, booth information with live venue photos, the posts announcing them, and reminders that reach the whole coordinator team. |
+| **Sponsor** | A self-service sponsor shop in the hub — offer, reservation, a contract signed online and the invoice — their company's tasks generated from what they bought, uploads that complete the task when the file arrives, company details and their own public name and links, their orders, booth information with live venue photos, the posts announcing them, and reminders that reach the whole coordinator team. |
 | **Media & event partner** | Their own crew hub with a welcome, Get-Started steps, hotel, dinner and party sign-up, and aggregate "who's coming" insights. |
 | **Attendee** | A welcome matched to their ticket, the in-hub master-class chooser (pick, switch, or join the waitlist), party sign-up and event information. |
 | **Anyone (no login)** | The public programme — `/Sessions`, `/Speakers`, `/Agenda`, `/MasterClasses`, `/Sponsors`, `/Contributors` — plus a per-session QR rating page. |
@@ -59,18 +59,18 @@ Every signed-in person also gets the **AI Community Helper**, which answers ques
 
 ## By the numbers
 
-Measured on this repository on 2026-09-14.
+Measured on this repository on 2026-10-21.
 
 | | |
 |---|---|
-| Delivered features in the catalog | **224** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
-| Application code (C#, excluding migrations) | **211,770** lines in 1,053 files |
-| Razor views | **43,076** lines in 261 files (203 pages) |
-| Scheduled background jobs | **43** timer-triggered functions, plus an order webhook |
-| Database migrations | **259** EF Core migrations |
-| Branded e-mail templates | **39** |
-| Automated tests | **6,773** xUnit tests (145,008 lines of test code), plus Pester and Playwright suites |
-| Infrastructure as code | **7** Bicep files (1,071 lines) |
+| Delivered features in the catalog | **250** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
+| Application code (C#, excluding migrations) | **232,747** lines in 1,162 files |
+| Razor views | **49,570** lines in 292 files (227 pages) |
+| Scheduled background jobs | **47** timer-triggered functions, plus an order webhook |
+| Database migrations | **292** EF Core migrations |
+| Branded e-mail templates | **50** |
+| Automated tests | **7,620** xUnit tests (159,123 lines of test code), plus Pester and Playwright suites |
+| Infrastructure as code | **7** Bicep files (1,087 lines) |
 
 ---
 
@@ -233,12 +233,14 @@ A summary of what is delivered today. Each area has much more detail — and the
 - A **Get-Started wizard for every role** that shows only the steps that apply, renders each real form in place, opens with a welcome, and names exactly what is missing.
 - A **pre-selection queue** for volunteers and other applicants, with an availability grid, undo and reversible deactivation.
 - **One status board** for every role with filters, chase lists and e-mail export; add a person by hand before any sync knows them.
-- **Volunteer structure** with categories, supervisors, help requests and an allocation pipeline that stays silent until an organizer commits.
+- **Volunteer structure** with categories, optional subcategories, supervisors, help requests and an allocation pipeline that stays silent until an organizer commits; onboard volunteers before handing out any work.
+- A **volunteer planner** that builds schedules by the clock and tells you which shifts it could not fill.
 - **Speaker categories** (community, sponsor, guest) and media picture and video libraries.
+- **Event partners** (for example venue staff) get the organizer area read-only.
 
 ### Self-service forms & logistics
 
-- **Hotel** across several hotels, with room blocks, confirmation numbers and a rooming list.
+- **Hotel** across several hotels, with room blocks, confirmation numbers and a rooming list — and a clear split between the nights the event pays and the nights the guest pays.
 - **Appreciation dinner** with structured diet and allergy capture, a kitchen allergy roll-up and a run-sheet.
 - **Catering numbers you can order against** and lunch lists for both days.
 - **Party RSVP**, swag choices, a two-step **travel reimbursement** offered only to people who can claim it, and a group-photo planner.
@@ -256,15 +258,18 @@ A summary of what is delivered today. Each area has much more detail — and the
 - **Hourly Sessionize import** of accepted speakers and sessions, with a dry-run preview and safe endpoint switching.
 - **Public `/Sessions`, `/Speakers`, `/Agenda`, `/MasterClasses` and `/Contributors`** pages with filters for track, level, length and time slot; only published speakers appear.
 - **The hub owns the schedule**: edit any session, mark keynotes and all-tracks sessions, and get told when your public event site disagrees.
-- **Session feedback by QR code**, turned into per-session reports delivered to the speakers.
+- **The hub is the master for speaker details**: a mail tells you, field by field, where your event platform differs and which side to update.
+- **Session feedback by QR code or on room tablets**, turned into per-session reports delivered to the speakers. Tablets are enrolled and locked by device management, follow the room's schedule, show faces, stars or points, report their battery, and have a maintenance mode; you choose what attendees are asked and can set test votes aside before the event.
 - A master-class Q&A board and ready-to-share promotion material for speakers.
 
 ### Sponsors & exhibitors
 
 - A sponsor is a **company**; its tasks are generated from what it bought and de-duplicated across orders.
-- A public **`/Sponsors`** page by tier and a booth page with **live venue photos** served from your document library.
-- Optional **exhibitor sync** to your event platform, **webshop and finance integration** with clear ownership of each field, and withdrawal of lapsed sponsors.
-- **Coupon pools and volume packages** with invoicing and a usage page for the customer.
+- **The sponsor shop runs inside the hub**: an organizer sends an offer, the sponsor reserves or orders and **signs the contract online**, and everyone receives the signed PDF. Reservations have deadlines, reminders and "ask for more time"; the hub counts stock itself so nothing is sold twice, keeps a live availability page and booth map, and invoices each contract line by line through your finance system (credit notes included).
+- Each sponsor has **one public name, website and LinkedIn**, which the sponsor can edit and every public place uses; the legal name is kept for contract and invoice. Company details and contacts follow your finance system.
+- A public **`/Sponsors`** page by tier and a booth page with **live venue photos** served from your document library; the organizer list shows what every sponsor bought, and a bought sponsor session appears in the agenda straight away.
+- Optional **exhibitor sync** to your event platform, **finance integration** with clear ownership of each field, and withdrawal of lapsed sponsors.
+- **Coupon pools and volume packages** with invoicing and a usage page for the customer; a discount-only code can be ignored.
 - A sponsor **Leads API** with a lead pipeline and quality scoring.
 
 ### Attendees & master-class seats
@@ -292,6 +297,7 @@ A summary of what is delivered today. Each area has much more detail — and the
 - A **post editor with live variables** that publishes to your LinkedIn company page, **tagging speakers and sponsor contacts** where LinkedIn allows it and telling you who it could not tag.
 - A **campaign planner**: per-category rounds and start dates, a holiday pause, a capacity view that tells you whether the campaign fits, and a "not ready" reason on every held-back post.
 - Posts are **approved as they come due**, and your own artwork is never overwritten.
+- Sponsor announcements **tag the company first**, found automatically (or tag only the company, if the sponsor prefers); a post never goes out with a missing speaker photo, and withdrawn sponsors and test accounts stay out of the campaign.
 
 ### AI Community Helper
 
@@ -303,6 +309,7 @@ A summary of what is delivered today. Each area has much more detail — and the
 - The whole environment is **infrastructure as code** (Bicep); production deploys can go through a **staging slot and swap** with instant rollback.
 - **Test mode and an external-write master switch** keep a dev environment from changing shared systems; integrations run in a safe no-write mode until configured.
 - Transient failures are retried rather than reported as permanent; a deliberate skip is not a failure.
+- **Monitoring is quiet by default** — warnings, errors and slow calls are always recorded, and one setting turns full detail on for an investigation without a release.
 - Participant pages target **WCAG 2.1 AA**, with automated accessibility checks.
 
 ---
@@ -323,7 +330,7 @@ A summary of what is delivered today. Each area has much more detail — and the
                Azure SQL   Key Vault         Storage      Application Insights
           (managed identity, no passwords)
 
-   Optional integrations: Sessionize · Zoho Backstage · WooCommerce · finance/ERP ·
+   Optional integrations: Sessionize · Zoho Backstage · finance/ERP ·
    SharePoint document library · LinkedIn company page · SMTP relay · AI provider
 ```
 

@@ -55,7 +55,7 @@ public class ReturnToOrganizerModel : PageModel
         var organizer = await _db.Participants.FirstOrDefaultAsync(
             p => p.Id == me.ActingAs.ActorParticipantId.Value
                  && p.EventId == me.EventId, ct);
-        if (organizer is null || organizer.Role != ParticipantRole.Organizer)
+        if (organizer is null || !organizer.Role.HasOrganizerAccess())   // §1312 — an event partner who switched to a user returns too
         {
             // The acting organizer no longer exists / is no longer an organizer:
             // fail safe by signing out entirely.

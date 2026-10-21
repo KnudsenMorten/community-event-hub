@@ -118,7 +118,10 @@ public sealed record BackstageSpeaker(
     // live 2026-07-29 against the list AND the per-id endpoint).
     string? Company = null,
     string? Skills = null,
-    string? Email = null)
+    string? Email = null,
+    // §1363 — Zoho's own split, so a name change is applied as Zoho holds it rather than guessed from the full name.
+    string? FirstName = null,
+    string? LastName = null)
 {
     /// <summary>
     /// ✅ §893 — <b>COUNTRY *IS* READABLE. THE §623 FINDING WAS AN ARTEFACT OF THE SAMPLE.</b>
@@ -344,6 +347,31 @@ public sealed class ZohoOptions
     /// by exact (case-insensitive) name. Resolution: exact → this map → CREATE-if-missing
     /// with the mapped (else Sessionize) name. Case-insensitive on the Sessionize label;
     /// overridable/extendable via <c>Zoho__TrackNameMap__&lt;label&gt;</c> app settings.
+    /// <summary>
+    /// 🔴 §1251 — the EXISTING Backstage track a COMMON-for-all-tracks session is created under,
+    /// because the create API refuses a track-less session. Blank ⇒ such a session is skipped.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-20, rejecting "create it by hand": *"why can you not create the
+    /// session. otherwise set it to security and inform me per mail to change it inside zoho. you
+    /// must create it to link the zoho id to ceh. that will not work if i create it manually"*.</para>
+    ///
+    /// <para>🔑 <b>That is the argument that decides it, and it is about the LINK, not the typing.</b>
+    /// A session created by hand in Backstage never gives CEH its <c>BackstageSessionId</c> — so the
+    /// two are never linked, the hub keeps seeing an unpushed session, and every downstream check
+    /// (the drift diff, the stale-link prune, the change chaser) has nothing to hold. The few
+    /// minutes saved by typing it manually cost the session its identity for the rest of the event.</para>
+    ///
+    /// <para>⚠️ So a wrong-but-temporary track is the lesser evil, and the mail says so loudly
+    /// (<c>DescribeCreateGaps</c> emits a CLEAR-the-Track-field line for a common session). The
+    /// window is real and public — this is a deliberate trade, not a free fix.</para>
+    ///
+    /// <para>🔒 The named track must ALREADY EXIST in Backstage. It is resolved, never created: the
+    /// one thing he ruled out from the start is CEH inventing a track on an API with no delete.</para>
+    /// </remarks>
+    public string CommonSessionFallbackTrack { get; set; } = string.Empty;
+
+    /// <summary>
     /// Edition-config candidate (the labels are edition facts, not code).
     /// </summary>
     public Dictionary<string, string> TrackNameMap { get; set; } =
@@ -766,7 +794,7 @@ public sealed class ZohoClient
     /// </summary>
     public async Task<bool> AssignExhibitorBoothAsync(
         string accessToken, string exhibitorId, string boothLabel, CancellationToken ct = default,
-        IReadOnlyDictionary<string, string>? boothMap = null)
+        IReadOnlyDictionary<string, string>? boothMap = null, Action<string>? reportError = null)
     {
         if (!await MayWriteAsync(nameof(AssignExhibitorBoothAsync), ct)) return false;
         if (string.IsNullOrWhiteSpace(exhibitorId) || string.IsNullOrWhiteSpace(boothLabel)) return false;
@@ -778,6 +806,7 @@ public sealed class ZohoClient
             _log?.LogWarning(
                 "Zoho AssignExhibitorBooth {Id}: booth label '{Booth}' did not resolve to a booth id "
                 + "({Count} booths known) — not assigned.", exhibitorId, label, boothMap.Count);
+            reportError?.Invoke($"booth '{label}' does not exist in Zoho ({boothMap.Count} booths known)");
             return false;
         }
 
@@ -794,6 +823,7 @@ public sealed class ZohoClient
             string body; try { body = await resp.Content.ReadAsStringAsync(ct); } catch { body = "(unreadable)"; }
             _log?.LogWarning("Zoho AssignExhibitorBooth {Id} '{Booth}' (booth_id {BoothId}) failed: HTTP {Status} — {Body}",
                 exhibitorId, label, boothId, (int)resp.StatusCode, body.Length > 300 ? body[..300] : body);
+            reportError?.Invoke($"HTTP {(int)resp.StatusCode} — {(body.Length > 300 ? body[..300] : body)}");
         }
         return resp.IsSuccessStatusCode;
     }
@@ -1042,11 +1072,15 @@ public sealed class ZohoClient
             // that exist — so it stays Unknown here and is only flagged. The caller decides, with
             // ZohoDeadLinkStrikes, whether it has been said often enough and far enough apart.
             var reportedMissing = false;
+            string failBody;
+            try { failBody = await resp.Content.ReadAsStringAsync(ct); } catch { failBody = "(unreadable)"; }
             if (!gone && resp.StatusCode == System.Net.HttpStatusCode.BadRequest)
-            {
-                var body = await resp.Content.ReadAsStringAsync(ct);
-                reportedMissing = body.Contains("not found", StringComparison.OrdinalIgnoreCase);
-            }
+                reportedMissing = failBody.Contains("not found", StringComparison.OrdinalIgnoreCase);
+            // 🔴 §1312 — say WHAT Zoho answered. 2026-09-29: the reconcile job's GET of two sponsor records got HTTP 400 on
+            // every run while the same GET from the web host (and by hand) got 200 — and the only trace was the caller's
+            // "could not be read", with the status and body thrown away here.
+            _log?.LogWarning("Zoho GET {Kind} {Url} failed: HTTP {Status} — {Body}",
+                rootProp, url, (int)resp.StatusCode, failBody.Length > 300 ? failBody[..300] : failBody);
 
             return (null, ExternalLinkProbe.ProbeOne(
                 foundExplicitly: false,
@@ -1959,7 +1993,10 @@ public sealed class ZohoClient
         var id = GetString(el, "id");
         if (id.Length == 0) return null;
 
-        var first = GetString(el, "name");
+        // 🔴 §1363 — Zoho returns the first name as `first_name` (live 2026-10-20: `name` blank on all 83 speakers, so every
+        // stored Backstage name was the last name alone). `name` stays as the fallback. Create still sends `name` and Zoho
+        // accepts it — every speaker the hub created has its first name.
+        var first = FirstNonEmpty(GetString(el, "first_name"), GetString(el, "name"));
         var last = GetString(el, "last_name");
         var name = $"{first} {last}".Trim();
 
@@ -1985,7 +2022,9 @@ public sealed class ZohoClient
             // §623 — both ARE returned, and both are what the operator asked about for Per Larsen.
             Company: NullIf(GetString(el, "company")),
             Skills: NullIf(GetString(el, "skills")),
-            Email: NullIf(GetString(el, "email")));
+            Email: NullIf(GetString(el, "email")),
+            FirstName: NullIf(first),
+            LastName: NullIf(last));
     }
 
     /// <summary>

@@ -2289,7 +2289,7 @@ public sealed class SessionBackstagePushServiceTests
         Assert.Equal("CEH", shop!.TargetSystem);
         Assert.True(shop.Fields.TryGetValue("SponsorOrder", out var order));
         Assert.All(order!.Values, f => Assert.Equal(IntegrationFieldMap.Direction.Inbound, f.Direction));
-        Assert.True(shop.Fields.ContainsKey("SponsorContact"));
+        Assert.False(shop.Fields.ContainsKey("SponsorContact"));   // §1312 — contacts come from e-conomic, not the webshop
     }
 
     [Fact]

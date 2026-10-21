@@ -95,6 +95,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Evaluation\Fonts\OpenSans-Regular.ttf" />
     <EmbeddedResource Include="Evaluation\Fonts\OpenSans-Bold.ttf" />
+    <EmbeddedResource Include="Evaluation\Fonts\Allura-Regular.ttf" />
     <!-- §750.8 — the event wordmark, on the report he expects people to screenshot. -->
     <EmbeddedResource Include="Evaluation\Fonts\logo-eldk.png" />
   </ItemGroup>

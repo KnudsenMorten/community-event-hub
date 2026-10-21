@@ -138,9 +138,9 @@ public class SessionizeEndpointSettingsModel : PageModel
     private async Task<bool> LoadAsync(CancellationToken ct)
     {
         var me = _participant.Current;
-        if (me is null || me.Role != ParticipantRole.Organizer)
+        if (me is null || !me.Role.HasOrganizerAccess())
         {
-            AccessDenied = me is not null && me.Role != ParticipantRole.Organizer;
+            AccessDenied = me is not null && !me.Role.HasOrganizerAccess();
             return false;
         }
 

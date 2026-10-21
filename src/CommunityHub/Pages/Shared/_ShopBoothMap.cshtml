@@ -1,0 +1,80 @@
+@model CommunityHub.Pages.Shared.ShopBoothMapViewModel
+@using CommunityHub.Core.Integrations.Webshop
+@* §1305 item 11 — the expo layout with every booth drawn over it, coloured by its LIVE state. Positions are
+   percentages of the picture, so the map scales from a phone to a wall screen. *@
+@if (Model.Booths.Count == 0)
+{
+    <p class="info">The booth map is not set up yet.</p>
+}
+else
+{
+    <div class="boothmap" role="img" aria-label="Expo booth map">
+        <img src="/shop-boothmap-image" alt="Expo layout" />
+        @foreach (var b in Model.Booths)
+        {
+            var css = b.State switch { ShopBoothState.Free => "free", ShopBoothState.Reserved => "reserved", ShopBoothState.Confirmed => "sold", _ => "na" };
+            var hl = string.Equals(b.Spot.BoothId, Model.Highlight, StringComparison.OrdinalIgnoreCase) ? " hl" : "";
+            var title = $"{b.Spot.BoothId} — " + (b.State switch { ShopBoothState.Free => "free", ShopBoothState.Reserved => "reserved", ShopBoothState.Confirmed => "sold", _ => "not for sale" })
+                        + (b.Product is null ? "" : $" · {b.Product.Name}") + (b.CompanyName is null ? "" : $" · {b.CompanyName}");
+            var style = $"left:{b.Spot.XPercent.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;top:{b.Spot.YPercent.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;width:{b.Spot.WidthPercent.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;height:{b.Spot.HeightPercent.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;";
+            if (b.State == ShopBoothState.Free && b.Product is not null && Model.LinkFor is not null)
+            {
+                <a class="spot @css@hl" style="@style" href="@Model.LinkFor(b)" title="@title"><span class="spot-label">@b.Spot.BoothId</span></a>
+            }
+            else
+            {
+                <span class="spot @css@hl" style="@style" title="@title"><span class="spot-label">@b.Spot.BoothId</span></span>
+            }
+        }
+    </div>
+    <p class="boothmap-legend">
+        <span class="spot-key free"></span> free
+        <span class="spot-key reserved"></span> reserved
+        <span class="spot-key sold"></span> sold
+        <span class="spot-key na"></span> not for sale
+    </p>
+    @if (Model.ShowList)
+    {
+        <div style="overflow-x:auto;">
+        <table>
+            <thead><tr><th>Booth</th><th>Status</th><th>Product</th>@if (Model.Booths.Any(b => b.CompanyName is not null)) { <th>Company</th> }</tr></thead>
+            <tbody>
+            @foreach (var b in Model.Booths)
+            {
+                <tr><td>@b.Spot.BoothId</td><td>@b.State</td><td>@(b.Product?.Name ?? "—")</td>
+                    @if (Model.Booths.Any(x => x.CompanyName is not null)) { <td>@(b.CompanyName ?? "")</td> }</tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+<style>
+    .boothmap { position:relative; width:100%; max-width:1200px; }
+    .boothmap img { width:100%; display:block; border-radius:6px; }
+    .boothmap .spot { position:absolute; border:2px solid; border-radius:3px; display:flex; align-items:center; justify-content:center;
+                      font-size:clamp(8px, 1.1vw, 13px); font-weight:700; text-decoration:none; color:#111; opacity:.85; }
+    /* §1312 — like the organizer marks it by hand (operator 2026-09-27, the decks availability slide): a taken booth is CROSSED
+       OUT — red when sold, amber when reserved — and a free one stays clear with a green outline. */
+    /* Operator 2026-09-28: "hard to see the green" — a free booth gets a thick bright outline and a clear tint that still
+       lets the tier word on the layout show through. */
+    .boothmap .spot.free { background:rgba(34,197,94,.30); border:3px solid #16a34a; box-shadow:0 0 0 1px #fff, 0 0 6px rgba(22,163,74,.8); opacity:1; }
+    .boothmap .spot.reserved { background:var(--x-amber); border-color:#b45309; color:transparent; }
+    .boothmap .spot.sold { background:var(--x-red); border-color:#b91c1c; color:transparent; }
+    .boothmap { --x-red:linear-gradient(to top right, transparent calc(50% - 3px), rgba(220,38,38,.9) calc(50% - 3px), rgba(220,38,38,.9) calc(50% + 3px), transparent calc(50% + 3px)), linear-gradient(to bottom right, transparent calc(50% - 3px), rgba(220,38,38,.9) calc(50% - 3px), rgba(220,38,38,.9) calc(50% + 3px), transparent calc(50% + 3px));
+                --x-amber:linear-gradient(to top right, transparent calc(50% - 3px), rgba(217,119,6,.9) calc(50% - 3px), rgba(217,119,6,.9) calc(50% + 3px), transparent calc(50% + 3px)), linear-gradient(to bottom right, transparent calc(50% - 3px), rgba(217,119,6,.9) calc(50% - 3px), rgba(217,119,6,.9) calc(50% + 3px), transparent calc(50% + 3px)); }
+    .boothmap .spot.na { background:rgba(156,163,175,.35); border-color:#6b7280; }
+    /* Operator 2026-09-28: "dont add the booth number, as it is already behind. now people can not see the GOLD word" — the
+       layout picture already prints the number and the tier; the label stays for screen readers and the tooltip only. */
+    .boothmap .spot-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    .boothmap .spot.hl { outline:3px solid #1565c0; outline-offset:2px; }
+    .boothmap a.spot:hover, .boothmap a.spot:focus { opacity:1; }
+    .boothmap-legend { font-size:13px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .spot-key { display:inline-block; width:14px; height:14px; border-radius:3px; border:2px solid; }
+    .spot-key.free { background:rgba(34,197,94,.30); border:3px solid #16a34a; }
+    .spot-key.reserved { background:var(--x-amber); border-color:#b45309; }
+    .spot-key.sold { background:var(--x-red); border-color:#b91c1c; }
+    .boothmap-legend { --x-red:linear-gradient(to top right, transparent 40%, #dc2626 40%, #dc2626 60%, transparent 60%), linear-gradient(to bottom right, transparent 40%, #dc2626 40%, #dc2626 60%, transparent 60%);
+                       --x-amber:linear-gradient(to top right, transparent 40%, #d97706 40%, #d97706 60%, transparent 60%), linear-gradient(to bottom right, transparent 40%, #d97706 40%, #d97706 60%, transparent 60%); }
+    .spot-key.na { background:rgba(156,163,175,.35); border-color:#6b7280; }
+</style>

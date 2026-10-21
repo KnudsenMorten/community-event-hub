@@ -259,7 +259,7 @@ public sealed class OrganizerOverviewService
             .Select(t => new
             {
                 t.Id,
-                Category = t.Subcategory.Category.Name,
+                Category = t.Category.Name,
                 AssignmentCount = t.Assignments.Count(a =>
                     a.Participant.IsActive
                     && a.DecisionStatus != ShiftDecisionStatus.Declined),

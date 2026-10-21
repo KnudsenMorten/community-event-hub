@@ -84,27 +84,24 @@ public sealed class SponsorOrderPullService
     }
 
     private readonly CommunityHubDbContext _db;
-    private readonly WooCommerceClient _woo;
+    private readonly Webshop.IWebshopOrderSource _orders;
     private readonly SponsorConfigLoader _configLoader;
-    private readonly WooCommerceOptions _options;
     private readonly SponsorConfigOptions _configOptions;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
-    private readonly SponsorContactSyncService _contactSync;
     private readonly SharePointUploadClient _sharePoint;
     private readonly DocLibrary.IDocLibraryPathResolver? _paths;
     private readonly Email.EngineAlertSender? _alerts;
+    private readonly Webshop.ShopOrderSource? _shopOrders;
     private readonly ILogger<SponsorOrderPullService> _log;
 
     public SponsorOrderPullService(
         CommunityHubDbContext db,
-        WooCommerceClient woo,
+        Webshop.IWebshopOrderSource orders,
         SponsorConfigLoader configLoader,
-        WooCommerceOptions options,
         SponsorConfigOptions configOptions,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
-        SponsorContactSyncService contactSync,
         SharePointUploadClient sharePoint,
         ILogger<SponsorOrderPullService> log,
         // 🔴 §784.14 — the DocLibrary registry, so per-sponsor upload folders are created under the
@@ -113,30 +110,26 @@ public sealed class SponsorOrderPullService
         DocLibrary.IDocLibraryPathResolver? paths = null,
         // §1161 — so an orphaned Zoho record reaches him by MAIL, not only the action queue.
         // Optional/defaulted like `paths` above, so existing constructions and tests keep working.
-        Email.EngineAlertSender? alerts = null)
+        Email.EngineAlertSender? alerts = null,
+        // §1305 item 7b — signed CEH shop orders join the SAME pipeline ("once a sponsor signs, then the
+        // normal flow to onboard them as sponsor starts"). Optional/defaulted like the two above.
+        Webshop.ShopOrderSource? shopOrders = null)
     {
+        _shopOrders = shopOrders;
         _alerts = alerts;
         _paths = paths;
         _db = db;
-        _woo = woo;
+        _orders = orders;
         _configLoader = configLoader;
-        _options = options;
         _configOptions = configOptions;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
-        _contactSync = contactSync;
         _sharePoint = sharePoint;
         _log = log;
     }
 
     public async Task<SponsorOrderPullResult> RunAsync(CancellationToken ct = default)
     {
-        if (!_options.Enabled)
-        {
-            _log.LogInformation("SponsorOrderPullService: WooCommerce disabled by config.");
-            return new SponsorOrderPullResult(0, 0, 0, 0, 0, false, "WooCommerce disabled");
-        }
-
         var activeEvent = await _db.Events
             .Where(e => e.IsActive)
             // §783.6 — EndDate too: a POST-event deadline anchors on the edition's LAST day.
@@ -152,6 +145,7 @@ public sealed class SponsorOrderPullService
         SponsorProductClassifier classifier;
         SponsorZohoCategoryMapper zohoCategories;
         BoothWallSpecs? wallSpecs;
+        SponsorAgendaSessionsConfig? agendaSessions;
         try
         {
             var config = _configLoader.Load(_configOptions.SponsorConfigPath);
@@ -159,6 +153,7 @@ public sealed class SponsorOrderPullService
             classifier = new SponsorProductClassifier(config);
             zohoCategories = new SponsorZohoCategoryMapper(config);
             wallSpecs = config.BoothWallSpecs;
+            agendaSessions = config.AgendaSessions;
         }
         catch (FileNotFoundException ex)
         {
@@ -181,7 +176,18 @@ public sealed class SponsorOrderPullService
                         && a.ResolvedAt == null)
             .Select(a => a.Summary)
             .ToListAsync(ct);
-        var orders = await _woo.GetOrdersAsync("completed", ct);
+        // §1312 — the old webshop's orders from CEH's own store (the webshop is closed and no longer read).
+        var orders = await _orders.GetOrdersAsync("completed", ct);
+
+        // §1305 item 7b — signed CEH shop orders are onboarded by this same loop. Negative order ids, so
+        // they can never collide with a webshop order; a CEH-registered company id (`ceh-…`) is not a
+        // Company Manager id, and every Company Manager call below is already guarded by int.TryParse.
+        if (_shopOrders is not null)
+        {
+            var signed = await _shopOrders.SignedOrdersAsync(activeEvent.Id, ct);
+            if (signed.Count > 0) orders = orders.Concat(signed).ToList();
+        }
+
         var created = 0;
         // §682 — tasks refused by the length guard below. Counted and returned so a
         // silently-shrinking task list shows up in the run result instead of only in a log line.
@@ -224,32 +230,11 @@ public sealed class SponsorOrderPullService
         {
             var companyId = group.Key;
 
-            // Resolve the company display name. Priority:
-            //   1. Company Manager "Public Company Name" (company_name_public)
-            //      -- this is the SHORT public name the team uses in
-            //      announcements + sponsor listings (e.g. "2LINKIT").
-            //   2. Company Manager Legal Name (name)
-            //      -- e.g. "2linkIT ApS"; used when the public name is blank.
-            //   3. WooCommerce billing.company
-            //      -- often empty (it was for 2LINKIT order 10726).
+            // Resolve the company display name. Priority (§1312 — the CEH shop is the source; Company Manager is retired):
+            //   1. The CEH shop company's public name (ShopCompany.PublicName) — CEH-owned, organizer-edited.
+            //   2. The CEH shop company's legal name WITHOUT its legal form ("2linkIT ApS" → "2linkIT").
+            //   3. The order's billing company — the LEGAL name; last resort.
             //   4. "Company {id}" fallback so substitution renders something.
-            // Best-effort: if Company Manager is disabled / the call fails,
-            // skip straight to billing / fallback.
-            string? cmPublicName = null;
-            string? cmLegalName = null;
-            try
-            {
-                if (int.TryParse(companyId, out var cidInt))
-                {
-                    var cm = await _contactSync.LookupCompanyAsync(cidInt, ct);
-                    cmPublicName = cm?.PublicName;
-                    cmLegalName  = cm?.Name;
-                }
-            }
-            catch
-            {
-                // swallow -- substitution falls back below
-            }
 
             // For contractPlus deadlines, "first order date" = the EARLIEST
             // completed-order date across all of this company's orders --
@@ -347,10 +332,22 @@ public sealed class SponsorOrderPullService
             var billingName = group
                 .Select(o => o.BillingCompany)
                 .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+            // 🔴 §1312 — THE CEH SHOP OWNS THE PUBLIC NAME, and it comes FIRST. Operator 2026-09-29: "remember we are not
+            // pulling orders from CM anymore, we use ceh new webshop". The shop company's public name is CEH's (the directory
+            // import never overwrites it) and is what the organizer edits; Company Manager is only a fallback for a company
+            // the shop does not know. And a company registered in the CEH shop (`ceh-…`) has no Company Manager record at all:
+            // its orders arrive with BillingCompany = the LEGAL name, and falling through to it rewrote the sponsor record to
+            // "Master Packager SIA" on every pull — the billing name that went to Zoho ("it must be the public name").
+            var shopPublicName = await _db.ShopCompanies.AsNoTracking()
+                .Where(c => c.EventId == activeEvent.Id && c.SponsorCompanyId == companyId && c.PublicName != null && c.PublicName != "")
+                .Select(c => c.PublicName).FirstOrDefaultAsync(ct);
+            var shopLegalName = await _db.ShopCompanies.AsNoTracking()
+                .Where(c => c.EventId == activeEvent.Id && c.SponsorCompanyId == companyId)
+                .Select(c => c.LegalName).FirstOrDefaultAsync(ct);
             var companyName =
-                (!string.IsNullOrWhiteSpace(cmPublicName) ? cmPublicName :
-                 !string.IsNullOrWhiteSpace(cmLegalName)  ? cmLegalName  :
-                 !string.IsNullOrWhiteSpace(billingName)  ? billingName  :
+                (!string.IsNullOrWhiteSpace(shopPublicName) ? shopPublicName :
+                 !string.IsNullOrWhiteSpace(shopLegalName)  ? CompanyLegalForm.Strip(shopLegalName) :
+                 !string.IsNullOrWhiteSpace(billingName)    ? billingName    :
                  $"Company {companyId}");
 
             // Log the resolved PUBLIC name (not the raw numeric id) so diagnostics read
@@ -402,7 +399,17 @@ public sealed class SponsorOrderPullService
                         IsExhibitor = companyTier != BoothTier.None,
                     });
                 }
-                else if (!string.Equals(info.CompanyName, companyName, StringComparison.Ordinal))
+                // 🔴 §1312 — THE PUBLIC NAME IS FILLED ONCE, THEN IT IS THE OPERATOR'S. Operator 2026-09-29: "the public name
+                // must not be changed if already fill out" — the automatic legal-form rule gets ~9 of 10 right ("Admin By
+                // Request Nordics" is really "Admin By Request"), so an edited name must never be undone by a pull.
+                //   • the CEH shop's public name (the one he edits) is MIRRORED onto the sponsor record — it is his value;
+                //   • anything else (Company Manager, the billing name) only FILLS an empty name, never overwrites one.
+                else if (!string.IsNullOrWhiteSpace(shopPublicName))
+                {
+                    if (!string.Equals(info.CompanyName, shopPublicName, StringComparison.Ordinal))
+                        info.CompanyName = shopPublicName;
+                }
+                else if (string.IsNullOrWhiteSpace(info.CompanyName))
                 {
                     info.CompanyName = companyName;
                 }
@@ -973,49 +980,10 @@ public sealed class SponsorOrderPullService
             await _db.SaveChangesAsync(ct);
         }
 
-        // Contact sync: every distinct company that appeared in this pull
-        // gets its Company Manager users mirrored into Participants, so a
-        // newly-onboarded sponsor's coordinators can PIN-log-in immediately
-        // and see their tasks (without manual UPDATEs to Participant rows).
-        var distinctCompanyIds = orders
-            .Select(o => o.CompanyId)
-            .Where(c => !string.IsNullOrWhiteSpace(c))
-            .Distinct()
-            .ToList();
-
-        var companiesSynced = 0;
-        var contactsCreated = 0;
-        var contactsUpdated = 0;
-
-        foreach (var companyIdStr in distinctCompanyIds)
-        {
-            if (!int.TryParse(companyIdStr, out var companyIdInt))
-            {
-                _log.LogWarning("SponsorOrderPullService: company id '{Id}' is not numeric, skipping contact sync.",
-                    companyIdStr);
-                continue;
-            }
-            // 🔑 §1034b — the "is this a sponsor?" gate is NOT repeated here. It lives inside
-            // `SponsorContactSyncService.SyncCompanyAsync`, which is what stamps `Role = Sponsor`
-            // and has FOUR callers — three of them organizer pages. A gate at this call site was
-            // the first attempt and it was measured wrong the same hour: the coupon customer he
-            // reported has no completed webshop order at all, so it never comes through here.
-            try
-            {
-                var result = await _contactSync.SyncCompanyAsync(activeEvent.Id, companyIdInt, ct);
-                companiesSynced++;
-                contactsCreated += result.ParticipantsCreated;
-                contactsUpdated += result.ParticipantsUpdated;
-            }
-            catch (Exception ex)
-            {
-                // Don't let one company's Company Manager hiccup fail the whole
-                // pull -- log and move on. The next run reconverges.
-                _log.LogError(ex,
-                    "SponsorOrderPullService: contact sync failed for company {Co}; continuing.",
-                    companyIdInt);
-            }
-        }
+        // 🔴 §1312 — the Company Manager contact sync is GONE (operator 2026-09-30: "we dont use company manager anymore").
+        // A company's people and roles come from e-conomic (ShopErpRoleSyncService), every 30 minutes and on every save of
+        // the e-conomic contacts page — not from this pull.
+        const int companiesSynced = 0, contactsCreated = 0, contactsUpdated = 0;
 
         // 🗑 §757 — THE REFUNDED/CANCELLED ACTION ITEM IS GONE. Do not reinstate it.
         //
@@ -1152,6 +1120,34 @@ public sealed class SponsorOrderPullService
             }
         }
 
+        // §1360 — public name, website, LinkedIn and X are ONE field each, on the company page; the sponsor record's copy is
+        // rewritten from it every run (a blank page field takes the copy's value once).
+        try
+        {
+            var sync = await Webshop.ShopCompanyLinks.SyncFromCompanyPageAsync(_db, activeEvent.Id, ct);
+            if (sync.CopiesRewritten > 0 || sync.PageFieldsAbsorbed > 0)
+                _log.LogInformation("§1360: {Copies} sponsor record(s) rewritten from the company page; {Absorbed} blank page field(s) filled from a copy.",
+                    sync.CopiesRewritten, sync.PageFieldsAbsorbed);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "§1360: syncing the sponsor record from the company page failed; the order pull itself completed.");
+        }
+
+        // §1352 — bought sponsor sessions into the agenda, from the SAME current orders this run trusted
+        // (completed webshop + signed CEH shop; never cancelled). Its own failure never breaks the pull.
+        try
+        {
+            var agenda = await new CommunityHub.Core.Sponsors.SponsorAgendaSessionService(_db, _log)
+                .SyncAsync(activeEvent.Id, orders, agendaSessions, ct);
+            if (agenda.Created > 0 || agenda.Updated > 0)
+                _log.LogInformation("§1352: sponsor agenda sessions — {Created} created, {Updated} updated.", agenda.Created, agenda.Updated);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "§1352: sponsor agenda-session sync failed; the order pull itself completed.");
+        }
+
         _log.LogInformation(
             "SponsorOrderPullService: {Orders} orders, {Created} new tasks, {Companies} companies synced ({CC} contacts created, {CU} updated), {TooLong} tasks skipped as too long.",
             orders.Count, created, companiesSynced, contactsCreated, contactsUpdated, tasksSkippedTooLong);
@@ -1246,59 +1242,6 @@ public sealed class SponsorOrderPullService
 
         if (closed > 0) await _db.SaveChangesAsync(ct);
         return (closed, open.Count - closed);
-    }
-
-    /// §253 G8d — surface WooCommerce order REFUNDS/CANCELLATIONS to the organizer
-    /// action queue. One <see cref="OrganizerActionItem"/> per Woo order id, ever:
-    /// the marker "Woo order {id}" in the Summary is the dedup key, so a resolved
-    /// item stays resolved and later runs never nag about it again. Nothing is
-    /// rolled back automatically (tiers are raise-only; §56 forbids Zoho deletes) —
-    /// the item tells the organizer what to review.
-    /// </summary>
-    private async Task RaiseRefundedOrderAlertsAsync(int eventId, CancellationToken ct)
-    {
-        var refunded = await _woo.GetOrdersAsync("cancelled,refunded", ct, enrichCategories: false);
-        if (refunded.Count == 0) return;
-
-        var knownSummaries = await _db.OrganizerActionItems
-            .Where(a => a.EventId == eventId
-                        && a.Type == Reminders.OrganizerActionItemService.TypeSponsorOrderRefunded)
-            .Select(a => a.Summary)
-            .ToListAsync(ct);
-
-        var raised = 0;
-        foreach (var order in refunded)
-        {
-            var marker = $"Woo order {order.OrderId}";
-            if (knownSummaries.Any(s => s.StartsWith(marker + " ", StringComparison.Ordinal)))
-                continue;
-
-            var company = string.IsNullOrWhiteSpace(order.BillingCompany)
-                ? (order.CompanyId is null ? "unknown company" : $"company {order.CompanyId}")
-                : order.BillingCompany;
-            var items = order.LineItems.Count == 0
-                ? "no line items"
-                : string.Join(", ", order.LineItems.Select(li => li.ProductName).Take(5));
-
-            _db.OrganizerActionItems.Add(new OrganizerActionItem
-            {
-                EventId = eventId,
-                Type = Reminders.OrganizerActionItemService.TypeSponsorOrderRefunded,
-                Summary = $"{marker} ({order.Status}) — {company}: {items}. "
-                          + "Review whether package/tier, booth, company tasks or the public "
-                          + "logo must be rolled back (tiers are raise-only; Zoho is never "
-                          + "deleted — consider the Withdraw-company action if the sponsorship ends).",
-            });
-            raised++;
-        }
-
-        if (raised > 0)
-        {
-            await _db.SaveChangesAsync(ct);
-            _log.LogWarning(
-                "SponsorOrderPullService: {N} refunded/cancelled Woo order(s) surfaced to the organizer action queue.",
-                raised);
-        }
     }
 
     /// <summary>

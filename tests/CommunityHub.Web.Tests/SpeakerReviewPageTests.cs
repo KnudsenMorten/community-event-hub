@@ -160,15 +160,20 @@ public sealed class SpeakerReviewPageTests
         Assert.Null(Assert.Single(m0.Speakers).Category);
 
         var result = await NewModel(db, http)
-            .OnPostCategoryAsync(sam.Id, SpeakerCategory.Sponsor, guestFundedNights: null, default);
+            .OnPostCategoryAsync(sam.Id, SpeakerCategory.Sponsor, default);
 
         Assert.IsType<RedirectToPageResult>(result);
         var profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == sam.Id);
         Assert.Equal(SpeakerCategory.Sponsor, profile.Category);
     }
 
+    /// <summary>
+    /// §1296 — setting a category no longer touches hotel nights at all. The Guest-only nights box
+    /// this page used to carry is gone: Guest is a STANDARD (Settings → "Hotel nights we cover") and
+    /// anything individual is the one extra-nights field on the person's own page.
+    /// </summary>
     [Fact]
-    public async Task Guest_category_stores_organizer_entered_nights_and_clearing_resets_them()
+    public async Task Category_save_no_longer_touches_hotel_nights()
     {
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
@@ -177,25 +182,21 @@ public sealed class SpeakerReviewPageTests
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
 
-        // Guest + organizer-entered ELDK-funded nights save in one post (§299 6.3).
-        await NewModel(db, http)
-            .OnPostCategoryAsync(gwen.Id, SpeakerCategory.Guest, guestFundedNights: 3, default);
+        await NewModel(db, http).OnPostCategoryAsync(gwen.Id, SpeakerCategory.Guest, default);
         var profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
         Assert.Equal(SpeakerCategory.Guest, profile.Category);
-        Assert.Equal(3, profile.GuestFundedNights);
 
-        // Switching away from Guest clears the stale nights value.
-        await NewModel(db, http)
-            .OnPostCategoryAsync(gwen.Id, SpeakerCategory.Community, guestFundedNights: 3, default);
+        await NewModel(db, http).OnPostCategoryAsync(gwen.Id, SpeakerCategory.Community, default);
         profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
         Assert.Equal(SpeakerCategory.Community, profile.Category);
-        Assert.Null(profile.GuestFundedNights);
 
-        // Clearing the category ("(not set)") marks the speaker uncategorized again.
-        await NewModel(db, http)
-            .OnPostCategoryAsync(gwen.Id, category: null, guestFundedNights: null, default);
+        // Clearing the category ("(not set)") still marks the speaker uncategorized.
+        await NewModel(db, http).OnPostCategoryAsync(gwen.Id, category: null, default);
         profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
         Assert.Null(profile.Category);
+
+        // No coverage row was created as a side effect — the per-person field is elsewhere.
+        Assert.False(await db.HotelCoverageExtras.AnyAsync());
     }
 
     [Fact]

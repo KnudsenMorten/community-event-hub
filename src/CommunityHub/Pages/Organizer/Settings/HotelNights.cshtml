@@ -1,0 +1,95 @@
+@page
+@using CommunityHub.Core.Entitlements
+@model CommunityHub.Pages.Organizer.Settings.HotelNightsModel
+@{
+    ViewData["Title"] = "Hotel nights we cover";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Hotel nights we cover</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .hn-row { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; margin:10px 0; }
+    .hn-row h3 { margin:0 0 4px; font-size:15.5px; }
+    .hn-now { font-size:13.5px; color:#374151; margin:0 0 10px; }
+    .hn-now .val { font-weight:700; color:#111827; }
+    .hn-tag { display:inline-block; font-size:11.5px; border-radius:999px; padding:1px 8px;
+              margin-left:6px; vertical-align:middle; }
+    .hn-tag.def { background:#f3f4f6; color:#4b5563; }
+    .hn-tag.set { background:#dcfce7; color:#166534; }
+    .hn-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .hn-form select, .hn-form input { padding:5px 7px; font-size:14px; }
+    .hn-btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+              padding:6px 12px; font-size:14px; cursor:pointer; }
+    .hn-btn:hover { background:#0079b8; }
+    /* Mobile-first: the controls stack rather than overflow at ~360px. */
+    @@media (max-width: 560px) { .hn-form { gap:6px; } .hn-form label { width:100%; } }
+</style>
+
+<div class="card">
+    <h1 style="margin-top:0;">Hotel nights we cover</h1>
+    <p>
+        The <strong>included nights per rule</strong> — what Experts Live Denmark pays for each group,
+        before anything agreed with one person. A rule covers a number of nights, the
+        <em>whole stay</em>, or <em>nothing</em>.
+    </p>
+    <p style="font-size:13.5px;color:#4b5563;">
+        Nobody is ever covered for more nights than they actually book — a 6-night rule pays 3 nights
+        for someone who books 3. To give ONE person more than their rule, use
+        <strong>Extra nights</strong> on their own page under
+        <a asp-page="/Organizer/Participants">People</a>; this page is only the standard.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p role="status" style="color:#0a6;">@Model.Message</p>
+    }
+
+    @foreach (var r in Model.Rows)
+    {
+        <div class="hn-row">
+            <h3>
+                @r.Label
+                @if (r.IsCustomized)
+                {
+                    <span class="hn-tag set" title="Saved for this edition">set by you</span>
+                }
+                else
+                {
+                    <span class="hn-tag def" title="No row saved — the built-in standard applies">default</span>
+                }
+            </h3>
+            <p class="hn-now">
+                Covers <span class="val">@r.Summary</span>
+                &middot; @r.PeopleInClass @(r.PeopleInClass == 1 ? "person" : "people") in this group right now
+            </p>
+
+            <form method="post" asp-page-handler="Set" class="hn-form">
+                <input type="hidden" name="cls" value="@r.Class" />
+                <label for="mode-@r.Class">Cover</label>
+                <select id="mode-@r.Class" name="mode" aria-label="Coverage type for @r.Label">
+                    <option value="@HotelCoverageMode.Nights" selected="@(r.Rule.Mode == HotelCoverageMode.Nights)">a number of nights</option>
+                    <option value="@HotelCoverageMode.WholeStay" selected="@(r.Rule.Mode == HotelCoverageMode.WholeStay)">the whole stay</option>
+                    <option value="@HotelCoverageMode.Nothing" selected="@(r.Rule.Mode == HotelCoverageMode.Nothing)">nothing</option>
+                </select>
+                <label for="nights-@r.Class">Nights</label>
+                <input id="nights-@r.Class" name="nights" type="number" inputmode="numeric"
+                       min="0" max="60" step="1" style="width:72px;"
+                       value="@r.Rule.Nights" aria-label="Number of nights for @r.Label" />
+                <button type="submit" class="hn-btn">Save</button>
+            </form>
+        </div>
+    }
+
+    <p style="margin-top:16px;">
+        <a asp-page="/Organizer/HotelAssignments">See what this means per person &rarr;</a>
+    </p>
+    <p><a asp-page="/Organizer/Settings">&larr; Back to settings</a></p>
+</div>

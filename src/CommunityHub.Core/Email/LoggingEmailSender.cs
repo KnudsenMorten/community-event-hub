@@ -115,6 +115,25 @@ public sealed class LoggingEmailSender : IEmailSender
                 toEmail, subject, htmlBody, attachments, cancellationToken));
     }
 
+    /// <summary>
+    /// 🔴 §1312 — the attachments send WITH its CC. This decorator did not implement the CC overload, so the interface's
+    /// default ran and DROPPED the CC: every shop mail with an attachment — the reservation (booth map), the signing request
+    /// and its daily reminders (contract PDF), the offer and the signed contract — reached the sponsor without the
+    /// organizers' copy. The PROD mail log showed it: attachment mails logged no CC, the plain ones did (operator
+    /// 2026-09-30: "i dont think i received email when … reservations was made to customer").
+    /// </summary>
+    public async Task SendWithAttachmentsAsync(
+        string toEmail, string subject, string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        IReadOnlyCollection<string>? cc,
+        CancellationToken cancellationToken = default)
+    {
+        await SendWithLogAsync(
+            toEmail, subject, cc,
+            () => _inner.SendWithAttachmentsAsync(
+                toEmail, subject, htmlBody, attachments, cc, cancellationToken));
+    }
+
     private async Task SendWithLogAsync(
         string toEmail, string subject, IReadOnlyCollection<string>? cc,
         Func<Task> send)

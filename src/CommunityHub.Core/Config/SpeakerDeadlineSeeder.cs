@@ -185,13 +185,20 @@ public sealed class SpeakerDeadlineSeeder
         // (frozen pending ❓OPEN-22): they keep the pre-gate behaviour — no
         // entitlement-gated logistics deadlines (a null category grants nothing),
         // but still the non-gated presentation deadlines, exactly as before.
+        // §1307 — ALSO a volunteer or organizer who speaks (has a speaker profile): operator 2026-09-26, a confirmed
+        // volunteer joining a panel should get the speaker tasks "but i don't her counted double". They get the SESSION
+        // tasks only (promote / preview / final) — never a second hotel, dinner, swag, lunch or travel task, which their
+        // own role already covers (see `hat` below). Sponsor and attendee rows are not included.
         var speakers = await _db.Participants
             .Where(p => p.EventId == eventId
                         && p.IsActive
-                        && p.Role == ParticipantRole.Speaker)
+                        && (p.Role == ParticipantRole.Speaker
+                            || (SpeakerHat.Roles.Contains(p.Role)
+                                && _db.SpeakerProfiles.Any(s => s.EventId == eventId && s.ParticipantId == p.Id))))
             .Select(p => new
             {
                 p.Id,
+                p.Role,
                 // §299 6.2: Sponsor-category speakers get NO presentation deadlines.
                 Category = _db.SpeakerProfiles
                     .Where(s => s.EventId == eventId && s.ParticipantId == p.Id)
@@ -210,6 +217,9 @@ public sealed class SpeakerDeadlineSeeder
         // their linked sessions (the SpeakingPreDay flag is retired) — drives
         // the masterclassOnly deadline gate below. Loaded once for the edition.
         var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
+        // §1307 — speakers whose every (non-service) session is a panel: no presentation tasks.
+        var panelOnly = await SpeakerHat.PanelOnlySpeakerIdsAsync(_db, eventId, ct);
 
         var now = _clock.GetUtcNow();
         var created = 0;
@@ -242,7 +252,10 @@ public sealed class SpeakerDeadlineSeeder
             // per-deadline logistics gate (below) can drop tasks they can't act on.
             // NOTE: Guest speakers lack TravelReimbursement (§299 6.2), so the travel
             // deadline is excluded for them here automatically.
-            var entitled = await EffectiveItemsAsync(eventId, speaker.Id, days, ct);
+            // §1307 — a speaker HAT (volunteer / organizer who speaks) gets no logistics task from the speaker side: an
+            // empty entitlement set withholds hotel, dinner, swag, lunch and travel; their own role covers those.
+            var hat = speaker.Role != ParticipantRole.Speaker;
+            var entitled = hat ? new HashSet<OrderItem>() : await EffectiveItemsAsync(eventId, speaker.Id, days, ct);
 
             // The speakerdl SourceKeys that SHOULD exist for this speaker after this
             // run — every deadline that still applies once the masterclass + P12
@@ -262,8 +275,10 @@ public sealed class SpeakerDeadlineSeeder
             // row gets is byte-identical to the one the JSON-seeded row already has. The existing
             // row is UPDATED IN PLACE: completion state survives, the reminder ledger still matches,
             // and the orphan prune below sees the key in its desired set and leaves it alone.
-            var facts = TaskAudienceFacts.For(
-                ParticipantRole.Speaker, SpeakerPredicates(speaker.Category, speaker.Country, days, entitled));
+            var predicates = SpeakerPredicates(speaker.Category, speaker.Country, days, entitled);
+            if (panelOnly.Contains(speaker.Id))
+                predicates = predicates.Append(TaskAudiencePredicate.IsPanelOnlySpeaker).ToArray();
+            var facts = TaskAudienceFacts.For(ParticipantRole.Speaker, predicates);
 
             foreach (var definition in TaskDefinitionRegistry.Shipped.For(facts))
             {
@@ -317,6 +332,18 @@ public sealed class SpeakerDeadlineSeeder
                 }
                 else
                 {
+                    // §1307 — an UPLOAD task the system retired (e.g. its session was marked a panel) comes back when it is
+                    // wanted again (the panel was a mistake, or a talk was added). Only a SYSTEM closure of an upload task
+                    // is reopened: a task a person completed (ClosedReason null) is never touched, and no other task kind
+                    // is reopened here.
+                    if (definition.Completion is TaskCompletion.Artefact
+                        && existingDef.State == TaskState.Done
+                        && existingDef.ClosedReason == TaskClosedReason.RetiredFromCatalog)
+                    {
+                        existingDef.State = TaskState.Open;
+                        existingDef.CompletedAt = null;
+                        existingDef.ClosedReason = null;
+                    }
                     existingDef.DueDate = defDue;
                     existingDef.IsMandatory = definition.IsMandatory;
                     existingDef.FormStepKey = (definition.Completion as TaskCompletion.Form)?.StepKey;
@@ -475,7 +502,10 @@ public sealed class SpeakerDeadlineSeeder
                         && t.SourceKey != null
                         && t.SourceKey.StartsWith("speakerdl:")
                         && t.AssignedParticipantId != null
-                        && t.AssignedParticipant!.Role != ParticipantRole.Speaker)
+                        && t.AssignedParticipant!.Role != ParticipantRole.Speaker
+                        // §1307 — a volunteer / organizer who SPEAKS keeps their speaker tasks.
+                        && !(SpeakerHat.Roles.Contains(t.AssignedParticipant.Role)
+                             && _db.SpeakerProfiles.Any(s => s.EventId == eventId && s.ParticipantId == t.AssignedParticipantId)))
             .ToListAsync(ct);
         if (exSpeakerOrphans.Count > 0)
         {

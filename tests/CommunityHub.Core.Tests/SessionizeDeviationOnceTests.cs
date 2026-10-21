@@ -90,4 +90,24 @@ public sealed class SessionizeDeviationOnceTests
         Assert.Null((await db.Sessions.SingleAsync()).SessionizeDeviationNotifiedHash);
         Assert.Single((await RunAsync(svc, Src("Hall B"))).DeviationsOrEmpty);  // recurs ⇒ told again
     }
+
+    /// <summary>
+    /// 🔒 §1265 — a TEST session is moved on purpose (operator 2026-09-21 moved one to "now" to try the
+    /// kiosk). Its disagreement with Sessionize is not news, and the mail goes to the whole organizer
+    /// list. A real session with the same disagreement is still reported — the flag is the difference.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
+    public async Task A_TEST_session_that_disagrees_with_Sessionize_is_not_reported(bool usedForTesting, int expected)
+    {
+        using var db = ScenarioFixture.NewDb();
+        var session = await SeedAsync(db, "Hall A");
+        session.UsedForTesting = usedForTesting;
+        await db.SaveChangesAsync();
+
+        var result = await RunAsync(NewService(db), Src("Hall B"));
+
+        Assert.Equal(expected, result.DeviationsOrEmpty.Count);
+    }
 }

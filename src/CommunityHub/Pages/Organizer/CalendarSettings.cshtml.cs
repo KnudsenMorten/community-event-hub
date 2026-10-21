@@ -51,7 +51,7 @@ public class CalendarSettingsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var settings = await _db.Events
             .Where(e => e.Id == me.EventId)

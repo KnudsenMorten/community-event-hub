@@ -14,7 +14,19 @@
         // Session-evaluations tile. Evaluation results + Evaluation sessions left Setup with it
         // (operator: they belong with the speaker-facing material, not with platform configuration).
         new HubTile("/Organizer/SessionFeedback", "Session feedback", "One row per session: its QR code, whether it can collect feedback, its satisfaction index and whether its report has been released."),
+        // §1265 — second door to the devices page (it stays on Setup too), so everything about
+        // session evaluation is reachable from the one hub an organizer thinks of it under.
+        new HubTile("/Organizer/EvaluationDevices", "Evaluation kiosks", "Approve the kiosk devices asking to join, link each to its room, and watch battery, signal and unsent votes."),
         new HubTile("/Organizer/SessionizeImport", Localizer["Nav.OrgSessionizeImport"].Value, Localizer["OrgContent.SessionizeImport"].Value),
+        // §1244 (operator 2026-09-20) — the two INTAKE queues, which lived only on the People hub.
+        // They sit directly after the import for a reason: this is where imported speakers land,
+        // so the place you run the import is the place you then look to approve them. Same pages,
+        // second door — not copies (same pattern as §1146b's Pre-Selection tile on Volunteers).
+        new HubTile("/Organizer/PendingSpeakers", "Pending speakers",
+            "Approve imported speakers for the Zoho flow: set category + ring; saving activates."),
+        new HubTile("/Organizer/PreselectionQueue", Localizer["Nav.OrgPreselectionQueue"].Value,
+            "Speakers imported without an e-mail address yet, plus prospective volunteers awaiting review.",
+            "participant-activation"),
         new HubTile("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, "Configure the Sessionize API endpoint."),
         new HubTile("/Organizer/SessionSource", "Session source", "Choose the session source (Sessionize / Backstage)."),
         new HubTile("/Organizer/SyncQueue", Localizer["Nav.OrgSyncQueue"].Value, Localizer["OrgContent.SyncQueue"].Value),

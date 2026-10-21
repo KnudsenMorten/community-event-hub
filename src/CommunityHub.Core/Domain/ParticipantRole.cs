@@ -46,3 +46,15 @@ public enum ParticipantRole
     /// <summary>Event partner org — sees Hotel + Dinner + Lunch + task management, like staff.</summary>
     EventPartner = 7
 }
+
+/// <summary>§1312 — who may use the organizer area.</summary>
+public static class ParticipantRoleAccess
+{
+    /// <summary>
+    /// 🔴 §1312 — Organizers AND event partners have the full organizer area (operator 2026-10-01: "i need all event partners to
+    /// have access in the organizer pages, so they can access logistics, etc. full access is fine"). An ACCESS rule only: data
+    /// that means "the organizers" (notice lists, organizer pickers, counts) still asks for <see cref="ParticipantRole.Organizer"/>.
+    /// </summary>
+    public static bool HasOrganizerAccess(this ParticipantRole role) =>
+        role is ParticipantRole.Organizer or ParticipantRole.EventPartner;
+}

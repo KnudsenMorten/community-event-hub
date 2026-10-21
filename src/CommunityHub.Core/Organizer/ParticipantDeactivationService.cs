@@ -2,6 +2,7 @@ using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Tasks;
 using CommunityHub.Core.Volunteers;
 using Microsoft.EntityFrameworkCore;
 
@@ -411,7 +412,7 @@ public sealed class ParticipantDeactivationService
 
     /// <summary>The result of a whole-company sponsor withdrawal (§253 G8b).</summary>
     public sealed record CompanyWithdrawalResult(
-        bool Found, int ContactsDeactivated, int GroupRsvpsCancelled);
+        bool Found, int ContactsDeactivated, int GroupRsvpsCancelled, int CompanyTasksClosed = 0);
 
     /// <summary>
     /// G8b: WITHDRAW a whole sponsor company. Marks the company's
@@ -494,6 +495,21 @@ public sealed class ParticipantDeactivationService
         }
         if (strayRsvps.Count > 0) await _db.SaveChangesAsync(ct);
 
+        // 🔴 §1362b — a company with NO sponsor record has nowhere to carry "withdrawn", so withdrawing one that is listed
+        // only because of its tasks used to report success and change nothing (operator 2026-10-20, "(name not synced —
+        // CM id 2)": 10 orphan tasks, no record, no contacts). Its open tasks are CLOSED (never deleted, §1082) with the
+        // deactivation reason, and the Sponsors page drops a record-less company whose tasks are all system-closed.
+        var tasksClosed = 0;
+        if (info is null)
+        {
+            foreach (var t in companyTasks.Where(t => t.State != TaskState.Done))
+            {
+                TaskClosure.Retire(t, TaskClosedReason.AbandonedOnDeactivation, now);
+                tasksClosed++;
+            }
+            if (tasksClosed > 0) await _db.SaveChangesAsync(ct);
+        }
+
         await _audit.RecordAsync(new AuditEntry
         {
             EventId = eventId,
@@ -506,11 +522,12 @@ public sealed class ParticipantDeactivationService
             // §1237 — name first; TargetId above still carries the id for machine lookup.
             Summary = $"Sponsor company {companyLabel} ({sponsorCompanyId}) withdrawn: "
                       + $"{deactivated} contact(s) deactivated, "
-                      + $"{strayRsvps.Count} lingering party RSVP row(s) cancelled. "
+                      + $"{strayRsvps.Count} lingering party RSVP row(s) cancelled"
+                      + (tasksClosed > 0 ? $", {tasksClosed} open company task(s) closed (no sponsor record). " : ". ")
                       + "Zoho/ERP records untouched (§56).",
         }, ct);
 
-        return new CompanyWithdrawalResult(true, deactivated, strayRsvps.Count);
+        return new CompanyWithdrawalResult(true, deactivated, strayRsvps.Count, tasksClosed);
     }
 
     // ----- cascade steps (none of these save; DeactivateAsync commits once) ----
@@ -665,7 +682,7 @@ public sealed class ParticipantDeactivationService
                 a.Task.Title,
                 a.Task.DueDate,
                 a.Task.Shift,
-                Bucket = a.Task.Subcategory.Category.Name,
+                Bucket = a.Task.Category.Name,
             })
             .ToListAsync(ct);
 

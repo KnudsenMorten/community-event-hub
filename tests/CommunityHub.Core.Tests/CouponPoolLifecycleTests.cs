@@ -131,8 +131,14 @@ public sealed class CouponPoolLifecycleTests
     {
         var claims = Enumerable.Range(1, 3).Select(i => Claim(id: $"t{i}")).ToArray();
 
-        Assert.True(CouponPrepaidBalance.For(Pool(purchased: 4), claims).IsLow);
-        Assert.False(CouponPrepaidBalance.For(Pool(purchased: 4, closedAt: Now), claims).IsLow);
+        // §1341 — the default level is 0 (no warning), so give both pools one to be low against.
+        var open = Pool(purchased: 4);
+        open.LowBalanceThreshold = 2;
+        var closed = Pool(purchased: 4, closedAt: Now);
+        closed.LowBalanceThreshold = 2;
+
+        Assert.True(CouponPrepaidBalance.For(open, claims).IsLow);
+        Assert.False(CouponPrepaidBalance.For(closed, claims).IsLow);
     }
 
     /// <summary>An oversubscribed pool says so, rather than reading as a tidy "used in full".</summary>

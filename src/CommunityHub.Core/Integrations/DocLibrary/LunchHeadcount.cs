@@ -34,15 +34,23 @@ namespace CommunityHub.Core.Integrations.DocLibrary;
 /// </param>
 /// <param name="MainDayCrew">
 /// §326h — nobody registers for main-day lunch (*"it is ordered for everyone"*), so presence is the
-/// count: every countable participant.
+/// count: every countable participant — 🔴 §1258: EXCEPT those already represented by a live
+/// ticket, who are counted on the attendee side.
 /// </param>
 /// <param name="MainDayAttendees">Every attendee still holding a ticket, any class.</param>
 /// <remarks>
-/// 🔒 <b>The participant side and the attendee side are DISJOINT — crew do not hold tickets</b>
-/// (operator 2026-08-14: <i>"yes crew do not have tickets, so no dedup needed"</i>). So the two are
-/// added, never merged, and there is deliberately no de-duplication by e-mail: a dedup would
-/// subtract a real head the day that assumption changes, and an over-order costs one lunch while an
-/// under-order costs somebody their meal.
+/// 🔴 <b>§1258 — the two sides are disjoint because they are MADE disjoint, not because they
+/// happen to be.</b> This note used to say crew do not hold tickets (operator 2026-08-14: <i>"yes
+/// crew do not have tickets, so no dedup needed"</i>) and therefore the two sides could simply be
+/// added. That was true when written and it is STILL true of crew — not one speaker, sponsor or
+/// organizer holds a ticket — but the ticket launch began provisioning a PARTICIPANT LOGIN for
+/// every 2-day buyer, so the participant table stopped being crew-only. Measured in PROD
+/// 2026-09-20: 137 of the 260 "crew" rows were attendee logins that each also held a live ticket,
+/// so the main-day figure read 423 where the truth was 286 — ~137 lunches over-ordered.
+/// ⇒ <see cref="LogisticsAudience.CountableCrew"/> now EXCLUDES anyone whose e-mail holds a live
+/// ticket, so the disjointness is enforced rather than assumed. The old note's fear — that a dedup
+/// would subtract a real head — is answered by matching on the TICKET (an actual second count),
+/// never on a name or a guess.
 /// </remarks>
 public sealed record LunchHeadcount(
     int EarlySetupDay,
@@ -150,7 +158,9 @@ public sealed class LunchHeadcountService
             PreDaySponsorBoothMembers: boothMembers,
             PreDayTwoDayAttendees: await LogisticsAudience
                 .PreDayAttendees(_db.Attendees, eventId).CountAsync(ct),
-            MainDayCrew: await countable.CountAsync(ct),
+            // §1258 — the crew side EXCLUDING anyone a live ticket already counts (see the class note).
+            MainDayCrew: await LogisticsAudience
+                .CountableCrew(_db.Participants, _db.Attendees, eventId).CountAsync(ct),
             MainDayAttendees: await LogisticsAudience
                 .CountableAttendees(_db.Attendees, eventId).CountAsync(ct),
             SignupResponses: signups.Count);

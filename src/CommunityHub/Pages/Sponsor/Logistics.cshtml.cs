@@ -27,8 +27,6 @@ public class LogisticsModel : PageModel
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
     private readonly CommunityHubDbContext _db;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<LogisticsModel> _log;
     private readonly SponsorActingCompanyService _acting;
 
@@ -37,8 +35,6 @@ public class LogisticsModel : PageModel
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
         CommunityHubDbContext db,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
         ILogger<LogisticsModel> log,
         SponsorActingCompanyService acting)
     {
@@ -46,8 +42,6 @@ public class LogisticsModel : PageModel
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
         _db = db;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
         _acting = acting;
     }
@@ -118,23 +112,10 @@ public class LogisticsModel : PageModel
         // shows "Company {id}".
         // §1236 — the company this contact is ACTING for (switcher choice, re-validated), not just their primary.
         var companyId = await _acting.CurrentAsync(me.ParticipantId, me.EventId, ct);
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var companyIdInt))
-        {
-            try
-            {
-                var company = await _cm.GetCompanyAsync(companyIdInt, ct);
-                if (company is not null)
-                {
-                    CompanyDisplayName = !string.IsNullOrWhiteSpace(company.PublicName)
-                        ? company.PublicName
-                        : company.Name;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Sponsor/Logistics: Company Manager lookup failed for company {Co}.", companyIdInt);
-            }
-        }
+        // 🔴 §1312 — CEH's own public name first (the CEH shop is the source); a company registered there has no Company
+        // Manager record, and its box marking read "your company".
+        if (!string.IsNullOrWhiteSpace(companyId))
+            CompanyDisplayName = await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct);
 
         // Booth number for the DSV box-marking line (§174b) — the SAME source the Our
         // Booth page uses: SponsorInfo.BoothLabel for this company (EventId +

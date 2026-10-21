@@ -153,7 +153,7 @@ public sealed class AvailabilityAutoAssignEngineTests
         await db.SaveChangesAsync();
 
         var sender = new CountingEmailSender();
-        var seeded = await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
+        var seeded = (await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
 
         Assert.Equal(2, seeded);
         var drafts = await db.TaskAllocationDrafts.OrderBy(d => d.ParticipantId).ToListAsync();
@@ -183,8 +183,8 @@ public sealed class AvailabilityAutoAssignEngineTests
         await db.SaveChangesAsync();
 
         var engine = NewEngine(db);
-        var first = await engine.SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
-        var second = await engine.SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
+        var first = (await engine.SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
+        var second = (await engine.SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
 
         Assert.Equal(2, first);
         Assert.Equal(0, second); // re-run proposes nothing already drafted
@@ -210,7 +210,7 @@ public sealed class AvailabilityAutoAssignEngineTests
         db.TaskAllocationDrafts.Add(new TaskAllocationDraft { EventId = EventId, OwnerParticipantId = OrganizerId, TaskId = task.Id, ParticipantId = drafted });
         await db.SaveChangesAsync();
 
-        var seeded = await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
+        var seeded = (await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
 
         // 3 needed - 1 assigned - 1 drafted = 1 remaining slot => only 'fresh' proposed.
         Assert.Equal(1, seeded);
@@ -234,7 +234,7 @@ public sealed class AvailabilityAutoAssignEngineTests
         AddDay(db, volunteerCandidate, VolunteerAvailabilityLevel.Full);
         await db.SaveChangesAsync();
 
-        var seeded = await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Organizer, OrganizerId);
+        var seeded = (await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Organizer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
 
         // Only the ELDK (organizer-routed) task is filled, only by an organizer.
         Assert.Equal(1, seeded);
@@ -254,7 +254,7 @@ public sealed class AvailabilityAutoAssignEngineTests
         AddDay(db, AddPerson(db, "v@x", ParticipantRole.Volunteer), VolunteerAvailabilityLevel.Full);
         await db.SaveChangesAsync();
 
-        var seeded = await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
+        var seeded = (await NewEngine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId, PlannerScope.Everyone)).Proposals.Count;
 
         Assert.Equal(0, seeded);
         Assert.False(await db.TaskAllocationDrafts.AnyAsync());

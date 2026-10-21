@@ -453,16 +453,16 @@ public static class DirectUploadEndpoints
     }
 
     /// <summary>The public sponsor company name, resolved the same way every other surface does.</summary>
+    /// <remarks>
+    /// 🔴 §1312 — it read ONLY the legacy upload-folder store, which a company registered in the CEH shop (<c>ceh-…</c>)
+    /// never gets: its logos were named <c>name-not-synced-cm-id-ceh-…-logo-web-1.png</c>, and the SoMe bundle, which finds
+    /// logos by the sponsor's name, then built no sponsor graphic at all. Now the shared resolver (sponsor record → CEH
+    /// shop public name → upload store → ERP).
+    /// </remarks>
     private static async Task<string> ResolveSponsorNameAsync(
-        CommunityHubDbContext db, int eventId, string companyId, CancellationToken ct)
-    {
-        var local = await db.SponsorUploadLocations
-            .Where(l => l.EventId == eventId && l.SponsorCompanyId == companyId)
-            .Select(l => l.CompanyName)
-            .FirstOrDefaultAsync(ct);
-        return CommunityHub.Core.Integrations.SponsorCompanyName.Resolve(
-            local, legalName: null, billingName: null, companyId: companyId);
-    }
+        CommunityHubDbContext db, int eventId, string companyId, CancellationToken ct) =>
+        (await CommunityHub.Core.Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+            db, eventId, new[] { companyId }, ct))[companyId];
 
     // §768.14 — the local NextVersionedNameAsync copy is gone; it lives in SponsorUploadKinds now,
     // because a second implementation of the naming rule is precisely what let the writers and the

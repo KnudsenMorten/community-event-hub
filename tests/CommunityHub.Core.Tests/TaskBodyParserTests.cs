@@ -68,11 +68,26 @@ public class TaskBodyParserTests
     {
         // §176/§487 — a sign-in hand-off notice where there is no second system to sign in to is
         // noise, and noise is how people learn to click through the one dialog that mattered.
+        // A DECLARED in-hub target with a notice is an authoring error and is refused.
         var body = Parse(
-            ":::button\nlabel: Company Details\nhref: /Sponsor/CompanyDetails\ninterstitial: zoho\n:::");
+            ":::button\nlabel: Company Details\nhref: /Sponsor/CompanyDetails\ntarget: inhub\ninterstitial: zoho\n:::");
 
         Assert.Empty(body.Blocks);
         Assert.Contains(body.Diagnostics, d => d.Message.Contains("in-hub button"));
+    }
+
+    [Fact]
+    public void A_placeholder_that_resolves_in_hub_keeps_its_button_and_drops_the_notice()
+    {
+        // §1305 — placeholders are substituted before parsing: {{configuratorUrl}} becomes /Sponsor/Shop while the
+        // CEH shop is on, under a file that declares `interstitial: webshop` for the old shop. Refusing that
+        // removed the order button from every shop task.
+        var body = Parse(
+            ":::button\nlabel: Order\nhref: /Sponsor/Shop?Group=Furniture\ninterstitial: webshop\n:::");
+
+        var button = Assert.IsType<TaskButton>(Assert.Single(body.Blocks));
+        Assert.Equal(TaskInterstitial.None, button.Interstitial);
+        Assert.Empty(body.Diagnostics);
     }
 
     [Fact]

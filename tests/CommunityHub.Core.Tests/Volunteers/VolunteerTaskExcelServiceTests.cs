@@ -130,10 +130,12 @@ public sealed class VolunteerTaskExcelServiceTests
         Assert.Equal(VolunteerTaskCriticality.NiceToHave, created.Criticality);
         Assert.Equal(2, created.ResourcesNeeded);
 
-        // Placed under a bucket derived from the Bucket column.
-        var sub = await db.VolunteerSubcategories.SingleAsync(s => s.Id == created.SubcategoryId);
-        var bucket = await db.VolunteerCategories.SingleAsync(c => c.Id == sub.CategoryId);
+        // Placed DIRECTLY under a bucket derived from the Bucket column — §1299: no placeholder
+        // "Imported plan" subcategory is created.
+        var bucket = await db.VolunteerCategories.SingleAsync(c => c.Id == created.CategoryId);
         Assert.Equal("Front of house", bucket.Name);
+        Assert.Null(created.SubcategoryId);
+        Assert.False(await db.VolunteerSubcategories.AnyAsync(s => s.CategoryId == bucket.Id));
     }
 
     [Fact]

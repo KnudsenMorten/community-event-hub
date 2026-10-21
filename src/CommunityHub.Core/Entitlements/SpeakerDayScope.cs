@@ -124,19 +124,15 @@ public static class SpeakerDayScope
     public static int FundedPolos(SpeakerCategory? category, SpeakerDays days) =>
         SpeakerProfile.EldkFunded(category) ? days.DistinctFundedDays : 0;
 
-    /// <summary>
-    /// §299 6.3 — ELDK-funded hotel nights for a speaker: Community = matches the polo rule (one
-    /// night per distinct presenting day); Guest = the ORGANIZER-ENTERED
-    /// <paramref name="guestFundedNights"/> (individual agreement, 0 until entered); Sponsor and
-    /// uncategorized (null) = 0.
-    /// </summary>
-    public static int FundedHotelNights(SpeakerCategory? category, SpeakerDays days, int? guestFundedNights) =>
-        category switch
-        {
-            SpeakerCategory.Community => days.DistinctFundedDays,
-            SpeakerCategory.Guest => guestFundedNights ?? 0,
-            _ => 0,
-        };
+    // 🗑 §1296 (2026-09-22) — FundedHotelNights is RETIRED, replaced by HotelCoverage +
+    // HotelCoverageService. It was the only coverage rule in the codebase and it was:
+    //   • speaker-only — volunteers, organizers, media and event partners had no number at all,
+    //     while /volunteer/signup already promised them one in prose;
+    //   • hard-coded — "2 nights for a master class" lived in this switch, so changing it was a
+    //     deploy rather than a setting; and
+    //   • displayed on exactly ONE page, so nothing the hotel or the person saw ever knew about it.
+    // The polo rule above is untouched: polos genuinely ARE one per presenting day, which is why
+    // the two were tangled together here in the first place.
 
     // A session counts as PRE-day when it is a MasterClass (pre-day = the master-class day) or is
     // scheduled on the event's PreDayDate (a non-MC session placed on the pre-day still counts).

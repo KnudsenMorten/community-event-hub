@@ -1,0 +1,47 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopPromotionsModel
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Commercial corner";
+}
+<div class="card">
+    <h1>Commercial corner</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Choose up to three products to promote. Sponsors see them beside the products in the shop, one at a time with
+           picture and price. A product that sells out leaves the corner by itself — you get an e-mail so you can pick a
+           new one here.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+        <form method="post" class="promo-form">
+            @for (var n = 0; n < CommunityHub.Pages.Organizer.ShopPromotionsModel.Slots; n++)
+            {
+                var cur = Model.Current[n];
+                <label>Product @(n + 1)
+                    <select name="slot">
+                        <option value="">(empty)</option>
+                        @foreach (var g in Model.Candidates.GroupBy(p => p.PrimaryCategory?.Group ?? CommunityHub.Core.Domain.ShopGroup.Unassigned))
+                        {
+                            <optgroup label="@WebshopCatalogModel.GroupLabel(g.Key)">
+                                @foreach (var p in g)
+                                {
+                                    <option value="@p.Id" selected="@(cur?.Id == p.Id)">@p.Name — @ShopPageModel.Eur(p.EffectivePriceEur)@(p.InStock ? "" : " (sold out)")</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                    @if (cur is not null && !cur.InStock) { <span class="error">Sold out — it is not shown. Pick another.</span> }
+                </label>
+            }
+            <button type="submit">Save the corner</button>
+        </form>
+        <p style="margin-top:18px;"><a asp-page="/Organizer/ShopOrders">&larr; Sponsor orders</a> · <a asp-page="/Organizer/WebshopCatalog">Shop catalogue</a></p>
+    }
+</div>
+<style>
+    .promo-form { display:grid; gap:12px; max-width:640px; }
+    .promo-form label { display:grid; gap:4px; }
+</style>

@@ -53,7 +53,12 @@ public sealed class EvaluationReportService
         DateTimeOffset? WindowOpensAt = null,
         DateTimeOffset? WindowClosesAt = null,
         int QrResponses = 0,
-        int DeviceResponses = 0);
+        int DeviceResponses = 0,
+        IReadOnlyList<FollowUpCount>? PositivePoints = null,
+        IReadOnlyList<FollowUpCount>? ImprovementPoints = null);
+
+    /// <summary>§1278 — one follow-up answer and how many people picked it.</summary>
+    public sealed record FollowUpCount(string Label, int Count);
 
     /// <summary>
     /// §752.4 — why the wordmark was omitted on the last render, or null when it drew fine.
@@ -84,6 +89,20 @@ public sealed class EvaluationReportService
 
     /// <summary>Between rows inside a block (table rows, wrapped comment lines).</summary>
     private const double Row = 14;
+
+    // §1274 — the "How this score works" panel, as offsets the drawing code and the height share.
+    internal const double HowPanelTitleBlock = 34;    // panel top → first explanation line
+    internal const double HowPanelFormulaBlock = 36;  // the two worked-example lines
+    internal const double HowPanelBandsBlock = 34;    // "What the words mean" + "Weighting used"
+    internal const double HowPanelBottomPad = 14;     // below the last line, inside the grey
+
+    /// <summary>
+    /// §1274 — the panel's height from the same blocks its text is placed at, so the grey
+    /// background always reaches past the last line.
+    /// </summary>
+    internal static double HowPanelHeight(int explanationLines, double row, bool withFormula) =>
+        HowPanelTitleBlock + (explanationLines * row) + (withFormula ? HowPanelFormulaBlock : 0)
+        + HowPanelBandsBlock + HowPanelBottomPad;
 
     /// <summary>Render the report. Returns the PDF bytes.</summary>
     /// <remarks>
@@ -274,7 +293,7 @@ public sealed class EvaluationReportService
         var channels = string.Join(", ",
             new[]
             {
-                ("feedback devices", d.DeviceResponses),
+                ("kiosk", d.DeviceResponses),
                 ("QR code", d.QrResponses),
             }
             .OrderByDescending(x => x.Item2)
@@ -345,10 +364,51 @@ public sealed class EvaluationReportService
             if (count > 0)
                 gfx.DrawRoundedRectangle(new XSolidBrush(colour), barX, y + 1,
                     Math.Max(11, barW * count / peak), 11, 6, 6);
-            Text(count.ToString(CultureInfo.InvariantCulture), bodyB, inkB, barX + barW + 10, y - 1, 40);
+            // §1288 — the SHARE beside the count (operator 2026-09-21: "i need % also").
+            var share = d.Score.Responses == 0 ? 0 : 100d * count / d.Score.Responses;
+            Text($"{count.ToString(CultureInfo.InvariantCulture)}  ({Num(share)}%)", bodyB, inkB, barX + barW + 10, y - 1, 90);
             y += 21;
         }
-        y += Section - 21;
+        // §1288 — a full section gap before the next heading ("make more space before 'what people
+        // picked' too cramped"): the old "- 21" pulled the next heading up against the last bar.
+        y += Section - 6;
+
+        // ---- §1278 — what people picked: the two follow-up questions ------------------------------
+        // Two columns, good | better, each answer with its count, most-picked first. Omitted when no
+        // one picked anything (a session rated only on built boxes, which cannot ask).
+        var goodList = d.PositivePoints ?? Array.Empty<FollowUpCount>();
+        var betterList = d.ImprovementPoints ?? Array.Empty<FollowUpCount>();
+        if (goodList.Count > 0 || betterList.Count > 0)
+        {
+            const double pickRow = 17, colGap = 20;
+            var colW = (width - colGap) / 2;
+            var pickRows = Math.Max(Math.Max(goodList.Count, betterList.Count), 1);
+            EnsureRoom(Heading + 18 + (pickRows * pickRow));
+            Text("What people picked", h2, inkB, left, y, width);
+            y += Heading;
+            Text(EvaluationFollowUps.PositiveQuestion, bodyB, inkB, left, y, colW);
+            Text(EvaluationFollowUps.ImprovementQuestion, bodyB, inkB, left + colW + colGap, y, colW);
+            y += 18;
+            void Column(IReadOnlyList<FollowUpCount> list, double x, XColor colour, double top)
+            {
+                if (list.Count == 0) { Text("Nobody picked one", small, mutedB, x, top, colW); return; }
+                var most = Math.Max(1, list.Max(p => p.Count));
+                var cy = top;
+                foreach (var p in list)
+                {
+                    Text(p.Label, small, inkB, x, cy, colW - 70);
+                    const double pbW = 44;
+                    var bx = x + colW - 70;
+                    gfx.DrawRoundedRectangle(new XSolidBrush(EvaluationReportLayout.Panel), bx, cy + 2, pbW, 8, 4, 4);
+                    gfx.DrawRoundedRectangle(new XSolidBrush(colour), bx, cy + 2, Math.Max(8, pbW * p.Count / most), 8, 4, 4);
+                    Text(p.Count.ToString(CultureInfo.InvariantCulture), bodyB, inkB, bx + pbW + 6, cy - 1, 20);
+                    cy += pickRow;
+                }
+            }
+            Column(goodList, left, EvaluationReportLayout.Rating3, y);
+            Column(betterList, left + colW + colGap, EvaluationReportLayout.Rating2, y);
+            y += (pickRows * pickRow) + Section - 6;
+        }
 
         // ---- open feedback, BELOW the numbers, and never truncated -------------------------------------
         Text("What people wrote", h2, inkB, left, y, width);
@@ -360,7 +420,7 @@ public sealed class EvaluationReportService
             // has four buttons and no keyboard. "No written feedback" invited the wrong conclusion —
             // that nobody had anything to say — when the real reading is usually that few people
             // scanned. Naming the route turns a silence into information.
-            Text("No open feedback via QR code — the room device collects button presses only.",
+            Text("No open feedback via QR code — the kiosk in the room collects button presses only.",
                 body, mutedB, left, y, width);
             y += Row;
         }
@@ -465,13 +525,18 @@ public sealed class EvaluationReportService
         }
 
         // ---- how the score works, in words ----------------------------------------------------------
-        var howH = 20 + (EvaluationReportLayout.HowItWorks.Length * Row) + (total > 0 ? 36 : 0) + 24;
+        // 🔴 §1274 — the height is DERIVED from the offsets the text below is placed at. It used to be
+        // a separate sum that forgot the bands and weighting lines, so those two printed BELOW the
+        // grey panel on white, and "When people answered" sat right against them (operator
+        // 2026-09-21: "error in the evaluation report … move space needed + how the score works color
+        // issue").
+        var howH = HowPanelHeight(EvaluationReportLayout.HowItWorks.Length, Row, total > 0);
         // 🔴 The panel is drawn as ONE rectangle, so it cannot be split — without this it ran off the
         // bottom of the sheet, taking the worked formula with it.
         EnsureRoom(howH);
         EvaluationReportLayout.Panelled(gfx, left, y, width, howH, EvaluationReportLayout.Panel);
         Text("How this score works", h2, inkB, left + 16, y + 12, width - 32);
-        var ly = y + 34;
+        var ly = y + HowPanelTitleBlock;
         foreach (var line in EvaluationReportLayout.HowItWorks) { Text(line, small, inkB, left + 16, ly, width - 32); ly += Row; }
         // 🔑 §750.8 (operator: "explain formula ... with real data") — the same sum worked through
         // with THIS session's counts. A formula in the abstract gets skipped; the identical formula
@@ -488,7 +553,7 @@ public sealed class EvaluationReportService
             Text($"This session:   {expression}   =   {Whole(sum)}", small, inkB, left + 16, ly + 6, width - 32);
             Text($"{Whole(sum)}  ÷  {total} presses   =   {Num(sum / total)} out of 100",
                 small, inkB, left + 16, ly + 20, width - 32);
-            ly += 36;
+            ly += HowPanelFormulaBlock;
         }
         // 🔑 §752.7 — the bands, with the word the reader actually met at the top of the page marked
         // out, so "Strong" is anchored to a range rather than left as vocabulary to be learned.

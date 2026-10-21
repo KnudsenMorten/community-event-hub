@@ -128,7 +128,8 @@ public sealed class WizardInlineStepperTests
     private static HotelFormService HotelSvc(CommunityHubDbContext db) =>
         new(db, new FixedClock(),
             new OrganizerActionItemService(db, new FixedClock()),
-            Loc(), NullLogger<HotelFormService>.Instance);
+            Loc(), NullLogger<HotelFormService>.Instance,
+            new CommunityHub.Core.Entitlements.HotelCoverageService(db, new FixedClock()));
 
     private static DinnerFormService DinnerSvc(CommunityHubDbContext db) =>
         new(db, new FixedClock(), new NoOpEmailSender(), Options.Create(new EmailOptions()),

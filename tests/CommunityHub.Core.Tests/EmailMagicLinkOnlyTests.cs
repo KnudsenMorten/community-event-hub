@@ -39,7 +39,10 @@ public sealed class EmailMagicLinkOnlyTests
         // 🔒 Deliberately an EXACT-NAME exemption, not a blanket "any {{token}}". A wildcard would
         // let the next `{{somePageUrl}}` pointing INTO the hub slip past silently, which is the drift
         // §351-6 found and this test exists to stop.
-        || href.StartsWith("{{webshopUrl}}", StringComparison.Ordinal);
+        || href.StartsWith("{{webshopUrl}}", StringComparison.Ordinal)
+        // §1290 — the published LinkedIn post (`https://www.linkedin.com/feed/update/…`, built by
+        // SoMeAnnouncementNotifier.PostUrl). LinkedIn, not the hub: a magic link means nothing there.
+        || href.StartsWith("{{postUrl}}", StringComparison.Ordinal);
 
     [Fact]
     public void Every_in_hub_email_link_uses_the_magic_link()

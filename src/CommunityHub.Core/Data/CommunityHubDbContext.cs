@@ -38,6 +38,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     {
         CleanupHardDeletedParticipantDependentsAsync(sync: true)
             .GetAwaiter().GetResult();
+        SyncVolunteerTaskCategoryAsync(sync: true).GetAwaiter().GetResult();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -45,7 +46,37 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         await CleanupHardDeletedParticipantDependentsAsync(sync: false, cancellationToken);
+        await SyncVolunteerTaskCategoryAsync(sync: false, cancellationToken);
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    // §1299 — a volunteer task carries BOTH CategoryId (required) and an optional SubcategoryId.
+    // When a subcategory is set, the category is the subcategory's — never a second, independent
+    // value. Enforced here, at the one seam every write passes through (create, move, import,
+    // Excel, tests), so no path can leave a task under subcategory "Monday" of bucket A while its
+    // CategoryId says bucket B. A task with NO subcategory keeps whatever CategoryId it was given.
+    private async Task SyncVolunteerTaskCategoryAsync(bool sync, CancellationToken ct = default)
+    {
+        var entries = ChangeTracker.Entries<VolunteerTask>()
+            .Where(e => e.State == EntityState.Added
+                        || (e.State == EntityState.Modified
+                            && e.Property(t => t.SubcategoryId).IsModified))
+            .ToList();
+        foreach (var e in entries)
+        {
+            var task = e.Entity;
+            var sub = task.Subcategory;
+            if (sub is null && task.SubcategoryId is int subId)
+            {
+                sub = VolunteerSubcategories.Local.FirstOrDefault(s => s.Id == subId)
+                      ?? (sync
+                          ? VolunteerSubcategories.FirstOrDefault(s => s.Id == subId)
+                          : await VolunteerSubcategories.FirstOrDefaultAsync(s => s.Id == subId, ct));
+            }
+            if (sub is null) continue;
+            if (sub.Category is not null) task.Category = sub.Category;
+            else task.CategoryId = sub.CategoryId;
+        }
     }
 
     private async Task CleanupHardDeletedParticipantDependentsAsync(
@@ -138,6 +169,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<JobHealthMarker> JobHealthMarkers => Set<JobHealthMarker>();
     // §327: operator-editable per-job throttle + last-run stamp (fleet-wide, like the marker).
     public DbSet<JobRunState> JobRunStates => Set<JobRunState>();
+    public DbSet<EngineAlertThrottle> EngineAlertThrottles => Set<EngineAlertThrottle>();   // §1256b
     public DbSet<HotelBooking> HotelBookings => Set<HotelBooking>();
     public DbSet<Hotel> Hotels => Set<Hotel>();
     // §326bs: per-night contracted supply + the contract's release deadlines.
@@ -205,6 +237,25 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
     /// <summary>§1165 — organizer reservations of swag-catalogue items.</summary>
     public DbSet<SwagCatalogHold> SwagCatalogHolds => Set<SwagCatalogHold>();
+
+    /// <summary>§1305 — the CEH sponsor shop's catalogue, imported from the webshop.</summary>
+    public DbSet<ShopCategory> ShopCategories => Set<ShopCategory>();
+    public DbSet<ShopProduct> ShopProducts => Set<ShopProduct>();
+    public DbSet<ShopProductCategory> ShopProductCategories => Set<ShopProductCategory>();
+    public DbSet<ShopProductImage> ShopProductImages => Set<ShopProductImage>();
+    public DbSet<ShopCompany> ShopCompanies => Set<ShopCompany>();
+    /// <summary>§1309 — people known for a company (lookup only; never mailed, cannot sign in).</summary>
+    public DbSet<ShopKnownContact> ShopKnownContacts => Set<ShopKnownContact>();
+    /// <summary>§1312 — the old webshop's orders, stored once (the webshop is closed).</summary>
+    public DbSet<WebshopOrderArchive> WebshopOrderArchives => Set<WebshopOrderArchive>();
+    /// <summary>§1309 — requests to join an existing company that wait for an organizer.</summary>
+    public DbSet<ShopJoinRequest> ShopJoinRequests => Set<ShopJoinRequest>();
+    public DbSet<ShopOrder> ShopOrders => Set<ShopOrder>();
+    public DbSet<ShopOrderLine> ShopOrderLines => Set<ShopOrderLine>();
+    public DbSet<ShopRegistration> ShopRegistrations => Set<ShopRegistration>();
+    public DbSet<ShopEntitlement> ShopEntitlements => Set<ShopEntitlement>();
+    public DbSet<ShopCatalogPage> ShopCatalogPages => Set<ShopCatalogPage>();
+    public DbSet<ShopBoothSpot> ShopBoothSpots => Set<ShopBoothSpot>();
 
     /// <summary>§1165k — euro credits granted to sponsors for catalogue items.</summary>
     public DbSet<SwagCatalogCredit> SwagCatalogCredits => Set<SwagCatalogCredit>();
@@ -279,6 +330,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<VolunteerHelpRequest> VolunteerHelpRequests => Set<VolunteerHelpRequest>();
     // Buckets feature (2026-06-15): multi-supervisor + draft→commit allocation.
     public DbSet<VolunteerBucketSupervisor> VolunteerBucketSupervisors => Set<VolunteerBucketSupervisor>();
+    /// <summary>§1297 — the curated WORKER roster the planner auto-assigns from.</summary>
+    public DbSet<VolunteerPlanningRosterEntry> VolunteerPlanningRoster => Set<VolunteerPlanningRosterEntry>();
+    /// <summary>§1297 — per-Bucket preferred volunteers, ranked ahead of the rest.</summary>
+    public DbSet<VolunteerCategoryPreference> VolunteerCategoryPreferences => Set<VolunteerCategoryPreference>();
     public DbSet<TaskAllocationDraft> TaskAllocationDrafts => Set<TaskAllocationDraft>();
     public DbSet<AllocationScenario> AllocationScenarios => Set<AllocationScenario>();
     public DbSet<AllocationScenarioMove> AllocationScenarioMoves => Set<AllocationScenarioMove>();
@@ -294,6 +349,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // Per-edition GROUP lifecycle rings (§23a): one optional ring per feature
     // group; features without their own override inherit their group's ring.
     public DbSet<FeatureGroupSetting> FeatureGroupSettings => Set<FeatureGroupSetting>();
+
+    /// <summary>§1296 — per-edition hotel coverage standards, one row per coverage class.</summary>
+    public DbSet<HotelCoverageStandard> HotelCoverageStandards => Set<HotelCoverageStandard>();
+
+    /// <summary>§1296 — per-person EXTRA covered nights on top of the class standard.</summary>
+    public DbSet<HotelCoverageExtra> HotelCoverageExtras => Set<HotelCoverageExtra>();
 
     // Generic, role-tagged event SCHEDULE / key dates (move-in … party … dinner);
     // organizer-managed, rendered role-filtered + synced to participants' calendars.
@@ -362,6 +423,13 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         Set<Domain.Evaluation.EvaluationResponse>();
     public DbSet<Domain.Evaluation.EvaluationRoom> EvaluationRooms =>
         Set<Domain.Evaluation.EvaluationRoom>();
+
+    /// <summary>§1350 — physical rooms (where a tablet stands) and their schedule-room placements.</summary>
+    public DbSet<Domain.Evaluation.EvaluationPhysicalRoom> EvaluationPhysicalRooms =>
+        Set<Domain.Evaluation.EvaluationPhysicalRoom>();
+
+    public DbSet<Domain.Evaluation.EvaluationRoomPlacement> EvaluationRoomPlacements =>
+        Set<Domain.Evaluation.EvaluationRoomPlacement>();
     public DbSet<Domain.Evaluation.EvaluationSession> EvaluationSessions =>
         Set<Domain.Evaluation.EvaluationSession>();
     public DbSet<Domain.Evaluation.EvaluationSessionSpeaker> EvaluationSessionSpeakers =>
@@ -661,13 +729,6 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // SponsorRecipientResolver loads a company's contacts by
             // (EventId, SponsorCompanyId) then filters by IsEventCoordinator.
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
-
-            // Unique-identifier contact link (REQUIREMENTS §7c): the CM/WordPress
-            // user_id written at sync time. Correlation from CM → hub prefers this
-            // id over name/email. Indexed by (EventId, CmUserId) for the id-based
-            // lookup; the many NULLs (non-sponsor / not-yet-synced rows) sit fine in
-            // a non-unique index.
-            e.HasIndex(x => new { x.EventId, x.CmUserId });
 
             // Calendar-feed token is the bearer secret for GET /calendar/{token}.ics.
             // Unique (filtered so the many NULLs before first-view don't collide)
@@ -1224,6 +1285,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => x.FunctionName).IsUnique();
         });
 
+        // --- EngineAlertThrottle (§1256b — the alert throttle that survives a restart) ---
+        b.Entity<EngineAlertThrottle>(e =>
+        {
+            e.Property(x => x.ThrottleKey).HasMaxLength(200).IsRequired();
+            e.Property(x => x.LastSubject).HasMaxLength(400);
+            // One row per key — a stamp updated in place, never a history, so it cannot grow.
+            e.HasIndex(x => x.ThrottleKey).IsUnique();
+        });
+
         // --- HotelBooking ---------------------------------------------------
         b.Entity<HotelBooking>(e =>
         {
@@ -1382,7 +1452,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // email length. Nullable: blank = no calendar override.
             e.Property(x => x.CalendarEmail).HasMaxLength(320);
             e.Property(x => x.Tagline).HasMaxLength(500);
-            e.Property(x => x.Biography).HasMaxLength(4000);
+            // §1314 — no cap in the DATABASE: a bio applied from Zoho Backstage is its editor's HTML (inline styles on every
+            // list item), far longer than the text; a 4000 cap made SpeakerChangeDetectionJob fail on every run (PROD
+            // 2026-09-28, error 2628). The speaker FORMS still limit what a speaker types to 4000 characters.
+            e.Property(x => x.Biography);
             e.Property(x => x.Blog).HasMaxLength(500);
             e.Property(x => x.LinkedIn).HasMaxLength(500);
             e.Property(x => x.Twitter).HasMaxLength(200);
@@ -1405,7 +1478,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // sizes as the CEH-owned bio columns above.
             e.Property(x => x.BackstageName).HasMaxLength(400);
             e.Property(x => x.BackstageTagline).HasMaxLength(500);
-            e.Property(x => x.BackstageBio).HasMaxLength(4000);
+            e.Property(x => x.BackstageBio);   // §1314 — Backstage's HTML verbatim; see Biography above
             e.Property(x => x.BackstageCountry).HasMaxLength(100);
             e.Property(x => x.BackstageLinkedIn).HasMaxLength(500);
             e.Property(x => x.BackstageTwitter).HasMaxLength(200);
@@ -1486,6 +1559,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // shares the 64-char id cap used by SessionizeId; the room mirrors Room.
             e.Property(x => x.BackstageSessionId).HasMaxLength(64);
             e.Property(x => x.BackstageRoom).HasMaxLength(200);
+            // §1352 — a bought sponsor slot: one agenda session per slot (filtered-unique).
+            e.Property(x => x.SponsorCompanyId).HasMaxLength(64);
+            e.Property(x => x.SponsorSlotKey).HasMaxLength(200);
+            e.HasIndex(x => new { x.EventId, x.SponsorSlotKey })
+                .IsUnique()
+                .HasFilter("[SponsorSlotKey] IS NOT NULL");
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -1960,7 +2039,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.LogoRasterFileName).HasMaxLength(200);
             e.Property(x => x.CompanyDescription).HasMaxLength(1000);
             e.Property(x => x.CompanyDescriptionShort).HasMaxLength(80);
-            e.Property(x => x.SocialMediaIntro).HasMaxLength(600);
+            e.Property(x => x.SocialMediaIntro).HasMaxLength(Integrations.ZohoExhibitorLimits.SocialBrandingText);
             e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
             e.Property(x => x.WebsiteUrl).HasMaxLength(400);
             e.Property(x => x.LinkedInUrl).HasMaxLength(400);
@@ -2375,6 +2454,253 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
         });
 
+        // --- CEH sponsor shop catalogue (§1305) --------------------------------
+        b.Entity<ShopCategory>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Slug).HasMaxLength(200);
+            e.Property(x => x.Group).HasConversion<string>().HasMaxLength(32);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction: SQL Server refuses a second cascade path into the same table, and a parent is
+            // never deleted while children point at it (the import only ever relinks).
+            e.HasOne(x => x.Parent).WithMany()
+                .HasForeignKey(x => x.ParentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // 🔒 One CEH row per webshop category per edition — the import matches on it.
+            e.HasIndex(x => new { x.EventId, x.WooCategoryId })
+                .IsUnique()
+                .HasFilter("[WooCategoryId] IS NOT NULL");
+        });
+
+        b.Entity<ShopProduct>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired().HasMaxLength(300);
+            e.Property(x => x.Slug).HasMaxLength(300);
+            e.Property(x => x.PriceEur).HasPrecision(18, 2);
+            e.Property(x => x.SalePriceEur).HasPrecision(18, 2);
+            e.Property(x => x.SponsorContributionPercent).HasPrecision(5, 2);
+            e.Ignore(x => x.IsDiscounted);
+            e.Ignore(x => x.EffectivePriceEur);
+            e.Ignore(x => x.DiscountPercent);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.BoothId).HasMaxLength(16);
+            e.Property(x => x.Timeslot).HasMaxLength(16);
+            e.Property(x => x.TimeslotTime).HasMaxLength(32);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.PrimaryCategory).WithMany()
+                .HasForeignKey(x => x.PrimaryCategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // 🔒 One CEH row per webshop product per edition — the import matches on it, and a second
+            // row would be a second, independent stock count for the same booth.
+            e.HasIndex(x => new { x.EventId, x.WooProductId })
+                .IsUnique()
+                .HasFilter("[WooProductId] IS NOT NULL");
+
+            // The expo map and the timeslot pickers look products up by these.
+            e.HasIndex(x => new { x.EventId, x.BoothId });
+        });
+
+        b.Entity<ShopProductCategory>(e =>
+        {
+            e.HasKey(x => new { x.ProductId, x.CategoryId });
+            e.HasOne(x => x.Product).WithMany(p => p.Categories)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Category).WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        b.Entity<ShopProductImage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SourceUrl).IsRequired().HasMaxLength(1000);
+            e.Property(x => x.AltText).HasMaxLength(500);
+            e.Property(x => x.SharePointPath).HasMaxLength(1000);
+            e.Property(x => x.SharePointItemId).HasMaxLength(200);
+            e.Property(x => x.ContentType).HasMaxLength(100);
+            e.Property(x => x.CopyError).HasMaxLength(500);
+            e.HasOne(x => x.Product).WithMany(p => p.Images)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<ShopCompany>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.LegalName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.PublicName).HasMaxLength(200);
+            e.Property(x => x.Cvr).HasMaxLength(32);
+            e.Property(x => x.Address).HasMaxLength(300);
+            e.Property(x => x.Postcode).HasMaxLength(20);
+            e.Property(x => x.City).HasMaxLength(100);
+            e.Property(x => x.CountryIso2).IsRequired().HasMaxLength(2);
+            e.Property(x => x.CompanyEmail).HasMaxLength(256);
+            e.Property(x => x.InvoiceEmail).HasMaxLength(256);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.Website).HasMaxLength(300);
+            e.Property(x => x.LinkedInUrl).HasMaxLength(300);
+            e.Property(x => x.TwitterUrl).HasMaxLength(300);
+            e.Property(x => x.Currency).IsRequired().HasMaxLength(3);
+            e.Property(x => x.ErpCustomerNumber).HasMaxLength(32);
+            e.Property(x => x.ErpError).HasMaxLength(500);
+            e.Property(x => x.VatCheck).HasMaxLength(200);
+            e.Property(x => x.RegisteredByEmail).HasMaxLength(256);
+            e.Property(x => x.BillingReference).HasMaxLength(100);   // §1311
+            e.Property(x => x.Notes).HasMaxLength(4000);              // §1311
+            e.Property(x => x.State).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Source).HasConversion<string>().HasMaxLength(20);
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Cascade);
+            // 🔒 One shop company per sponsor company id per edition.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
+            // Registration de-duplicates on the CVR (the old webhook matched on NAME, which is weak).
+            e.HasIndex(x => new { x.EventId, x.Cvr });
+        });
+
+        // §1312 — the old webshop's orders, stored once so nothing reads WooCommerce again. The key IS the webshop order id.
+        b.Entity<WebshopOrderArchive>(e =>
+        {
+            e.HasKey(x => x.OrderId);
+            e.Property(x => x.OrderId).ValueGeneratedNever();
+            e.Property(x => x.Status).IsRequired().HasMaxLength(30);
+            e.Property(x => x.CompanyId).HasMaxLength(64);
+            e.Property(x => x.BillingCompany).IsRequired().HasMaxLength(300);
+            e.Property(x => x.BillingEmail).IsRequired().HasMaxLength(256);
+            e.Property(x => x.Json).IsRequired();
+            e.HasIndex(x => new { x.EventId, x.Status });
+            e.HasIndex(x => new { x.EventId, x.CompanyId });
+        });
+
+        b.Entity<ShopKnownContact>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(256);
+            e.Property(x => x.FullName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.Source).IsRequired().HasMaxLength(20);
+            // One row per person per company per edition — a re-import updates, never duplicates.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Email }).IsUnique();
+        });
+
+        b.Entity<ShopJoinRequest>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(256);
+            e.Property(x => x.FullName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.MatchedBy).IsRequired().HasMaxLength(16);
+            e.Property(x => x.DecidedByEmail).HasMaxLength(256);
+            e.Property(x => x.DecisionNote).HasMaxLength(1000);
+            e.HasIndex(x => new { x.EventId, x.Approved });
+        });
+
+        b.Entity<ShopOrder>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Number).HasMaxLength(32);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.PurchaseOrderRef).HasMaxLength(100);
+            e.Property(x => x.SpecialTerms).HasMaxLength(4000);
+            e.Property(x => x.Currency).IsRequired().HasMaxLength(3);
+            e.Property(x => x.VatRatePercent).HasPrecision(5, 2);
+            e.Property(x => x.SignedByName).HasMaxLength(200);
+            e.Property(x => x.SignedByEmail).HasMaxLength(256);
+            e.Property(x => x.SignatureKind).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.SignedFromIp).HasMaxLength(64);
+            e.Property(x => x.ContractPath).HasMaxLength(1000);
+            e.Property(x => x.ContractItemId).HasMaxLength(200);
+            e.Property(x => x.CancelledByEmail).HasMaxLength(256);
+            e.Property(x => x.CancelReason).HasMaxLength(1000);
+            e.Property(x => x.SwagCreditEur).HasPrecision(18, 2);
+            e.Property(x => x.ErpInvoiceReference).HasMaxLength(64);
+            e.Property(x => x.InvoiceProblem).HasMaxLength(1000);
+            // §1308 — organizer reservations.
+            e.Property(x => x.ReservationRequesterName).HasMaxLength(200);
+            e.Property(x => x.ReservationRequesterEmail).HasMaxLength(256);
+            e.Property(x => x.ReservationNote).HasMaxLength(2000);
+            e.Property(x => x.ExtensionRequestReason).HasMaxLength(1000);   // §1312
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Status });
+            e.HasIndex(x => new { x.EventId, x.Number }).IsUnique().HasFilter("[Number] IS NOT NULL");
+        });
+
+        b.Entity<ShopOrderLine>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.UnitPriceEur).HasPrecision(18, 2);
+            e.Property(x => x.NormalUnitPriceEur).HasPrecision(18, 2);
+            e.Property(x => x.AgreedUnitPriceEur).HasPrecision(18, 2);   // §1312
+            e.Property(x => x.SurchargePercent).HasPrecision(5, 2);
+            e.Property(x => x.ProductName).IsRequired().HasMaxLength(300);
+            e.HasOne(x => x.Order).WithMany(o => o.Lines).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        b.Entity<ShopRegistration>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(256);
+            e.Property(x => x.CodeHash).IsRequired().HasMaxLength(200);
+            e.Property(x => x.SessionTokenHash).HasMaxLength(200);
+            e.Property(x => x.SponsorCompanyId).HasMaxLength(64);
+            e.Property(x => x.RequestIp).HasMaxLength(64);
+            e.HasIndex(x => new { x.EventId, x.Email });
+        });
+
+        b.Entity<ShopEntitlement>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.SourceEdition).IsRequired().HasMaxLength(20);
+            e.Property(x => x.ProductName).IsRequired().HasMaxLength(300);
+            e.Property(x => x.BoothId).HasMaxLength(16);
+            e.Property(x => x.Timeslot).HasMaxLength(16);
+            e.HasOne(x => x.MatchedProduct).WithMany().HasForeignKey(x => x.MatchedProductId).OnDelete(DeleteBehavior.NoAction);
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
+        });
+
+        b.Entity<ShopCatalogPage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Slug).IsRequired().HasMaxLength(100);
+            e.Property(x => x.Title).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Chapter).HasMaxLength(100);
+            e.Property(x => x.MediaUrl).HasMaxLength(1000);
+            e.Property(x => x.ProductGroup).HasConversion<string>().HasMaxLength(32);
+            e.Property(x => x.ProductMatch).HasMaxLength(200);
+            e.Property(x => x.AvailabilityView).HasConversion<string>().HasMaxLength(16).HasDefaultValue(ShopCatalogAvailabilityView.None);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(256);
+            e.HasIndex(x => new { x.EventId, x.Slug }).IsUnique();
+        });
+
+        b.Entity<ShopBoothSpot>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.BoothId).IsRequired().HasMaxLength(16);
+            e.Property(x => x.XPercent).HasPrecision(7, 3);
+            e.Property(x => x.YPercent).HasPrecision(7, 3);
+            e.Property(x => x.WidthPercent).HasPrecision(7, 3);
+            e.Property(x => x.HeightPercent).HasPrecision(7, 3);
+            e.HasIndex(x => new { x.EventId, x.BoothId }).IsUnique();
+        });
+
         // --- SwagCatalogHold (§1165) -------------------------------------------
         b.Entity<SwagCatalogHold>(e =>
         {
@@ -2548,11 +2874,21 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.NoAction);
+            // §1299 — a task belongs to a CATEGORY; the subcategory is optional. The category is
+            // the cascade path (deleting a bucket deletes its tasks). The subcategory FK is
+            // ClientSetNull: SQL Server refuses a second cascade path (Category→Subcategory→Task
+            // beside Category→Task), and removing a subcategory should move its tasks up to the
+            // category rather than delete them — VolunteerStructureService does that explicitly.
+            e.HasOne(x => x.Category).WithMany(c => c.Tasks)
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Subcategory).WithMany(s => s.Tasks)
                 .HasForeignKey(x => x.SubcategoryId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
 
             e.HasIndex(x => new { x.EventId, x.SubcategoryId });
+            e.HasIndex(x => new { x.EventId, x.CategoryId });
             e.HasIndex(x => new { x.EventId, x.Status });
             // §151: the stable external key the Excel round-trip upserts by — unique.
             e.HasIndex(x => x.ExternalKey).IsUnique();
@@ -2632,6 +2968,45 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // A volunteer supervises a given bucket at most once.
             e.HasIndex(x => new { x.CategoryId, x.ParticipantId }).IsUnique();
             // "Which buckets does this volunteer supervise?" lookup.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId });
+        });
+
+        // --- §1297 VolunteerPlanningRosterEntry (the WORKER roster) ---------
+        b.Entity<VolunteerPlanningRosterEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AddedByEmail).HasMaxLength(320);
+            e.Property(x => x.Note).HasMaxLength(500);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Presence IS the flag, so a person is on the roster at most once per edition.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
+        });
+
+        // --- §1297 VolunteerCategoryPreference (preferred per Bucket) ------
+        b.Entity<VolunteerCategoryPreference>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AddedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Category).WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // One preference row per (bucket, volunteer).
+            e.HasIndex(x => new { x.CategoryId, x.ParticipantId }).IsUnique();
             e.HasIndex(x => new { x.EventId, x.ParticipantId });
         });
 
@@ -3040,6 +3415,40 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasOne(x => x.Room).WithMany()
                 .HasForeignKey(x => x.RoomId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // §1349 — the pre-day (master-class) room. NoAction for the same reason as Room.
+            e.HasOne(x => x.MasterClassRoom).WithMany()
+                .HasForeignKey(x => x.MasterClassRoomId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // §1350 — the physical room. NoAction for the same reason as Room.
+            e.HasOne(x => x.PhysicalRoom).WithMany()
+                .HasForeignKey(x => x.PhysicalRoomId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // §1350 — physical rooms and their placements. 🔒 ONE cascade path into the placements
+        // (Event → PhysicalRoom → Placement); the schedule-room side is NoAction, because Event also
+        // cascades to EvaluationRooms and a second delete rule would give SQL Server two paths.
+        b.Entity<Domain.Evaluation.EvaluationPhysicalRoom>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.Name }).IsUnique();
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationRoomPlacement>(e =>
+        {
+            e.HasKey(x => new { x.PhysicalRoomId, x.EvaluationRoomId });
+            e.HasOne(x => x.PhysicalRoom).WithMany(p => p.Placements)
+                .HasForeignKey(x => x.PhysicalRoomId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.EvaluationRoom).WithMany()
+                .HasForeignKey(x => x.EvaluationRoomId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // §753 — the onboarding queue.
@@ -3200,12 +3609,19 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         b.Entity<Domain.Evaluation.EvaluationResponse>(e =>
         {
             e.HasKey(x => x.Id);
+            // §1357 — an INACTIVE response counts nowhere. A global filter so no score, statistic, comparison
+            // or report can forget it; only ingest's duplicate check, the deletion guards and the
+            // inactivation itself call IgnoreQueryFilters().
+            e.HasQueryFilter(x => !x.IsInactive);
             e.Property(x => x.SerialNumber).HasMaxLength(200);
             e.Property(x => x.DeviceRecordId).HasMaxLength(200);
             e.Property(x => x.Source).HasMaxLength(10).IsRequired();
             e.Property(x => x.FirmwareVersion).HasMaxLength(50);
             // Free text is attendee prose to a speaker; generous but bounded.
             e.Property(x => x.FreeText).HasMaxLength(4000);
+            // §1278 — follow-up codes (EvaluationFollowUps), never free text.
+            e.Property(x => x.PositivePoint).HasMaxLength(CommunityHub.Core.Evaluation.EvaluationFollowUps.MaxCodeLength);
+            e.Property(x => x.ImprovementPoint).HasMaxLength(CommunityHub.Core.Evaluation.EvaluationFollowUps.MaxCodeLength);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -3275,6 +3691,44 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             // One group-ring row per (edition, group) — upserted on save.
             e.HasIndex(x => new { x.EventId, x.Group }).IsUnique();
+        });
+
+        // --- §1296 hotel coverage: the per-class standard + the per-person extra ---
+        b.Entity<HotelCoverageStandard>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Class).HasConversion<int>();
+            e.Property(x => x.Mode).HasConversion<int>();
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One standard per (edition, class) — upserted on save.
+            e.HasIndex(x => new { x.EventId, x.Class }).IsUnique();
+        });
+
+        b.Entity<HotelCoverageExtra>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 Restrict, not Cascade: the Event root already cascades, and a second cascade path
+            // through Participant is what SQL Server refuses (the same reason Participant.HotelId
+            // is NoAction). Deleting a participant is routed through ParticipantDeletionService,
+            // which is where this row is cleaned up.
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // At most one extra-nights row per person per edition.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
         });
 
         // --- ScheduleEntry (generic role-tagged key dates / schedule) ---------

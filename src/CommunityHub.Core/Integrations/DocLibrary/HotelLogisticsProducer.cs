@@ -33,13 +33,26 @@ public sealed record HotelLogisticsFile(
 public sealed class HotelLogisticsProducer
 {
     private readonly CommunityHubDbContext _db;
+    private readonly Entitlements.HotelCoverageService _coverage;
 
-    public HotelLogisticsProducer(CommunityHubDbContext db) => _db = db;
+    /// <param name="coverage">
+    /// §1296 — supplies the two coverage columns (operator 2026-09-22: <i>"the excel file for hotel
+    /// must be updated with 2 more columns … coverage (eldk, own expenses)"</i>). REQUIRED: a file
+    /// that reached a hotel with the split silently missing is the whole failure this prevents.
+    /// </param>
+    public HotelLogisticsProducer(CommunityHubDbContext db, Entitlements.HotelCoverageService coverage)
+    {
+        _db = db;
+        _coverage = coverage;
+    }
 
+    /// <param name="CoveredNights">§1296 — nights ELDK pays for this guest.</param>
+    /// <param name="OwnExpenseNights">§1296 — nights the guest settles with the hotel themselves.</param>
     private sealed record Guest(
         int Id, string Name, string Email, string Role,
         DateOnly? CheckIn, DateOnly? CheckOut, string? RoomType,
-        string ShareWith, string Confirmation, string Notes);
+        string ShareWith, string Confirmation, string Notes,
+        int CoveredNights, int OwnExpenseNights);
 
     /// <summary>One file per hotel that has at least one guest.</summary>
     public async Task<IReadOnlyList<HotelLogisticsFile>> BuildAllAsync(
@@ -99,21 +112,33 @@ public sealed class HotelLogisticsProducer
                 })
             .ToListAsync(ct);
 
+        // §1296 — resolve the whole hotel population in ONE pass, not per guest.
+        var coverage = await _coverage.ResolveManyAsync(
+            eventId, rows.Select(r => r.Id).Distinct().ToList(), ct);
+
         return rows
             .GroupBy(r => r.HotelId)
             .ToDictionary(
                 g => g.Key,
                 g => g
-                    .Select(r => new Guest(
-                        r.Id, r.FullName, r.Email, r.Role.ToString(),
-                        r.CheckInDate, r.CheckOutDate, r.RoomType,
-                        (r.RoomShareWith ?? string.Empty).Trim(),
-                        r.ConfirmationState == HotelConfirmationState.Confirmed
-                            ? (string.IsNullOrWhiteSpace(r.ConfirmationNumber)
-                                ? "Confirmed"
-                                : $"Confirmed ({r.ConfirmationNumber!.Trim()})")
-                            : "Not confirmed",
-                        (r.Notes ?? string.Empty).Trim()))
+                    .Select(r =>
+                    {
+                        // A miss cannot happen for a placed guest, but if it ever did, reporting
+                        // ZERO covered (i.e. the guest pays) is the honest direction to fail: it
+                        // shows up as a bill somebody queries, not as a night ELDK silently owns.
+                        var cov = coverage.TryGetValue(r.Id, out var c) ? c.Result : default;
+                        return new Guest(
+                            r.Id, r.FullName, r.Email, r.Role.ToString(),
+                            r.CheckInDate, r.CheckOutDate, r.RoomType,
+                            (r.RoomShareWith ?? string.Empty).Trim(),
+                            r.ConfirmationState == HotelConfirmationState.Confirmed
+                                ? (string.IsNullOrWhiteSpace(r.ConfirmationNumber)
+                                    ? "Confirmed"
+                                    : $"Confirmed ({r.ConfirmationNumber!.Trim()})")
+                                : "Not confirmed",
+                            (r.Notes ?? string.Empty).Trim(),
+                            cov.Covered, cov.OwnExpense);
+                    })
                     .OrderBy(x => x.Name, StringComparer.Ordinal)
                     .ThenBy(x => x.Id)
                     .ToList());
@@ -124,7 +149,10 @@ public sealed class HotelLogisticsProducer
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("Rooming list");
 
+        // §1296 — the two coverage columns sit immediately after Nights, so the hotel reads
+        // "6 nights = 2 + 4" left to right without hunting across the sheet.
         Header(ws, "Name", "Email", "Role", "Check-in", "Check-out", "Nights",
+            "Nights — ELDK", "Nights — own expenses",
             "Room type", "Sharing with", "Confirmation", "Notes");
 
         var row = 2;
@@ -136,10 +164,12 @@ public sealed class HotelLogisticsProducer
             ws.Cell(row, 4).Value = g.CheckIn?.ToString("yyyy-MM-dd") ?? string.Empty;
             ws.Cell(row, 5).Value = g.CheckOut?.ToString("yyyy-MM-dd") ?? string.Empty;
             ws.Cell(row, 6).Value = Nights(g.CheckIn, g.CheckOut);
-            ws.Cell(row, 7).Value = g.RoomType ?? string.Empty;
-            ws.Cell(row, 8).Value = g.ShareWith;
-            ws.Cell(row, 9).Value = g.Confirmation;
-            ws.Cell(row, 10).Value = g.Notes;
+            ws.Cell(row, 7).Value = g.CoveredNights;
+            ws.Cell(row, 8).Value = g.OwnExpenseNights;
+            ws.Cell(row, 9).Value = g.RoomType ?? string.Empty;
+            ws.Cell(row, 10).Value = g.ShareWith;
+            ws.Cell(row, 11).Value = g.Confirmation;
+            ws.Cell(row, 12).Value = g.Notes;
             row++;
         }
 
@@ -148,14 +178,20 @@ public sealed class HotelLogisticsProducer
             ws.Cell(row, 1).Value = $"{hotelName} — total guests";
             ws.Cell(row, 2).Value = guests.Count;
             ws.Cell(row, 6).Value = guests.Sum(g => Nights(g.CheckIn, g.CheckOut));
-            ws.Range(row, 1, row, 6).Style.Font.Bold = true;
+            ws.Cell(row, 7).Value = guests.Sum(g => g.CoveredNights);
+            ws.Cell(row, 8).Value = guests.Sum(g => g.OwnExpenseNights);
+            ws.Range(row, 1, row, 8).Style.Font.Bold = true;
         }
 
         Finish(ws);
 
+        // 🔒 §1296 — the coverage numbers are PART OF THE CONTENT KEY. §6.4 mails a hotel its file
+        // when the file CHANGES, so a key that ignored these columns would let a coverage decision
+        // reach the sheet and never reach the hotel — the column would exist and be invisible to
+        // the mechanism that delivers it.
         var key = GeneratedFile.KeyOf(guests.Select(g =>
             $"{g.Id}|{g.Name}|{g.Email}|{g.Role}|{g.CheckIn}|{g.CheckOut}|{g.RoomType}|"
-            + $"{g.ShareWith}|{g.Confirmation}|{g.Notes}"));
+            + $"{g.ShareWith}|{g.Confirmation}|{g.Notes}|{g.CoveredNights}|{g.OwnExpenseNights}"));
 
         return new GeneratedFile(fileName, Save(wb), GeneratedFile.XlsxContentType, key,
             LogisticsHeadline.Of(guests.Count, "guest", "guests"));

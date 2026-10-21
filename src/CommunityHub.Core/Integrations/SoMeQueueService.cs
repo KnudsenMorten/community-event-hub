@@ -427,10 +427,10 @@ public sealed class SoMeQueueService
 
             // The hub has no company table; the public name is resolved from any
             // SponsorInfo / participant company we hold, falling back to the chain.
-            var publicName = await _db.SponsorInfos
-                .Where(s => s.EventId == post.EventId && s.SponsorCompanyId == companyId)
-                .Select(s => s.CompanyDescriptionShort)
-                .FirstOrDefaultAsync(ct);
+            // 🔴 §1312 — the company's PUBLIC NAME. This read `CompanyDescriptionShort` — the one-line description — as the
+            // name; the shared resolver is the sponsor record, then the CEH shop's public name (audit 2026-09-29).
+            var publicName = (await SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, post.EventId, new[] { companyId }, ct)).GetValueOrDefault(companyId);
 
             var companyName = SponsorCompanyName.Resolve(publicName, null, null, companyId);
             post.AutoText = SoMeTextComposer.ForSponsor(companyName, eventDisplay);

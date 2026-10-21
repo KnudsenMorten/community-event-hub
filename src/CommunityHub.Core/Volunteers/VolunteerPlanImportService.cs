@@ -5,19 +5,28 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Core.Volunteers;
 
 /// <summary>The outcome of importing a plan, for the organizer's confirmation screen.</summary>
+/// <param name="AssignmentsHeldOutOfRing">
+/// §1295 — matched volunteers the RING GATE held back: the name resolved to a real volunteer, but
+/// volunteer task assignment is not released to their ring, so no assignment row was written.
+/// Reported separately from <paramref name="UnmatchedNames"/> because the two need opposite
+/// remedies — an unmatched name is a data problem, a held one is a Settings decision.
+/// </param>
+/// <param name="HeldNames">The distinct names behind <paramref name="AssignmentsHeldOutOfRing"/>.</param>
 public sealed record PlanImportResult(
     int BucketsCreated,
     int TasksCreated,
     int AssignmentsLinked,
     int NamesUnmatched,
     int GuidanceFilled,
-    IReadOnlyList<string> UnmatchedNames);
+    IReadOnlyList<string> UnmatchedNames,
+    int AssignmentsHeldOutOfRing = 0,
+    IReadOnlyList<string>? HeldNames = null);
 
 /// <summary>
 /// Imports a parsed volunteer plan into the DB for an edition: creates Buckets
 /// (<see cref="VolunteerCategory"/>) from the distinct responsible teams, then the
-/// tasks under a single "Imported plan" subcategory per bucket (the subcategory
-/// level is kept as a structural holder — the plan groups by Bucket → Task).
+/// tasks DIRECTLY under their bucket (§1299 — no subcategory; the plan groups by
+/// Bucket → Task, and the organizer adds subcategories such as "Monday" if wanted).
 ///
 /// Behaviour:
 ///  - Buckets and tasks are upserted by name so re-importing the same plan is
@@ -38,15 +47,16 @@ public sealed class VolunteerPlanImportService
     private readonly CommunityHubDbContext _db;
     private readonly ITaskGuidanceGenerator _guidance;
     private readonly TimeProvider _clock;
-
-    public const string ImportedSubcategoryName = "Imported plan";
+    private readonly VolunteerAssignmentGate _assignmentGate;
 
     public VolunteerPlanImportService(
-        CommunityHubDbContext db, ITaskGuidanceGenerator guidance, TimeProvider clock)
+        CommunityHubDbContext db, ITaskGuidanceGenerator guidance, TimeProvider clock,
+        VolunteerAssignmentGate assignmentGate)
     {
         _db = db;
         _guidance = guidance;
         _clock = clock;
+        _assignmentGate = assignmentGate;
     }
 
     public async Task<PlanImportResult> ImportAsync(
@@ -55,6 +65,7 @@ public sealed class VolunteerPlanImportService
         var now = _clock.GetUtcNow();
         int bucketsCreated = 0, tasksCreated = 0, assignmentsLinked = 0, guidanceFilled = 0;
         var unmatched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var heldOutOfRing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Pre-load the edition's volunteers for name matching.
         var volunteersByName = await _db.Participants
@@ -64,18 +75,22 @@ public sealed class VolunteerPlanImportService
             .GroupBy(p => p.FullName.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
+        // 🔒 §1295 — which of them may be assigned AT ALL under the currently released ring.
+        // Resolved ONCE for the whole import (a plan is 127 rows × several names each) rather than
+        // per row. The tasks themselves still import; only the assignment rows are held, and the
+        // held names come back in the result so the import screen can SAY so — a sweep that links
+        // nobody in silence is the §767 failure, which went unnoticed for four prod runs.
+        var assignableIds = await _assignmentGate.FilterAssignableAsync(
+            eventId, volunteersByName.Select(p => p.Id), ct);
+
         // 1. Upsert buckets (categories) by name.
         var bucketByName = await UpsertBucketsAsync(eventId, plan.Buckets, now, ct);
         bucketsCreated = bucketByName.Values.Count(b => b.WasCreated);
 
-        // 2. Ensure one "Imported plan" subcategory per bucket.
-        var subByBucket = await EnsureSubcategoriesAsync(eventId, bucketByName, now, ct);
-
-        // 3. Upsert tasks under their bucket's subcategory.
+        // 2. Upsert tasks directly under their bucket (§1299 — no placeholder subcategory).
         foreach (var pt in plan.Tasks)
         {
             var bucket = bucketByName[pt.BucketName].Category;
-            var sub = subByBucket[bucket.Id];
 
             // §327k — the upsert key includes the DATE and START TIME, not the title alone.
             //
@@ -84,8 +99,12 @@ public sealed class VolunteerPlanImportService
             // turned 127 plan rows into 72 tasks, discarding 55 shifts along with their times
             // and headcounts. Two rows are the same task only when they are the same task AT
             // THE SAME TIME; otherwise they are separate shifts somebody has to staff.
+            //
+            // §1299 — matched by BUCKET, whatever subcategory it now sits in: an organizer who
+            // filed the task under "Monday" must not get a duplicate on the next import, and the
+            // import never moves it back out.
             var task = await _db.VolunteerTasks.FirstOrDefaultAsync(
-                t => t.EventId == eventId && t.SubcategoryId == sub.Id
+                t => t.EventId == eventId && t.CategoryId == bucket.Id
                      && t.Title == pt.Title
                      && t.DueDate == pt.Date
                      && t.Shift == pt.Shift, ct);
@@ -95,7 +114,7 @@ public sealed class VolunteerPlanImportService
                 task = new VolunteerTask
                 {
                     EventId = eventId,
-                    SubcategoryId = sub.Id,
+                    CategoryId = bucket.Id,
                     Title = pt.Title,
                     CreatedAt = now,
                 };
@@ -108,6 +127,8 @@ public sealed class VolunteerPlanImportService
             task.DueDate = pt.Date;
             task.Shift = pt.Shift;
             task.TimeEnd = pt.TimeEnd;
+            // §1297 — keep the typed planner window in step with the text the plan carries.
+            VolunteerTaskWindow.SyncTypedTimes(task);
             task.Status = pt.Status;
             task.Criticality = pt.Criticality;
             task.ResponsibleTeam = pt.ResponsibleTeam;
@@ -144,6 +165,7 @@ public sealed class VolunteerPlanImportService
             foreach (var name in pt.ResourceNames)
             {
                 if (!nameLookup.TryGetValue(name, out var vol)) { unmatched.Add(name); continue; }
+                if (!assignableIds.Contains(vol.Id)) { heldOutOfRing.Add(name); continue; }
                 var already = await _db.VolunteerTaskAssignments.AnyAsync(
                     a => a.TaskId == task.Id && a.ParticipantId == vol.Id, ct);
                 if (already) continue;
@@ -163,7 +185,8 @@ public sealed class VolunteerPlanImportService
 
         return new PlanImportResult(
             bucketsCreated, tasksCreated, assignmentsLinked,
-            unmatched.Count, guidanceFilled, unmatched.OrderBy(x => x).ToList());
+            unmatched.Count, guidanceFilled, unmatched.OrderBy(x => x).ToList(),
+            heldOutOfRing.Count, heldOutOfRing.OrderBy(x => x).ToList());
     }
 
     private async Task<Dictionary<string, (VolunteerCategory Category, bool WasCreated)>>
@@ -188,32 +211,5 @@ public sealed class VolunteerPlanImportService
         }
         await _db.SaveChangesAsync(ct);
         return result;
-    }
-
-    private async Task<Dictionary<int, VolunteerSubcategory>> EnsureSubcategoriesAsync(
-        int eventId,
-        Dictionary<string, (VolunteerCategory Category, bool WasCreated)> buckets,
-        DateTimeOffset now, CancellationToken ct)
-    {
-        var map = new Dictionary<int, VolunteerSubcategory>();
-        foreach (var (cat, _) in buckets.Values)
-        {
-            var sub = await _db.VolunteerSubcategories.FirstOrDefaultAsync(
-                s => s.EventId == eventId && s.CategoryId == cat.Id && s.Name == ImportedSubcategoryName, ct);
-            if (sub is null)
-            {
-                sub = new VolunteerSubcategory
-                {
-                    EventId = eventId,
-                    CategoryId = cat.Id,
-                    Name = ImportedSubcategoryName,
-                    CreatedAt = now,
-                };
-                _db.VolunteerSubcategories.Add(sub);
-            }
-            map[cat.Id] = sub;
-        }
-        await _db.SaveChangesAsync(ct);
-        return map;
     }
 }

@@ -93,12 +93,15 @@ public sealed class SessionScheduleChangeNotifier
 
         var session = await _db.Sessions.AsNoTracking()
             .Where(s => s.Id == sessionId && s.EventId == eventId)
-            .Select(s => new { s.Title })
+            .Select(s => new { s.Title, s.UsedForTesting })
             .FirstOrDefaultAsync(ct);
         if (session is null) return new Result(0, false, "session not found");
 
+        // 🔒 §1263 — a TEST session notifies only the operator accounts (ring 0/1). Moving a test
+        // session to "now" is how the kiosk gets tried out; that must never reach a real speaker.
         var speakers = await _db.SessionSpeakers
-            .Where(ss => ss.SessionId == sessionId)
+            .Where(ss => ss.SessionId == sessionId
+                         && (!session.UsedForTesting || ss.Participant.Ring <= CommunityHub.Core.Settings.Ring.Ring1))
             .Select(ss => new { ss.ParticipantId, ss.Participant.Email, ss.Participant.FullName })
             .ToListAsync(ct);
 

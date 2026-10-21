@@ -75,7 +75,7 @@ public sealed class InvoiceProblemNotifier
             + "scheduled PowerShell script was retired, so CEH is the only system creating these "
             + "drafts — an order that keeps being refused is money nobody is asking for.</p>"
             + "<p style=\"color:#6b7280;font-size:13px;\">Each line above says exactly what is "
-            + "missing, and most are fixed outside CEH: an ERP customer number in Company Manager, a "
+            + "missing, and most are fixed outside CEH: the e-conomic customer number on the CEH company page, a "
             + "price on the webshop product, or a billing rule on "
             + "<strong>Organizer → Setup → Coupon invoicing</strong>. This repeats only when the list "
             + "CHANGES — a new problem is reported on the next run rather than waiting for a quiet "

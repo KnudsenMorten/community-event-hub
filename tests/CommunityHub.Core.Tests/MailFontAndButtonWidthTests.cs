@@ -65,6 +65,47 @@ public sealed class MailFontAndButtonWidthTests
             "the default must be the OUTER declaration, or it would override the author's choice");
     }
 
+    // ---- §1282 — Outlook does not inherit a font into tables ---------------------------------
+
+    [Fact]
+    public void Every_table_cell_without_a_font_gets_the_default_one()
+    {
+        // The SoMe 24-hour digest's shape: prose, then an unstyled-font table (operator 2026-09-21).
+        var body = "<p>1 post</p><table style=\"border-collapse:collapse;\"><tr>"
+                   + "<th style=\"padding:6px;\">Type</th><td>AdHoc</td></tr></table>";
+
+        var wrapped = BrevoEmailSender.ApplyDefaultFont(body);
+
+        Assert.Contains("<table style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;border-collapse:collapse;\">", wrapped);
+        Assert.Contains("<th style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;padding:6px;\">Type</th>", wrapped);
+        Assert.Contains("<td style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;\">AdHoc</td>", wrapped);
+    }
+
+    [Fact]
+    public void A_cell_or_table_with_its_own_font_keeps_it_and_its_cells_inherit_it()
+    {
+        var body = "<table style=\"font-family:Consolas,monospace;\"><tr><td>code</td>"
+                   + "<td style=\"font-family:Georgia;\">quote</td></tr></table>";
+
+        var wrapped = BrevoEmailSender.ApplyDefaultFont(body);
+
+        Assert.Contains("<table style=\"font-family:Consolas,monospace;\">", wrapped);           // untouched
+        Assert.Contains("<td style=\"font-family:Consolas,monospace;\">code</td>", wrapped);      // the TABLE's font
+        Assert.Contains("<td style=\"font-family:Georgia;\">quote</td>", wrapped);               // untouched
+    }
+
+    [Fact]
+    public void After_a_self_fonted_table_closes_the_next_table_gets_the_default_again()
+    {
+        var body = "<table style=\"font-family:Consolas;\"><tr><td>a</td></tr></table>"
+                   + "<table><tr><td>b</td></tr></table>";
+
+        var wrapped = BrevoEmailSender.ApplyDefaultFont(body);
+
+        Assert.Contains("<td style=\"font-family:Consolas;\">a</td>", wrapped);
+        Assert.Contains("<td style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;\">b</td>", wrapped);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

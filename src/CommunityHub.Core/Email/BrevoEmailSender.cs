@@ -138,8 +138,64 @@ public class BrevoEmailSender : IEmailSender
     public static string ApplyDefaultFont(string? htmlBody)
     {
         if (string.IsNullOrWhiteSpace(htmlBody)) return htmlBody ?? string.Empty;
-        return "<div style=\"font-family:Aptos,'Segoe UI',Arial,Helvetica,sans-serif;"
-             + "font-size:14px;line-height:1.5;color:#111827;\">" + htmlBody + "</div>";
+        // §1312 — every Outlook button wide enough for its label, whatever template or code built it.
+        htmlBody = OutlookButtonFit.Apply(htmlBody);
+        return "<div style=\"font-family:" + DefaultFontStack + ";"
+             + "font-size:14px;line-height:1.5;color:#111827;\">" + FontTables(htmlBody) + "</div>";
+    }
+
+    /// <summary>The one default mail font stack (§302).</summary>
+    public const string DefaultFontStack = "Aptos,'Segoe UI',Arial,Helvetica,sans-serif";
+
+    private static readonly System.Text.RegularExpressions.Regex TableTag = new(
+        @"<(/?)(table|td|th)\b([^>]*)>",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex FontDecl = new(
+        @"font-family\s*:\s*([^;""]+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// 🔴 §1282 — classic Outlook (Word's renderer) does NOT inherit a font into TABLES: every
+    /// <c>table</c>/<c>td</c>/<c>th</c> falls back to its own default, whatever the wrapping div says.
+    /// So a mail's prose was in Aptos and its table in something else (operator 2026-09-21, on the SoMe
+    /// 24-hour digest: <i>"font looks wrong here"</i>) — and so was every other mail with a table.
+    /// </summary>
+    /// <remarks>
+    /// Each table tag WITHOUT its own <c>font-family</c> gets one: the nearest enclosing table's font
+    /// if that table declared one (an author's deliberate choice carries into its cells), else the
+    /// default. A tag that declares its own font is never touched.
+    /// </remarks>
+    internal static string FontTables(string html)
+    {
+        var tableFonts = new Stack<string?>();
+        return TableTag.Replace(html, m =>
+        {
+            var closing = m.Groups[1].Value == "/";
+            var name = m.Groups[2].Value.ToLowerInvariant();
+            var attrs = m.Groups[3].Value;
+
+            if (closing)
+            {
+                if (name == "table" && tableFonts.Count > 0) tableFonts.Pop();
+                return m.Value;
+            }
+
+            var own = FontDecl.Match(attrs);
+            var inherited = tableFonts.Count > 0 ? tableFonts.Peek() : null;
+            var font = own.Success ? own.Groups[1].Value.Trim() : inherited ?? DefaultFontStack;
+            if (name == "table") tableFonts.Push(font);
+            if (own.Success) return m.Value;
+
+            var styleAttr = System.Text.RegularExpressions.Regex.Match(
+                attrs, @"\bstyle\s*=\s*""([^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            // Double quotes inside the value would end the attribute: the stack uses single quotes.
+            var decl = "font-family:" + font.Replace('"', '\'') + ";";
+            var newAttrs = styleAttr.Success
+                ? attrs.Remove(styleAttr.Groups[1].Index, 0).Insert(styleAttr.Groups[1].Index, decl)
+                : attrs + " style=\"" + decl + "\"";
+            return "<" + m.Groups[2].Value + newAttrs + ">";
+        });
     }
 
     /// <summary>
@@ -929,11 +985,20 @@ public class BrevoEmailSender : IEmailSender
         }
     }
 
+    public Task SendWithAttachmentsAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default)
+        => SendWithAttachmentsAsync(toEmail, subject, htmlBody, attachments, cc: null, cancellationToken);
+
     public async Task SendWithAttachmentsAsync(
         string toEmail,
         string subject,
         string htmlBody,
         IReadOnlyCollection<EmailAttachment> attachments,
+        IReadOnlyCollection<string>? cc,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
@@ -991,6 +1056,8 @@ public class BrevoEmailSender : IEmailSender
                 added.Add(attachment);
             }
 
+            // Each CC is its own recipient ⇒ ring-gated + redirected exactly as on the plain send.
+            AddCc(message, await RingFilterAddressesAsync(cc, cancellationToken));
             // Actually sending (passed ring gate + kill switch) ⇒ add the operator BCC.
             AddOperatorBcc(message);
 

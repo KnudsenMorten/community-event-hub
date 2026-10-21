@@ -1,0 +1,102 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopCompaniesModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Companies — sponsors and potential sponsors";
+}
+
+<div class="card">
+    <h1>Companies — sponsors and potential sponsors</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Every company is either a <strong>Sponsor</strong> (signed — onboarding, welcome mail and tasks run) or a
+           <strong>Potential sponsor</strong> (can sign in, shop, reserve and sign — but gets <em>nothing</em> automatic). A company
+           becomes a sponsor when a contract is signed.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        <h2>Join requests waiting for you (@Model.Pending.Count)</h2>
+        @if (Model.Pending.Count == 0) { <p>None.</p> }
+        @foreach (var (r, company) in Model.Pending)
+        {
+            <section class="co-req">
+                <p><strong>@r.FullName</strong> (@r.Email@(string.IsNullOrWhiteSpace(r.Phone) ? "" : $", {r.Phone}")) asks to join
+                   <strong>@company</strong> — matched by @r.MatchedBy, @r.RequestedAt.ToString("yyyy-MM-dd HH:mm") UTC.
+                   Their e-mail does not prove the company's domain.</p>
+                <form method="post" asp-page-handler="Decide" class="co-actions">
+                    <input type="hidden" name="requestId" value="@r.Id" />
+                    <input name="note" placeholder="Note (optional)" maxlength="1000" />
+                    <button type="submit" name="approve" value="true" class="primary">Approve — add as contact</button>
+                    <button type="submit" name="approve" value="false">Reject</button>
+                </form>
+            </section>
+        }
+
+        <h2>Companies (@Model.Companies.Count)</h2>
+        <form method="get" class="co-search" role="search">
+            <input type="hidden" name="Show" value="@Model.Show" />
+            <input type="search" name="Q" value="@Model.Q" placeholder="Search name, company #, e-conomic # or CVR / VAT" aria-label="Search companies" />
+            <button type="submit">Search</button>
+            @if (!string.IsNullOrWhiteSpace(Model.Q)) { <a asp-route-Show="@Model.Show">Clear</a> }
+        </form>
+        <p class="co-filter">
+            <a asp-route-Show="" asp-route-Q="@Model.Q" class="@(string.IsNullOrEmpty(Model.Show) ? "on" : "")">All</a>
+            <a asp-route-Show="sponsors" asp-route-Q="@Model.Q" class="@(Model.Show == "sponsors" ? "on" : "")">Sponsors</a>
+            <a asp-route-Show="potential" asp-route-Q="@Model.Q" class="@(Model.Show == "potential" ? "on" : "")">Potential sponsors</a>
+        </p>
+        <div style="overflow-x:auto;">
+        <table>
+            @* Like the old webshop's company list: the LEGAL (billing) name first with the public name under it, the e-conomic
+               number and the CVR / VAT — together they make each company unique (operator 2026-09-27). *@
+            @* §1312 — the PUBLIC name is edited right here (operator 2026-09-29): filled once automatically (the legal name
+               without ApS, A/S, Ltd …), then it is his; nothing automatic changes it again. SoMe, Zoho, the site and the app use it. *@
+            <thead><tr><th>Company #</th><th>Company (legal name)</th><th>Public name (SoMe, Zoho, website, app)</th><th>e-conomic #</th><th>CVR / VAT</th><th>Currency</th><th>People in the hub</th><th>Known people</th><th>Status</th></tr></thead>
+            <tbody>
+            @foreach (var r in Model.Companies)
+            {
+                var c = r.Company;
+                <tr>
+                    <td><span class="co-id">#@c.SponsorCompanyId</span></td>
+                    <td><a asp-page="/Organizer/ShopCompany" asp-route-Id="@c.SponsorCompanyId"><strong>@c.LegalName</strong></a>
+                        <div class="co-public">@(c.City)@(string.IsNullOrWhiteSpace(c.City) ? "" : ", ")@c.CountryIso2 · @(c.Source == ShopCompanySource.CompanyManager ? "from the old webshop" : "registered in CEH")</div></td>
+                    <td>
+                        <form method="post" asp-page-handler="PublicName" class="co-pn">
+                            <input type="hidden" name="companyId" value="@c.SponsorCompanyId" />
+                            <input type="hidden" name="Show" value="@Model.Show" />
+                            <input type="hidden" name="Q" value="@Model.Q" />
+                            <input name="publicName" value="@(c.PublicName ?? c.PublicLabel)" maxlength="200" required aria-label="Public name for @c.LegalName" />
+                            <button type="submit">Save</button>
+                        </form>
+                    </td>
+                    <td><code>@(c.ErpCustomerNumber ?? "—")</code></td>
+                    <td>@(c.Cvr ?? "—")</td>
+                    <td>@c.Currency</td>
+                    <td>@r.HubPeople</td>
+                    <td>@r.KnownPeople</td>
+                    <td><span class="co-state @(c.State == ShopCompanyState.Sponsor ? "is-sponsor" : "")">@(c.State == ShopCompanyState.Sponsor ? "Sponsor" : "Potential sponsor")</span></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+</div>
+<style>
+    .co-req { border:1px solid #e5e7eb; border-left:4px solid #d97706; border-radius:10px; padding:10px 14px; margin:0 0 12px; background:#fff; }
+    .co-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .co-actions input { font-size:16px; padding:8px 10px; min-width:0; flex:1 1 200px; }
+    .co-state { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; color:#374151; font-size:13px; font-weight:600; white-space:nowrap; }
+    .co-state.is-sponsor { background:#dcfce7; color:#166534; }
+    .co-filter { display:flex; gap:12px; }
+    .co-search { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 10px; }
+    .co-search input[type=search] { font-size:16px; padding:8px 10px; min-width:0; flex:1 1 240px; }
+    .co-id { display:inline-block; background:#1565c0; color:#fff; font-weight:700; font-size:12px; padding:2px 8px; border-radius:999px; }
+    .co-public { font-size:12px; color:#6b7280; }
+    .co-filter a.on { font-weight:700; text-decoration:none; }
+    .co-pn { display:flex; gap:6px; align-items:center; margin:0; min-width:220px; }
+    .co-pn input { font-size:16px; padding:6px 8px; min-width:0; flex:1 1 160px; }
+    .co-pn button { padding:6px 10px; white-space:nowrap; }
+</style>

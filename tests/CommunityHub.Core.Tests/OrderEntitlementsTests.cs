@@ -299,24 +299,11 @@ public sealed class OrderEntitlementsTests
         Assert.Equal(0, SpeakerDayScope.FundedPolos(null, bothDays));
     }
 
-    [Fact]
-    public void Funded_hotel_nights_follow_category_rules()
-    {
-        var bothDays = Days(preDay: true, mainDay: true);
-
-        // Community: matches the polo rule (one night per distinct presenting day).
-        Assert.Equal(2, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Community, bothDays, guestFundedNights: null));
-        Assert.Equal(1, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Community, Days(mainDay: true), guestFundedNights: null));
-        Assert.Equal(0, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Community, SpeakerDays.None, guestFundedNights: null));
-
-        // Guest: the ORGANIZER-ENTERED nights (individual agreement), never the schedule.
-        Assert.Equal(3, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Guest, Days(mainDay: true), guestFundedNights: 3));
-        Assert.Equal(0, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Guest, bothDays, guestFundedNights: null));
-
-        // Sponsor + uncategorized: nothing, ever.
-        Assert.Equal(0, SpeakerDayScope.FundedHotelNights(SpeakerCategory.Sponsor, bothDays, guestFundedNights: 3));
-        Assert.Equal(0, SpeakerDayScope.FundedHotelNights(null, bothDays, guestFundedNights: 3));
-    }
+    // 🗑 §1296 — `Funded_hotel_nights_follow_category_rules` MOVED, not deleted. The rule it pinned
+    // (`SpeakerDayScope.FundedHotelNights`) is retired: hotel coverage is now per-edition data with
+    // a per-person extra, covers every role rather than speakers only, and lives in
+    // HotelCoverageTests. The POLO rule stays here, because polos really are one per presenting day
+    // — that they shared a derivation with hotel nights is what tangled them together.
 
     // --- Derived presenting days (§299 C5) ---------------------------------
 

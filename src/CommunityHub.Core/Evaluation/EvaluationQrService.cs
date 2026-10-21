@@ -74,7 +74,14 @@ public sealed class EvaluationQrService
         string? Room,
         IReadOnlyList<string> Speakers,
         DateTimeOffset? WindowOpensAt,
-        DateTimeOffset? WindowClosesAt);
+        DateTimeOffset? WindowClosesAt)
+    {
+        /// <summary>§1354 — what the QR page asks for this session (its physical room's QR policy, else the default).</summary>
+        public FeedbackCapturePolicy Policy { get; init; } = FeedbackCapturePolicies.DefaultQr;
+
+        /// <summary>§1355 — the symbols on the rating buttons (its physical room's choice, else the QR default).</summary>
+        public RatingSymbols Symbols { get; init; } = RatingSymbolChoices.Default;
+    }
 
     private static readonly IReadOnlyList<string> NoSpeakers = Array.Empty<string>();
 
@@ -122,7 +129,11 @@ public sealed class EvaluationQrService
         return new Resolution(
             state, session.Id, evalSession.Id, session.EventId,
             session.Title, evalSession.Room?.Name, speakers,
-            evalSession.CollectionWindowOpensAt, evalSession.CollectionWindowClosesAt);
+            evalSession.CollectionWindowOpensAt, evalSession.CollectionWindowClosesAt)
+        {
+            Policy = await FeedbackCapturePolicies.ForQrAsync(_db, session.EventId, evalSession.RoomId, ct),
+            Symbols = await RatingSymbolChoices.ForQrAsync(_db, session.EventId, evalSession.RoomId, ct),
+        };
     }
 
     /// <summary>Valid ratings. The four-point forced choice — no neutral midpoint, by design.</summary>
@@ -154,13 +165,28 @@ public sealed class EvaluationQrService
     /// the day one of them stops being "now" this code should not have to be found first.</para>
     /// </remarks>
     public async Task<SubmitResult> SubmitAsync(
-        string? token, int rating, string? freeText, CancellationToken ct = default)
+        string? token, int rating, string? freeText, CancellationToken ct = default) =>
+        await SubmitAsync(token, rating, freeText, positivePoint: null, improvementPoint: null, ct);
+
+    /// <summary>
+    /// §1278 — the same submission with the two optional follow-up codes. Unknown codes are dropped;
+    /// the rating stands regardless.
+    /// </summary>
+    public async Task<SubmitResult> SubmitAsync(
+        string? token, int rating, string? freeText,
+        string? positivePoint, string? improvementPoint, CancellationToken ct = default)
     {
         var resolved = await ResolveAsync(token, ct);
         if (resolved.State != FeedbackState.Open) return new SubmitResult(resolved.State, false);
 
         if (rating < MinRating || rating > MaxRating)
             throw new ArgumentOutOfRangeException(nameof(rating), rating, "Rating must be 1–4.");
+
+        // §1354 — only what this session's policy asks is kept: a page rendered under an older policy (or a
+        // hand-made post) cannot slip answers past the policy the organisers chose to measure.
+        var policy = resolved.Policy;
+        if (!FeedbackCapturePolicies.HasFreeText(policy)) freeText = null;
+        if (!FeedbackCapturePolicies.HasFollowUps(policy)) { positivePoint = null; improvementPoint = null; }
 
         var text = string.IsNullOrWhiteSpace(freeText) ? null : freeText.Trim();
         if (text is { Length: > MaxFreeTextLength }) text = text[..MaxFreeTextLength];
@@ -178,6 +204,10 @@ public sealed class EvaluationQrService
             ReceivedTimestamp = now,
             Source = EvaluationResponseSources.Qr,
             FreeText = text,
+            PositivePoint = EvaluationFollowUps.NormalizePositive(positivePoint),
+            ImprovementPoint = EvaluationFollowUps.NormalizeImprovement(improvementPoint),
+            CapturePolicy = policy,
+            RatingSymbols = resolved.Symbols,
         });
 
         await _db.SaveChangesAsync(ct);

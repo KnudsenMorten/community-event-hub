@@ -64,6 +64,10 @@ public class VolunteerCategory
 
     // --- Navigation ---------------------------------------------------------
     public ICollection<VolunteerSubcategory> Subcategories { get; set; } = new List<VolunteerSubcategory>();
+
+    /// <summary>§1299 — EVERY task in this category, with or without a subcategory. Tasks directly
+    /// under the category are the ones whose <c>SubcategoryId</c> is null.</summary>
+    public ICollection<VolunteerTask> Tasks { get; set; } = new List<VolunteerTask>();
     public ICollection<VolunteerHelpRequest> HelpRequests { get; set; } = new List<VolunteerHelpRequest>();
 
     /// <summary>

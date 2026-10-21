@@ -87,6 +87,43 @@ public class EvaluationDevice
     public int? RoomId { get; set; }
     public EvaluationRoom? Room { get; set; }
 
+    /// <summary>
+    /// §1349 — the SAME physical room's pre-day (master-class) record. CEH keeps the pre-day as
+    /// its own room ("Room-16-Floor 1-Max 32-MC" next to "Room-16-Floor 1-Max 44"), so a unit
+    /// standing in room 16 needs both links. NULL when the room hosts no master class.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 An explicit link, not a name rule: "Room-18-19-…-MC" and "Room-5-7-…-MC" span two
+    /// main-day rooms. The pre-day and the main days never overlap, so the press time decides
+    /// which room's session it lands on (<see cref="LinkedRoomIds"/>).
+    /// </remarks>
+    public int? MasterClassRoomId { get; set; }
+    public EvaluationRoom? MasterClassRoom { get; set; }
+
+    /// <summary>
+    /// §1349 — the two DIRECT links (main day + pre-day). Superseded by <see cref="PhysicalRoomId"/>
+    /// (§1350) and used only when no physical room is set; resolve through
+    /// <c>EvaluationRoomMap.RoomIdsAsync</c>, never this alone.
+    /// </summary>
+    public IReadOnlyList<int> LinkedRoomIds() =>
+        new[] { RoomId, MasterClassRoomId }.OfType<int>().Distinct().ToList();
+
+    /// <summary>
+    /// §1350 — the PHYSICAL room this unit stands in. When set it wins over <see cref="RoomId"/> /
+    /// <see cref="MasterClassRoomId"/>: the unit collects for every schedule room mapped to it.
+    /// </summary>
+    public int? PhysicalRoomId { get; set; }
+    public EvaluationPhysicalRoom? PhysicalRoom { get; set; }
+
+    /// <summary>
+    /// §1354 — this kiosk's own capture policy, overriding the edition's default kiosk policy, so two
+    /// tablets can run different policies side by side (*"so we can test what works"*). Null = default.
+    /// </summary>
+    public CommunityHub.Core.Evaluation.FeedbackCapturePolicy? CapturePolicy { get; set; }
+
+    /// <summary>§1355 — this kiosk's own rating-button symbols (null = the edition's kiosk default).</summary>
+    public CommunityHub.Core.Evaluation.RatingSymbols? RatingSymbols { get; set; }
+
     // ---- Heartbeat telemetry (C1 health board) ---------------------------------------------
 
     /// <summary>Last contact of ANY kind. Drives online / late / silent, and the missed-heartbeat alert.</summary>
@@ -105,6 +142,74 @@ public class EvaluationDevice
 
     /// <summary>The device's last successful clock sync, as reported. Feeds the §5.5 skew check.</summary>
     public DateTimeOffset? ClockSyncedAt { get; set; }
+
+    // ---- §1259 — the WEB KIOSK option (an iPad instead of a built box) ----------------------
+    //
+    // 🔒 ADDITIVE, and the hardware design is untouched. Operator 2026-09-20: *"i would like to
+    // build a web based portal that i can run on 20 ipads instead of my other physical session
+    // eval boxes"* · *"make this a new option"* · *"dont remove the old session eval design"*.
+    // ⇒ A kiosk is just another EvaluationDevice: same opaque identifier, same per-device key,
+    // same room link, same /evaluation/v1/ingest contract, same time attribution, same score and
+    // the same reports. Nothing about the built units changes, and a room can run either kind.
+
+    /// <summary>
+    /// §1259 — true when this "device" is an iPad running the web kiosk rather than a built unit.
+    /// </summary>
+    /// <remarks>
+    /// Recorded for two reasons only: the response's <c>Source</c> (diagnostics, never
+    /// segmentation of the headline figure — Part 1, "the two channels are one instrument"), and
+    /// the health board, where a kiosk has no battery or signal to report and would otherwise read
+    /// as a unit failing to send telemetry.
+    /// </remarks>
+    public bool IsKiosk { get; set; }
+
+    /// <summary>
+    /// §1259 — the hash of a ONE-TIME pairing code an organiser issues so an iPad can fetch its
+    /// device key without anyone typing a 43-character secret on a tablet.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Hashed with the same PBKDF2 helper as the device key: it is a credential for the few
+    /// minutes it lives, and the thing it hands over is the real key. Single use
+    /// (<see cref="PairingCodeUsedAt"/>) and short-lived (<see cref="PairingCodeExpiresAt"/>), so a
+    /// code read off a shoulder at the venue is worthless within the hour — and re-pairing is one
+    /// click, which is what makes a strict expiry affordable.
+    /// </remarks>
+    public string? PairingCodeHash { get; set; }
+
+    /// <summary>When the outstanding pairing code stops working. Null when none is outstanding.</summary>
+    public DateTimeOffset? PairingCodeExpiresAt { get; set; }
+
+    /// <summary>When the outstanding pairing code was redeemed. Non-null ⇒ it cannot be used again.</summary>
+    public DateTimeOffset? PairingCodeUsedAt { get; set; }
+
+    /// <summary>When this kiosk last loaded its screen (the browser equivalent of a heartbeat).</summary>
+    public DateTimeOffset? KioskLastSeenAt { get; set; }
+
+    /// <summary>
+    /// §1259c — the hash of this device's LONG-LIVED enrolment token: the secret inside the URL an
+    /// iPad keeps on its Home Screen, exchanged for a device key whenever the browser has lost one.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>This is what makes the kiosk self-healing and removes any "daily login".</b>
+    /// Safari can evict script-written storage, an iPad can be wiped, a replacement can arrive
+    /// mid-event — in every case the bookmark still carries enough to become this device again,
+    /// with nobody typing anything.</para>
+    ///
+    /// <para>⚠️ <b>A deliberate exception to "a credential is never in a URL", and the reasons it is
+    /// acceptable HERE:</b> it grants exactly one capability — to be this one kiosk, whose only
+    /// power is to add ratings to the room it is linked to. It reads nothing, it cannot reach the
+    /// hub, and it is revocable per device in one click. The alternative — a human typing a code on
+    /// 20 tablets after every storage eviction, during an event — is the failure we are actually
+    /// trying to avoid. The page strips the parameter from the address bar the moment it is used,
+    /// so it does not sit on screen or in the back stack.</para>
+    ///
+    /// <para>🔒 Revoke by rotating: issuing a new enrolment link invalidates the old one, and
+    /// clearing it stops the device re-enrolling at all.</para>
+    /// </remarks>
+    public string? KioskEnrolmentTokenHash { get; set; }
+
+    /// <summary>When the current enrolment token was issued, for the audit trail on the device row.</summary>
+    public DateTimeOffset? KioskEnrolmentIssuedAt { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

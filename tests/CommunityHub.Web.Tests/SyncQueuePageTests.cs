@@ -91,7 +91,7 @@ public sealed class SyncQueuePageTests
 
         var queue = new SyncDeltaQueueService(db);
         var delta = await queue.EnqueueSessionUpdateAsync(
-            EventId, session.Id, "Demo Session", SessionSyncDirection.ZohoToCeh,
+            EventId, session.Id, "Demo Session", SessionSyncDirection.SessionizeToCeh,
             SyncDeltaQueueService.BuildSessionChanges(
                 start, start.AddHours(1), "Room A",
                 start.AddHours(2), start.AddHours(3), "Room A"));

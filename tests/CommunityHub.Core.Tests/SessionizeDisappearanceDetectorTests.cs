@@ -297,4 +297,74 @@ public sealed class SessionizeDisappearanceDetectorTests
         Assert.Single(db.SpeakerProfiles);       // never deleted
         Assert.Single(db.Participants);
     }
+
+    [Fact]
+    public async Task An_ACKNOWLEDGED_session_stops_being_reported()
+    {
+        // 🔴 §1247 — operator 2026-09-20, on two declined test sessions he cannot delete (their
+        // master-class signups and questions block it, correctly): *"how can i avoid this message"*.
+        // There was no answer: the mail repeated on every run for ever.
+        //
+        // 🔑 §1231 fixed exactly this for SPEAKERS (a deactivated speaker stops being reported) and
+        // left sessions with the same defect. The acknowledgement already existed — the §59 queue
+        // holds a Disappeared delta per session and APPROVING it is defined as "acknowledged, never
+        // deletes" — the detector simply never read the answer. So approving changed nothing
+        // observable, and a mail told him to act while ignoring the action he took.
+        using var db = ScenarioFixture.NewDb();
+        var acked = await SeedSessionAsync(db, "Test Master Class", "sess-acked");
+        await SeedSessionAsync(db, "Still Undecided", "sess-open");
+
+        db.SyncDeltas.Add(new Domain.SyncDelta
+        {
+            EventId = EventId,
+            EntityType = SyncDeltaEntityType.Session,
+            EntityId = acked.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            EntityLabel = "Test Master Class",
+            ChangeKind = SyncDeltaChangeKind.Disappeared,
+            Status = SyncDeltaStatus.Approved,
+        });
+        await db.SaveChangesAsync();
+
+        var det = new SessionizeDisappearanceDetector(db, NewAlerts(new CapturingEmailSender()));
+
+        // Neither is in the pull — both have genuinely disappeared upstream.
+        var r = await det.ScanAsync(EventId, Array.Empty<string>(), Array.Empty<string>());
+
+        // Only the undecided one is still reported. 🔒 And the acknowledged session still EXISTS —
+        // acknowledging is bookkeeping, never a delete.
+        Assert.Equal("sess-open", Assert.Single(r.DisappearedSessions).SessionizeId);
+        Assert.Equal(2, db.Sessions.Count());
+    }
+
+    [Fact]
+    public async Task A_REJECTED_or_PENDING_session_is_still_reported()
+    {
+        // 🔒 Scoped to APPROVED only. "Reject" means "I looked and I am keeping it" — a decision
+        // about the CEH value, not a statement that the mail is finished. A still-PENDING row is
+        // precisely what the mail exists to chase, so neither may silence it.
+        using var db = ScenarioFixture.NewDb();
+        var rejected = await SeedSessionAsync(db, "Rejected", "sess-rej");
+        var pending = await SeedSessionAsync(db, "Pending", "sess-pend");
+
+        db.SyncDeltas.Add(new Domain.SyncDelta
+        {
+            EventId = EventId, EntityType = SyncDeltaEntityType.Session,
+            EntityId = rejected.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            EntityLabel = "Rejected", ChangeKind = SyncDeltaChangeKind.Disappeared,
+            Status = SyncDeltaStatus.Rejected,
+        });
+        db.SyncDeltas.Add(new Domain.SyncDelta
+        {
+            EventId = EventId, EntityType = SyncDeltaEntityType.Session,
+            EntityId = pending.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            EntityLabel = "Pending", ChangeKind = SyncDeltaChangeKind.Disappeared,
+            Status = SyncDeltaStatus.Pending,
+        });
+        await db.SaveChangesAsync();
+
+        var det = new SessionizeDisappearanceDetector(db, NewAlerts(new CapturingEmailSender()));
+        var r = await det.ScanAsync(EventId, Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.Equal(2, r.DisappearedSessions.Count);
+    }
 }

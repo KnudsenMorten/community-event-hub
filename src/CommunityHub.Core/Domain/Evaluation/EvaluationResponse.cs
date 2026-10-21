@@ -91,11 +91,50 @@ public class EvaluationResponse
     /// scoreboard, the signage feed, or any aggregate endpoint.
     /// </summary>
     public string? FreeText { get; set; }
+
+    /// <summary>
+    /// §1278 — the "What was good?" follow-up: a code from <see cref="Evaluation.EvaluationFollowUps.Positive"/>,
+    /// or null (skipped, or a built box that cannot ask). Set when the row is written, never later —
+    /// the table stays append-only; the kiosk holds the vote until both follow-ups are answered.
+    /// </summary>
+    public string? PositivePoint { get; set; }
+
+    /// <summary>§1278 — the "What could be better?" follow-up; same rules as <see cref="PositivePoint"/>.</summary>
+    public string? ImprovementPoint { get; set; }
+
+    /// <summary>
+    /// §1354 — the capture policy this response was collected under, so policies can be compared ("so we
+    /// can test what works"). Null for responses before §1354 and for built boxes. Set when written, never later.
+    /// </summary>
+    public CommunityHub.Core.Evaluation.FeedbackCapturePolicy? CapturePolicy { get; set; }
+
+    /// <summary>§1355 — the symbols the rating buttons showed (null before §1355 and for built boxes).</summary>
+    public CommunityHub.Core.Evaluation.RatingSymbols? RatingSymbols { get; set; }
+
+    /// <summary>
+    /// §1357 — set aside by an organizer ("set current responses inactive"): kept, but counted NOWHERE. Enforced
+    /// by a global query filter, so every score, statistic, comparison and report leaves it out without having to
+    /// remember to; only ingest's duplicate check and the inactivation itself look past the filter.
+    /// Operator 2026-10-19: *"make a state inactive so it is not included … like a button"*.
+    /// </summary>
+    public bool IsInactive { get; set; }
+
+    /// <summary>§1357 — when it was set inactive (null while active).</summary>
+    public DateTimeOffset? InactivatedAt { get; set; }
 }
 
-/// <summary>The two collection channels. One instrument, two delivery paths.</summary>
+/// <summary>The collection channels. One instrument, several delivery paths.</summary>
 public static class EvaluationResponseSources
 {
     public const string Device = "device";
     public const string Qr = "qr";
+
+    /// <summary>
+    /// §1259 — an iPad running the web kiosk instead of a built box. Recorded for DIAGNOSTICS
+    /// only: it is the same four ratings, the same weights, the same threshold and the same score
+    /// (Part 1, <i>"the two channels are one instrument"</i>), so it must never segment a headline
+    /// figure. Knowing which stand a run of odd presses came from is a support question, not a
+    /// reporting one.
+    /// </summary>
+    public const string Kiosk = "kiosk";
 }

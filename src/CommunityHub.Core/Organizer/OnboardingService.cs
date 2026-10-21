@@ -603,11 +603,15 @@ public sealed class OnboardingService
                 .Select(m => m.SponsorCompanyId).Distinct().ToListAsync(ct))
             .ToHashSet();
 
+        // §1360 — the website is ONE field, on the company page.
+        var links = await Integrations.Webshop.CompanyLinks.AllAsync(_db, eventId, ct);
+
         foreach (var (participantId, companyId) in companyByParticipant)
         {
             infoByCompany.TryGetValue(companyId, out var info);
             result[participantId] =
-                SponsorProgressFrom(info, companiesWithBoothMembers.Contains(companyId));
+                SponsorProgressFrom(info, companiesWithBoothMembers.Contains(companyId),
+                    Integrations.Webshop.CompanyLinks.Of(links, companyId).Website);
         }
         return result;
     }
@@ -618,10 +622,10 @@ public sealed class OnboardingService
     /// are always required; booth members are required ONLY for booth packages
     /// (<see cref="SponsorInfo.HasBooth"/>).
     /// </summary>
-    private static SponsorProgress SponsorProgressFrom(SponsorInfo? info, bool hasBoothMembers)
+    private static SponsorProgress SponsorProgressFrom(SponsorInfo? info, bool hasBoothMembers, string? website)
     {
         bool companyInfo = info is not null
-            && (!string.IsNullOrWhiteSpace(info.WebsiteUrl)
+            && (!string.IsNullOrWhiteSpace(website)
                 || !string.IsNullOrWhiteSpace(info.CompanyDescription));
         bool logos = info is not null
             && (!string.IsNullOrWhiteSpace(info.LogoRasterPath)

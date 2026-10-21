@@ -53,7 +53,7 @@ public class SoMeCalendarModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         // 🔴 §1206 — with the readiness reason, so a held post says whether it is waiting for HIM or
         // waiting for someone else. Those are different jobs and looked identical.

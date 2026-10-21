@@ -37,21 +37,19 @@ public class EvaluationsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerSessionsService _sessions;
     private readonly SessionEvalsQrService _qr;
+    private readonly CommunityHub.Core.Domain.SpeakerAccessService _access;
 
     public EvaluationsModel(
         ICurrentParticipantAccessor participant,
         SpeakerSessionsService sessions,
-        SessionEvalsQrService qr)
+        SessionEvalsQrService qr,
+        CommunityHub.Core.Domain.SpeakerAccessService access)
     {
         _participant = participant;
         _sessions = sessions;
         _qr = qr;
+        _access = access;
     }
-
-    public static readonly ParticipantRole[] EligibleRoles =
-    {
-        ParticipantRole.Speaker,
-    };
 
     /// <summary>
     /// Always a redirect until C10 (the speaker view of the four-point results) exists.
@@ -77,7 +75,9 @@ public class EvaluationsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (!EligibleRoles.Contains(me.Role)) return NotFound();
+        // §1255 — capability, not role (see ParticipantCapabilities).
+        if (!await _access.HasSpeakerHubAccessAsync(me.EventId, me.ParticipantId, me.Role, ct))
+            return NotFound();
 
         var mine = await _sessions.GetMySessionsAsync(me.EventId, me.ParticipantId, me.Role, ct);
         var session = mine.FirstOrDefault(s => s.SessionId == sessionId);

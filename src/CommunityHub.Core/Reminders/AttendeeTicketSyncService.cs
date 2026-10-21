@@ -741,7 +741,11 @@ public sealed class AttendeeTicketSyncService
     /// Matched to the EXACT login identity the provisioning created: the Attendee-role
     /// Participant for this Email + EventId. A person who is ALSO another role (e.g. a speaker
     /// who happens to hold a cancelled attendee ticket) has no Attendee Participant here and is
-    /// therefore never locked out by this path. No hard delete — only the IsActive switch (the
+    /// therefore never locked out by this path. 🔒 §1255b: nor is an ATTENDEE-role row that also
+    /// holds another capability (a speaker profile / session link, a volunteer assignment, a
+    /// sponsor company link) — an attendee who became a speaker keeps the role she was created
+    /// with, and cancelling her ticket must not take her speaker hub with it.
+    /// No hard delete — only the IsActive switch (the
     /// onboarding LifecycleState is left untouched). Per-email try/catch so a login-gate hiccup
     /// can NEVER break the authoritative mirror reconcile. Saves only when something changed.
     /// </para>
@@ -775,6 +779,21 @@ public sealed class AttendeeTicketSyncService
                     a.EventId == eventId
                     && a.MirrorState == MirrorState.Active
                     && a.Email.ToLower() == norm, ct);
+
+                // 🔒 §1255b — NEVER lock out a row that is also something else. An attendee who
+                // became a SPEAKER (or a volunteer, or a sponsor contact) keeps the Attendee role
+                // she was created with — the speaker import deliberately never overwrites Role —
+                // so cancelling her ticket would otherwise deactivate the login she needs for her
+                // sessions, tasks and deadlines. Measured on PROD 2026-09-20: one live row
+                // (Role=Attendee, an active ticket, and a SpeakerProfile) was one cancellation
+                // away from exactly that. The ticket-derived ENTITLEMENTS still fall away with the
+                // ticket; only the login survives.
+                if (!hasActiveTicket && participant.IsActive)
+                {
+                    var keeps = await ParticipantCapabilities
+                        .NonAttendeeCapabilitiesAsync(_db, participant, ct);
+                    if (keeps.Count > 0) continue;   // still needed for another reason → leave active
+                }
 
                 if (participant.IsActive != hasActiveTicket)
                 {

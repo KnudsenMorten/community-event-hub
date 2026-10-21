@@ -51,8 +51,6 @@ public class CompanyDetailsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly SharePointUploadClient _sp;
@@ -66,14 +64,11 @@ public class CompanyDetailsModel : PageModel
 
     /// <summary>§482b — pulls an ERP contact change back into the hub straight away. OPTIONAL so a
     /// host without Company Manager keeps working; the edit still lands in the ERP either way.</summary>
-    private readonly CommunityHub.Core.Integrations.SponsorContactSyncService? _contactSync;
 
     public CompanyDetailsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         TimeProvider clock,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
         EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions,
         SharePointUploadClient sp,
@@ -83,17 +78,13 @@ public class CompanyDetailsModel : PageModel
         CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<CompanyDetailsModel> log,
         SponsorActingCompanyService acting,
-        CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null,
         // §1072 — the designer notice must declare itself ops mail or the ring gate eats it.
         IEmailContextAccessor? emailCtx = null)
     {
         _paths = paths;
-        _contactSync = contactSync;
         _db = db;
         _participant = participant;
         _clock = clock;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _sp = sp;
@@ -109,8 +100,11 @@ public class CompanyDetailsModel : PageModel
     /// <summary>This contact has no sponsor company id (nothing to edit).</summary>
     public bool NoCompanyLink { get; private set; }
 
-    /// <summary>Public company name from Company Manager (read-only here).</summary>
-    public string? PublicName { get; private set; }
+    /// <summary>
+    /// §1344 — the PUBLIC company name, EDITABLE here and in Get Started (operator 2026-10-14). Saved by the explicit
+    /// Save only, not by auto-save: a half-typed name would otherwise go live on the site and SoMe mid-word.
+    /// </summary>
+    [BindProperty] public string? PublicName { get; set; }
     /// <summary>True when this company bought booth products (shown as "Exhibitor").</summary>
     public bool IsExhibitor { get; private set; }
     public string TypeLabel => IsExhibitor ? "Exhibitor" : "Sponsor";
@@ -206,7 +200,8 @@ public class CompanyDetailsModel : PageModel
         var companyId = await GetCompanyIdAsync(me.ParticipantId, me.EventId, ct);
         if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: false, ct); return Page(); }
 
-        var error = ValidateUrl("Website URL", WebsiteUrl)
+        var error = ValidateLen("Public company name", PublicName, Core.Integrations.Webshop.ShopCompanyLinks.PublicNameMax)
+                    ?? ValidateUrl("Website URL", WebsiteUrl)
                     ?? ValidateUrl("LinkedIn URL", LinkedInUrl)
                     ?? ValidateUrl("Twitter URL", TwitterUrl)
                     ?? ValidateLen("Company Overview", CompanyOverview, MaxOverview)
@@ -222,20 +217,14 @@ public class CompanyDetailsModel : PageModel
         }
 
         var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
-        // 🔒 §1081 — WebsiteUrl is NOT written here. The WEBSHOP owns it (operator 2026-08-13:
-        // *"website url comes from webshop … that one is authoritative for that field"*), and
-        // SponsorZohoSyncService.ReconcileWithWebshopAsync (§41b) fills it into CEH automatically.
-        // The field is rendered read-only with a "Change on the webshop" hand-off; dropping the write
-        // is what makes that real rather than cosmetic, since a readonly input still POSTs its value.
-        // ✅ §1126 — LinkedIn and Twitter JOINED IT (operator 2026-08-25: *"linkedin + twitter is
-        // also coming from webshop"* · *"it must also overwrite as webshop is authoritative"* ·
-        // *"add ability to change those fields similar to the web url with a button"*). The note
-        // that used to sit here — "he asked only about the website" — recorded the limit of the
-        // question at the time, and he has now answered the wider one.
-        //
-        // 🔴 Dropping these two writes is NOT optional once the sync overwrites them: an editable
-        // field that a later sync silently reverts is worse than a read-only one, because nothing
-        // tells the sponsor it happened and they cannot fix it from either side.
+        // 🔴 §1312 — the sponsor EDITS website, LinkedIn and X here: CEH owns them (operator 2026-09-30: "ceh owns the field …
+        // sponsor must be able to change this here" · "old webshop is not owner of this anymore, we changed that sunday").
+        // Supersedes §1081/§1126 (webshop-owned, read-only). The same field the organizer edits — written to the shop
+        // company too — and nothing from the old webshop overwrites it (§1312 — Company Manager is retired), so a save here is never undone.
+        info.WebsiteUrl  = Core.Integrations.HttpsUrl.Normalize(WebsiteUrl);
+        info.LinkedInUrl = Core.Integrations.HttpsUrl.Normalize(LinkedInUrl);
+        info.TwitterUrl  = Core.Integrations.HttpsUrl.Normalize(TwitterUrl);
+        await Core.Integrations.Webshop.ShopCompanyLinks.MirrorToShopAsync(_db, me.EventId, companyId!, info, ct);
         info.CompanyDescription      = NormaliseOrNull(CompanyOverview);
         info.SocialMediaIntro        = NormaliseOrNull(SocialMediaBrandingText);
         if (info.HasBooth)
@@ -246,6 +235,7 @@ public class CompanyDetailsModel : PageModel
         info.EventCoordinatorEmail       = NormaliseOrNull(EventCoordinatorEmail);
         info.EventCoordinatorPhone       = NormaliseOrNull(EventCoordinatorPhone);
         info.LastUpdatedByEmail      = me.Email;
+        await Core.Integrations.Webshop.ShopCompanyLinks.ApplyPublicNameAsync(_db, me.EventId, companyId!, info, PublicName, ct);
         await _db.SaveChangesAsync(ct);
 
         // Save & Sync to Zoho Backstage (fail-soft: SQL is already saved). Resolves
@@ -326,20 +316,14 @@ public class CompanyDetailsModel : PageModel
             return new JsonResult(new { ok = false, error }) { StatusCode = 400 };
 
         var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
-        // 🔒 §1081 — WebsiteUrl is NOT written here. The WEBSHOP owns it (operator 2026-08-13:
-        // *"website url comes from webshop … that one is authoritative for that field"*), and
-        // SponsorZohoSyncService.ReconcileWithWebshopAsync (§41b) fills it into CEH automatically.
-        // The field is rendered read-only with a "Change on the webshop" hand-off; dropping the write
-        // is what makes that real rather than cosmetic, since a readonly input still POSTs its value.
-        // ✅ §1126 — LinkedIn and Twitter JOINED IT (operator 2026-08-25: *"linkedin + twitter is
-        // also coming from webshop"* · *"it must also overwrite as webshop is authoritative"* ·
-        // *"add ability to change those fields similar to the web url with a button"*). The note
-        // that used to sit here — "he asked only about the website" — recorded the limit of the
-        // question at the time, and he has now answered the wider one.
-        //
-        // 🔴 Dropping these two writes is NOT optional once the sync overwrites them: an editable
-        // field that a later sync silently reverts is worse than a read-only one, because nothing
-        // tells the sponsor it happened and they cannot fix it from either side.
+        // 🔴 §1312 — the sponsor EDITS website, LinkedIn and X here: CEH owns them (operator 2026-09-30: "ceh owns the field …
+        // sponsor must be able to change this here" · "old webshop is not owner of this anymore, we changed that sunday").
+        // Supersedes §1081/§1126 (webshop-owned, read-only). The same field the organizer edits — written to the shop
+        // company too — and nothing from the old webshop overwrites it (§1312 — Company Manager is retired), so a save here is never undone.
+        info.WebsiteUrl  = Core.Integrations.HttpsUrl.Normalize(WebsiteUrl);
+        info.LinkedInUrl = Core.Integrations.HttpsUrl.Normalize(LinkedInUrl);
+        info.TwitterUrl  = Core.Integrations.HttpsUrl.Normalize(TwitterUrl);
+        await Core.Integrations.Webshop.ShopCompanyLinks.MirrorToShopAsync(_db, me.EventId, companyId!, info, ct);
         info.CompanyDescription      = NormaliseOrNull(CompanyOverview);
         info.SocialMediaIntro        = NormaliseOrNull(SocialMediaBrandingText);
         if (info.HasBooth)
@@ -586,16 +570,12 @@ public class CompanyDetailsModel : PageModel
                 using var scope = scopeFactory.CreateScope();
                 var sp = scope.ServiceProvider;
 
-                var erpToCm = sp.GetService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
-                if (erpToCm is not null)
+                // 🔴 §1312 — e-conomic → the hub DIRECTLY; Company Manager is retired (operator 2026-09-30: "we dont use
+                // company manager anymore").
+                var erpToHub = sp.GetService<CommunityHub.Core.Integrations.Webshop.ShopErpRoleSyncService>();
+                if (erpToHub is not null)
                 {
-                    await erpToCm.SyncAsync(onlyCustomerNumber: erpCustomerNumber, ct: ct);
-                }
-
-                var cmToHub = sp.GetService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
-                if (cmToHub is not null && int.TryParse(companyId, out var cmCompanyId))
-                {
-                    await cmToHub.SyncCompanyAsync(eventId, cmCompanyId, ct);
+                    await erpToHub.RunAsync(eventId, ct, onlyErpCustomerNumber: erpCustomerNumber);
                 }
             }
             catch (Exception ex)
@@ -689,9 +669,11 @@ public class CompanyDetailsModel : PageModel
 
         if (prefill && info is not null)
         {
-            WebsiteUrl              = info.WebsiteUrl;
-            LinkedInUrl             = info.LinkedInUrl;
-            TwitterUrl              = info.TwitterUrl;
+            // §1360 — the links are ONE field, on the company page; the save writes both (MirrorToShopAsync).
+            var links = await Core.Integrations.Webshop.CompanyLinks.ForAsync(_db, me.EventId, companyId, ct);
+            WebsiteUrl              = links.Website;
+            LinkedInUrl             = links.LinkedIn;
+            TwitterUrl              = links.Twitter;
             CompanyOverview         = info.CompanyDescription;
             SocialMediaBrandingText = info.SocialMediaIntro;
             CompanyShortDescription = info.CompanyDescriptionShort;
@@ -702,7 +684,10 @@ public class CompanyDetailsModel : PageModel
             EventCoordinatorPhone       = info.EventCoordinatorPhone;
         }
 
-        PublicName = await ResolveSponsorNameAsync(companyId, ct, allowFallback: false);
+        // A failed POST keeps what was typed (§1344); a GET or a blank shows the current name.
+        if (prefill || string.IsNullOrWhiteSpace(PublicName))
+            PublicName = await Core.Integrations.Webshop.ShopCompanyLinks.PublicNameAsync(_db, me.EventId, companyId, ct)
+                         ?? await ResolveSponsorNameAsync(companyId, ct, allowFallback: false);
 
         // Which upload buttons to show. §768.14 — asked of ResolveKind, so a control appears
         // exactly when the POST handler would accept it. Reading the config keys directly (as this
@@ -794,17 +779,9 @@ public class CompanyDetailsModel : PageModel
         }
     }
 
-    /// <summary>Resolve this sponsor's e-conomic customer number from the webshop company.</summary>
-    private async Task<int?> ResolveErpCustomerNumberAsync(string companyId, CancellationToken ct)
-    {
-        if (!_cmOptions.Enabled || !int.TryParse(companyId, out var cid)) return null;
-        try
-        {
-            var company = await _cm.GetCompanyAsync(cid, ct);
-            return company is not null && int.TryParse(company.ErpCustomerNumber, out var n) && n > 0 ? n : null;
-        }
-        catch (Exception ex) { _log.LogWarning(ex, "CompanyDetails: ERP number lookup failed for {Co}.", companyId); return null; }
-    }
+    /// <summary>§1312 — this sponsor's e-conomic customer number from CEH's own company record (Company Manager is retired).</summary>
+    private Task<int?> ResolveErpCustomerNumberAsync(string companyId, CancellationToken ct) =>
+        Core.Integrations.Webshop.ShopCompanyErp.CustomerNumberAsync(_db, companyId, ct);
 
     // ---- Booth materials (exhibitor-only): videos (URLs) + collateral (files) --
 
@@ -1138,25 +1115,13 @@ public class CompanyDetailsModel : PageModel
         return info;
     }
 
-    /// <summary>Public name from Company Manager. With allowFallback, returns "Company {id}" if unresolved.</summary>
+    /// <summary>§1312 — the public name from CEH's own records. With allowFallback, returns "Company {id}" if unresolved.</summary>
     private async Task<string?> ResolveSponsorNameAsync(string companyId, CancellationToken ct, bool allowFallback = true)
     {
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var cid))
-        {
-            try
-            {
-                var company = await _cm.GetCompanyAsync(cid, ct);
-                if (company is not null)
-                {
-                    var name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-                    if (!string.IsNullOrWhiteSpace(name)) return name;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "CompanyDetails: Company Manager lookup failed for {Co}.", cid);
-            }
-        }
+        // §1312 — CEH's own public name (Company Manager is retired).
+        if (await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) is { } first) return first;
+        var local = await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct);
+        if (local is not null) return local;
         return allowFallback ? $"Company {companyId}" : null;
     }
 

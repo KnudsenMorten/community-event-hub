@@ -321,11 +321,6 @@ public class IndexModel : PageModel
     /// <summary>The signed-in speaker's master classes (with public logistics link).</summary>
     public List<MyMasterClass> MasterClasses { get; private set; } = new();
 
-    public static readonly ParticipantRole[] EligibleRoles =
-    {
-        ParticipantRole.Speaker,
-    };
-
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }
     public string FirstName { get; private set; } = "there";
@@ -378,7 +373,12 @@ public class IndexModel : PageModel
 
         Role = me.Role;
         FirstName = me.FirstName;
-        if (!EligibleRoles.Contains(me.Role))
+        // §1255 — the speaker hub is gated on the CAPABILITY (a SpeakerProfile exists), not on
+        // Participant.Role. An organizer / volunteer / attendee who is also a speaker keeps the
+        // role they were created with (the import never overwrites it) and would otherwise be
+        // denied her own sessions, tasks and deadlines. See ParticipantCapabilities.
+        if (!await ParticipantCapabilities.HasSpeakerHubAccessAsync(
+                _db, me.EventId, me.ParticipantId, me.Role, ct))
         {
             AccessDenied = true;
             return Page();

@@ -204,8 +204,6 @@ public sealed class WebAiHelperPublicInfoProvider : IAiHelperPublicInfoProvider
                 s.SponsorCompanyId,
                 s.Tier,
                 s.BoothLabel,
-                s.WebsiteUrl,
-                s.LinkedInUrl,
                 s.CompanyDescription,
                 s.CompanyDescriptionShort,
             })
@@ -216,26 +214,24 @@ public sealed class WebAiHelperPublicInfoProvider : IAiHelperPublicInfoProvider
             // The hub has no company entity — the public NAME lives on SponsorUploadLocation
             // and resolves through the shared fallback chain, so the helper says exactly the
             // same company name as every other sponsor surface (§443).
-            var names = await _db.SponsorUploadLocations
-                .Where(l => l.EventId == eventId)
-                .Select(l => new { l.SponsorCompanyId, l.CompanyName })
-                .ToListAsync(ct);
-            var nameByCompany = names
-                .Where(n => !string.IsNullOrWhiteSpace(n.CompanyName))
-                .GroupBy(n => n.SponsorCompanyId)
-                .ToDictionary(g => g.Key, g => g.First().CompanyName!, StringComparer.OrdinalIgnoreCase);
+            // 🔴 §1312 — the shared resolver (sponsor record → CEH shop public name → upload store → ERP), not the upload
+            // store alone: a company registered in the CEH shop has no upload-location row and read "(name not synced …)".
+            var nameByCompany = await CommunityHub.Core.Integrations.SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, eventId, sponsors.Select(s => s.SponsorCompanyId), ct);
+
+            // §1360 — website / LinkedIn are ONE field, on the company page.
+            var links = await CommunityHub.Core.Integrations.Webshop.CompanyLinks.AllAsync(_db, eventId, ct);
 
             var lines = new List<string>();
             foreach (var s in sponsors)
             {
-                nameByCompany.TryGetValue(s.SponsorCompanyId, out var publicName);
-                var name = CommunityHub.Core.Integrations.SponsorCompanyName.Resolve(
-                    publicName, legalName: null, billingName: null, companyId: s.SponsorCompanyId);
+                var name = nameByCompany[s.SponsorCompanyId];
+                var l = CommunityHub.Core.Integrations.Webshop.CompanyLinks.Of(links, s.SponsorCompanyId);
 
                 var bits = new List<string> { $"tier: {s.Tier}" };
                 if (!string.IsNullOrWhiteSpace(s.BoothLabel)) bits.Add($"booth: {s.BoothLabel!.Trim()}");
-                if (!string.IsNullOrWhiteSpace(s.WebsiteUrl)) bits.Add($"web: {s.WebsiteUrl!.Trim()}");
-                if (!string.IsNullOrWhiteSpace(s.LinkedInUrl)) bits.Add($"LinkedIn: {s.LinkedInUrl!.Trim()}");
+                if (l.Website is not null) bits.Add($"web: {l.Website}");
+                if (l.LinkedIn is not null) bits.Add($"LinkedIn: {l.LinkedIn}");
 
                 var about = s.CompanyDescriptionShort ?? s.CompanyDescription;
                 var blurb = string.IsNullOrWhiteSpace(about) ? "" : " — " + Truncate(about!.Trim(), 600);

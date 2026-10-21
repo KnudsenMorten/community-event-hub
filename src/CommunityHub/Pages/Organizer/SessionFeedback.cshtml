@@ -47,7 +47,13 @@
         gathered per session. The feedback <strong>devices</strong> are still set up under
         <a asp-page="/Organizer/EvaluationDevices">Evaluation Devices</a>.
     </p>
-    <p><a asp-page="/Organizer/Content">&larr; Back to speakers &amp; sessions</a></p>
+    @* §1265 — everything about session evaluation, one click from here. *@
+    <p style="display:flex;flex-wrap:wrap;gap:8px 16px;">
+        <a asp-page="/Organizer/EvaluationDevices"><strong>Devices &amp; kiosks</strong></a>
+        <a href="/eval" target="_blank" rel="noopener">Open the kiosk page</a>
+        <a asp-page="/Organizer/Sessions">Sessions (times &amp; rooms)</a>
+        <a asp-page="/Organizer/Content">&larr; Back to speakers &amp; sessions</a>
+    </p>
 </div>
 
 @if (Model.Message is not null)
@@ -86,8 +92,8 @@
         @if (Model.MeanSession is { } mean)
         {
             <p style="margin:10px 0 0;">
-                <strong>@mean.ToString("0.0")</strong> index &mdash; <em>mean session</em><br />
-                <span class="sf-meta">every session weighted equally, sessions under
+                <strong>@mean.ToString("0.0")</strong> index &mdash; <em>average per session</em><br />
+                <span class="sf-meta">each session's own score, averaged — every session weighted equally, sessions under
                 @Model.Threshold responses excluded. This is the figure for comparing tracks or
                 years, where a change in room sizes should not move the number.</span>
             </p>
@@ -109,30 +115,185 @@
             not toward any session below.
         </p>
     }
+
+    @* §1357 — set test/demo votes aside before the event: kept, counted nowhere, reversible. *@
+    <div style="margin:16px 0;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;">
+        <strong>Responses that count:</strong> @Model.ActivationCounts.Active
+        @if (Model.ActivationCounts.Inactive > 0)
+        {
+            <span class="set-deps"> · @Model.ActivationCounts.Inactive inactive (counted nowhere)</span>
+        }
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+            <form method="post" asp-page-handler="SetAllInactive"
+                  onsubmit="return confirm('Set all @Model.ActivationCounts.Active current responses INACTIVE? They are kept but no longer count in any score, statistic or report. You can reactivate them.');">
+                <button type="submit" class="btn" @(Model.ActivationCounts.Active == 0 ? "disabled" : "")>Set all current responses inactive</button>
+            </form>
+            @if (Model.ActivationCounts.Inactive > 0)
+            {
+                <form method="post" asp-page-handler="ReactivateAll"
+                      onsubmit="return confirm('Make all @Model.ActivationCounts.Inactive inactive responses count again?');">
+                    <button type="submit" class="btn">Reactivate all</button>
+                </form>
+            }
+        </div>
+        <p class="set-deps" style="margin:6px 0 0;">Use it to clear test and demo votes before the event. Nothing is deleted.</p>
+    </div>
+
+    @* §1354 — the same responses per channel and capture policy, to see what each policy yields. *@
+    @if (Model.ByPolicy.Count > 0)
+    {
+        <h3 style="margin:16px 0 6px;">By capture policy</h3>
+        <div style="overflow-x:auto;">
+        <table class="grid">
+            <thead>
+                <tr><th>Channel</th><th>Policy</th><th>Symbols</th><th>Responses</th><th>Avg rating</th><th>Answered a follow-up</th><th>Wrote a comment</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var r in Model.ByPolicy)
+            {
+                <tr>
+                    <td>@r.Channel</td>
+                    <td>@r.PolicyLabel</td>
+                    <td>@r.SymbolsLabel</td>
+                    <td>@r.Responses</td>
+                    <td>@r.AverageRating.ToString("0.00")</td>
+                    <td>@(r.FollowUpRate is double f ? f.ToString("P0") : "—")</td>
+                    <td>@(r.FreeTextRate is double t ? t.ToString("P0") : "—")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+        <p class="set-deps">"—" = the policy did not ask it. Rating scale 1–4.</p>
+    }
+
+    @* §1273 — the breakdown: per day, per session type, per track, responses by channel, and when
+       it was calculated. Pooled within each group, like the headline above. *@
+    @if (Model.Statistics is { } st)
+    {
+        <style>
+            .st-line { margin: 12px 0 4px; font-size: 14px; }
+            /* §1293 — FIXED layout with the same column widths in all three tables, so the columns line
+               up under each other and the channel columns stay on screen (operator: "layout should be
+               under the others"). */
+            .st-grid { width: 100%; min-width: 640px; table-layout: fixed; border-collapse: collapse; margin: 6px 0 14px; font-size: 13.5px; }
+            .st-grid td:first-child { overflow-wrap: anywhere; }
+            .st-bar { max-width: 100%; }
+            .st-grid th { text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; padding: 5px 8px; white-space: nowrap; }
+            .st-grid td { border-bottom: 1px solid #f1f5f9; padding: 6px 8px; vertical-align: middle; }
+            .st-grid td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+            .st-bar { display: flex; height: 10px; width: 120px; border-radius: 5px; overflow: hidden; background: #f1f5f9; }
+            .st-wrap { overflow-x: auto; }
+            .st-h { margin: 16px 0 2px; font-size: 15px; }
+        </style>
+        <p class="st-line">
+            <strong>@st.Event.Total</strong> response(s) in total &middot;
+            @* §1303 — two channels only: kiosk (any kiosk device, incl. the built boxes) and QR code. *@
+            @(st.Event.Box + st.Event.Kiosk) from kiosks &middot; @st.Event.Qr by QR code
+        </p>
+        <p class="sf-meta" style="margin:0;">Calculated @CommunityHub.Pages.Organizer.SessionFeedbackModel.DanishTime(st.CalculatedAt) (Danish time) &mdash; reload the page to recalculate.</p>
+
+        foreach (var (heading, rows) in new[] { ("Per day", st.ByDay), ("Per session type", st.ByType), ("Per track", st.ByTrack) })
+        {
+            <h3 class="st-h">@heading</h3>
+            @if (rows.Count == 0)
+            {
+                <p class="sf-meta" style="margin:0 0 10px;">No responses attributed to a session yet.</p>
+                continue;
+            }
+            <div class="st-wrap">
+            <table class="st-grid">
+                <colgroup>
+                    <col style="width:26%" /><col style="width:15%" /><col style="width:19%" />
+                    <col style="width:9%" /><col style="width:11%" />
+                    <col style="width:10%" /><col style="width:10%" />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th></th><th>Score</th><th>Answers</th>
+                        <th class="n">Sessions</th><th class="n">Responses</th>
+                        <th class="n">Kiosk</th><th class="n">QR</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var row in rows)
+                {
+                    var d = row.Score.Distribution;
+                    var tot = Math.Max(1, d.Total);
+                    <tr>
+                        <td><strong>@row.Label</strong></td>
+                        <td style="white-space:nowrap;">
+                            @if (row.Score.Score is double sc)
+                            {
+                                <strong>@sc.ToString("0.0")</strong> <span class="sf-meta">@row.Score.Band</span>
+                            }
+                            else { <span class="sf-meta">—</span> }
+                        </td>
+                        <td>
+                            <div class="st-bar" title="@d.Four very happy · @d.Three happy · @d.Two somewhat unhappy · @d.One unhappy">
+                                @foreach (var (n, rating) in new[] { (d.Four, 4), (d.Three, 3), (d.Two, 2), (d.One, 1) })
+                                {
+                                    if (n > 0)
+                                    {
+                                        <span style="width:@((100d * n / tot).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%;background:@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Colour(rating);"></span>
+                                    }
+                                }
+                            </div>
+                        </td>
+                        <td class="n">@row.Sessions</td>
+                        <td class="n"><strong>@row.Channels.Total</strong></td>
+                        <td class="n">@(row.Channels.Box + row.Channels.Kiosk)</td>
+                        <td class="n">@row.Channels.Qr</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
 </div>
 
 @* --- the three WRITE actions. §784.7: kept SEPARATE on purpose — different privileges, different
        moments. Each is its own POST; none of them is a "do everything" control. --- *@
 <div class="card">
     <h2 style="margin-top:0;">Actions</h2>
+    @* §1292 — operator 2026-09-21: *"why have a button for run report publish. is it not running as
+       job"*. It is — all three are scheduled jobs; the buttons only skip the wait. Said on the page. *@
+    <p style="margin:0 0 4px;"><strong>Download</strong></p>
+    <div class="sf-actions">
+        @* A real button (an <a class="btn"> rendered as a plain link). GET, so the handler travels as a field. *@
+        <form method="get">
+            <input type="hidden" name="handler" value="DownloadAllQr" />
+            <button type="submit" class="btn">&#11015; Download all QR codes (ZIP)</button>
+        </form>
+    </div>
+    <p style="margin:14px 0 4px;"><strong>These run automatically</strong>
+        <span class="sf-meta">&mdash; use a button only to run one now instead of waiting.</span></p>
     <div class="sf-actions">
         <form method="post" asp-page-handler="Sync">
-            <button type="submit" class="btn">Sync sessions from CEH</button>
+            <button type="submit" class="btn">Sync sessions from CEH now</button>
         </form>
+        <span class="sf-meta">every 10 min</span>
         <form method="post" asp-page-handler="GenerateCodes">
-            <button type="submit" class="btn">Generate missing QR codes</button>
+            <button type="submit" class="btn">Generate missing QR codes now</button>
         </form>
-        <a class="btn" asp-page-handler="DownloadAllQr">Download all QR codes (ZIP)</a>
+        <span class="sf-meta">every 10 min</span>
         <form method="post" asp-page-handler="RunPublish">
-            <button type="submit" class="btn">Run report publish now</button>
+            <button type="submit" class="btn">Publish reports now</button>
         </form>
+        <span class="sf-meta">every 10 min</span>
     </div>
     <p class="sf-meta" style="margin-top:10px;">
         Sync reads the schedule from CEH (CEH is master &mdash; nothing here is edited).
         Codes are <strong>permanent</strong>: a session that changes room or time keeps the code
         already printed, which is why there is no regenerate.
-        Publishing waits @Model.QuietMinutes minutes after the last response before it releases a
-        report, and this button runs that same pass rather than forcing past it.
+        Feedback for a session is open from its start until 30 minutes after it ends. Its report is
+        released once feedback has <strong>closed</strong> and nothing new has arrived for
+        @Model.QuietMinutes minutes; a device uploading late afterwards releases one updated report.
+        <em>Publish reports now</em> runs that same pass rather than forcing past it. The intervals
+        are the defaults; they can be changed on the <a asp-page="/Organizer/Jobs">Jobs</a> page.
+        QR codes are made whatever the switches say; publishing and mailing reports also needs the
+        <strong>session-eval-email</strong> switch on in Settings.
     </p>
     @if (!Model.PdfFolderConfigured)
     {
@@ -182,7 +343,8 @@
                         <div class="sf-meta">
                             @if (r.ScheduledStart is { } start)
                             {
-                                <text>@start.UtcDateTime.ToString("ddd dd MMM HH:mm")</text>
+                                @* §1289 — Danish time; this printed UTC. *@
+                                <text>@TimeZoneInfo.ConvertTime(start, CommunityHub.Core.Integrations.EventTimezone.Tz).ToString("ddd dd MMM HH:mm")</text>
                             }
                             else
                             {
@@ -258,12 +420,15 @@
                     @if (r.Score is { } s2)
                     {
                         @* The four-way distribution, in the order the buttons sit on the unit. *@
+                        @* §1289 — the BUTTON words (one vocabulary everywhere, §750.8), with shares.
+                           This read "fantastic / good / not great / poor" — four words no attendee saw. *@
+                        var pct = (int n) => s2.Responses == 0 ? "0" : Math.Round(100d * n / s2.Responses).ToString("0");
                         <p class="sf-meta" style="margin:0 0 8px;">
                             @s2.Responses response(s) &middot;
-                            @s2.Distribution.Four fantastic &middot;
-                            @s2.Distribution.Three good &middot;
-                            @s2.Distribution.Two not great &middot;
-                            @s2.Distribution.One poor
+                            @s2.Distribution.Four @CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(4).ToLowerInvariant() (@pct(s2.Distribution.Four)%) &middot;
+                            @s2.Distribution.Three @CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(3).ToLowerInvariant() (@pct(s2.Distribution.Three)%) &middot;
+                            @s2.Distribution.Two @CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(2).ToLowerInvariant() (@pct(s2.Distribution.Two)%) &middot;
+                            @s2.Distribution.One @CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(1).ToLowerInvariant() (@pct(s2.Distribution.One)%)
                         </p>
                     }
 
@@ -276,8 +441,13 @@
                         }
                         @if (r.EvaluationSessionId is int eid && r.Responses > 0)
                         {
-                            <a class="btn" asp-page-handler="Report" asp-route-evaluationSessionId="@eid">
-                                Download the report (PDF)
+                            @* §1291 — on the page first; the PDF stays one click away. *@
+                            <a class="btn" asp-page="/Organizer/SessionFeedbackView" asp-route-evaluationSessionId="@eid">
+                                &#128065; View all feedback
+                            </a>
+                            <a class="btn" target="_blank" rel="noopener"
+                               asp-page-handler="Report" asp-route-evaluationSessionId="@eid">
+                                &#128196; PDF
                             </a>
                         }
                         @* §783.9 — the PUBLISHED files, served through the hub proxy (never a

@@ -36,7 +36,7 @@ public class PartyRsvpsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Party = await _svc.GetActivePartyAsync(ct);
         (Total, Attending) = await _svc.CountsAsync(me.EventId, ct);
@@ -48,7 +48,7 @@ public class PartyRsvpsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var csv = await BuildCsvAsync(me.EventId, ct);
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", "party-rsvps.csv");
@@ -58,7 +58,7 @@ public class PartyRsvpsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var csv = await BuildCsvAsync(me.EventId, ct);
         return File(CsvToXlsx.Build(csv, "Party RSVPs"), CsvToXlsx.ContentType, "party-rsvps.xlsx");

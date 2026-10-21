@@ -78,7 +78,7 @@ public sealed class SpeakerZohoGapReporter
             .Where(p => p.EventId == eventId
                         && p.BackstageSpeakerId != null && p.BackstageSpeakerId != "")
             .Join(_db.Participants, p => p.ParticipantId, pa => pa.Id,
-                (p, pa) => new { Profile = p, pa.Email, pa.FullName })
+                (p, pa) => new { Profile = p, pa.Email, pa.FullName, pa.Role })
             .ToListAsync(ct);
 
         var found = new List<SpeakerGap>();
@@ -86,6 +86,8 @@ public sealed class SpeakerZohoGapReporter
 
         foreach (var row in linked)
         {
+            // §1365 — only the Speaker role is compared; `linked` stays whole so every profile is stamped below.
+            if (!IsReported(row.Role)) continue;
             if (!live.TryGetValue(row.Profile.BackstageSpeakerId!, out var z)) continue;
             compared++;
 
@@ -119,11 +121,12 @@ public sealed class SpeakerZohoGapReporter
         var mailed = 0;
         if (_notifier is not null)
         {
+            // §1364 — no intro line of our own: the notifier already explains that Backstage is updated by hand, and a
+            // second paragraph rendered as a stray bullet. The two arrows say which side to change.
             var lines = new List<string>
             {
-                "<b>These speakers are missing information in Zoho Backstage that CEH already holds.</b> "
-                + "The speakers API is create-only, so these cannot be pushed — they need adding by "
-                + "hand in Backstage.",
+                "<b>(new value in Zoho from hub)</b> — set it in Backstage · "
+                + "<b>(new value in hub from Zoho)</b> — the hub is missing it, add it in CEH.",
             };
             foreach (var g in found)
             {
@@ -144,7 +147,7 @@ public sealed class SpeakerZohoGapReporter
             //
             // §763 — manualOnly: the speakers API is create-only, so CEH wrote NOTHING here. The mail
             // must not claim it did, nor ask him to publish a change that does not exist.
-            await _notifier.NotifyAsync("Speakers — details missing in Backstage", lines, ct,
+            await _notifier.NotifyAsync("Speakers — Backstage and CEH differ", lines, ct,
                 actionable: true,
                 actionUrl: "https://eldk27.eventhub.expertslive.dk/Organizer/Participants?role=Speaker",
                 actionText: "Open the speakers in CEH (to copy the values)",
@@ -164,6 +167,16 @@ public sealed class SpeakerZohoGapReporter
     }
 
     /// <summary>
+    /// §1365 — is this participant in the gap mail? Only the <see cref="ParticipantRole.Speaker"/> role.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-10-21: *"only take the role speaker … so we dont include organizers, volunteers, sponsors in that
+    /// alert mail"*. Sponsors and organizers who also speak never fill the CEH speaker form, so CEH has no company or
+    /// skills for them and every "(new value in hub from Zoho)" line was an action nobody could take — it never cleared.
+    /// </remarks>
+    public static bool IsReported(ParticipantRole role) => role == ParticipantRole.Speaker;
+
+    /// <summary>
     /// The gaps for one speaker — CEH has a value, Zoho does not. Only READABLE fields are compared.
     /// </summary>
     /// <remarks>
@@ -180,26 +193,35 @@ public sealed class SpeakerZohoGapReporter
     {
         var gaps = new List<string>();
 
-        // SKILLS — readable, and the operator's own example. CEH derives it from the Microsoft
-        // accreditation + MVP categories (ZohoFieldMap.SpeakerSkills, §302b).
-        var skills = ZohoFieldMap.SpeakerSkills(ceh);
-        if (Has(skills) && !Has(z.Skills))
-            gaps.Add($"{ZohoFieldMap.Speaker.Skills.GuiLabel}: {skills!.Trim()}");
+        // 🔴 §1364 — CEH IS THE MASTER, and the CONTENT must match, not only exist. Operator 2026-10-20: *"compare the
+        // speaker fields from ceh (master) to zoho … tagline, bio, country, company, skills (accreditation) … they must
+        // match, with ceh as master … it must be in the speaker gap job so we get a mail reminder"*. Before, a field was
+        // reported only when Backstage was BLANK, so a Backstage value that had drifted from CEH was never seen.
+        // 🔁 A blank in CEH with a value in Backstage is the OTHER direction: CEH lacks something Backstage has. It is
+        // reported as "(add to CEH) <- value" so the organizers can catch CEH up (operator: "if field is blank in ceh, but
+        // exist in zoho. tell me so i can update ceh … i will then make a catch-up into ceh and next sync will be fine").
+        // It is never "clear it in Backstage" — that would delete real data CEH simply never captured.
 
-        // COMPANY / DESIGNATION / BIO — all readable, so a blank in Zoho is a REAL gap.
-        if (Has(ceh.CompanyName) && !Has(z.Company))
-            gaps.Add($"{ZohoFieldMap.Speaker.Company.GuiLabel}: {ceh.CompanyName!.Trim()}");
-        if (Has(ceh.Tagline) && !Has(z.Tagline))
-            gaps.Add($"{ZohoFieldMap.Speaker.Tagline.GuiLabel}: {ceh.Tagline!.Trim()}");
-        if (Has(ceh.Biography) && !Has(z.Bio))
-            gaps.Add($"{ZohoFieldMap.Speaker.Biography.GuiLabel}: (bio text is set in CEH but empty in Backstage)");
+        // SKILLS — CEH derives it from the Microsoft accreditation + MVP categories (ZohoFieldMap.SpeakerSkills, §302b);
+        // compared as a SET, so order, case and ", " vs "," are not a difference.
+        CompareField(gaps, ZohoFieldMap.Speaker.Skills.GuiLabel, ZohoFieldMap.SpeakerSkills(ceh), z.Skills, SkillSet);
+
+        // COMPANY / DESIGNATION / BIO — compared as plain text, ignoring capitalisation ("InSpark" = "Inspark").
+        CompareField(gaps, ZohoFieldMap.Speaker.Company.GuiLabel, ceh.CompanyName, z.Company, ComparableText);
+        CompareField(gaps, ZohoFieldMap.Speaker.Tagline.GuiLabel, ceh.Tagline, z.Tagline, ComparableText);
+        // §1364 — the bio line carries the plain text (Backstage stores HTML), so it pastes cleanly either way.
+        CompareField(gaps, ZohoFieldMap.Speaker.Biography.GuiLabel, PlainText(ceh.Biography), PlainText(z.Bio), ComparableText);
 
         // SOCIAL — the two CEH fields merge into Zoho's single social object (FieldKind.Object), so
         // existence is the only meaningful check (§302b: "just validate it exist").
         if (Has(ceh.LinkedIn) && !Has(z.LinkedIn))
-            gaps.Add($"{ZohoFieldMap.Speaker.LinkedIn.GuiLabel}: {ceh.LinkedIn!.Trim()}");
+            gaps.Add(Line(ZohoFieldMap.Speaker.LinkedIn.GuiLabel, ceh.LinkedIn!.Trim()));
+        if (!Has(ceh.LinkedIn) && Has(z.LinkedIn))
+            gaps.Add(AddToCehLine(ZohoFieldMap.Speaker.LinkedIn.GuiLabel, z.LinkedIn!.Trim()));
         if (Has(ceh.Twitter) && !Has(z.Twitter))
-            gaps.Add($"{ZohoFieldMap.Speaker.Twitter.GuiLabel}: {ceh.Twitter!.Trim()}");
+            gaps.Add(Line(ZohoFieldMap.Speaker.Twitter.GuiLabel, ceh.Twitter!.Trim()));
+        if (!Has(ceh.Twitter) && Has(z.Twitter))
+            gaps.Add(AddToCehLine(ZohoFieldMap.Speaker.Twitter.GuiLabel, z.Twitter!.Trim()));
 
         // 🔒 COUNTRY — NOT a comparison. Zoho never returns it (§623), so we cannot know whether it
         // is set. Reported as an unverifiable check, and ONLY when CEH actually has a value, so the
@@ -226,19 +248,22 @@ public sealed class SpeakerZohoGapReporter
         //
         // 🔒 ABSENT ≠ EMPTY: a missing key means Backstage has NO country, which IS the gap worth
         // reporting. A present key that matches is silence.
+        // §1364 — CEH blank, Backstage set: CEH is missing it — add it to CEH.
+        if (BackstageSpeaker.CountryIsReadable && !Has(ceh.Country) && Has(z.Country))
+            gaps.Add(AddToCehLine(ZohoFieldMap.Speaker.Country.GuiLabel, z.Country!.Trim()));
+
         if (BackstageSpeaker.CountryIsReadable && Has(ceh.Country))
         {
             if (!Has(z.Country))
             {
-                gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: {ceh.Country!.Trim()} "
-                         + "— not set in Backstage");
+                gaps.Add(Line(ZohoFieldMap.Speaker.Country.GuiLabel, ceh.Country!.Trim()));
             }
             else if (!CountryMatches(ceh.Country, z.Country))
             {
                 // ⚠️ Zoho stores an ISO-2 CODE ("DK"); CEH may hold a name ("Denmark"). Only a
                 // real disagreement is reported — otherwise every speaker would differ forever.
-                gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: CEH has "
-                         + $"{ceh.Country!.Trim()}, Backstage has {z.Country!.Trim()}");
+                // §1364 — the value to put in Backstage, not the old one.
+                gaps.Add(Line(ZohoFieldMap.Speaker.Country.GuiLabel, ceh.Country!.Trim()));
             }
         }
 
@@ -277,6 +302,51 @@ public sealed class SpeakerZohoGapReporter
             ceh.CountryConfirmedInBackstage!.Trim(),
             (ceh.Country ?? string.Empty).Trim(),
             StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// §1364 — one CEH-master comparison. CEH has a value that Backstage lacks or holds differently ⇒ set it in
+    /// Backstage. CEH is blank but Backstage has a value ⇒ add it to CEH (the other direction). Both blank or equal ⇒ silent.
+    /// </summary>
+    private static void CompareField(
+        List<string> gaps, string label, string? ceh, string? zoho, Func<string?, string> normalise)
+    {
+        var c = normalise(ceh);
+        var z = normalise(zoho);
+        if (string.Equals(c, z, StringComparison.Ordinal)) return;
+        gaps.Add(c.Length == 0 ? AddToCehLine(label, PlainText(zoho)) : Line(label, ceh!.Trim()));
+    }
+
+    /// <summary>
+    /// §1364 — one mail line: the field and the value to put in Backstage, nothing else. Operator 2026-10-20:
+    /// *"maybe Tagline (new value) ->"*. The value stays bare (§760: no quotes, so it pastes cleanly).
+    /// </summary>
+    /// <remarks>Operator 2026-10-20: *"i need to be more specific like (new value in zoho from hub) or (new value in hub
+    /// from zoho)"* — the label says which system to change and where the value comes from.</remarks>
+    public static string Line(string label, string newValue) => $"{label} (new value in Zoho from hub) -> {newValue}";
+
+    /// <summary>§1364 — the other direction: CEH is blank, Backstage has this value — copy it into CEH.</summary>
+    public static string AddToCehLine(string label, string backstageValue) => $"{label} (new value in hub from Zoho) -> {backstageValue}";
+
+    /// <summary>§1364 — plain text, case-insensitive: "InSpark" and "Inspark" are the same company.</summary>
+    public static string ComparableText(string? value) => PlainText(value).ToLowerInvariant();
+
+    /// <summary>§1364 — text as a reader sees it: tags removed, entities decoded, whitespace collapsed.</summary>
+    public static string PlainText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var noTags = System.Text.RegularExpressions.Regex.Replace(value, "<[^>]+>", " ");
+        var decoded = System.Net.WebUtility.HtmlDecode(noTags).Replace(' ', ' ');
+        return System.Text.RegularExpressions.Regex.Replace(decoded, @"\s+", " ").Trim();
+    }
+
+    /// <summary>§1364 — skills as a set: order, case and ", " vs "," are not a difference.</summary>
+    public static string SkillSet(string? value) =>
+        string.Join(",", (value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => !string.Equals(s, "None", StringComparison.OrdinalIgnoreCase))
+            .Select(s => s.ToLowerInvariant())
+            .Distinct()
+            .OrderBy(s => s, StringComparer.Ordinal));
 
     private static bool Has(string? v) => !string.IsNullOrWhiteSpace(v);
     private static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);

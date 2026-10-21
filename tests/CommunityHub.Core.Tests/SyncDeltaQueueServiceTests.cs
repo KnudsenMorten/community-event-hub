@@ -109,7 +109,7 @@ public sealed class SyncDeltaQueueServiceTests
 
         var start = Now;
         await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Talk", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(2), start.AddHours(3)));
 
         var pending = await svc.ListPendingAsync(EventId);
@@ -131,11 +131,11 @@ public sealed class SyncDeltaQueueServiceTests
 
         // First detection.
         await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Talk", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(2), start.AddHours(3)));
         // Second detection of the SAME (event, type, id, kind) with a newer target.
         await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk (renamed)", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Talk (renamed)", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(5), start.AddHours(6)));
 
         var pending = await svc.ListPendingAsync(EventId);
@@ -158,7 +158,7 @@ public sealed class SyncDeltaQueueServiceTests
         var svc = NewService(db, sender, audit);
 
         var delta = await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Keynote", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Keynote", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(2), start.AddHours(3)));
 
         var result = await svc.ApproveAsync(delta.Id, "olivia@x.dk");
@@ -209,7 +209,7 @@ public sealed class SyncDeltaQueueServiceTests
         var changes = SyncDeltaQueueService.BuildSessionChanges(
             null, null, null, start.AddHours(2), start.AddHours(3), "Hall C");
         var delta = await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk", SessionSyncDirection.ZohoToCeh, changes);
+            EventId, sid, "Talk", SessionSyncDirection.SessionizeToCeh, changes);
 
         var result = await svc.ApproveAsync(delta.Id, "olivia@x.dk");
         Assert.True(result.Applied);
@@ -236,7 +236,7 @@ public sealed class SyncDeltaQueueServiceTests
         var svc = NewService(db, sender, audit);
 
         var delta = await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Keynote", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Keynote", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(2), start.AddHours(3)));
 
         var result = await svc.RejectAsync(delta.Id, "olivia@x.dk", "Upstream entered in error");
@@ -288,7 +288,7 @@ public sealed class SyncDeltaQueueServiceTests
         var svc = NewService(db, sender);
 
         var delta = await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Talk", SessionSyncDirection.SessionizeToCeh,
             TimeMove(start, start.AddHours(1), start.AddHours(2), start.AddHours(3)));
 
         var first = await svc.ApproveAsync(delta.Id, "olivia@x.dk");
@@ -476,7 +476,7 @@ public sealed class SyncDeltaQueueServiceTests
     }
 
     [Fact]
-    public async Task Approve_applies_the_zoho_values_to_the_ceh_speaker_profile()
+    public async Task Approve_of_a_zoho_speaker_change_writes_nothing_into_ceh()
     {
         using var db = ScenarioFixture.NewDb();
         await SeedEventAsync(db);
@@ -503,27 +503,22 @@ public sealed class SyncDeltaQueueServiceTests
 
         var result = await svc.ApproveAsync(delta.Id, "olivia@x.dk");
 
+        // 🔴 §1364 — nothing from Zoho is written into CEH: the approval is acknowledged and the profile is untouched.
         Assert.True(result.Found);
-        Assert.True(result.Applied);
-        Assert.False(result.Emailed);   // ZohoToCeh apply does not email
+        Assert.False(result.Applied);
+        Assert.False(result.Emailed);
 
-        // The CEH speaker profile now holds the approved Zoho values.
         var profile = db.SpeakerProfiles.Single();
-        Assert.Equal("New Tagline", profile.Tagline);
-        Assert.Equal("New bio.", profile.Biography);
-        Assert.Equal("DK", profile.Country);
-        Assert.Equal("https://li/sam", profile.LinkedIn);
-        Assert.Equal("@sam", profile.Twitter);
-        // Name was split into First/Last from the Zoho display name.
-        Assert.Equal("Samuel", profile.FirstName);
-        Assert.Equal("Speaker", profile.LastName);
-        // The stored Backstage* baseline is refreshed to the applied value.
-        Assert.Equal("New Tagline", profile.BackstageTagline);
-        Assert.NotNull(profile.BackstageChangeCheckedAt);
+        Assert.Equal("Old Tagline", profile.Tagline);
+        Assert.Equal("Old bio.", profile.Biography);
+        Assert.Null(profile.Country);
+        Assert.Null(profile.LinkedIn);
+        Assert.Null(profile.Twitter);
+        Assert.Null(profile.FirstName);
+        Assert.Equal("Old Tagline", profile.BackstageTagline);
 
         var reloaded = (await svc.GetAsync(delta.Id))!;
-        Assert.Equal(SyncDeltaStatus.Applied, reloaded.Status);
-        Assert.NotNull(reloaded.AppliedAt);
+        Assert.NotEqual(SyncDeltaStatus.Applied, reloaded.Status);
         // The speaker was NOT deleted.
         Assert.NotNull(await db.Participants.FindAsync(pid));
         Assert.Contains(db.AuditEntries, a => a.Action == "syncqueue.approve" && a.TargetId == delta.Id.ToString());
@@ -544,7 +539,7 @@ public sealed class SyncDeltaQueueServiceTests
         var svc = NewService(db);
 
         await svc.EnqueueSessionUpdateAsync(
-            EventId, sid, "Talk", SessionSyncDirection.ZohoToCeh,
+            EventId, sid, "Talk", SessionSyncDirection.SessionizeToCeh,
             TimeMove(Now, Now.AddHours(1), Now.AddHours(2), Now.AddHours(3)));
         await svc.EnqueueDisappearanceAsync(
             2, SyncDeltaEntityType.Session, "99", "Other-event item",

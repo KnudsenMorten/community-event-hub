@@ -61,6 +61,11 @@ public sealed class JobFailureTracker
     public async Task<FailureDecision> RecordFailureAsync(
         string jobKey, string? error, CancellationToken ct = default, int alertThreshold = DefaultAlertThreshold)
     {
+        // 🔴 §1314 — this shares the FAILED job's DbContext (same invocation scope). Its unsaved changes are still tracked, so
+        // saving the counter re-sent the very write that failed (a too-long bio, PROD 2026-09-28): the counter was never
+        // stored, the gate failed OPEN, and the alert blamed an unreachable database — coalesced, so other engines'
+        // alerts were held back for 6 hours. The job has already failed; its pending changes are dropped first.
+        _db.ChangeTracker.Clear();
         var now = _clock.GetUtcNow();
         var marker = await GetOrCreateAsync(jobKey, ct);
         marker.ConsecutiveFailures += 1;

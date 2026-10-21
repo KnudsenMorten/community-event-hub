@@ -1,0 +1,96 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopBoothMapModel
+@{
+    ViewData["Title"] = "Booth map";
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+}
+
+<div class="card">
+    <h1>Booth map</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>The expo layout with every booth drawn over it. Green = free, amber = reserved (CEH order not yet signed),
+           red = sold (signed in CEH, or sold out in the webshop). Status is live.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        <details @(Model.Spots.Count == 0 ? "open" : "")>
+            <summary><strong>Set up</strong></summary>
+            <form method="post" asp-page-handler="Image" enctype="multipart/form-data" style="margin:10px 0;">
+                <label>Layout picture (PNG/JPG; saved to SharePoint as <code>@Model.ImageFileName</code>)
+                    <input type="file" name="picture" accept="image/png,image/jpeg" required /></label>
+                <button type="submit">Upload</button>
+            </form>
+            <form method="post" asp-page-handler="Seed" style="margin:10px 0;">
+                <button type="submit">Place the ELDK27 booths (deck slide 97) on the map</button>
+            </form>
+            @* §1305 — AI booth detection is NOT offered: measured against the real deployment on the ELDK27 picture
+               (2026-09-26) the model read 29/31 booth numbers but placed them nowhere near the booths (mean overlap
+               0.01), so it would draw the map wrong. The handler and ShopBoothDetector stay for the planned two-step
+               version (find the drawn rectangles in code, let AI only READ each one's number) — REQUIREMENTS §1305. *@
+            @if (Model.UnplacedBooths.Count > 0)
+            {
+                <p>Booths sold in the shop but not on the map yet: <strong>@string.Join(", ", Model.UnplacedBooths)</strong></p>
+            }
+        </details>
+
+        <h2>Draw or move a booth</h2>
+        <p style="font-size:13px;">Type the booth id, then drag a rectangle on the picture below — the numbers fill in. Save.</p>
+        <form method="post" asp-page-handler="Spot" id="spot-form" style="display:flex;flex-wrap:wrap;gap:6px;align-items:end;">
+            <label>Booth <input name="boothId" id="spot-id" required style="width:80px;" /></label>
+            <label>x % <input name="x" id="spot-x" style="width:70px;" /></label>
+            <label>y % <input name="y" id="spot-y" style="width:70px;" /></label>
+            <label>w % <input name="w" id="spot-w" style="width:70px;" /></label>
+            <label>h % <input name="h" id="spot-h" style="width:70px;" /></label>
+            <button type="submit">Save booth</button>
+        </form>
+        <div id="draw-area" style="position:relative;max-width:1200px;margin-top:10px;cursor:crosshair;">
+            @if (Model.MapView is not null) { <partial name="_ShopBoothMap" model="Model.MapView" /> }
+            <div id="draw-box" style="position:absolute;border:2px dashed #1565c0;display:none;pointer-events:none;"></div>
+        </div>
+
+        <h2>Placed booths</h2>
+        <div style="overflow-x:auto;">
+        <table>
+            <thead><tr><th>Booth</th><th>x</th><th>y</th><th>w</th><th>h</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var s in Model.Spots)
+            {
+                <tr><td>@s.BoothId</td><td>@s.XPercent.ToString("0.#", inv)</td><td>@s.YPercent.ToString("0.#", inv)</td>
+                    <td>@s.WidthPercent.ToString("0.#", inv)</td><td>@s.HeightPercent.ToString("0.#", inv)</td>
+                    <td><form method="post" asp-page-handler="Delete"><input type="hidden" name="id" value="@s.Id" /><button type="submit">Remove</button></form></td></tr>
+            }
+            </tbody>
+        </table>
+        </div>
+
+        <script>
+        (function () {
+            const area = document.getElementById('draw-area');
+            const img = area.querySelector('.boothmap img');
+            const box = document.getElementById('draw-box');
+            if (!img) return;
+            let start = null;
+            const pct = (v, total) => (Math.max(0, Math.min(total, v)) / total * 100).toFixed(2);
+            function rel(e) { const r = img.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height, r }; }
+            area.addEventListener('pointerdown', e => { if (e.target.closest('a')) return; start = rel(e); box.style.display = 'block'; e.preventDefault(); });
+            area.addEventListener('pointermove', e => {
+                if (!start) return; const p = rel(e); const ar = area.getBoundingClientRect(); const off = start.r.left - ar.left, offY = start.r.top - ar.top;
+                const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+                Object.assign(box.style, { left: (off + x) + 'px', top: (offY + y) + 'px', width: Math.abs(p.x - start.x) + 'px', height: Math.abs(p.y - start.y) + 'px' });
+            });
+            area.addEventListener('pointerup', e => {
+                if (!start) return; const p = rel(e);
+                document.getElementById('spot-x').value = pct(Math.min(start.x, p.x), p.w);
+                document.getElementById('spot-y').value = pct(Math.min(start.y, p.y), p.h);
+                document.getElementById('spot-w').value = pct(Math.abs(p.x - start.x), p.w);
+                document.getElementById('spot-h').value = pct(Math.abs(p.y - start.y), p.h);
+                start = null;
+            });
+        })();
+        </script>
+    }
+</div>

@@ -100,5 +100,5 @@ public class SecureLinkModel : PageModel
     }
 
     private static bool IsRealOrganizer(CurrentParticipant me) =>
-        me.Role == ParticipantRole.Organizer && !me.IsActingAs;
+        me.Role.HasOrganizerAccess() && !me.IsActingAs;
 }

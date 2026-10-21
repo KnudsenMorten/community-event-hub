@@ -16,13 +16,20 @@ public sealed class HotelCalendarInviter
     private readonly EmailOptions _emailOptions;
     private readonly IEmailContextAccessor? _context;
 
+    // §1296 — resolves what ELDK covers for this guest, so the confirmation mail carries the same
+    // split the hotel form showed them. Optional: without it the mail is exactly what it was, which
+    // is the only safe fallback for a sentence about somebody's bill.
+    private readonly CommunityHub.Core.Entitlements.HotelCoverageService? _coverage;
+
     public HotelCalendarInviter(
         IEmailSender emailSender, IOptions<EmailOptions> emailOptions,
-        IEmailContextAccessor? context = null)
+        IEmailContextAccessor? context = null,
+        CommunityHub.Core.Entitlements.HotelCoverageService? coverage = null)
     {
         _emailSender = emailSender;
         _emailOptions = emailOptions.Value;
         _context = context;
+        _coverage = coverage;
     }
 
     public async Task SendAsync(
@@ -62,6 +69,15 @@ public sealed class HotelCalendarInviter
         // Build the email + calendar text via the pure Core builder (unit-tested):
         // it folds the organizer-assigned hotel name + address + the per-person
         // confirmation number into the venue/subject/body (multi-hotel placement).
+        // §1296 — resolved from the PERSON, not from the dates in this call: their class standard
+        // plus anything agreed with them. Null when coverage does not apply to them at all.
+        CommunityHub.Core.Entitlements.HotelCoverageResult? coverage = null;
+        if (_coverage is not null)
+        {
+            var resolved = await _coverage.ResolveAsync(eventId, participantId, ct);
+            if (resolved.Class is not null) coverage = resolved.Result;
+        }
+
         var content = HotelEmailContentBuilder.Build(
             eventCode: eventCode,
             fullName: fullName,
@@ -74,7 +90,8 @@ public sealed class HotelCalendarInviter
             hotelAddress: hotelAddress,
             hotelConfirmationNumber: hotelConfirmationNumber,
             inviteAttached: attachCalendarInvite,
-            addToCalendarHtml: addToCalendarHtml);
+            addToCalendarHtml: addToCalendarHtml,
+            coverage: coverage);
 
         // §705.15 — this is the ORGANIZER-TRIGGERED guest mail: he enters a hotel confirmation number
         // and EVERY guest placed in that hotel is written to. It keeps a ring precisely because the

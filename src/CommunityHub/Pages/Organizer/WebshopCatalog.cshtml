@@ -1,0 +1,167 @@
+@page
+@model CommunityHub.Pages.Organizer.WebshopCatalogModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Organizer
+@{
+    ViewData["Title"] = "Sponsor webshop — catalogue";
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    string Eur(decimal v) => "€" + CommunityHub.Core.Integrations.Webshop.ShopPricing.Amount(v);
+}
+
+<div class="card">
+    <h1>Sponsor webshop — catalogue</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>The products of the new CEH sponsor shop, taken from the current webshop: text, prices and
+           pictures are synced every 2 minutes. <strong>Availability is read live from the webshop</strong>
+           each time this page loads, so both shops always show the same.</p>
+
+        @if (!Model.FeatureOn)
+        {
+            <p class="info" role="status" style="border-left:4px solid #b45309;">
+                <strong>The shop is switched off</strong> (<code>@WebshopCatalogModel.FeatureKey</code>).
+                Sponsors see nothing and the 2-minute sync does not run.
+            </p>
+        }
+
+        @if (Model.Products.Count > 0 && !Model.StockIsLive)
+        {
+            <p class="error" role="status">
+                The webshop could not be reached just now, so availability below is the last synced copy
+                (@(Model.LastSyncedAt is null ? "never" : Model.LastSyncedAt.Value.ToString("yyyy-MM-dd HH:mm 'UTC'", inv))),
+                not live. Nothing can be sold on it.
+            </p>
+        }
+
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        <p style="font-size:13px;color:#4b5563;">
+            Last catalogue sync: @(Model.LastSyncedAt is null ? "never" : Model.LastSyncedAt.Value.ToString("yyyy-MM-dd HH:mm 'UTC'", inv))
+        </p>
+
+        <p style="font-size:13px;">
+            @if (Model.ShowHidden)
+            {
+                <a asp-page="/Organizer/WebshopCatalog" asp-route-ShowHidden="false">Hide private, draft and removed products</a>
+            }
+            else
+            {
+                <a asp-page="/Organizer/WebshopCatalog" asp-route-ShowHidden="true">Show private, draft and removed products too</a>
+            }
+        </p>
+
+        @if (Model.Products.Count == 0)
+        {
+            <p class="info" role="status">Nothing synced yet. The catalogue appears after the first 2-minute
+                sync once <code>@WebshopCatalogModel.FeatureKey</code> is switched on.</p>
+        }
+
+        @foreach (var g in WebshopCatalogModel.GroupOrder)
+        {
+            var items = Model.Products.Where(p => WebshopCatalogModel.GroupOf(p) == g).ToList();
+            if (items.Count == 0) { continue; }
+
+            <h2 style="margin-top:24px;">@WebshopCatalogModel.GroupLabel(g) <span style="font-weight:normal;color:#6b7280;">(@items.Count)</span></h2>
+            <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Product</th>
+                        <th>Booth / slot</th>
+                        <th style="text-align:right;">Price</th>
+                        <th>Availability</th>
+                        @if (Model.ShowHidden) { <th>Status</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var p in items)
+                {
+                    var pic = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault();
+                    var av = Model.Stock.GetValueOrDefault(p.Id);
+                    <tr>
+                        <td style="width:56px;">
+                            @if (pic is not null)
+                            {
+                                <img src="/shop-image/@pic.Id" alt="@(pic.AltText ?? p.Name)" loading="lazy"
+                                     style="width:48px;height:48px;object-fit:cover;border-radius:4px;"
+                                     title="@(pic.SharePointItemId is null ? "Not copied to SharePoint yet" + (pic.CopyError is null ? "" : ": " + pic.CopyError) : "Served from SharePoint")" />
+                            }
+                        </td>
+                        <td>
+                            <a asp-page="/Organizer/ShopProduct" asp-route-id="@p.Id">@p.Name</a>
+                            @if (p.ContentManagedInCeh) { <span style="font-size:11px;color:#6b7280;"> (managed in CEH)</span> }
+                            @if (p.PrimaryCategory is not null)
+                            {
+                                <div style="font-size:12px;color:#6b7280;">@p.PrimaryCategory.Name</div>
+                            }
+                        </td>
+                        <td>
+                            @if (p.BoothId is not null) { <strong>@p.BoothId</strong> }
+                            @if (p.Timeslot is not null)
+                            {
+                                <span>Slot @p.Timeslot</span>
+                                @if (p.TimeslotTime is not null) { <span style="color:#6b7280;"> (@p.TimeslotTime)</span> }
+                            }
+                        </td>
+                        <td style="text-align:right;white-space:nowrap;">@Eur(p.PriceEur)</td>
+                        <td style="white-space:nowrap;@(av is { Available: true } ? "" : "color:#b91c1c;")">
+                            @WebshopCatalogModel.AvailabilityText(p, av)
+                            @if (av is { Live: false }) { <span style="font-size:11px;color:#6b7280;"> (not live)</span> }
+                        </td>
+                        @if (Model.ShowHidden) { <td>@p.Status</td> }
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+
+        @if (Model.Categories.Count > 0)
+        {
+            <h2 style="margin-top:32px;">Category groups</h2>
+            <p style="font-size:13px;color:#4b5563;">Each webshop category is placed in one sponsor-facing group.
+               The import guesses from the name; a group you set here is kept.</p>
+            <div style="overflow-x:auto;">
+            <table>
+                <thead><tr><th>Webshop category</th><th>Group</th></tr></thead>
+                <tbody>
+                @foreach (var c in Model.Categories)
+                {
+                    <tr>
+                        <td>
+                            @(c.ParentId is null ? "" : "↳ ")@c.Name
+                            @if (c.GroupSetByOrganizer) { <span style="font-size:12px;color:#6b7280;"> (set by organizer)</span> }
+                        </td>
+                        <td>
+                            <form method="post" asp-page-handler="Group" style="display:flex;gap:6px;flex-wrap:wrap;">
+                                <input type="hidden" name="categoryId" value="@c.Id" />
+                                <input type="hidden" name="ShowHidden" value="@Model.ShowHidden.ToString().ToLowerInvariant()" />
+                                <select name="group" aria-label="Group for @c.Name">
+                                    @foreach (var g in WebshopCatalogModel.GroupOrder)
+                                    {
+                                        <option value="@g" selected="@(c.Group == g)">@WebshopCatalogModel.GroupLabel(g)</option>
+                                    }
+                                </select>
+                                <button type="submit">Save</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+
+        <p style="margin-top:24px;"><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsors</a></p>
+    }
+</div>

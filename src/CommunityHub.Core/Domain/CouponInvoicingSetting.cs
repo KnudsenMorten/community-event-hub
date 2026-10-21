@@ -35,6 +35,15 @@ public enum CouponBillingType
     /// <summary>Free / included. NEVER invoiced, and not a gap — a deliberate decision that must be
     /// distinguishable from <see cref="Unmapped"/>.</summary>
     NoInvoicing = 3,
+
+    /// <summary>
+    /// §1312 — IGNORED: a plain discount code (e.g. 10 % for a community group) — the attendee pays the rest in Backstage, so
+    /// there is nobody for CEH to bill and nothing to track. Never invoiced, never "needs a decision", never chased or mailed,
+    /// and listed apart on <c>/Organizer/CouponInvoicing</c> (operator 2026-10-01: "this is a coupon that must not be imported
+    /// into ceh, so we need a way to ignore it. reason: we give 10% discount to a community group"). Distinct from
+    /// <see cref="NoInvoicing"/>, which means the ticket is FREE / included.
+    /// </summary>
+    Ignored = 4,
 }
 
 /// <summary>

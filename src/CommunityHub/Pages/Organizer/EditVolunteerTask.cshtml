@@ -89,7 +89,7 @@ else
     <form method="post" asp-page-handler="Save" class="et-card">
         <input type="hidden" asp-for="Input.TaskId" />
         <p style="margin-top:0;font-size:13px;color:#6e7681;">
-            Bucket: <strong>@Model.Editing.Bucket</strong> &middot; @Model.Editing.Subcategory
+            Bucket: <strong>@Model.Editing.Bucket</strong>@if (!string.IsNullOrWhiteSpace(Model.Editing.Subcategory)) {<text> &middot; @Model.Editing.Subcategory</text>}
         </p>
 
         <div class="et-field">

@@ -1,47 +1,31 @@
 @model CommunityHub.Forms.Steps.SponsorCompanyModel
+<div class="company-fields">
 @*
     Fields-ONLY partial for the sponsor Company-details wizard step (§32 / §285 Phase 2).
     NO <form>/buttons/chrome — the shared wizard host owns those. Field names match
     SponsorCompanyModel (and the standalone Company Details section) so the host's empty-prefix
     binding fills them; same fields + limits + helper copy as the standalone page.
 *@
-@* 🔒 §1081 — READ-ONLY. The webshop owns this field; CEH fills it in via the §41b reconcile.
-   The hand-off carries data-webshop-interstitial="1", which the §653 dialog in _Layout picks up
-   through its DOCUMENT-level delegated click handler — so it works here exactly as it does in the
-   nav, with no new dialog, script or style. *@
+@* 🔴 §1312 — EDITABLE. CEH owns the website, LinkedIn and X (operator 2026-09-30: "ceh owns the field … sponsor must be
+   able to change this here and it should show the ceh data with edit / save feature integrated" · "old webshop is not owner
+   of this anymore, we changed that sunday"). This SUPERSEDES §1081/§1126 (read-only, "Change it in the Sponsor Shop"). The
+   same field the organizer edits on the company page; whoever saves last wins. *@
+@* §1344 — the PUBLIC name is editable here too (operator 2026-10-14). Blank keeps the current name; the legal name is not this. *@
+<label for="PublicName">Public company name</label>
+<input type="text" id="PublicName" asp-for="PublicName" maxlength="@CommunityHub.Core.Integrations.Webshop.ShopCompanyLinks.PublicNameMax" />
+<p class="cf-hint" style="margin:2px 0 12px;">How your company is shown on the event website, in the app and in our social-media posts. Your legal name on the contract and invoice is not changed.</p>
+
 <label for="WebsiteUrl">Website URL</label>
-<input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="400" readonly
-       style="background-color:#f3f4f6;color:#6b7280;" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your website address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-<p style="margin:2px 0 12px;">
-    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-</p>
+<input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="400" placeholder="https://www.example.com" />
+<p class="cf-hint" style="margin:2px 0 12px;">Starts with https:// — shown on the event website and in the event app.</p>
 
-@* §1126 — LinkedIn and Twitter are WEBSHOP-OWNED, exactly like the website above (operator
-   2026-08-25: "linkedin + twitter is also coming from webshop … it must also overwrite as webshop
-   is authoritative").
-
-   🔴 Read-only is not cosmetic here — it is REQUIRED by the overwrite. Leaving these editable while
-   the sync overwrites them means a sponsor types a URL, is told it saved, and has it silently
-   reverted on the next sync. Unfixable from their side and invisible while it happens. *@
 <label for="LinkedInUrl">LinkedIn URL</label>
-<input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="400" readonly
-       style="background-color:#f3f4f6;color:#6b7280;" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Your LinkedIn address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-<p style="margin:2px 0 12px;">
-    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-</p>
+<input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="400" placeholder="https://www.linkedin.com/company/…" />
+<p class="cf-hint" style="margin:2px 0 12px;">Your company page — we tag it when we announce you on LinkedIn.</p>
 
 <label for="TwitterUrl">Twitter / X URL</label>
-<input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="400" readonly
-       style="background-color:#f3f4f6;color:#6b7280;" />
-<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Your Twitter / X address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-<p style="margin:2px 0 14px;">
-    <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-       data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-</p>
+<input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="400" placeholder="https://x.com/…" />
+<p class="cf-hint" style="margin:2px 0 14px;">Optional.</p>
 
 <label for="CompanyOverview">Company Overview</label>
 <textarea id="CompanyOverview" asp-for="CompanyOverview" rows="6" maxlength="1000"></textarea>
@@ -51,9 +35,9 @@
 </p>
 
 <label for="SocialMediaBrandingText">Company Social Media Branding Text</label>
-<textarea id="SocialMediaBrandingText" asp-for="SocialMediaBrandingText" rows="4" maxlength="600"></textarea>
+<textarea id="SocialMediaBrandingText" asp-for="SocialMediaBrandingText" rows="4" maxlength="@CommunityHub.Core.Integrations.ZohoExhibitorLimits.SocialBrandingText"></textarea>
 <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-    Used by ELDK in social-media promotion (max 600 chars). This is NOT sent to the Event System (Zoho).
+    Used by ELDK in social-media promotion (max @CommunityHub.Core.Integrations.ZohoExhibitorLimits.SocialBrandingText chars). This is NOT sent to the Event System (Zoho).
 </p>
 
 @if (Model.IsExhibitor)
@@ -64,3 +48,13 @@
         A concise version for space-limited sections (event listings, the mobile app). Max 80 chars.
     </p>
 }
+</div>
+<style>
+    /* Roomy fields (operator 2026-09-26: "all boxes in the company details looks very cramped and small"). */
+    .company-fields label { display:block; margin:14px 0 5px; font-weight:600; font-size:15px; }
+    .company-fields input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .company-fields textarea, .company-fields select {
+        width:100%; box-sizing:border-box; padding:11px 12px; font-size:16px; line-height:1.4; border:1px solid #9ca3af; border-radius:8px; }
+    .company-fields textarea { min-height:6em; }
+    .company-fields input[readonly] { background:#f3f4f6; color:#4b5563; }
+    .company-fields .cf-hint { font-size:13px; color:#4b5563; margin:4px 0 4px; }
+</style>

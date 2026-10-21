@@ -116,8 +116,8 @@ public sealed class FeatureCatalogClassificationTests
         // The §23 seed set: the operator's real advanced integrations/automation.
         var required = new[]
         {
-            // §252 F7: economic-erp-sync was removed (inert duplicate of erp-webshop-reconcile).
-            "sessionize-import", "backstage-sync", "erp-webshop-reconcile",
+            // §252 F7: economic-erp-sync was removed; §1312: erp-webshop-reconcile went with Company Manager.
+            "sessionize-import", "backstage-sync",
             "some-scheduling", "linkedin-queue", "reminder-jobs", "digest-emails",
             "welcome-email", "magic-link", "surveys",
             // §23 residual: the remaining advanced sync jobs + their web triggers.

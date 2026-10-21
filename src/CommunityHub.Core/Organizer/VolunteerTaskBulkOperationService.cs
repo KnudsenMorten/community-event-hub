@@ -196,12 +196,12 @@ public sealed class VolunteerTaskBulkOperationService
     /// tasks") and the implication was missed: the feature existed and could not do the thing it was
     /// built for.</para>
     ///
-    /// <para>🔑 Lands in the category's FIRST sub-category by name, or creates a <c>General</c> one
-    /// when it has none. Creating is the honest behaviour here: the alternative is refusing the move
-    /// and telling an organizer holding 127 tasks to go and make a container first, which is the
-    /// tedium this feature exists to remove.</para>
+    /// <para>🔑 §1299 — the tasks land DIRECTLY under the category, with no subcategory. (This used
+    /// to pick the first subcategory by name or invent a <c>General</c> one, because a task could
+    /// not exist without a subcategory. Operator 2026-09-23: <i>"move tasks must support both main
+    /// category and subcategory"</i> — a category target now means exactly the category.)</para>
     /// </remarks>
-    /// <returns>The move result, plus the sub-category actually used.</returns>
+    /// <returns>The move result, plus where the tasks landed.</returns>
     public async Task<(BulkMoveResult Result, string LandedIn)> MoveToCategoryAsync(
         int eventId, IEnumerable<int> taskIds, int targetCategoryId,
         CancellationToken ct = default)
@@ -211,24 +211,25 @@ public sealed class VolunteerTaskBulkOperationService
         if (category is null)
             throw new InvalidOperationException("That target category is not part of this event.");
 
-        var sub = await _db.VolunteerSubcategories
-            .Where(s => s.EventId == eventId && s.CategoryId == targetCategoryId)
-            .OrderBy(s => s.Name)
-            .FirstOrDefaultAsync(ct);
+        var ids = Normalize(taskIds);
+        if (ids.Count == 0) return (new BulkMoveResult(0, 0, 0), category.Name);
 
-        if (sub is null)
+        var targets = await _db.VolunteerTasks
+            .Where(t => t.EventId == eventId && ids.Contains(t.Id))
+            .ToListAsync(ct);
+
+        int moved = 0, already = 0;
+        foreach (var t in targets)
         {
-            sub = new VolunteerSubcategory
-            {
-                EventId = eventId, CategoryId = targetCategoryId, Name = "General",
-                Description = "Created automatically to receive moved tasks.",
-            };
-            _db.VolunteerSubcategories.Add(sub);
-            await _db.SaveChangesAsync(ct);
+            if (t.CategoryId == targetCategoryId && t.SubcategoryId is null) { already++; continue; }
+            t.SubcategoryId = null;
+            t.CategoryId = targetCategoryId;
+            t.UpdatedAt = DateTimeOffset.UtcNow;
+            moved++;
         }
 
-        var result = await MoveAsync(eventId, taskIds, sub.Id, ct);
-        return (result, $"{category.Name} → {sub.Name}");
+        if (moved > 0) await _db.SaveChangesAsync(ct);
+        return (new BulkMoveResult(targets.Count, moved, already), category.Name);
     }
 
     public async Task<BulkMoveResult> MoveAsync(
@@ -238,9 +239,9 @@ public sealed class VolunteerTaskBulkOperationService
         var ids = Normalize(taskIds);
         if (ids.Count == 0) return new BulkMoveResult(0, 0, 0);
 
-        var targetExists = await _db.VolunteerSubcategories
-            .AnyAsync(s => s.Id == targetSubcategoryId && s.EventId == eventId, ct);
-        if (!targetExists)
+        var target = await _db.VolunteerSubcategories
+            .FirstOrDefaultAsync(s => s.Id == targetSubcategoryId && s.EventId == eventId, ct);
+        if (target is null)
             throw new InvalidOperationException("That target sub-category is not part of this event.");
 
         var targets = await _db.VolunteerTasks
@@ -254,6 +255,7 @@ public sealed class VolunteerTaskBulkOperationService
             // is not a change, and must not be reported as one.
             if (t.SubcategoryId == targetSubcategoryId) { already++; continue; }
             t.SubcategoryId = targetSubcategoryId;
+            t.CategoryId = target.CategoryId; // §1299 — the category follows the subcategory
             t.UpdatedAt = DateTimeOffset.UtcNow;
             moved++;
         }

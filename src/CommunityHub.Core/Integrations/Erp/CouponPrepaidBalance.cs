@@ -76,8 +76,13 @@ public sealed record CouponPoolBalance(
     /// <remarks>
     /// §795.1 — a pool CLOSED BY HAND is never "low": nobody is going to claim against it, so
     /// warning about it is noise about a decision somebody already made (§302).
+    /// <para>§1341 — the level is capped at <c>Purchased - 1</c>: a pool of 5 with the default level
+    /// of 5 read "running low" before a single claim (operator 2026-10-08, invoiced and fine). A
+    /// level of <b>0 switches the warning off</b>; oversubscription is still reported, because that is
+    /// tickets nobody has paid for, not a pool running down.</para>
     /// </remarks>
-    public bool IsLow => !ClosedByHand && Remaining <= LowBalanceThreshold;
+    public bool IsLow => !ClosedByHand
+        && CouponPrepaidBalance.IsLowAt(Remaining, Purchased, LowBalanceThreshold);
 
     /// <summary>True when the pool is exactly used up — no more, but none over.</summary>
     public bool IsExhausted => Remaining == 0;
@@ -124,8 +129,20 @@ public sealed record CouponPoolBalance(
 /// </summary>
 public static class CouponPrepaidBalance
 {
-    /// <summary>Default warning level when an allocation does not set its own.</summary>
-    public const int DefaultLowBalanceThreshold = 5;
+    /// <summary>
+    /// Default warning level when an allocation does not set its own. §1341 — <b>0 = no
+    /// running-low warning</b> (operator 2026-10-08: <i>"default should be 0 (no warning)"</i>); a
+    /// pool only warns at a level somebody set on it, or when it goes past what was paid for.
+    /// </summary>
+    public const int DefaultLowBalanceThreshold = 0;
+
+    /// <summary>
+    /// §1341 — the one "running low" rule for a pool and a capped ad-hoc coupon alike. Over the
+    /// agreed number is always low; otherwise only when a level is set (&gt; 0), and that level is
+    /// capped at <c>size - 1</c> so a pool of 5 at level 5 is not low before a single claim.
+    /// </summary>
+    public static bool IsLowAt(int remaining, int size, int threshold) =>
+        remaining < 0 || (threshold > 0 && remaining <= Math.Min(threshold, size - 1));
 
     /// <summary>
     /// Balance one allocation against the claims on its coupon.

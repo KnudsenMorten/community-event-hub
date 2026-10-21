@@ -71,7 +71,6 @@ public sealed class OrganizerGridSearchSortPagingTests
             cascade,
             new ParticipantSearchService(db),
             new ImpersonationAuditService(db, clock),
-            new CommunityHub.Core.Integrations.CompanyManagerClient(new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ParticipantsModel>.Instance, clock)
         {
             PageContext = new PageContext { HttpContext = http },
@@ -558,9 +557,7 @@ public sealed class OrganizerGridSearchSortPagingTests
         return new CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel(
             db, accessor, null!, null!, null!, null!, clock,
             new CommunityHub.Core.Settings.FeatureGateService(db),
-            // Company Manager lookups disabled (Enabled=false default) — the GET
-            // grid path resolves names from the DB-local fallback only.
-            cm: null!, cmOptions: new CommunityHub.Core.Integrations.CompanyManagerOptions(),
+            // The GET grid path resolves names from the DB-local fallback only.
             logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<
                 CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel>.Instance)
         {
@@ -688,9 +685,6 @@ public sealed class OrganizerGridSearchSortPagingTests
             new CommunityHub.Core.Organizer.SponsorInfoDeletionService(db),
             new CommunityHub.Core.Organizer.ParticipantDeactivationService(
                 db, clock, new CommunityHub.Core.Audit.AuditTrailService(db, clock)),
-            new CommunityHub.Core.Integrations.CompanyManagerClient(
-                new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false }),
-            new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false },
             Microsoft.Extensions.Logging.Abstractions.NullLogger<SponsorsModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
@@ -796,5 +790,60 @@ public sealed class OrganizerGridSearchSortPagingTests
 
         Assert.Equal("high-co", model.Companies.First().CompanyId);
         Assert.Equal(2, model.Companies.First().Overdue);
+    }
+
+    /// <summary>§1362b — "In progress" sorts like every other count column (it was the one header with no link).</summary>
+    [Fact]
+    public async Task Sponsors_sort_by_in_progress_count_descending()
+    {
+        using var db = NewDb();
+        db.Participants.AddRange(
+            MakeSponsor("A", "a@x.test", "idle-co"),
+            MakeSponsor("B", "b@x.test", "busy-co"));
+        db.Tasks.AddRange(
+            new ParticipantTask { EventId = EventId, Title = "t1", SponsorCompanyId = "busy-co", State = TaskState.InProgress },
+            new ParticipantTask { EventId = EventId, Title = "t2", SponsorCompanyId = "idle-co", State = TaskState.Open });
+        await db.SaveChangesAsync();
+
+        var model = NewSponsors(db, OrganizerContext(), new FixedClock());
+        model.Sort = "inprogress"; model.Desc = true;
+        await model.OnGetAsync(CancellationToken.None);
+
+        Assert.Equal("busy-co", model.Companies.First().CompanyId);
+    }
+
+    /// <summary>
+    /// 🔴 §1362b, operator 2026-10-20 ("(name not synced — CM id 2)", "can i withdraw it"): a company listed only because of
+    /// its tasks — no sponsor record, no contacts — used to be "withdrawn" with nothing changed and stayed on the page. Its
+    /// open tasks are now closed (kept, never deleted) and the row leaves the grid.
+    /// </summary>
+    [Fact]
+    public async Task Withdrawing_a_company_that_only_has_tasks_closes_them_and_removes_the_row()
+    {
+        using var db = NewDb();
+        db.Participants.Add(MakeSponsor("A", "a@x.test", "real-co"));
+        db.Tasks.AddRange(
+            new ParticipantTask { EventId = EventId, Title = "t1", SponsorCompanyId = "2", State = TaskState.Open, DueDate = new DateOnly(2026, 1, 1) },
+            new ParticipantTask { EventId = EventId, Title = "t2", SponsorCompanyId = "2", State = TaskState.Open });
+        await db.SaveChangesAsync();
+
+        var http = OrganizerContext();
+        var before = NewSponsors(db, http, new FixedClock());
+        await before.OnGetAsync(CancellationToken.None);
+        Assert.Contains(before.Companies, c => c.CompanyId == "2");
+
+        var model = NewSponsors(db, http, new FixedClock());
+        await model.OnPostWithdrawCompanyAsync("2", CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase, CancellationToken.None);
+
+        Assert.Contains("2 open task(s) closed", model.Message);
+        Assert.DoesNotContain(model.Companies, c => c.CompanyId == "2");
+        Assert.Contains(model.Companies, c => c.CompanyId == "real-co");
+        var tasks = await db.Tasks.Where(t => t.SponsorCompanyId == "2").ToListAsync();
+        Assert.Equal(2, tasks.Count);   // closed, never deleted
+        Assert.All(tasks, t =>
+        {
+            Assert.Equal(TaskState.Done, t.State);
+            Assert.Equal(TaskClosedReason.AbandonedOnDeactivation, t.ClosedReason);
+        });
     }
 }

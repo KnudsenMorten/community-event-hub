@@ -478,42 +478,12 @@ public class SponsorRecipientResolverTests
     }
 
     // ----------------------------------------------------------------------
-    // Unique-identifier contact link — the resolver carries CmUserId (the id),
-    // and correlation keys on id/email, never on name (REQUIREMENTS §7c).
+    // Contact correlation — keys on id/email, never on name (REQUIREMENTS §7c;
+    // the Company Manager user id it also carried was dropped in §1312).
     // ----------------------------------------------------------------------
-
-    [Fact]
-    public void Select_carries_CmUserId_id_link_on_each_recipient()
-    {
-        var coord = Sponsor("coord@2linkit.net", coordinator: true, signer: false);
-        coord.CmUserId = 68;
-
-        var r = Assert.Single(SponsorRecipipientOrSelect(coord));
-        Assert.Equal(68, r.CmUserId);
-        Assert.Equal("coord@2linkit.net", r.Email);
-    }
 
     private static IReadOnlyList<SponsorRecipient> SponsorRecipipientOrSelect(Participant p) =>
         SponsorRecipientResolver.Select(new[] { p });
-
-    [Fact]
-    public async Task ResolveAsync_recipients_carry_the_CmUserId_from_the_participant_row()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var eventId = await SeedEventAsync(db);
-
-        var coord = Sponsor("coord@2linkit.net", coordinator: true, signer: false);
-        coord.EventId = eventId;
-        coord.CmUserId = 68;
-        db.Participants.Add(coord);
-        await db.SaveChangesAsync();
-
-        var resolver = new SponsorRecipientResolver(db);
-        var recipients = await resolver.ResolveAsync(eventId, "test-2linkit");
-
-        var r = Assert.Single(recipients);
-        Assert.Equal(68, r.CmUserId);
-    }
 
     [Fact]
     public async Task ResolveAsync_correlates_by_id_email_not_by_name()
@@ -526,20 +496,17 @@ public class SponsorRecipientResolverTests
         // or match the pair by their identical name.
         var coord = Sponsor("coord@2linkit.net", coordinator: true, signer: false, name: "Same Name");
         coord.EventId = eventId;
-        coord.CmUserId = 68;
         var signerTwin = Sponsor("signer@2linkit.net", coordinator: false, signer: true, name: "Same Name");
         signerTwin.EventId = eventId;
-        signerTwin.CmUserId = 77;
         db.Participants.AddRange(coord, signerTwin);
         await db.SaveChangesAsync();
 
         var resolver = new SponsorRecipientResolver(db);
         var recipients = await resolver.ResolveAsync(eventId, "test-2linkit");
 
-        // Only the coordinator row (by its own flag), identified by its CmUserId.
+        // Only the coordinator row (by its own flag), identified by its e-mail.
         var r = Assert.Single(recipients);
         Assert.Equal("coord@2linkit.net", r.Email);
-        Assert.Equal(68, r.CmUserId);
     }
 
     // ----------------------------------------------------------------------

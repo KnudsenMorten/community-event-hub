@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Core.Email;
@@ -56,15 +58,27 @@ public sealed class EngineAlertSender
     /// rather than a confident <c>[PROD]</c> on a DEV alert, which is the failure mode §702.1
     /// exists to prevent. Both hosts register it, so the default is a floor, not the norm.
     /// </summary>
+    /// <summary>
+    /// §1256b — resolves a scoped <see cref="Data.CommunityHubDbContext"/> for the PERSISTED
+    /// throttle. Optional and last, so every existing construction (and every test) compiles
+    /// unchanged; when it is null the throttle is in-memory only, exactly as before.
+    /// <para>🔒 A scope factory, not a DbContext: this class is a SINGLETON in both hosts, and
+    /// capturing a scoped context in a singleton is the classic way to get a disposed-context
+    /// crash under load.</para>
+    /// </summary>
+    private readonly IServiceScopeFactory? _scopes;
+
     public EngineAlertSender(
         IEmailSender email, IEmailContextAccessor ctx, TimeProvider clock, ILogger<EngineAlertSender> log,
-        CommunityHub.Core.Diagnostics.HubEnvironment? env = null)
+        CommunityHub.Core.Diagnostics.HubEnvironment? env = null,
+        IServiceScopeFactory? scopes = null)
     {
         _email = email;
         _ctx = ctx;
         _clock = clock;
         _log = log;
         _env = env ?? new CommunityHub.Core.Diagnostics.HubEnvironment(null, null);
+        _scopes = scopes;
     }
 
     /// <summary>
@@ -139,7 +153,22 @@ public sealed class EngineAlertSender
                 _log.LogInformation("EngineAlert throttled ({Key}): {Subject}", throttleKey, subject);
                 return;
             }
+
+            // 🔴 §1256b — THE IN-MEMORY MAP IS NOT ENOUGH, and believing it was cost a whole
+            // evening of mail. This class is a singleton, so the map is correct only while the
+            // PROCESS lives — and the Functions host recycles between timer ticks. Every tick
+            // therefore started with an empty map, the 6-hour window never applied, and the
+            // Sessionize-disappearance alert arrived every 10 minutes (measured PROD 2026-09-20).
+            // 🔑 The map stays as the free first check; SQL is the authority when it is cold.
+            if (await PersistedThrottleBlocksAsync(throttleKey, now, ct))
+            {
+                _log.LogInformation(
+                    "EngineAlert throttled from the persisted stamp ({Key}): {Subject}", throttleKey, subject);
+                return;
+            }
+
             _lastSent[throttleKey] = now;
+            await RecordPersistedSendAsync(throttleKey, now, subject, ct);
         }
 
         var to = string.IsNullOrWhiteSpace(recipient) ? Recipient : recipient.Trim();
@@ -241,5 +270,84 @@ public sealed class EngineAlertSender
         return s.StartsWith(_env.SubjectTag, StringComparison.OrdinalIgnoreCase)
             ? s
             : $"{_env.SubjectTag} {s}".TrimEnd();
+    }
+
+    /// <summary>
+    /// §1256b — is this key inside its window according to the PERSISTED stamp? Also warms the
+    /// in-memory map so the next call in this process answers without a round-trip.
+    /// <para>🔒 Fail-OPEN: a storage hiccup must never swallow an ops alert. The worst case of
+    /// answering "not throttled" is one extra mail; the worst case of failing closed is silence
+    /// about a broken engine, which is the thing this class exists to prevent.</para>
+    /// </summary>
+    private async Task<bool> PersistedThrottleBlocksAsync(
+        string throttleKey, DateTimeOffset now, CancellationToken ct)
+    {
+        if (_scopes is null) return false;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetService<Data.CommunityHubDbContext>();
+            if (db is null) return false;
+
+            var stamp = await db.EngineAlertThrottles
+                .AsNoTracking()
+                .Where(t => t.ThrottleKey == throttleKey)
+                .Select(t => (DateTimeOffset?)t.LastSentAt)
+                .FirstOrDefaultAsync(ct);
+
+            if (stamp is not { } last || now - last >= ThrottleWindow) return false;
+
+            _lastSent[throttleKey] = last;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "EngineAlert: could not read the persisted throttle for {Key} — sending anyway.", throttleKey);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// §1256b — stamp "sent now" for this key (insert or update in place). Fail-safe for the same
+    /// reason as the read: a failed stamp degrades to the old in-memory-only behaviour.
+    /// </summary>
+    private async Task RecordPersistedSendAsync(
+        string throttleKey, DateTimeOffset now, string subject, CancellationToken ct)
+    {
+        if (_scopes is null) return;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetService<Data.CommunityHubDbContext>();
+            if (db is null) return;
+
+            var row = await db.EngineAlertThrottles
+                .FirstOrDefaultAsync(t => t.ThrottleKey == throttleKey, ct);
+            if (row is null)
+            {
+                db.EngineAlertThrottles.Add(new Domain.EngineAlertThrottle
+                {
+                    ThrottleKey = throttleKey,
+                    LastSentAt = now,
+                    LastSubject = Trim(subject),
+                });
+            }
+            else
+            {
+                row.LastSentAt = now;
+                row.LastSubject = Trim(subject);
+            }
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "EngineAlert: could not persist the throttle stamp for {Key}; "
+                + "the in-memory window still applies for this process.", throttleKey);
+        }
+
+        static string? Trim(string? s) =>
+            string.IsNullOrWhiteSpace(s) ? null : (s.Length <= 400 ? s : s[..400]);
     }
 }

@@ -35,9 +35,10 @@ public static class ZohoExhibitorLimits
 
     /// <summary>
     /// CEH's own limit for the social-media branding text. ⚠️ Not a Zoho field — it never goes to
-    /// Backstage, so it is not part of the measurement above.
+    /// Backstage, so it is not part of the measurement above. Raised 600 → 900 (§1343, operator
+    /// 2026-10-14: a sponsor's text did not fit). The DB column follows it.
     /// </summary>
-    public const int SocialBrandingText = 600;
+    public const int SocialBrandingText = 900;
 
     /// <summary>CEH's own limit for a stored URL.</summary>
     public const int Url = 400;

@@ -271,6 +271,80 @@ historical staging plan lives in the source CONTEXT material and is not repeated
     the heuristic on any error so import never breaks.
   - **Volunteer view** — `/volunteer/mytasks` now shows each task's
     instructions/pre-req/expectations and the bucket's supervisor(s) + ELDK lead.
+- **Hotel coverage** (added 2026-09-22, §1296, migration **`HotelCoverageStandards`**) — how many
+  hotel nights the event pays and how many the guest pays, as data rather than code.
+  - **The rule is one line:** `covered = clamp(standard(class) + extraNights, 0, bookedNights)`,
+    `ownExpense = booked − covered`. **Counts only — no covered-date window.** An earlier design had
+    one; it would have had to be chosen, explained to a hotel and re-derived whenever somebody moved
+    their check-in, and the hotel only needs the count.
+  - **`HotelCoverage`** (pure, `Core/Entitlements`) holds the `HotelCoverageClass` enum, the agreed
+    defaults, `ClassFor` (role + speaker category + **derived presenting days**), `Resolve` and
+    `NightsBetween`. Speakers split into master-class / pre-day-only / main-only from their linked
+    sessions, so a schedule change moves their coverage with no edit; a Community speaker with no
+    sessions falls back to main-day (an unfinished agenda is not a decision to stop paying).
+  - **`HotelCoverageService`** (EF) owns the two tables and is what every surface calls:
+    `HotelCoverageStandards` (one row per edition × class; missing ⇒ the catalog default) and
+    `HotelCoverageExtras` (one row per person granted something, with who/when — setting 0 deletes
+    the row, so its presence means "was granted", not "was looked at"). `ResolveManyAsync` answers a
+    whole list in four queries for the list surfaces.
+  - 🔑 **The clamp IS the cap.** "Guest speakers, max 6" needs no special mode: a 6-night standard
+    pays 3 for someone who books 3 and 6 for someone who books 8. *Whole stay* is reserved for the
+    genuinely uncapped classes (organizer / media / event partner).
+  - 🔒 **"Nothing" is a standard, not a veto** — extra nights still apply to a sponsor-brought
+    speaker, because a control that accepted the input and discarded it would be worse than none.
+  - **Surfaces, all reading the one resolver:** `/Organizer/Settings/HotelNights` (the standards),
+    the person's page under People (the extra + the arithmetic), `/Organizer/HotelAssignments`
+    (`covered/booked` for every role, and a flag on volunteers still on the standard),
+    `_HotelFields.cshtml` (the booking-time line — server-rendered and recomputed client-side, and
+    shared by `/Forms/Hotel`, the Get Started step and the inline task row),
+    `HotelLogisticsProducer` (the two Excel columns, **in the content key** so §6.4 re-mails the
+    hotel when coverage changes) and `HotelEmailContentBuilder` (the same sentence in the mail).
+  - **Retired with it:** `SpeakerDayScope.FundedHotelNights` (speaker-only, hard-coded, shown on one
+    page), the four static per-role policy strings in the hotel form, and the Guest-nights box on
+    `/Organizer/SpeakerReview`. `SpeakerProfile.GuestFundedNights` remains on the entity per the
+    additive-only rule but is written and read by nothing.
+- **Volunteer assignment gate** (added 2026-09-21, §1295) — one ring-gated switch decides
+  whether volunteers get work at all, so an edition can onboard and activate volunteers
+  while no assignment can happen.
+  - **`VolunteerAssignmentGate`** (`Core/Volunteers`) is the single authority. It reads the
+    catalog feature **`volunteer-assignments`** (group Volunteers, **UserImpact**, default
+    **OFF at Ring 1**) and answers two questions with the same switch + ring:
+    `MayAssignAsync` (may this volunteer be assigned — kill switch AND effective ring ≤
+    released ring) and `MaySeeOwnAssignmentsAsync` (may they open `/volunteer/myschedule`).
+    `FilterAssignableAsync` is the batch form — it reads the switch and released ring ONCE,
+    then resolves each target, for the importer / queue / scenario loops.
+  - **It is a constructor dependency, not a page check.** `VolunteerStructureService`
+    (required param), `AllocationScenarioService` (required), `VolunteerPlanImportService`
+    (required) and `VolunteerAllocationService` (optional, but built from that service's own
+    `FeatureGateService` + `RingResolver` when absent, so there is no ungated path). The
+    check itself sits in **`VolunteerStructureService.AssignVolunteerAsync`** — the one
+    authority both the organizer page and the supervisor dashboard call — and throws
+    `VolunteerValidationException`, which both pages already render as a notice.
+    🔑 It used to live in `/Organizer/VolunteerStructure`'s page model, which is exactly why
+    the supervisor dashboard, the scenario commit and the plan import had no gate at all.
+  - **Per-path behaviour on refusal, and why they differ:** the allocation QUEUE leaves the
+    draft in place (dormant, re-committable — its existing out-of-ring semantics); an
+    allocation SCENARIO refuses the whole commit (it is stamped Committed with no queue left
+    to re-commit from, so a silent skip would lose the moves); the CSV PLAN IMPORT imports
+    tasks and buckets as normal and holds only the assignment rows, returning
+    `AssignmentsHeldOutOfRing` + `HeldNames` which `/Organizer/BucketAllocation` prints —
+    "0 people linked" with no reason is the §767 silent-sweep failure.
+  - **Volunteer-facing side:** `/volunteer/myschedule` answers **404 on every handler** (GET
+    and all POSTs — status, help, shift decisions, calendar invite), and `NavBuilder` takes a
+    `volunteerAssignmentsVisible` flag (default **false**) that `_Layout` resolves via the
+    gate for volunteers only, in the same pass as the supervisor check.
+  - ⚠️ **Why a NEW key rather than `volunteer-tasks` / `volunteer-allocation`.** Those are
+    **Queue** surfaces and `FeatureDescriptor.IsRingScoped` is `UserImpact && !TileOnly`, so
+    the Settings page renders them "not ring-scoped" **with no ring selector** (§589) — their
+    ring gates real behaviour with no GUI control to move it. Re-classifying them would also
+    give `_HubGrid` grounds to HIDE the organizer's own Volunteers tiles (those keys badge and
+    gate them, and both are catalog-default OFF), locking the organizer out of the page they
+    would change the setting from. They keep meaning "which organizer TOOLS are on"; the new
+    key means "who gets work".
+  - **Rollout:** Settings → Features → Volunteers → turn it on and raise the ring
+    (Ring 1 testers → Ring 2 → Ring 3 everyone). A per-feature override or a **Volunteers
+    group ring** wins over the catalog default (`FeatureGateService.GetReleasedRingAsync`).
+    No schema change, no migration.
 - **Onboarding lifecycle** (added 2026-06-15) — adds **columns to `Participant`**
   (no new table), migration **`OnboardingLifecycle`**:
   - **`LifecycleState`** (`ParticipantLifecycleState`: `Inactive`=0 → `Preselected`=1
@@ -627,6 +701,13 @@ blip is swallowed), through the ring-exempt `EngineAlertSender` under the thrott
 `engine-fail:erp-webshop-reconcile`; a success resets the counter. The job **deliberately does not
 re-throw** — a crash is recorded and alerted, not bubbled up to fail the Functions invocation.
 
+**§1314 — a failed job's own writes never reach the failure counter.** `JobFailureTracker.RecordFailureAsync` runs in the
+failed invocation's scope and shares its `DbContext`; it clears the change tracker first, so the counter is saved even
+when the job died on a bad write (it used to re-send that write, fail, and make the gate fail OPEN with the coalesced
+"database unreachable" alert, which also held back other engines' alerts for 6 h). `SpeakerProfile.Biography` and
+`BackstageBio` are `nvarchar(max)` (migration `SpeakerBioUnbounded`): a bio applied from Zoho Backstage is its editor's
+HTML; the speaker forms still cap typed text at 4000.
+
 ### Operator-editable job frequency (§509/§510)
 
 The organizer sets a job's cadence on `/Organizer/Jobs` with no deploy. The cron cannot carry this
@@ -776,21 +857,33 @@ given integration runs fine on its fallback path.
 - Tasks are **per-company**, not per-contact — all contacts of a company see all that company's
   tasks. Never embed an order id, product name, or contact email in a task description.
 
-### Company Manager (companies / contacts / roles)
-- A custom WordPress plugin on your-domain.example that **owns** sponsor company/contact/role data; the
-  hub reads it as source-of-truth, never re-implements it.
-- REST base `https://your-wordpress-site.example/wp-json/company-manager/v1`, HTTP Basic (a WP application
-  password in Key Vault). Endpoints in use: `GET/POST /companies`, `GET/PUT /companies/{id}`,
-  `POST /companies/{id}/users`, `GET/PUT /users`.
-- Company fields include `erp_customer_number`, `corporate_identification_number` (CVR), currency,
-  VAT zone, billing block, `default_signer_id`, `event_coordination_default_contact_id`.
-- **Roles:** Role 1 = Signer (`default_signer_id`), Role 2 = Event Coordinator
-  (`event_coordination_default_contact_id`). The hub's "reminders go to Event Coordinators, never
-  the Signer" rule maps directly to these.
-- **Public company name** resolves via the fallback chain `company_name_public → legal → billing →
-  "Company {id}"` for every sponsor-facing reference.
-- Editing of contacts/roles stays in the WordPress UI; the hub reads via API (open question on
-  whether to surface editing in the hub).
+### Companies, people and roles — e-conomic is the source (§1312, 2026-09-30)
+- 🗑 **Company Manager (the old webshop's company plugin) is RETIRED** — no client, no options, no job, no page reads or
+  writes it. Removed: `CompanyManagerClient`, `SponsorContactSyncService` (CM → hub contacts), `ErpWebshopContactSyncService`
+  (e-conomic → CM, + CEH offboarding) with `ErpSyncCustomerContactJob`, the CM directory pre-load with
+  `ShopCompanyDirectoryRefreshJob`, `SponsorPublicNameNormalizer`, `WebshopOwnedFields`, the `/Organizer/SponsorWebshopCompany`
+  editor and three SponsorAdmin dashboard actions. The numeric company ids that came from CM stay — they are simply CEH's
+  ids now. The columns `Participant.CmUserId` and `SponsorInfo.CmDefaultCoordinatorUserId` are DROPPED (migration
+  `DropCompanyManagerIds`), with the dead `erp-webshop-reconcile` switch, the `companyManager` config block, the CM role
+  ids in `sponsor.*.json`, the CM contact record in the webshop field map and the `CompanyManager__*` app settings.
+- **The company record is `ShopCompany`**: legal / public name, e-conomic customer number, billing identity. Every former CM
+  lookup (e-conomic number for invoices and the wizard, public name, the welcome audience's e-conomic mapping in
+  `SponsorErpCoordinatorSource`, the webshop invoice's billing reference) reads it; the webshop invoice's Att / Your
+  reference is e-conomic's Role:1 contact.
+- **People and roles: `ShopErpRoleSyncService`** (job `ShopErpRoleSyncJob`, every 10 minutes; and at once, for one
+  customer, when an organizer saves `/Organizer/EconomicContacts` or a sponsor saves Company Details). For every
+  `ShopCompany` with an e-conomic number (withdrawn skipped): billing identity follows e-conomic; the `ShopKnownContacts`
+  (Source `Economic`) ARE e-conomic's contacts with roles (Role:1 signer, Role:2 coordinator in the contact notes); a linked
+  hub contact who is an e-conomic contact carries e-conomic's roles. Only a **signed sponsor** (and a CEH-registered
+  company) has its e-conomic contacts created as hub contacts — a potential sponsor's are offered in the company page and
+  order-page dropdowns ("k:{id}", made a contact by `ShopCompanyDirectoryService.KnownToContactAsync` when picked, no mail).
+- 🔒 **Nothing is removed or deactivated automatically.** For a signed sponsor, mismatches are stored in
+  `ShopCompany.ErpRoleWarning` (one per line), shown on `/Organizer/ShopCompany` and mailed to the organizers once when
+  new: an ACTIVE CEH signer / coordinator who is not an e-conomic contact, no Role:1 / Role:2 in e-conomic, and an e-conomic
+  contact whose name matches a linked person under another e-mail (never created twice). An empty e-conomic answer changes
+  nothing.
+- **Public company name**: `ShopCompany.PublicName` (filled once from the legal name without its legal form, then the
+  organizer's), via `SponsorCompanyNameService` for every sponsor-facing reference.
 
 ### e-conomic ERP + sponsor webshop (REQUIREMENTS §7a)
 A clean .NET slice of the legacy PowerShell ERP/webshop pipeline, in
@@ -1006,6 +1099,50 @@ Speakers).
     hub-added, and inverting this rule would delete precisely what it protects. Deletes run AFTER the
     main `SaveChangesAsync` (that service commits, and committing mid-loop would flush half-built
     rows). `SessionDeletionService` is registered in the Jobs host for this.
+- **Organizer → Sponsors: what each company bought, real sponsors first (§1359).** `SponsorPurchaseOverview` (Core)
+  reads the SAME orders the sponsor-order pull trusts — completed webshop orders (`WebshopOrderArchiveSource`) + signed
+  CEH shop orders (`ShopOrderSource`), never cancelled ones — and gives per company: the booth tier only while
+  `HasCurrentBoothOrder` backs it (`Tier` is raise-only), the product categories of the CURRENT lines (the stored Zoho
+  category set is raise-only too) and every product with its total quantity. Shown as a "Tier & products" column and
+  in the Excel download. By default the list hides test (`IsTestData`), withdrawn and inactive companies (every contact
+  deactivated; a company with no contacts yet stays — mid-onboarding); "Show test & inactive (N)" brings them back,
+  marked, and every sort/page link and action form keeps the choice.
+  §1362b: the grid is built from contacts AND tasks, so a company with no `SponsorInfo` and no contacts can be listed by
+  its tasks alone — and Withdraw (which marks the record and deactivates contacts) had nothing to change. For such a
+  company `WithdrawSponsorCompanyAsync` now retires its open tasks (`TaskClosure.Retire`, `AbandonedOnDeactivation`), and
+  the grid's "nothing left to show" test ignores system-closed tasks, so the row drops out. "In progress" is sortable.
+- **Public name, website, LinkedIn, X: ONE field each, on the company page (§1360).** `ShopCompany.PublicName /
+  Website / LinkedInUrl / TwitterUrl` is the single store; the legal / billing name (`LegalName` — contracts, invoices)
+  is a different field and is never touched. Readers go through `CompanyLinks.AllAsync / ForAsync / Of` (public
+  sponsor page, AI helper, SoMe variables, LinkedIn organisation lookup, onboarding progress, the sponsor's own forms,
+  the links reminder) and the name resolver (`SponsorCompanyNameService` — company-page public name FIRST, then the
+  copy, then the legal name without its legal form, upload store, ERP). The sponsor record's `CompanyName / WebsiteUrl
+  / LinkedInUrl / TwitterUrl` are a COPY: `ShopCompanyLinks.SyncFromCompanyPageAsync` (every sponsor-order pull)
+  rewrites it from the page, so the remaining readers of the copy (Zoho sync/provisioning, ~38 name readers) are at
+  most one pull behind and a one-sided write to the copy never wins. Only exception: a BLANK page field takes the
+  copy's value once (carried-forward or legacy values are not lost — "we set the public name as one-time if blank").
+  Writers already write both (`MirrorToShopAsync`, `ApplyPublicNameAsync`, the organizer company page). Background:
+  the copies were kept equal only on a save, so Egiss/RedHat (blank copy) and Truesec (.com vs .dk) drifted. The
+  links reminder names the CEH company page instead of "the webshop".
+- **Bought sponsor sessions become agenda sessions (§1352).** `SponsorAgendaSessionService` runs at the
+  end of every sponsor-order pull (5 min, Jobs host) over the SAME orders the pull trusts — completed
+  webshop orders + signed CEH shop orders, never cancelled ones. `SponsorInfo.HasSponsorSession` is
+  deliberately not the source: it is raise-only and survives a cancellation. The slot comes from the
+  product name (`… timeslot: N (est. time: HH:MM-HH:MM)`, Danish time on the main day → UTC), the room
+  per product kind from `sponsor.<edition>.json → agendaSessions.rooms`; no `agendaSessions` block ⇒ off.
+  One hub-added `Session` per bought slot, keyed by `Session.SponsorSlotKey` (filtered-unique) with
+  `Session.SponsorCompanyId`. Until the sponsor submits the session step the title is
+  "<Sponsor>: Session TBD"; afterwards it carries the sponsor's title, abstract, track (else
+  `agendaSessions.fallbackTrack`, because Zoho refuses a session without one) and speakers. Every run
+  rewrites title, abstract, speakers, room and time from that truth, so organizer edits to those are
+  replaced. The TRACK is different: the fallback is used only when the session is created; afterwards
+  the session keeps its track (an organizer may set it on the Sessions page) unless the sponsor picks
+  one in the hub, which then wins.
+  `ExcludeFromSoMeAnnouncements` is always set: the sponsor is already announced as
+  `sponsorsession:{id}`, and a TBD title must never post. The session push creates it in Backstage as
+  it stands (create-only); a later change surfaces through the §1002 hourly difference mail to info@.
+  A slot that is no longer bought is logged as an orphan and never deleted (it may be in Backstage and
+  carry attendee data). Test sponsors (`SponsorInfo.IsTestData`) are skipped.
   - 🔒 Matched **anywhere in the title**, case-insensitively — never as a prefix. He moved the
     markers to the END of the title the same day (*"Identity "black belt" session [Placeholder]"*),
     and a prefix rule would have stopped matching silently at exactly that moment.
@@ -1166,7 +1303,11 @@ The only Zoho delete it performs is a booth **member** delete (below).
   `BackstageExhibitor:DefaultBoothCategoryId`, mirrored from `zoho-mapping`), `company_name`,
   `website_url`, `booth_label`, `amount`, `currency_code` and `contact{first,last,email}`, and must
   **drop** `exhibitor_type` (server-derived). A create that returns 2xx **without an id** is treated
-  as a FAILURE (Zoho keys on contact email; an existing email yields a no-create 200). Every create
+  as a FAILURE (Zoho keys on contact email; an existing email yields a no-create 200). The contact comes
+  from the Company Manager default coordinator, and — for a company registered through the CEH shop
+  (`ceh-…`, no Company Manager record) — from the shop's company contacts (event coordinator, else signer);
+  without either, Zoho answers a bare HTTP 400 "unexpected error" (2026-09-29). The contact travels on the
+  CREATE only — never on an update (Zoho caps contact e-mail updates at three, §791.5). Every create
   now **logs the HTTP status + trimmed body on failure** and surfaces it to the provision notes →
   the operator alert email, and the fall-through **increments a counter** so a silent failure can no
   longer read as "0 created, 0 skipped".
@@ -1174,7 +1315,10 @@ The only Zoho delete it performs is a booth **member** delete (below).
   product name (`\bE-(\d{1,3})\b`). Assigning a booth to an EXISTING/linked exhibitor resolves the
   slot **label → `booth_id`** via `GetBoothsAsync` and PUTs that (`AssignExhibitorBoothAsync`) rather
   than re-creating. If the product name carries no slot (booth assigned later), `BoothLabel` stays
-  blank and nothing is pushed until a source supplies it.
+  blank and nothing is pushed until a source supplies it. The create never carries the booth (§1163), so an
+  exhibitor created this run gets its booth PUT in the same run. Zoho refuses a booth whose **booth category**
+  differs from the exhibitor's (400 "The selected booth belongs to a different exhibitor category") — a refusal
+  goes into the provision notes with Zoho's reason and counts as skipped, so the drift mail reports it.
 - **Contact-email 3× cap (§41a, CRITICAL).** Zoho hard-caps the sponsor/exhibitor **contact email**
   at 3 UPDATE *attempts* (a no-op re-send still counts) then BLOCKS the record. CEH tracks the
   last-synced value in `SponsorInfo.ZohoContactEmail` and sends the email **only when
@@ -1236,6 +1380,26 @@ not Sessionize. Gating is threefold: the feature **kill switch**, the **released
 (1 Dec 2026). The **first populate seeds silently** (no email for a value that was simply never
 recorded), and with no agenda source the run is a graceful no-op. The engine is **inert until the
 agenda is in scope** — it does nothing for sessions/speakers outside the released ring + date window.
+
+**Speaker names from Backstage (§1363).** The speakers API returns the first name as `first_name` (the older `name` key is
+blank; it is still read as a fallback), plus `last_name`; `BackstageSpeaker` carries the full name and Zoho's own
+First/LastName. Until 2026-10-20 the reader took `name`, so every stored `BackstageName` baseline was the last name alone;
+`SpeakerChangeDetectionService.IsLastNameOnlyBaseline` corrects such a baseline quietly (no delta) on the next pass. A real
+name change carries Zoho's First/LastName in the delta, and the apply writes them as given instead of splitting the full
+name at a space.
+
+**Speaker data: CEH is the master (§1364).** Speakers edit their details in the hub; Backstage is updated BY HAND (the
+speakers API is create-only). `SpeakerZohoGapReporter` (job `SpeakerGapReportJob`, feature `speaker-gap-report`) compares
+tagline, bio, country, company and skills (accreditation + MVP categories) as CONTENT and mails one line per field, in
+two directions: CEH has a value Backstage lacks or holds differently ⇒ `Field (new value in Zoho from hub) -> <hub value>` (set it in
+Backstage); CEH is blank but Backstage has a value ⇒ `Field (new value in hub from Zoho) -> <Zoho value>` (catch CEH up — never
+"clear it", which would delete data CEH simply never captured). Text compares as plain text ignoring capitals; skills as
+a case-insensitive set. Only participants with the **Speaker role** are compared (§1365, `IsReported`): an organizer,
+volunteer or sponsor who also speaks never fills the CEH speaker form, so CEH has no company or skills to hold
+Backstage's value and the line could never clear. Every linked profile is still stamped with the hash, so a stale stamp
+on an excluded profile cannot defeat the dedupe. Hash-deduped: one mail per change of the set; subject "Speakers — Backstage and CEH differ". **Nothing from Zoho is written into CEH:** `SpeakerChangeDetectionService` is off in
+code (`DisabledInCode` — no setting; re-enabling is a deploy, the same shape as §1020 for sessions), and approving any
+queued Zoho→CEH update (speaker or session) only acknowledges it. The attendee ticket-name sync (§707.22) is unchanged.
 
 ### Sessionize (speaker import)
 Two interchangeable sources feed **one** upsert core. The upsert semantics live once in
@@ -1948,9 +2112,14 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
 Gold → Feature → "Other supporters"), backed by `PublicSponsorsService`. Sponsors are public, so there is
 **no publish gate** — every `SponsorInfo` row for the edition is shown. The display name resolves through the
 shared `SponsorCompanyName` fallback chain (the per-company `SponsorUploadLocation.CompanyName` captured at
-order-pull time → `"Company {id}"`); the logo uses `SponsorInfo.LogoRasterPath` normalised to a root-relative
+order-pull time → §1315 `SponsorInfo.CompanyName` → the shop company's public name, legal name as the legal fallback →
+the unresolved-name marker); the logo uses `SponsorInfo.LogoRasterPath` normalised to a root-relative
 URL (non-browser-renderable vector formats `.eps/.ai/.pdf` are dropped so the page falls back to an initials
-monogram, never a broken image); the optional link surfaces only an absolute http(s) `SponsorInfo.WebsiteUrl`.
+monogram, never a broken image). §1315: a logo stored as a SharePoint URL (403 for anyone outside the tenant) is served
+through the anonymous `/sponsor-logo/{company}` (`PublicSponsorsService.PublicLogoPath` / `SharePointLocation`: the
+drive-relative folder + file of the URL, listed and downloaded with the file store; raster types only — an SVG is never
+served from the hub's origin; only an Active sponsor of the active edition; listing cached 10 min, file 30 min); the
+sponsor start page uses the same; the optional link surfaces only an absolute http(s) `SponsorInfo.WebsiteUrl`.
 Note the SoMe `GraphicAsset` of `Type=Sponsor` is **internal-only** (§8) and is deliberately **not** used
 here — the public logo is the sponsor-uploaded raster, not the internal SoMe graphic. Returns **null** when
 there is no active event; an active event with no sponsors renders zero groups (a "sponsors coming soon"
@@ -2054,6 +2223,17 @@ Vault. See §7.
 The hub generates social-media graphics for speakers and sponsors, stores graphics + speaker pictures on
 SharePoint, and lets speakers self-share — built as a **clean seam + stub for every external system** so
 the engine, schema and gates are real and tested offline while real creds/site/URLs stay operator config.
+
+- **Face gate — a speaker graphic is complete or it does not exist (§1304).** The sweep
+  (`SoMeBundleBuildService`) builds a track GIF / session graphic only when EVERY speaker has a matched
+  photo; otherwise it counts the subject as waiting and, if a released generated graphic exists,
+  un-releases it and marks it (`InputHash = FaceGateRetiredHash`). A complete rebuild re-releases only
+  what the gate retired — organizer overrides and manual un-releases are never touched. `FaceGateVersion`
+  is part of the speaker hashes (not sponsor ones), so its introduction rebuilt every speaker graphic once.
+  At publish time an un-released graphic is a hard block (the send-time approval gate), logged as
+  `§1304 CRITICAL` and mailed once per post and reason to the SoMe notification list
+  (`some-graphic-blocked`, ring-exempt). The sweep logs each rebuilt graphic by name. Previously a
+  missing photo became an empty ring and the hash (ids + names only) never noticed the photo arriving.
 
 **Code shape** (`CommunityHub.Core/Integrations/Graphics/`):
 - **`GraphicCompositor`** — pure **SixLabors.ImageSharp** (Apache-2.0 3.1.x line; **not** the
@@ -2344,11 +2524,24 @@ operator wires it.
   `ImageRef`, `Tags` (newline-separated handle/URN list → `TagList`), `AutoGenerated`,
   and the dispatch audit (`PublishedAtUtc`, `ExternalPostId`, `LastError`, `SpeakerPreAlertSent`). Indexed
   `(EventId, Status, IsActive, ScheduledAtUtc)` for the dispatcher's due-query.
+- **Organizer mails show the post as published (§1313).** `SoMeMailPreview` (scoped, both hosts) builds the text with the
+  publish composer (`SoMePostComposer.ValuesForAsync` + `Resolve`; `SoMeEmptyVariableGate` names a missing value) and the
+  picture with THE resolver the publish uses (`ResolveImageAsync` moved here from `SoMeDispatchService`, which now
+  delegates: §917 current subject graphic, then the GraphicAssets store, then the media library). Used by the T-5 speaker
+  pre-alert (it printed the raw template), the 24-hour notice (it had no text at all), the auto-approval notice and the
+  publish notice (it only named the file). The picture goes as an attachment (`SendWithAttachmentsAsync`: first address
+  To, the rest CC); videos are named, not attached.
 - **`SoMeSettings`** — one row per edition: `Enabled`, `CompanyPageUrlOrOrgId` (operator config, NOT a
   secret — placeholder only in committed files, like the Sessionize endpoint id),
   `SpeakerPreAlertOrganizerEmail`, `NotificationEmails` + `NotifyOnPublish`. **The LinkedIn OAuth access
   token is intentionally NOT a column** — it is a Key Vault secret (`linkedin-some-access-token`) read by
   the live publisher only.
+- **The event's LinkedIn page** — `EventLinkedInPage.Url` (`/company/<your-event-page>`) is the ONE link a person
+  follows or opens: the follow card on the speaker and sponsor announcement pages (`_LinkedInFollowCard`), the
+  announcement mail's follow invite (`SoMeAnnouncementNotifier.FollowBlock`) and the speaker share text
+  (`GraphicsService`). It is deliberately not `CompanyPageUrlOrOrgId`: that holds the numeric organization id the
+  publisher posts as, and the numeric URL sends a visitor to a login page. (2026-10-01: three hand-copied URLs had
+  drifted, and two of them linked a slug that LinkedIn answers with 404.)
 
 **Code shape** (`CommunityHub.Core/Integrations/`):
 - **`ILinkedInPostPublisher`** (gated seam) — `NullLinkedInPostPublisher` is the default (`CanPublish=false`,
@@ -2448,6 +2641,23 @@ an excluded subject would otherwise read as "already handled". Any queued, unpub
 subject key is excluded is **tombstoned (§853)**, which is also what stops the planner re-proposing it;
 the reason travels into the planner's own message. Published posts are never touched, and a removal is
 reversed by clearing the flag and pressing Restore in the post editor.
+
+**§1347 (2026-10-18) — withdrawn sponsors and test contacts.** `TestDataScope.NotAnnounceableSponsorCompanyIdsAsync`
+= test companies ∪ `WithdrawnSponsorCompanyIdsAsync` (a company with sponsor rows and **none** `Active`).
+The planner (types 2–4), the tier list (`SponsorTierValuesAsync`), the capacity report and the guard's
+`sponsor:` keys (reason "withdrawn") all read it. Before, only the dispatcher's publish-time
+`RevalidateSubjectAsync` stopped a withdrawn sponsor. `SponsorValuesAsync` also drops `IsTestUser`
+contacts from `{SponsorSigner}`/`{SponsorEventCoordinators}`, because a real company can carry seeded test
+contacts and the mixed-company rule (§905) deliberately keeps it real.
+
+**§1348 (2026-10-18) — lapsed booth tier.** `TestDataScope.LapsedBoothTierSponsorCompanyIdsAsync` returns
+companies with a booth package (Gold/Diamond/Platinum) and no row with `HasCurrentBoothOrder`. That is
+the one entitlement field rewritten on every pull; `SponsorPackage` is raise-only (§1163). The set joins
+`NotAnnounceableSponsorCompanyIdsAsync` (so planner, tier list, capacity and guard follow it, guard reason
+"booth tier lapsed"), and the bundle sweep drops it from the tier GIF only: the single sponsor graphic
+also feeds branding and is kept. It is safe for new sponsors because the same pull (WooCommerce + signed
+CEH shop orders) sets both the package and the flag. The case it was built for is a Gold sponsor whose
+booth was cancelled and which remains a founding partner.
 
 #### One post per subject per round, and no Type 5 churn (§1201/§1203, 2026-09-12)
 
@@ -3475,10 +3685,24 @@ union of every form; each role gets a deliberately trimmed list of exactly what 
   questions / evaluations / SoMe graphics per session), Bio (`/Forms/Speaker`), Calendar, an
   Event-logistics fold-out, and Contact organizers. The old long flat speaker list is dissolved.
 - **Volunteer** — My schedule (the single home for assigned shifts AND tasks), My availability
-  (`/volunteer/availability`), the Supervisor dashboard **only when the volunteer actually supervises
+  (now the Get Started step `/Forms/Wizard?step=availability`, §939; the standalone page shares the same
+  `VolunteerAvailabilityFormService`), the Supervisor dashboard **only when the volunteer actually supervises
   a bucket** (`isVolunteerSupervisor`, so a non-supervisor never lands on a dead-end), and an
   Event-logistics fold-out. The shift-signup wizard moved out of the volunteer menu (it becomes an
   anonymous survey).
+  🔴 **§1346 — availability saves apply directly, first save AND every later change.** The first save
+  e-mails the volunteer lead (`AvailabilityModel.NotifyEmail`) the full table; a change writes only the
+  changed days and e-mails the lead a "What changed" old→new table above the full table. A later change
+  used to be enqueued as a §59 Volunteer Update delta, but the wizard host never renders the service's
+  `Notice`, so the volunteer re-opened the form, saw her old values and re-submitted ~20 times. The
+  delta apply path (`ApplyVolunteerAvailabilityUpdateAsync`) still exists, but nothing enqueues a
+  Volunteer delta any more and the PROD queue was drained on 2026-10-15.
+  🔒 **Operator rule (2026-10-15): no approval queue for volunteer availability, and the lead hears of
+  EVERY change.** The two write paths and their notification: the availability form
+  (`VolunteerAvailabilityFormService.SaveAsync` → `NotifyLeadAsync`, first save + every change) and the
+  public signup page (`Signup.cshtml.cs` → its own `NotifyLeadAsync`, full table on every submission).
+  A new path that writes `VolunteerDayAvailability` must notify the lead too. Deletion paths
+  (participant deletion, edition purge) are not volunteer changes and do not notify.
 - **Sponsor** — Sponsor Webshop / Exhibitor & Booth / Leads fold-outs (the Zoho exhibitor-dashboard
   links + the in-hub failover pages), Sponsor tasks, Sponsor event logistics and Contact organizers.
 
@@ -4850,6 +5074,24 @@ first.
 **Zero-downtime prod:** S1 plan + a staging slot — deploy to the slot, warm it up, then swap. A bad
 deploy is rolled back by swapping the slot back.
 
+> 🔒 **App settings must exist on BOTH slots, with the same value.** App settings are *not*
+> slot-specific unless marked sticky, so a swap **trades** them: a setting that exists only on
+> production is carried away to the staging slot by the next deploy and is simply gone from the
+> running app. Nothing warns the app — the value reads as unset and whatever depends on it silently
+> takes its "not configured" branch.
+> - `deploy-app.ps1` **diffs the two slots before every swap** and prints three named lists —
+>   PRODUCTION ONLY (*lost* on swap), STAGING ONLY (*arrives*), DIFFERENT VALUE (staging's wins).
+>   Names only, never values, because the output gets pasted into chats. It **warns and continues**:
+>   a difference is often deliberate mid-change, and a deploy tool that blocks on one it cannot judge
+>   gets worked around within a week.
+> - ⚠️ **Which makes acting on the warning the actual control.** When the diff names a PRODUCTION
+>   ONLY key, settle it *before* swapping — copy it to the staging slot, or accept losing it on
+>   purpose. This has now bitten twice (a SharePoint folder path in July, a Backstage fallback-track
+>   key in September); the second time the warning named the key correctly and was read past.
+> - 🔑 **Recovery is easy if you know where to look:** a prod-only setting is not destroyed, it is
+>   *on the staging slot* after the swap. Read the value back from there rather than reconstructing
+>   it, then write it to both slots.
+
 > **Runtime / framework version.** Both apps run on **.NET 10** (LTS) — the web app on Linux App
 > Service (`linuxFxVersion = DOTNETCORE|10.0`, set in `appservice.bicep`), the scheduler on Azure
 > Functions FlexConsumption (`functionAppConfig.runtime = dotnet-isolated 10.0`, set in
@@ -5093,6 +5335,38 @@ string. Keep dev↔prod schema in sync by applying this migration to both enviro
     the workspace instead, e.g.
     `az monitor log-analytics query -w <workspaceCustomerId> --analytics-query "AppTraces | where TimeGenerated > ago(1h) | take 20"`,
     or use the Logs blade on the workspace (not the Insights resource).
+  - **On-demand detailed logging (§1317, jobs host).** The jobs host logs QUIET by default: SQL
+    statement lines (`Microsoft.EntityFrameworkCore.Database.Command`) and HttpClient request lines
+    are held at Warning, fast successful SQL dependencies are not sent (a SQL call that fails or
+    takes ≥ 1 s always is), and `Host.Startup` is at Warning in `host.json`. Job log lines, warnings,
+    errors and exceptions are unaffected. **To investigate an issue**, set the Functions app setting
+    `Diagnostics__VerboseLogging = true` — the host restarts and logs in full detail; remove it (or
+    set `false`) afterwards. No deploy is needed either way. Detail is only captured from the moment
+    it is switched on. Implementation: `src/CommunityHub.Jobs/DiagnosticsLogging.cs`.
+    ⚠️ The worker uses a bare `HostBuilder`, so `Logging__LogLevel__*` app settings are not honoured
+    there — use this switch.
+  - **Performance counters and routine metrics are off (§1317).** Jobs: the worker's performance
+    counters and the `azure.functions.health_check.*` metric are sent only while
+    `Diagnostics__VerboseLogging = true`; the runtime's counters are off in `host.json`
+    (`enablePerformanceCountersCollection`, re-enable with the app setting
+    `AzureFunctionsJobHost__logging__applicationInsights__enablePerformanceCountersCollection = true`).
+    Web: performance counters off and the OpenTelemetry `http.client.*` metric series dropped
+    (`http.server.*` kept). The Platform-health page reads none of these.
+    ⚠️ **Measured after the 2026-10-05 deploy, only the jobs performance counters actually stopped.**
+    Three are configured but NOT effective yet: the jobs `azure.functions.health_check.*` metric
+    (pre-aggregated metrics do not pass the worker's telemetry-processor chain, so
+    `QuietSqlDependencyFilter` never sees them), and on the web both
+    `EnablePerformanceCounterCollectionModule = false` and the `http.client.*` drop view (App Insights
+    ASP.NET Core 3.x is OpenTelemetry-based and appears to ignore both). Tracked in REQUIREMENTS §1317.
+  - **DEV sends no telemetry at all** (2026-10-05): `APPLICATIONINSIGHTS_CONNECTION_STRING` was
+    removed from the DEV web and jobs apps, so neither registers a destination and the DEV
+    Platform-health page shows its numbers as unavailable. To get DEV telemetry back for an
+    investigation, re-add the setting from the DEV Application Insights resource's connection string.
+    ⚠️ The infra Bicep (`appservice.bicep` / `functions.bicep`) still sets it, so an infra redeploy of
+    DEV turns telemetry back on — remove it again afterwards.
+  - **DEV workspace daily cap — 0.3 GB/day** (set 2026-10-05). Once reached, DEV stops ingesting
+    telemetry until the daily reset. PROD has no cap. The cap is set on the workspace, not in
+    `infra/modules/monitoring.bicep`, so re-deploying that module may clear it — re-check afterwards.
   - **"No telemetry" after a deploy usually means a runtime/build mismatch, not a logging gap.** A
     .NET-version mismatch (old-framework build on a new-framework runtime) crash-loops the worker
     before it can emit anything (`dotnet exited with code 150`); fix by redeploying a build that
@@ -5626,8 +5900,13 @@ after the money was gone.
 - **"Low" is asked, never re-derived.** The service reads `CouponPoolBalance.IsLow` — the same
   arithmetic the organizer page shows — so the mail and the screen cannot drift apart, and
   hand-closed pools (§795.1) are excluded at the source rather than by a second rule here.
-- **Threshold:** the pool's own `LowBalanceThreshold`, default 5. Oversubscribed pools are counted
-  and titled separately: *"3 left"* is a heads-up, *"-2"* is money already gone.
+- **Threshold:** the pool's own `LowBalanceThreshold`; **default 0 = no running-low warning**
+  (§1341, 2026-10-08 — the old default of 5 flagged a fresh, invoiced 5-ticket pool before a single
+  claim). One rule, `CouponPrepaidBalance.IsLowAt(remaining, size, level)`, serves pools and capped
+  ad-hoc coupons: **past the agreed number is always low**; otherwise only when level &gt; 0, and the
+  level is capped at `size − 1`. A saved 0 is stored as 0 — only a blank field means "default".
+  Oversubscribed pools are counted and titled separately: *"3 left"* is a heads-up, *"-2"* is money
+  already gone.
 - 🔴 **The quiet period (24h, per row) is broken by DETERIORATION.** `LastLowBalanceAlertRemaining`
   stores the balance each alert was sent at, so a pool warned at *"3 left"* and now at *"-2"*
   re-alerts within the hour. A plain time-based suppression would silence exactly the transition the
@@ -5820,6 +6099,19 @@ posts a plain quantity, and one handler serves both (`PoolTargetTotal` null ⇒ 
   so §990's prepaid invoices were invisible on the page and "does what I billed match the code's
   max?" could not be answered there. Built from **all** allocations, dormant included — a dormant pool
   still records money that was billed.
+
+**§1362 (2026-10-20) — Reduce TO a total: a correction, not an edit.** "Reduce to" adds a purchase row with a
+**negative** quantity (`CouponPoolReduction`), so the pool stays derived (purchased = sum of purchases), the earlier
+purchases keep their invoice numbers, and the history reads "28 bought, 9 credited". The row's number field holds the
+**credit note**, which is made in e-conomic by hand — CEH raises no invoice or credit note for it, and the row is never
+`ErpInvoiceRaisedByCeh`, so the §1312 refresher never tries to raise it again. Refused when the new total is not lower,
+or below the tickets already claimed (same claim source as the page). The correction is valued at the latest priced
+purchase so the agreed value nets down. Until the credit-note number is entered, the §795.2 chase names the row as a
+correction waiting for a credit note. The Backstage promo code's max is still set by hand (no coupon API).
+🔴 Crediting an invoice in e-conomic **copies its references**, so the credit note carries the invoice's own
+`CouponPrepaid-{id}` marker. The invoice scan flags a booked invoice with a negative net amount as a credit note
+(`EconomicInvoiceReference.IsCreditNote`, shown as "credit note N"), and the §1013a number refresher skips it — before
+that, it took whichever came last and wrote the credit note's number over the invoice it credits.
 
 ### 21.12 "No contacts" must not mean "could not read" (§991)
 
@@ -6438,6 +6730,21 @@ delivered =  CompanyDescription has text
 ```
 
 - **Text means whitespace-trimmed non-empty.** The form stores blank input as null, so the two agree.
+- **Lengths come from `ZohoExhibitorLimits`** — `Overview` 1000 and `ShortDescription` 80 are measured
+  Zoho caps; `SocialBrandingText` is CEH's own (**900**, raised from 600 by §1343 on 2026-10-14). The
+  EF column `SponsorInfo.SocialMediaIntro` takes its max length from the same constant (migration
+  `SponsorSocialMediaIntro900`, nvarchar 600 → 900, widen-only), and both forms render the limit and
+  counter from it, so the number exists once.
+- **The public name is ONE field for sponsor and organizer (§1344, 2026-10-14).** It lives on
+  `ShopCompany.PublicName` and is copied to `SponsorInfo.CompanyName` (what `SponsorCompanyNameService`
+  reads first). Organizer writes: `ShopCompanyDirectoryService.SetPublicNameAsync` (companies table) and
+  `UpdateCehDataAsync` (company page). Sponsor writes: `ShopCompanyLinks.ApplyPublicNameAsync` from the
+  Get Started company step and Company Details — the same two columns. Sponsor screens READ it through
+  `ShopCompanyLinks.PublicNameAsync` (the shop row first), so both sides always see one value. A blank
+  never clears it; the legal name is never written. Company Details saves it on **Save** only (not
+  auto-save), so a half-typed name never goes live; the wizard step's save re-syncs Zoho with it.
+- **Live in PROD 2026-10-14:** §1343 (`8d80150b`, with the column migration) and §1344 (`d281cd16`), web and jobs
+  hosts both.
 - 🔒 **`CompanyDescriptionShort` is exhibitor-only** because `SponsorCompanyFormService` writes it
   only inside `if (info.HasBooth)`. Requiring it from a non-exhibitor would hold them below 100% on a
   field their own form refuses to save — the §732 defect. The conditionality lives in the predicate,
@@ -7004,6 +7311,27 @@ retrying costs nothing a user can see.
 post-failure cooldown is in force and the request budget is already spent; asking again is what turns
 a transient throttle into a sustained outage.
 
+## §1361 — Pacing the Zoho Backstage API
+
+Zoho publishes no request limit for Backstage. It was **measured** on PROD (2026-10-19): when the five- and ten-minute
+jobs coincide, about 275 API calls left in eight seconds; Zoho answered **HTTP 400 "Request limit exceeded"** from
+roughly the 110th call onward and refused about 40 per run. Zoho's other APIs document 100 requests per minute per
+organisation, which is consistent with that.
+
+Every Backstage call (the typed Zoho HttpClient, in both hosts) passes one handler with one per-process budget:
+
+- **At most 80 requests per rolling minute.** A call over budget waits for a slot; a caller never waits more than two
+  minutes, after which it is answered as refused without being sent.
+- **After a real "Request limit exceeded" (or a 429) nothing is sent for 65 seconds.** Calls in that window are answered
+  locally with the same refusal, so every caller's existing "unavailable — retry next run" path applies unchanged and a
+  burst stops hammering the wall.
+- **The token endpoint is not paced here** — it has its own, tighter limit and cooldown (§1142 below).
+- The budget is per process; the jobs host can scale out, and the refusal pause is what contains the remainder.
+
+The sponsor sync also **rotates its starting company every ten-minute slot** (a stable order by company id, shifted).
+With a fixed order the same tail of companies was refused on every run and their changes never arrived; rotated, a run
+that is cut short delays different companies each time and every one is reached within a few runs.
+
 ## §1142 — The shared Zoho access token
 
 Zoho meters the *token endpoint* far more tightly than the API: a small number of grants per
@@ -7235,3 +7563,968 @@ was considered and rejected: it would report the same company twice for one caus
   `SessionizeDisappearanceDetector` filters on `Participant.DeactivatedByOrganizerAt == null` — not `IsActive`,
   which is also false for an unreviewed import. The mail names `participant #N (speaker profile M)`; the
   sync-queue delta keeps the profile id as its `EntityId`.
+- **Speaker-hub access is a CAPABILITY, not the `Role` enum (§1255).**
+  `ParticipantCapabilities.HasSpeakerHubAccessAsync(db, eventId, participantId, role)` is true for
+  `Role == Speaker` **or** an existing `SpeakerProfile` in that edition; every `/Speaker/*` gate asks it
+  (pages holding no `DbContext` inject the thin `SpeakerAccessService` wrapper). 🔑 The data model already
+  stored multi-role people correctly — the speaker import creates a profile, links sessions and seeds
+  deadlines while deliberately never overwriting an existing row's `Role` — so an organizer, volunteer or
+  attendee who also speaks was refused pages whose own content already belonged to her. Deliberately NOT a
+  `Participant.Roles` set: `Participation` replaces that in the target model, so a set would be built and
+  then deleted. `NavBuilder.Build(..., hasSpeakerCapability)` adds a two-leaf **Speaker** section (My
+  Session(s) + speaker tasks) AFTER Contact, so no existing item changes position; it is ignored for
+  `Role == Speaker`, whose menu is already complete. ⚠️ The capability is granted by the IMPORT, so access
+  widens without a human act — accepted deliberately (every measured case was a genuine speaker), and
+  recorded as an open decision in REQUIREMENTS §1255.
+- **A cancelled ticket never closes a login that is something else too (§1255b).**
+  `AttendeeTicketSyncService.ReconcileParticipantLoginsAsync` still deactivates an attendee-role login when
+  its last active ticket goes, but first asks `ParticipantCapabilities.NonAttendeeCapabilitiesAsync` —
+  speaker profile or session link, volunteer assignment, sponsor company link. Any hit and the row is left
+  active. The list is deliberately GENEROUS because the two failure modes are not symmetric: a false
+  positive leaves an account open one edition too long, a false negative locks a speaker out of her own
+  sessions. The guard is one-directional — it blocks only the deactivate branch, so a re-purchase still
+  restores access. Ticket-derived entitlements are untouched; only the login survives.
+- **An ops alert throttles on SQL, not on memory (§1256b).** `EngineAlertSender` keeps its in-process
+  dictionary as a free first check, but the authority is one row per key in `EngineAlertThrottles`
+  (`ThrottleKey` unique, `LastSentAt`, `LastSubject`). 🔑 The class is a SINGLETON, so the old map was
+  correct only while the process lived — and the Functions host recycles between timer ticks, so every
+  run started cold and the 6-hour window never applied. It resolves a scoped `DbContext` through an
+  optional `IServiceScopeFactory` (never a captured context in a singleton) and fails OPEN in both
+  directions: one extra mail is a better failure than silence about a broken engine.
+- **Text is compared as a reader sees it (§1256c/§1256d).** `HtmlTextNormalizer` turns the markup some
+  Sessionize bios carry into plain text — `</p>` and `<br>` become real line breaks FIRST, so the
+  author's paragraphs survive — and it runs in the importer, in the hub's save path, and as a repair
+  on values already stored. `TextComparison.DiffersVisibly` collapses runs of whitespace before
+  comparing, because every surface that renders a title collapses them anyway: asking an operator to
+  re-type a title so a double space matches is work that cannot change what anyone sees. Session
+  titles are collapsed on save for the same reason. ⚠️ Only whitespace and markup are normalised —
+  case, punctuation and dashes stay, because a change to one of those IS visible.
+- **One human counts once, and the rule has ONE home (§1257/§1258).** `LogisticsAudience` is the
+  filter every logistics surface already asks — the hotel, swag, lunch, food and expo producers,
+  `LunchHeadcountService` and the Excel exports. It now excludes two kinds of second count:
+  a **linked duplicate** (`SamePersonAsId != null` — the same human as another row, set by an
+  organizer and never inferred) and, via `CountableCrew`, **anyone a live ticket already counts**.
+  🔑 No de-duplication report exists, deliberately: `ExcludedDuplicates` answers "who was left out?"
+  from the same definition, so a report cannot disagree with the count it explains.
+  ⚠️ `CountableCrew` is a MAIN-DAY rule (any live ticket class); the pre-day admits only 2-day
+  holders and keeps its sign-up-based build, because excluding a 1-day holder there would drop a
+  real head.
+- **Linking is a decision with a direction, and the guard refuses rather than guesses (§1257b).**
+  Link/Unlink live on `/Organizer/Participants` (both rows on screen, primary chosen explicitly);
+  `DuplicateLinkGuard.WouldLoseAsync` compares what the would-be duplicate holds against the
+  primary — hotel (needs a room), swag, lunch, dinner, party, hotel placement — and blocks the link
+  with a message naming each item and the way out. The speaker-review picker can only point one
+  way, which is why the general control exists.
+- **The evaluation kiosk is a DEVICE, not a second system (§1259).** An iPad running `/eval` pairs
+  itself to an existing `EvaluationDevice` and then behaves as one: votes go to the unchanged
+  `/evaluation/v1/ingest/responses` with the same headers, the same record shape and the same
+  device-generated idempotency key, so time attribution, de-duplication, scoring and the reports
+  have exactly one path through them. `EvaluationDevice.IsKiosk` only decides the recorded `Source`
+  (diagnostics) and that a kiosk has no battery/signal to report. Two endpoints exist for the
+  browser alone — `POST /evaluation/v1/kiosk/pair` (a one-time 60-minute code exchanged for the
+  device key, which it rotates, keeping the old one as `PreviousKeyHash` so an iPad mid-flush is not
+  cut off) and `GET /evaluation/v1/kiosk/session` (the session running in that device's room, by the
+  same attribution a press gets, so the screen cannot name one session while the vote lands on
+  another). The page is standalone with `Layout = null`, holds no server state, and writes every
+  vote to `localStorage` before touching the network — the ordering that makes a dead venue Wi-Fi a
+  non-event. 🔴 No cooldown: at a stand, consecutive taps are consecutive people.
+- **A kiosk onboards itself into the queue a human already watches (§1259d).** `POST
+  /evaluation/v1/kiosk/join` carries a browser-generated identifier (`KIOSK-…`, stored before the
+  first request, the equivalent of a stamped serial) into `EvaluationProvisioningService.RequestAsync`
+  — the SAME idempotent pending-approval flow the built units use, with the Approve/Reject already on
+  `/Organizer/EvaluationDevices`. The screen polls the same endpoint every 8 s and goes live when the
+  key is minted on first collection after approval. 🔒 No bootstrap secret, deliberately: these
+  tablets have no mail and no keyboard worth typing a secret on, and what makes the endpoint safe is
+  that reaching it grants NOTHING — a row in a queue, and a human decides. The guard that matters is
+  therefore a cap (60 pending), and an identifier already queued is always admitted, because that is
+  a device polling for its answer. The way onto the page is the camera: the devices page renders a QR
+  of `/eval` with the same `PngByteQRCode` renderer as the session QR codes.
+- **The kiosk heals itself, because nobody is watching it (§1259c).** A service worker serves the
+  page shell cache-first, so a reload during a venue Wi-Fi outage still opens the kiosk instead of the
+  browser's error page — the one failure the localStorage vote queue could not cover. On top of that:
+  auto re-enrol from the device's link on 401/403 (never a pairing screen in front of attendees), a
+  watchdog that forces a flush and a re-enrol when the queue has not drained in 5 minutes while
+  online, an overnight reload only when the queue is empty and the screen untouched, one reload after
+  an unhandled script error, and the existing device heartbeat every 5 minutes carrying queue depth —
+  the single number that reveals a stand that looks fine and is collecting nothing.
+- **The tap is confirmed twice, and blocks nothing (§1259e).** The pressed face takes a ring and a
+  tick while the screen says "THANK YOU !" for 900 ms (§1269: white text only — the green tick badge
+  read as if a red "Unhappy" had been turned positive). Two signals because the reason people
+  press again is doubt that the first press registered; pointer-transparent and restartable because
+  there is no cooldown and consecutive taps are consecutive people.
+- **The kiosk speaks the instrument's words, and reads its room live (§1261).** The four button
+  labels render from `EvaluationRatingLabels` — the same vocabulary as `/f/{token}` and the reports —
+  so rating 2 reads *"Somewhat unhappy"* even though the moulded face has a straight mouth: the scale
+  has no neutral midpoint. `GET /evaluation/v1/kiosk/session` returns the device's ROOM NAME (it had
+  returned the device label), and the page overwrites its cached room with it on every 60 s refresh,
+  so a room linked after approval shows up without re-pairing. A device minted from an approved
+  request takes the requester's `Note` (the name typed on the iPad) as its `Label`, falling back to
+  `Serial <id>`.
+- **An idle kiosk counts down to the next window (§1262).** When nothing is running,
+  `/kiosk/session` also returns `next` — the earliest session in the device's room whose COLLECTION
+  window has not opened (`EvaluationKioskService.NextSessionAsync`) — and the page ticks the
+  countdown locally every second, re-asking for the session the moment it reaches zero. Title and
+  speakers render on two lines, speakers smaller.
+- **A TEST session mails only ring 0/1 (§1263).** `SessionScheduleChangeNotifier` and
+  `EvaluationReportReadyMailService` drop every linked speaker above Ring 1 when the CEH session is
+  `UsedForTesting` — the same audience a TEST session is visible to. The template ring row cannot do
+  this (the report mail is released to everyone), so the rule lives with the session.
+- **A sent report is re-sent only when its own session moved (§1264).** The report version includes
+  the event's pooled figures, so it changes with every press anywhere; the version still decides
+  whether a PDF is current, but `EvaluationReportDebounceService` re-publishes and re-mails an
+  already-published report only when the session's own latest arrival or `UpdatedAt` is strictly
+  after `PublishedReportAt`. The pooled figure inside a sent PDF may therefore lag until that
+  session's next own change — accepted, because the alternative mailed every rated speaker every
+  five minutes during the event.
+- **A kiosk updates itself (§1265).** The offline shell is cache-first, so a deploy used to reach a
+  running iPad only at the 03:00 reload. The page now carries its build id
+  (`EvaluationKioskController.BuildId`, the module version id) and polls `GET
+  /evaluation/v1/kiosk/build` every 5 minutes; on a new build, with an empty vote queue and an
+  untouched screen, it fetches `/eval?refresh=…` — the one request `eval-sw.js` lets past the cache
+  — verifies the copy carries the new id, stores it as the shell and reloads. One attempt per build
+  per hour bounds any mismatch a reload cannot cure.
+- **TEST sessions are silent to the organizer list too (§1265).** `SessionImportService` does not
+  record a Sessionize deviation for a `UsedForTesting` session, so moving one on purpose does not
+  mail the organizer list.
+- **A device is shown by its name (§1266).** `EvaluationDevicesModel.DisplayName` (custom name, else
+  serial; the legacy `"Serial <id>"` label is not a name) leads every table on the devices page,
+  including the approval queue, which renders the request's `Note`. Status uses `LastContact` — the
+  later of the heartbeat and the kiosk's 60-second check-in — and times are Danish wall time. The
+  Health cell shows only what that device type reports.
+- **The evaluation schedule syncs itself (§1268).** `EvaluationSessionSyncJob` runs
+  `EvaluationSessionSyncService.SyncAsync` for the active edition every 10 minutes (interval-driven,
+  5-minute base tick), so room and time changes reach attribution and the kiosks without the manual
+  button, which remains for an immediate pass.
+- **The kiosk shows its own health (§1269).** A small bottom bar reads room · device name · serial ·
+  connection; "connected" is green only after an authorised answer from the server within 3 minutes
+  with an empty vote queue. `/kiosk/session` returns `device { name, serial }` using the same
+  `DisplayName` as the devices page.
+- **Feedback window and report release (§1270/§1271).** A session collects from its scheduled start
+  to scheduled end + 30 minutes. The kiosk shows that close ("Feedback open until"), switches to an
+  idle "Next session" screen with no faces when the server reports nothing running, and a report is
+  released only once the window has closed AND 30 minutes have passed without a new response.
+- **One iPad stays one device across Safari and the Home Screen (§1275).** iOS gives a Home Screen
+  web app separate storage, so the approval response carries the device's reconnect token; in a
+  Safari tab the page writes it into the address (`/eval?k=…`) for "Add to Home Screen" to capture,
+  and strips it only in standalone mode.
+- **Two follow-up questions (§1278).** After a rating, the kiosk asks "What was good?" and "What
+  could be better?" (one tap each, Skip, 10 s per step) and the QR page offers the same choices beside
+  the comment. Answers are codes from `EvaluationFollowUps`, stored on the response row itself
+  (`PositivePoint`, `ImprovementPoint`) — the kiosk holds the queued vote (a hold TIME, 60 s) until
+  they are answered so the append-only row is written once, complete. Unknown codes are dropped.
+  The session report counts them in "What people picked".
+- **Devices are renamed in place (§1265)**, and session evaluation has its own organizer-menu entry
+  (Session Evaluation → Session feedback), with the device board carded on the Sessions hub as well
+  as Setup.
+- **Kiosk tablets under Intune (§1303).** Android Enterprise *dedicated* devices, provisioned by
+  `tools/intune-eval-kiosk.ps1` (idempotent; plan-only without `-Apply`; tenant values from a
+  per-edition file under `config/`, which is not published): a shared enrollment QR, the
+  Session Evaluation Managed Google Play web app plus Chrome (URL allow-list = the CEH host), Wi-Fi
+  profiles, and a SINGLE-app kiosk so the feedback screen opens by itself. A Managed Home Screen variant
+  (the only mode with an exit PIN) was tried and dropped: it cannot auto-open an app. Devices are named
+  `ELDK-<SERIAL>` by the enrollment template. Assignments target a dynamic group AND All devices + an
+  assignment filter on the name — the group was observed to lag >15 min after enrollment, the filter is
+  evaluated at check-in. Room binding stays in CEH. The page never shows the internal `KIOSK-…`
+  identifier, and shows "Managed by Intune" for `ELDK-…` names (case-insensitive; the page cannot query
+  Intune).
+  - **Intune behaviours that shaped the script** (all hit on the pilot): a dedicated-device enrollment
+    profile refuses Wi-Fi fields (AOSP only), and a PATCH may only touch name/description/naming
+    template; the naming template has no running-number token; `playStoreMode = allowList` errored on one
+    model (dropped — the Play Store is unreachable in a single-app kiosk); there is no Sync action for
+    Android dedicated devices in the portal (Restart forces a check-in); renaming a device via Graph
+    needs `DeviceManagementManagedDevices.PrivilegedOperations.All`.
+  - **Enrollment QR.** Intune's QR is the Android provisioning JSON; a custom QR built from the same token
+    can add provisioning extras Android accepts (Wi-Fi, locale, time zone, skip education screens, keep
+    system apps enabled — Chrome is a system app on some models and the web app cannot run without it).
+    Both QR images hold the enrollment token and are kept outside the repo.
+- **Organizer PIN + one-tap enrolment (§1303).** `POST /evaluation/v1/kiosk/unlock {pin}` opens setup
+  and returns the Intune tablet names (`IntuneKioskDirectory`, a read-only Graph call through the
+  `SharePointUploadClient` registration, prefix `EvaluationKiosk:IntuneNamePrefix`, null ⇒ fallback to
+  typing). `POST managed-enrol {pin,name}` re-checks the PIN AND that Intune has the name, then
+  `EvaluationKioskService.EnrolManagedAsync` creates the device approved with the Intune name as its
+  identifier, or rotates the key of the existing one (previous key kept). `KioskPinGuard`: constant-time
+  compare, 5 failures per client IP ⇒ 15-min lockout, in memory. The PIN is the app setting
+  `EvaluationKiosk:Pin` only; empty ⇒ setup opens without it and one-tap answers 503.
+- **One tablet, two room records (§1349).** CEH keeps a room's pre-day (master-class) use as its own
+  record (`Room-16-Floor 1-Max 32-MC` next to `Room-16-Floor 1-Max 44`), so a device links to a main-day
+  room (`RoomId`) AND a master-class room (`MasterClassRoomId`, NoAction FK like `RoomId`).
+  `EvaluationDevice.LinkedRoomIds()` is the set every "this device's room" read uses: ingest attribution,
+  the kiosk's current session and countdown, and the sync backfill. The pre-day and main days never
+  overlap, so the press time picks the session. The screen names the main-day room, or the MC room when
+  it is the only link. An explicit link rather than a name rule, because `Room-18-19-…-MC` and
+  `Room-5-7-…-MC` each span two main-day rooms.
+- **Room mapper (§1350) — supersedes the §1349 two-slot link.** The schedule's rooms
+  (`EvaluationRoom`, one per room name the sessions carry) are VIRTUAL; the venue reuses one physical
+  space under several of them, and one pre-day room can span two main-day rooms (`Room-5-7-…-MC` =
+  Room 5 + Room 6-7). So: `EvaluationPhysicalRoom` (name unique per event) ↔ `EvaluationRoomPlacement`
+  (many-to-many) ↔ `EvaluationRoom`, and `EvaluationDevice.PhysicalRoomId`. `EvaluationRoomMap` is the ONE
+  resolver — ingest attribution, the kiosk's current session and countdown, the room name on screen and
+  the sync backfill all ask it: tablet → physical room → its schedule rooms → their sessions, then the
+  press time picks (`EvaluationAttribution.Resolve`). Without a physical room a device falls back to its
+  §1349 direct links, so earlier links keep counting. Cascade: Event → PhysicalRoom → Placement only;
+  the schedule-room and device FKs are NoAction (one cascade path, as §744.1 requires). The devices page
+  lists physical rooms with a tick-list of schedule rooms and warns about: a schedule room with sessions
+  in no physical room, overlapping sessions of two schedule rooms in one physical room, and a physical
+  room with sessions but no active tablet. Nothing is matched by name — a person decides what is one space.
+- **Feedback capture policies (§1354; supersedes §1353's one-tap flag).** `FeedbackCapturePolicy` = Rating
+  only · Rating + free text · Rating + 2 questions · Rating + 2 questions + free text (int values are DATA —
+  never renumber). `FeedbackCapturePolicies` is the one resolver. Kiosk: `EvaluationDevice.CapturePolicy` →
+  `Event.KioskCapturePolicy` → Rating + 2 questions, narrowed by `ForKiosk` (a kiosk never asks free text).
+  QR: the session's schedule room → its physical room(s) `QrCapturePolicy` (used only when they agree — a
+  split room with different overrides falls back) → `Event.QrCapturePolicy` → Rating + 2 questions + free
+  text (the page as it was). All nullable, so no DB default/sentinel. The kiosk gets `policy` + `followUps`
+  with every `kiosk/session` answer (≤ 60 s to switch; the stored answer keeps it offline); in rating-only
+  mode `vote()` queues without a hold and flashes + flushes at once. Each queued vote carries the policy it
+  was asked under and ingest stores it in `EvaluationResponse.CapturePolicy` (a vote without one gets the
+  policy in force; a built box none). The QR page stays one form and shows only the sections the policy
+  asks; `SubmitAsync` also drops anything the policy does not ask and stores the policy.
+  `EvaluationPolicyComparison` splits responses by channel × policy (count, average, follow-up and comment
+  rates — "—" where not asked; pre-policy responses are their own row) on `/Organizer/SessionFeedback`.
+  The `FeedbackCapturePolicies` migration carries §1353's one-tap flag over (one tap = Rating only) before
+  dropping `Event.EvaluationKioskOneTap`.
+- **Rating-button symbols (§1355).** `RatingSymbols` flags (Faces 1 · Stars 2 · Points 4; one or two —
+  `RatingSymbolChoices.IsValid`), presentation only (brief §2.2): colour, word and the stored 1–4 rating never
+  change. Resolved exactly like the capture policy — kiosk: `EvaluationDevice.RatingSymbols` →
+  `Event.KioskRatingSymbols` → Faces; QR: the physical room's `QrRatingSymbols` when its rooms agree →
+  `Event.QrRatingSymbols` → Faces. The kiosk draws all three on every button and the `symbols` field of the
+  session answer toggles body classes (`s-nofaces`, `s-stars`, `s-points`, `s-two` — two symbols shrink so the
+  word stays on the tile); each vote carries the symbols it showed and ingest stores
+  `EvaluationResponse.RatingSymbols` (else the symbols in force for a kiosk). The QR page draws the chosen
+  symbols left of the word (faces are drawn SVG, never emoji). The "By capture policy" table splits by
+  symbols too.
+- **Kiosk battery (§1358).** The kiosk page reads `navigator.getBattery()` (Chrome on Android; feature-detected —
+  nothing shown or sent where absent), shows "🔋 82% ⚡" on the status bar (amber ≤ 40 %, red ≤ 20 % when not
+  charging) and sends `batteryPercent` with its 5-minute heartbeat, the field the built boxes already use, so
+  `LastBatteryPercent` and the devices page's low-battery colour now cover tablets too.
+- **Inactive responses (§1357).** `EvaluationResponse.IsInactive` (+ `InactivatedAt`) with a GLOBAL query filter
+  `!IsInactive`, so every score, statistic, comparison, report and the scoreboard leave them out without code
+  of their own. `EvaluationResponseActivation` sets every response received up to now inactive, or reactivates
+  all — nothing is deleted. Only four reads look past the filter: ingest's duplicate check (a retried batch
+  must stay a duplicate — the unique index would refuse it anyway) and the session / bulk / device deletion
+  guards (set aside is not deleted). Button on `/Organizer/SessionFeedback`, with counts and a confirmation.
+- **Kiosk maintenance mode (§1351).** A web page cannot end Android lock-task mode, so leaving the kiosk
+  is an Intune act: the assigned group `eldk-kioskdevices-maintenance-mode` is EXCLUDED from the
+  `CEH Eval Kiosk Restrictions` profile (`tools/intune-eval-kiosk.ps1`). Wi-Fi, apps and the Chrome
+  allow-list stay assigned. Runbook: add the tablet to the group → Restart it from Intune → the kiosk
+  lock lifts → change settings → remove it → Restart → kiosk again.
+- **Two channels in every view (§1303):** kiosk (box + tablet) and QR code. `EvaluationDevice.IsKiosk`
+  and the statistics' Box/Kiosk split remain in the model; pages and the PDF merge them.
+- **Deleted device → setup (§1303).** `GET kiosk/session` answers **410 `device_removed`** when the
+  device no longer exists or is revoked (`AuthFailure.UnknownDevice`); a wrong key stays 401 and the page
+  heals silently from its reconnect link. On 410 the page drops its stored identity and reconnect link
+  and opens setup, within the 60-s session refresh; its vote queue is kept. Deleting a device (only when
+  it has no responses) goes through `EvaluationProvisioningService.DeleteDeviceAsync`, which also
+  deletes its approval request and device-specific telemetry windows — both are NoAction FKs, and an
+  approved request left behind without its device would mint the device again on the next poll.
+- **Kiosk screen (§1303).** The status bar (room · name · Managed by Intune · connection) is
+  z-index 9: above the full-screen follow-up layer (8) and the thank-you, below only setup (10); the idle
+  header is `min-height:0; overflow:hidden` so it cannot push the bar off screen. With no room linked
+  the idle screen says "No room linked — link this tablet to a room under Organizer → Evaluation devices".
+- **Operating the kiosk tablets (runbook, §1303).**
+  1. *New tablet:* factory reset → six taps on the first setup screen → join Wi-Fi if the QR does not
+     carry it → scan the enrollment QR → wait for the kiosk to open by itself (10–20 min on first boot).
+  2. *Enrol:* five taps top-left → organizer PIN → tap the tablet's `ELDK-…` name → link the device to
+     its room on `/Organizer/EvaluationDevices`.
+  3. *Move to another room:* change the room on the devices page; nothing on the tablet.
+  4. *Tablet misbehaves:* Restart it from the Intune portal (forces a check-in); if its identity is
+     broken, delete the device in CEH — the tablet returns to setup within a minute — and enrol again.
+  5. *Lost or wiped:* a wiped tablet re-scans the QR and is re-enrolled by tapping the same name; a lost
+     one is revoked in CEH and wiped/retired in Intune.
+  6. *Keep them charging:* the screen stays on only while plugged in.
+
+- **Feedback statistics and the on-page view (§1273/§1291).** `EvaluationStatisticsService` groups ATTRIBUTED
+  responses per Danish day / CEH session type / track, pooled within each group with no per-session floor, plus
+  an event-wide channel count (box / kiosk / QR, all responses); shown on /Organizer/SessionFeedback with its
+  calculation time. `/Organizer/SessionFeedbackView` renders `EvaluationReportBuilder`'s `ReportData` as HTML —
+  the same data the PDF renders.
+- **"Your announcement is live" (§1290).** `SoMeAnnouncementNotifier` has a third stage, `Live`: published posts
+  with an `ExternalPostId` inside a 48 h lookback, same audience and per-post-per-stage ledger, template
+  `some-post-live` with its own ring (fails closed until released).
+
+## §1297 — Volunteer planner: the interval model
+
+**What changed.** `AvailabilityAutoAssignEngine` used to rank candidates by a single capacity
+scalar — `VolunteerDayAvailability.Level`, `Max()` across **all** days. `Note` was never selected,
+so the day and the slot were discarded: a volunteer available only on the setup morning scored 100
+and was a valid candidate for a main-day afternoon task. There was also no per-run memory, so the
+top-ranked person was proposed onto *every* short task, including simultaneous ones. The only
+overlap notion anywhere was `AllocationScenarioService.SimulateAsync` flagging two tasks on the same
+**date** as a "possible double-booking" — a warning, per day, in simulation only.
+
+**The shape is unchanged.** Propose → draft queue → organizer commit, with commit the only mail path
+and the §1295 ring gate on it. Only the matching was replaced.
+
+### The two sides of the match
+
+| | Type | Source |
+|---|---|---|
+| Task | `TimeWindow?` | `VolunteerTaskWindow.WindowOf` — typed `VolunteerTask.StartTime`/`EndTime`, falling back to parsing `Shift`/`TimeEnd` |
+| Volunteer | `DayWindow` per day | `VolunteerDayOptions.WindowFor(day, level, note)` |
+
+- **`TimeWindow` is half-open `[Start, End)`.** Consecutive shifts (09:00–12:00 then 12:00–15:00)
+  must not read as an overlap; with closed intervals the planner would refuse most of the plan.
+  `Contains` is eligibility (the whole task must fit), `Overlaps` is double-booking.
+- **`VolunteerDayOptions.Option` carries a typed `Window`.** The hours are declared beside the
+  display text rather than parsed back out of it. **Nothing may read hours from a stored slot tag:**
+  stale tags are normal (`[Morning 9–12]` rows survive against days whose morning is now 7–12 or
+  6:40–12) and `Resolve` maps them onto the current option by Level fallback. Read the resolved
+  option, never the string.
+- **`Window == null` means "present, hours not stated"** and matches anything that day. Two
+  deliberate cases: the **packing day**, which is binary by operator decision, and the **generic
+  option set** used by other editions and fixtures. Inventing a window for either would refuse work
+  those people volunteered for — concretely, a 09:00–14:00 packing window would make *Pack attendee
+  bags* (09:00–15:00) unfillable by the 17 people who said yes to exactly it.
+- **`Attending conference — can help evening` is `Level = Half` but carries 17:00–21:00.** A naive
+  "Half ⇒ morning or afternoon" reading would schedule those people into the main-day morning, which
+  is when they are attending.
+
+### `VolunteerTask.StartTime` / `EndTime`
+
+Additive `TimeOnly?` columns, projected from the free-text `Shift`/`TimeEnd` by
+`VolunteerTaskWindow.SyncTypedTimes`, called from every write path (`UpdateTaskDetailsAsync`,
+`UpdateTaskContentAsync`, `VolunteerPlanImportService`). Migration `VolunteerPlannerWindows`
+backfills with `TRY_CONVERT(time, …)` — a prose value yields NULL and the task stays unscheduled
+rather than failing the migration. **Duration is `End − Start` and is never stored**: a stored
+duration beside a start and an end is a third value that can disagree.
+
+### `VolunteerPlanner` (pure)
+
+Ordering is **hardest first** — fewest eligible candidates, then longest, then id. Not a preference:
+in creation order a "fair" pick spends the only eligible person on a task anyone could have done,
+and the constrained task is then unfillable — a shortfall the ordering itself caused.
+
+Ranking within a task: **preferred-for-bucket (rank) → fewest hours already allocated → capacity →
+id**, deterministic throughout. The fairness term is a tie-break, not the driver, because the pool
+is the worker roster (people who opted into being worked).
+
+Occupancy is seeded from existing effective assignments **and** this owner's drafts, and grows
+during the run. Leth's "manual assignment consumes that timeslot" therefore needs no mechanism of
+its own — a hand-made assignment is a row like any other.
+
+An **unscheduled task (no `DueDate`)** keeps the old capacity-only behaviour and consumes no
+interval. Many tasks carry no date; treating that as "nobody can do it" would empty the plan.
+
+### Shortfall reporting
+
+`PlannerResult` carries `Shortfalls`, not just a count, and `Summarize()` always names them. The
+reason is the actionable part and the four are answered differently:
+
+| Reason | Means | Response |
+|---|---|---|
+| `OutsideStatedHours` | Nobody in scope stated hours covering it | Recruiting does not help — the availability window (or the task) has to change |
+| `EveryoneBusy` | Everyone free is on an overlapping task | More people |
+| `NotEnoughPeople` | Everyone eligible and free was used | More people |
+| `NobodyAvailable` | Nobody in scope is present that day | A different day, or different people |
+
+`/Organizer/BucketAllocation` carries the per-task list across the redirect in `TempData` and renders
+it under the run controls. Against the measured ELDK27 state (~25% of slots outside the hours
+volunteers were asked about; setup and main days at ~85% / ~81% utilisation) a run that reported only
+its proposals would read as "done".
+
+### Scope — the worker roster
+
+`VolunteerPlanningRosterEntry` (unique per edition+participant, curated on
+`/Organizer/VolunteerWorkerRoster`) is the planner's default pool. Two populations were being treated
+as one: **workers** (not attending, loadable all day) and **attendees** (helping around sessions they
+want to be at). Scoping to the workers dissolves the fairness objection rather than answering it.
+
+- **Membership is the flag, and it is explicit.** "Full day on every day" looks like the same set and
+  is a guess; a guess about who may be worked flat out is the wrong thing to infer.
+- **Membership overrides nothing.** No Half-promotion, no contradiction detector, no precedence table
+  — roster members answer Full day anyway (operator: *"dont overengineer it"*). The absence is the
+  decision.
+- **An empty roster falls back to everyone** and `PlannerResult.ScopeFellBackToEveryone` says so.
+  Nobody has curated it on the day this ships, and silently proposing nothing would read as a broken
+  planner rather than an empty list.
+- The organizer queue (`/Organizer/OrganizerAllocation`) always runs `PlannerScope.Everyone` — the
+  roster is a volunteer concept.
+
+### Preferred volunteers per bucket
+
+`VolunteerCategoryPreference` (unique per category+participant, `Rank` lowest first, managed on
+`/Organizer/VolunteerStructure`). A **preference, not a reservation**: it reorders candidates and
+never bypasses availability, overlap, the ring gate or the roster scope — otherwise the planner would
+emit assignments that read as decided and cannot be worked.
+
+### What is still an open decision
+
+Typing the windows makes the gap visible; it does not close it. ~57 of 229 slots sit outside the
+hours volunteers were ever asked about (17 main-day slots starting 06:00–06:30 against a 06:40 start;
+18 pack-down slots at 17:30–21:00 against a 17:00 close), and the planner will correctly report them
+run after run. That is `docs/REQUIREMENTS.md` §1297 — widen the windows and re-ask, or accept the gap.
+
+## §1297a — Pre-day full day runs to 18:30
+
+`VolunteerDayOptions` pre-day `Full day` is `07:00–18:30`, and its display line reads
+`whole day available — 07:00–18:30` rather than `from 07:00`. The `Full` helper takes an optional
+explicit `sub` for exactly this: a widened window that is true only inside the planner would hold
+people to something the form never said.
+
+🔒 **`Afternoon` deliberately stays `12–18`.** Its `Slot` (`"Afternoon 12–18"`) embeds the hours and
+is the **stored identity**. Changing it would strand saved rows, and `Resolve`'s Level fallback maps
+an unknown `Half` slot to the **first** `Half` option — `Morning`. Anyone who answered afternoon
+would silently become a morning person. When a window has to be widened, widen the option whose Slot
+does **not** carry hours (`Full day`), or keep the Slot constant and change only Title/Sub.
+
+## §1299 — Volunteer work structure: category-direct tasks, one shared queue, publish by ring
+
+**Model.** `VolunteerTask.CategoryId` (required, FK → `VolunteerCategories`, cascade) plus
+`SubcategoryId` (**nullable**). A subcategory is an organizer-named grouping only; nothing in the hub
+creates one. `VolunteerCategory.Tasks` holds every task of the category — those with
+`SubcategoryId == null` are the ones shown directly under it.
+
+- **One cascade path.** SQL Server refuses Category→Subcategory→Task beside Category→Task, so the
+  subcategory FK is `ClientSetNull`. Deleting a category cascades both ways from the category;
+  removing a subcategory is done by `VolunteerStructureService.DeleteSubcategoryAsync`, which moves
+  its tasks up to the category (tasks and their assignments survive) before deleting the row.
+- **The two ids never disagree.** `CommunityHubDbContext.SaveChanges` syncs `CategoryId` from the
+  subcategory whenever a task is added or its `SubcategoryId` changes — one seam for create, move,
+  import, Excel and tests. A task with no subcategory keeps the `CategoryId` it was given.
+- **Imports** (`VolunteerPlanImportService`, `VolunteerTaskExcelService`) create tasks directly under
+  the bucket. The plan re-import matches by **bucket** + title + date + start, whatever subcategory
+  the task now sits in, and never moves it back out.
+- **Bulk move.** `MoveToCategoryAsync` sets `SubcategoryId = null` and the category; `MoveAsync`
+  (subcategory target) sets both from the target.
+- **Migration `VolunteerTaskCategoryDirect`** backfills `CategoryId` from the subcategory, then
+  dissolves the hub-made placeholders — every `Imported plan`, and `General` only where it carries
+  the auto-created description, so an organizer's own "General" survives. Down re-creates one
+  `Imported plan` holder per category for category-direct tasks. Verified up/down/cascade against
+  SQL Server Express before release.
+
+**Assign queues; publish is the ring-gated step.** `AssignVolunteerAsync` (organizer page and
+supervisor dashboard) writes a Manual `TaskAllocationDraft`, never a `VolunteerTaskAssignment`. Every
+volunteer surface reads assignments only, so a queued task is invisible to the volunteer.
+`UnassignVolunteerAsync` removes a queued draft first, a published assignment otherwise.
+
+- **One shared volunteer queue per edition.** `VolunteerAllocationService` no longer filters by
+  `OwnerParticipantId` for the volunteer queue: coverage, the tray, remove, publish (commit) and
+  discard all act on the edition's whole queue, and the planner counts every volunteer draft as
+  occupancy. `OwnerParticipantId` remains as *queued by* (shown in the tray). The unique
+  `(TaskId, ParticipantId)` draft index already made a person queueable once per task, whoever queued
+  them. The **organizer** queue stays per-owner.
+- **Publish = `CommitAsync`**, unchanged in gating: the `volunteer-allocation` released ring AND the
+  §1295 `VolunteerAssignmentGate` per target. An out-of-ring draft stays queued (unpublished); widen
+  the ring and publish again. Queueing itself is deliberately not gated — staging work for people not
+  yet released is the point.
+
+**Structure page.** Each category is one `<details class="vs-catfold">` (settings included — this
+supersedes §942's settings-always-visible fold), with *Expand/Collapse all*. Tasks render once via a
+Razor local function (`async Task RenderTask`, async because it contains tag helpers), showing
+published assignees and queued people (*not published*) by name.
+
+## §1300 — Sponsor company mention: looked up, cached, first in the Tag line
+
+**Lookup.** `LinkedInOrganizationLookupClient` calls the finder `GET /v2/organizations?q=vanityName&vanityName={slug}`
+with the org token — measured working on `r_organization_social` (REQUIREMENTS §856.1; §824.14c's "403" was
+the by-id getter). It accepts only an element whose `vanityName` matches the slug asked for. Status is
+`Resolved` / `NotFound` / `LookupFailed`; "could not ask" is never a negative.
+
+**Cache.** `SponsorOrganizationResolutionService` runs inside `SpeakerMentionResolutionJob` (before the people
+sweep; it needs only the token) and fills `SponsorInfo.LinkedInOrganizationId`, recording
+`LinkedInOrganizationLookedUpFrom` (the slug) and `LinkedInOrganizationCheckedAt`:
+resolved-for-this-slug ⇒ never asked again; slug changed ⇒ asked again; an id with no recorded slug was set
+by hand ⇒ kept; negative ⇒ re-asked after 24 h; a failure never erases an id. Rendering only reads the cache.
+
+**Template.** New variable `{SponsorCompanyMention}` = `@[Name](urn:li:organization:{id})` or **null** (never
+the plain name — in a Tag line that reads as a failed tag); optional in `SoMeEmptyVariableGate`. Default
+Sponsor body: the sentence uses `{SponsorName}`, the Tag line is
+`Tag: {SponsorCompanyMention} {SponsorSigner} {SponsorEventCoordinators}` — the company tagged once, first.
+🔴 §1345: the publisher's mention-preserving escaper (`LiveLinkedInPostPublisher.MentionSpan`) must accept
+`urn:li:organization:{digits}` as well as `urn:li:person:{id}` — until 2026-10-15 it knew only the person form,
+so every company mention was escaped as prose and published as raw `@[Name](urn:…)` text.
+Planned posts store the template text (values resolved at render), frozen at planning, so migration
+`SponsorCompanyMentionTag` rewrites the two phrases in UNPUBLISHED `SoMePosts.AutoText`/`ManualTextOverride`,
+in `SoMeTemplates` and in `SoMeBodySamples` (the §935 pattern). `{SponsorLinkedInUrl}` still resolves
+(mention-or-name) for any template that uses it.
+
+**Cadence.** The lookup rides the mention job's interval (Jobs page, 30 min). ⚠️ `JobsPauseMiddleware` applies
+that interval to a manual `admin/functions` trigger too — a manual run inside the window executes and returns
+without doing the work. First PROD run resolved all 24 sponsor companies (one call per slug, all 200); later
+runs skip them, since an organization id never changes.
+
+**Renderer.** `SoMeTemplateRenderer.Render` now actually drops an emptied LABEL line — every placeholder known
+and empty, and the remaining text empty or a short `Label:` — which the §884.3 comments assumed and never
+had (a sponsor with nobody to tag published a bare "Tag:"). An emptied placeholder also takes one adjacent
+space with it ("Tag: {A} {B}" → "Tag: b"). Lines with real text of their own are kept.
+
+## §1301 — Prepaid coupon invoice: the class name, resolved at the last step
+
+`CouponPrepaidInvoiceService.ResolveTicketClassNameAsync` runs before the line is composed: a human label
+passes through; an id (or blank) is looked up in Backstage `ticket_classes` (`ZohoClient.GetTicketClassNamesAsync`,
+the pre-sale source from §1019). Fail-soft — no Zoho, no token, no match ⇒ the input is returned and
+`ComposePrepaidDescription` drops the line (§1116). Placed in the SERVICE, not the callers, because both callers
+(`CouponInvoicing.OnPostAddTicketsAsync`, which never loads the label map, and the partner top-up on
+`Monitor`) could hand it the id — the same "guard at the last step" reasoning as §1116.
+
+Layout (`ComposePrepaidDescription`): `Prepaid tickets: N` / `Ticket Class: <name>` (runs of spaces collapsed —
+Backstage names carry double spaces) / blank line / `Coupon: <name>` / optional conversion note. The claim
+invoice (`ComposeTicketDescription`, one line per attendee) is unchanged.
+
+## §1302 — Booth coupon codes are generic
+
+`config/sponsor.eldk27.json` → `boothWallSpecs.tiers.*.coupon` = `eldk-<tier>-booth-included`: the webshop's
+included-furniture coupons are EVERGREEN, not per edition, so they carry no edition number. Resolved into
+`{{couponCode}}` at render time (`TaskBodyService`, §688) and re-rendered into stored descriptions by the order
+pull, so a config change reaches every sponsor's booth task without a data fix. Pinned by
+`BoothMemberAllowanceTests.The_booth_coupon_is_the_generic_webshop_code`.
+
+## §1305 — CEH sponsor webshop: the catalogue (step 1, DEV only)
+
+The new sponsor shop inside CEH runs **alongside** the existing webshop (WooCommerce + Company Manager) while
+both are in use. Step 1 is the catalogue; cart, registration and contracts build on it.
+
+**Data** (`Domain/ShopCatalog.cs`): `ShopCategory` (webshop id, parent, name, sort order, sponsor-facing
+`ShopGroup`), `ShopProduct` (webshop id, name, both descriptions, `PriceEur` excl. VAT, status, booth id,
+timeslot + time, primary category, fallback stock), `ShopProductCategory` (a product sits in parent AND child),
+`ShopProductImage` (source URL + the SharePoint copy). Unique `(EventId, WooCategoryId)` /
+`(EventId, WooProductId)` so the import matches rows by the webshop's ids and a product keeps its CEH row for ever.
+
+**Availability is LIVE, never copied.** Operator requirement: CEH and the webshop must always show the same
+availability. `ShopStockService` reads stock from the webshop (`WooCommerceClient.GetStockAsync`, one call per
+100 products) every time a page shows it. The webshop is the single stock counter while both shops run:
+- a sale in CEH lowers the webshop's count at that moment (`DecrementStockAsync`: re-read, refuse if too few
+  remain, then write), a release puts it back (`IncrementStockAsync`) — both through the external-writes guard;
+- an unlimited product (the webshop does not count it) needs no write and is never refused;
+- a product missing from the webshop's answer, or not published, is **not** available;
+- if the webshop cannot be reached, the last synced count is shown **labelled "not live"**, and nothing may be
+  sold on it.
+
+**Catalogue sync** (`ShopCatalogImportService`, run by `ShopCatalogSyncJob` every 2 minutes on a 1-minute tick,
+gated by `sponsor-webshop`): categories and products are upserted by webshop id; text, price and status follow
+the webshop unless `ContentManagedInCeh` is set; a product the webshop no longer returns becomes `Removed`
+(never deleted — history may point at it). The booth (`E-20A`) and timeslot (`2`, `early` + `11:30-12:30`) are
+parsed from the product NAME (`ShopProductNameParser`) because the webshop has no field for them; no match ⇒ null,
+never a guess. Categories map to sponsor-facing groups (Booths, Packages, Sessions, Branding, Furniture, Package
+handling, Swag, Tickets) by name (`ShopGroupMapper`), a child inheriting its parent's group; an organizer's
+choice on the catalogue page is kept by later syncs. The primary category is the most specific one (a child
+before a top-level; among top-levels the one with fewer products).
+
+**Pictures** are copied into the document-library folder `Sponsors/Webshop/Products` (registry key
+`SponsorWebshopProducts`, resolved under the one DocLibrary root, so DEV writes under its own root) as
+`{webshopProductId}-{slug}-{n}.{ext}`. Only new or changed pictures are copied; a failed picture is recorded on
+its row and never stops the catalogue. `/shop-image/{id}` streams the SharePoint copy (signed-in only for now,
+cached 30 minutes) and falls back to the webshop's public URL until the copy exists.
+
+**Organizer page** `/Organizer/WebshopCatalog`: products by group with picture, booth/slot, price and LIVE
+availability; hidden (private/draft/removed) products on request; per-category group override. Open to
+organizers whether or not the feature is on, so the catalogue can be reviewed before it is switched on.
+
+**Gating:** `sponsor-webshop` is off by default (Ring 1). Off ⇒ the sync job no-ops and sponsors see nothing, so
+the code can ship on the main branch without appearing in production.
+
+### §1305 batch 2 — cart, contract, registration, reservations, catalogue, booth map (DEV only)
+
+All behind `sponsor-webshop`. Configuration per edition in the private `config/shop.<edition>.json` (`ShopConfig`):
+VAT rate, late surcharge (percent, days, groups), included-furniture allowance per booth tier, the contract's fixed
+content (event, organizer, payment, terms, agreement text), the reservation window and the booth-map picture name.
+
+**Data** (`Domain/ShopOrders.cs`): `ShopCompany` (legal/billing identity + `Candidate`/`Sponsor` state; the id is
+the same value space as `SponsorInfo.SponsorCompanyId` — a CEH-registered company gets `ceh-xxxxxxxx`),
+`ShopOrder` (`Cart` → `Reserved` → `AwaitingSignature` → `Signed`, or `Cancelled`; PO, signer, coordinator,
+special terms, `InvoiceNotBefore`, `PaymentDays`, signature picture, contract path), `ShopOrderLine` (frozen unit
+price + surcharge, `StockTaken`), `ShopRegistration` (e-mail proof before any person exists), `ShopEntitlement`
+(reservation rights from a previous edition), `ShopCatalogPage`, `ShopBoothSpot`.
+
+**Money** (`ShopPricing`, no I/O): late surcharge by product group inside N days of day 1; VAT only when the
+e-conomic zone is domestic (or unknown and the country is DK); included furniture = min(tier allowance, furniture at
+list price). Rounded per line; totals are sums of rounded lines, so the contract adds up.
+
+**Stock, two-way** (`ShopOrderService`): a cart holds nothing. Reserving freezes prices and takes each counted line
+off the webshop (`DecrementStockAsync`, guarded by `ExternalWrites:WebshopStock`); if any line fails, every line
+already taken is given back and nothing is reserved. Cancelling gives back exactly what was taken. CEH-only products
+keep their own count.
+
+**Stock is taken at SIGNING (§1312).** Opening the contract to sign, or sending it to the signer
+(`SendForSignatureAsync` → `ReserveAsync(takeStock: false)`), freezes prices and numbers the order but takes no stock.
+`SignAsync` — and an organizer's `ConfirmOfflineAsync` for a contract the sponsor signed their own way (signature kind
+`Offline`, the uploaded PDF archived as the contract) — calls `TakeOutstandingStockAsync`, all or nothing: an item that
+sold out meanwhile refuses the signing. Only an organizer-accepted reservation holds stock before signing. The sold-out
+notice therefore fires at signing, and names the webshop PRODUCT number, never an order.
+
+**Registration marks and Northern Ireland (§1312).** Required fields carry a red `*`; optional ones no label. "XI" is a VIES
+prefix, not an ISO country: a company picks GB, and `ShopVatChecker.IsNorthernIrish` (GB + a number starting XI) sends the
+number to VIES under XI and requires it green (`NeedsVies(country, vat)`); the XI prefix is kept through Verify.
+
+**Company matching (§1312 audit).** `ErpWebshopContactSyncService.ChooseCompanyToAdopt`: an ERP sponsor without a webshop
+company adopts a same-named one only when exactly one unlinked company has the name and CEH's own record of it (ERP number,
+CVR) does not contradict; several ⇒ reported, never a further CREATE. Duplicate ERP numbers in the webshop resolve to the
+lowest id (logged). The Zoho sponsor and exhibitor bootstraps already use `ZohoRecordMatch` (claimed + ambiguous refused).
+`EconomicCustomerSyncService` stays dormant (no callers). A read-only what-if on PROD data (2026-09-27) showed no change:
+58/58 sponsor customers already linked, no duplicate ERP numbers.
+
+**Link selected as one person (§1312).** `SamePersonLinker`: the first ticked row (oldest first) that every other ticked row
+can link to without loss (`DuplicateLinkGuard`) becomes the primary; nothing fits ⇒ refused with reasons; rows linked
+outside the selection block it (no chains).
+
+**The booth on the map in mails (§1312).** `ShopBoothMapPicture` draws the order's placed booth spot(s) on the layout picture
+(`boothMap.imageFileName` in the products folder) — light fill + white-haloed outline — scaled to ≤1400 px JPEG, attached to the
+offer and the reservation mail (`SendOrganizerReservationReminderAsync`) with a line naming the booth. Best-effort: no booth,
+no spot or no layout ⇒ no picture. The booth map and the "Reserved" label count an unsigned order only while its line holds
+the stock (`StockTaken`). The last-unit notice (`NotifySoldOutAsync`) reads "Reserved — no longer available" (company, not signed yet) when a reservation took it (`ReserveAsync`, adding to a reservation) and "Sold out … to {company}, order N (signed)" at signing.
+
+**Sponsor deck → catalogue (§1312).** `ShopCatalogDeckImporter` reads `catalogDeck.folder/fileName` (drive-relative SharePoint)
+with System.IO.Compression + LINQ-to-XML (no Office dependency): slide order from `presentation.xml`; a titled slide starts a
+page, untitled slides join it (after a video: an "Impressions" page), "(n/m)" parts and equal titles in a chapter merge;
+chapters come from layouts of type title/secHead or named Title / Title Slide / Section Header. Text → paragraphs / nested
+bullets (whitespace-only runs preserved), tables → Markdown tables minus `skipColumnsNamed` (default Sold To, Bought by,
+Customer, Price), pictures → ≤1600 px JPEG `catalog-<slug>-n.jpg` in the products folder, served by the bounded anonymous
+`/shop-catalog-image/{name}`. Skipped: hidden slides, titles containing `skipTitlesContaining` (+ their untitled
+follow-ups), static price lines, empty dividers. Pages are `deck-*` slugs, unpublished; a re-import replaces only those.
+Runs in the background (`ShopCatalogDeckImportRunner`, one at a time) because the ELDK27 deck is 186 MB / 87 pictures.
+A titled slide inside an open "X (n/m)" series (n < m) joins that page under a `###` heading ("Platinum Booths" between
+Platinum (1/3) and (2/3)). A slide's pictures go into one `::: catalog-gallery` block of Markdig figures (`^^^ caption`);
+a short text on, under/over or beside a picture (by `a:xfrm` geometry, nearest first, each used once) is its caption and
+is not repeated as text; consecutive galleries merge (`TidyBody`). A video slide's link becomes the page's `MediaUrl` (its
+still frame — the `p:pic` with `a:videoFile` — is dropped); at import the link's redirects are followed (≤4 hops, no
+auto-redirect client WITH a User-Agent — the deck's short-link host answers 403 without one) until a YouTube / Vimeo URL, and the page embeds it (`SponsorCatalogModel.EmbedUrl` →
+youtube-nocookie / player.vimeo; anything else stays a link). Every page gets `ProductMatch` = its title. At the first
+skipped reservation slide two live pages are inserted: *Available packages* (`AvailabilityView = Available`, booth map)
+and *Reserved & confirmed* (`Taken`).
+
+**Live packages in the catalogue (§1312).** `ShopPackageAvailability.RowsAsync(eventId, match, withCompanyNames)`:
+published, priced products of Booths / Packages / Sessions / Branding / BoothOptions (in that order); a page's
+`ProductMatch` keeps only products whose name + category carry every word (case-insensitive, plural = singular, stop
+words dropped; a match of edition codes only matches nothing). Slot products (a `BoothId` or `Timeslot`) are ONE line per
+category + name-before-" - " (edition code removed; a common "(Shared)" suffix kept). Per product: a CEH order holds it when
+signed, or unsigned while its line has `StockTaken` (the booth-map rule) ⇒ confirmed / reserved; otherwise the webshop's
+LIVE availability ⇒ available units, or confirmed (sold there, no name); a held slot is never also free. Maximum = left +
+reserved + confirmed (none when unlimited). Company names (`withCompanyNames`) are shown on the *Reserved & confirmed*
+page to everyone (operator 2026-09-27: "names public is ok" — the deck's "Sold to" was public); package lines on other
+pages and the booth map carry none. `ShopCatalogPage.AvailabilityView` (None / Available / Taken, string)
+and `ProductMatch` (≤200) — migration `ShopCatalogProductMatch`; both editable on `/Organizer/ShopCatalogPages`.
+`AvailabilityView = Summary` (no migration — the enum is stored as a string): one table per group — package (linked to
+`ShopPackageAvailability.PageFor`: the non-availability page whose `ProductMatch` matches the line, most words first),
+price, remaining of maximum, reserved and confirmed holders; organizers additionally get the booked euro per line, per
+group and in total (`ShopPackageTaker.AmountEur` = the order line's frozen `UnitPriceEur` × `Quantity` × (1 + surcharge),
+or the product's effective price for a sale in the old shop). The import puts Summary / Available / Taken in their own
+chapter "Availability & booked". Live: `Cache-Control: no-store` on `/sponsor-catalog`, no output/stock caching, and on an
+availability page a script re-fetches the page every 60 s (skipped while the tab is hidden) and swaps `.catalog-live`.
+**SmartArt** (`dgm:relIds` in a `graphicFrame`): `SmartArtMarkdown` reads the diagram's data part — `dgm:pt` nodes (type
+node/doc; pres/trans points ignored) and `parOf` `dgm:cxn` in `srcOrd` — and writes a table when 2–6 top nodes each hold
+only plain values (the Numbers timeline), else a nested list. `catalogDeck.skipPagesTitled` drops pages by exact title
+(the cover, and the deck's outdated "How to Participate ?"), `catalogDeck.skipChaptersTitled` drops a whole chapter (the
+orphaned "ELDK27 Logistics"), so a re-import does not bring back what the operator removed. The import appends a generated
+"How to order" page/chapter (`HowToOrderMarkdown(ShopConfig)`: register → sign in (PIN) → choose → reserve or order/sign
+(online or paper) → pay (VAT rule + `lateSurcharge` from config) → Get Started).
+**2026-09-28 additions.** Page 1 is generated (`FrontPageMarkdown`: event display name, `event.datesText`, `event.venue`,
+website, links to Availability and How to order). SmartArt with plain nodes that carry photos (layout points whose
+`prSet@presAssocID` names the node and whose `a:blip` resolves through the data part's rels) or several paragraphs becomes
+person cards (figure: photo + bold name + one line per paragraph). A picture that cannot be converted leaves `NoPicture`,
+which `TidyBody` removes (the old "^^^ blank ^^^" rule also ate the gap between two figures). The reservation slides
+become ONE page, "Availability" (`AvailabilityView.Summary` + booth map). `catalogDeck.productMatches` (title → match) and
+match syntax `;` alternatives / `=Exact package name`; `PageFor` ranks by `Specificity`. Any sellable package no page
+matches gets a generated page before the Availability chapter (`ProductPagesAsync`: webshop description via
+`ShopSigningService.PlainText` + first picture `/shop-image/{id}`, match `=Label`).
+**Availability rows.** `ShopPackageRow.Slots` — every product of a package as `ShopPackageSlot(label, state, company)`
+(label "E-16" / "slot 2 (11:30-12:30)"; state Free / Reserved / Confirmed) — and `FreeSlots`. A product the webshop reports
+gone without a CEH order is named from the webshop's own paid orders (`SoldTo`: completed + processing in the edition
+window, `CompanyId` → public name, else billing company; cached 5 min, fail-soft). The page hides `tr.soldout` / all-sold
+groups unless `.catalog-page.show-soldout` (the toggle survives the 60-s refresh). 2026-09-28 later: the toggle is a
+"Show reserved & sold" switch (a checkbox) in a bar ABOVE the map with the colour key; off also hides reserved/sold chips,
+so the default view is "what can still be bought". Rows sort by package name within a group. 🔒 The catalogue shows NO
+money — the booked-€ column, group and grand totals were removed even for organizers ("dont expose this public");
+`ShopPackageRow.BookedEur` stays in Core for an organizer page. A selling line under each package comes from
+`shop.<edition>.json → packageHighlights` (match → text, the catalogue-page match syntax, first match wins, `_`-keys
+ignored); ELDK27's lines are worded from the sponsor deck and the webshop descriptions.
+
+**Listing rule (§1312).** `ShopProduct.ListedUnder(group)`: a product is listed under its own group, and a sponsor-visible
+product with a `BoothId` (a feature booth inside a branding package) also under Booths — the shop tabs and the catalogue
+product pages share it. Organizer-only products never.
+
+**Contract** (`ShopSigningService`, `ShopContractPdfService` on PDFsharp): the order's contract, re-rendered on
+demand; the signed copy is archived in `Sponsors/Webshop/Contracts`. Signatures arrive as a picture from the browser
+(typed name in a handwriting font, drawn, or uploaded), are decoded, bounded and re-encoded server-side. Only the
+signer named on the order (or, when none is named, a company signer) may sign; signing while an organizer acts as
+someone is refused. Signing flips the company to sponsor (`SponsorInfo.IsSponsor`).
+
+**Onboarding**: `ShopOrderSource` presents signed CEH orders as completed webshop-shaped orders (negative ids, the
+webshop's category names) to the existing order pull and to the purchase summaries, so tasks, flags, welcome mail
+and Zoho provisioning run through the one pipeline.
+
+**Registration** (`ShopRegistrationService`, `/sponsor-registration`, anonymous and gated): captcha (`ShopCaptcha`:
+Turnstile when configured, else a sealed arithmetic challenge with a minimum fill time) + honeypot + a 6-digit code
+(rate-limited per address and per IP) → wizard → company (candidate), people linked (an existing person is linked,
+never moved), e-conomic customer (matched by CVR first, then name; created with its address) and contacts with
+roles; failures there are stored on the company and reported, never block the registration.
+
+**Mail** (`ShopMailer`, `templates/emails/shop-*.html`): registration code and organizer notice (ring-exempt), sign
+request, signed confirmation, the daily pending-order reminder and the weekly reservation reminder (`ShopRemindersJob`,
+reminder-engine de-duplication per day / ISO week). Links use `{{hubUrl}}`, i.e. the recipient's own sign-in link.
+**Signing reminder (§1312).** An order in `AwaitingSignature` (signer set, has lines) is NOT in the cart reminder; instead
+`ShopSigningService.SendSignRemindersAsync` (called by `ShopRemindersJob`, registered in both hosts with
+`ShopContractPdfService`) re-sends the signing mail itself — `SendSignRequestAsync`: magic link, items, deadline, contract
+PDF — to the signer, daily (event-local day), not on the day it was sent, de-duplicated in `SentReminders`
+(`shop-sign-reminder`, `{orderId}:{yyyy-MM-dd}`). This also covers orders sent for signature from an organizer
+reservation, which the cart and reservation reminders both skip.
+Every mail to a sponsor or requester (offer, contract to the signer, signed confirmation, cart and reservation reminders)
+carries the edition's `organizer.copyEmails` as **CC** (§1312); the registration code and the organizer notices do not.
+The CC is added by the sender at the point the mail actually leaves, ring-gated and redirected like any CC — a mail that
+is ring-dropped or kill-switched produces no copy either.
+
+**Website, LinkedIn and X are CEH's** (§1312, 2026-09-30 — supersedes §1081/§1125/§1126): the sponsor edits them in
+Company details (wizard step + page) and the organizer on the shop company page; both save `SponsorInfo` AND
+`ShopCompany` (`ShopCompanyLinks`), last save wins. `WebshopOwnedFields` now only FILLS a blank from the old webshop.
+Every link goes through `HttpsUrl.Normalize` (http:// upgraded, bare host gets https://) — Zoho refuses non-https. The
+exhibitor push always sends LinkedIn AND X together: Zoho's `company_social_pages` is one object a PUT replaces whole.
+
+**CEH owns the shop — the old webshop (WooCommerce) is closed** (§1312, 2026-10-01; operator: "ceh ows the webshop
+functionality 100%" · "store the information in ceh about the orders/products that was bought using the old webshop" ·
+"old webshop is closed for new orders" · "the previous orders and any dependency must be workin").
+- **Stock:** `ShopStockService` answers every product from `ShopProduct.ManageStock` / `StockQuantity` / `InStock` (always
+  live); `ShopOrderService.TakeStockAsync` / `GiveBackStockAsync` adjust only those fields. `StockQuantity` carries
+  `[ConcurrencyCheck]`, so two saves taking the last unit cannot both succeed. The organizer product editor writes only CEH.
+- **Catalogue:** `ShopCatalogImportService` + `ShopCatalogSyncJob` are gone; products, prices, pictures (SharePoint
+  Products folder, names via `ShopProductPictures.FileName`) are maintained in CEH only.
+- **Old orders:** `WebshopOrderArchive` (key = the webshop order id; `Json` = the `WooOrder` exactly as the readers consume it,
+  with the category names captured — they existed only in the webshop) behind `IWebshopOrderSource` /
+  `WebshopOrderArchiveSource`, which has the WooCommerce client's `GetOrdersAsync` signature, so every reader kept its logic:
+  `SponsorOrderPullService` (tasks, tier, booth, Zoho categories), `WebshopDraftInvoiceService` (idempotent on
+  `WebshopOrderId-{id}`), `SponsorPurchaseSummaryService` (TV / furniture / package handling / bag packaging / staff tickets),
+  `ShopEntitlementService` (last edition's items), `ShopPackageAvailability` (who bought which package — completed AND
+  processing), and the organizer / sponsor order pages. 🔒 Deliberately NOT `ShopOrders`: nothing in the CEH order lifecycle
+  (invoicing, stock, contracts, cancel, pricing, reminders) may act on them — an imported "signed" order would be invoiced
+  again under `CehShopOrder-…`. 🔒 Filled ONCE, completely (status "any", the edition's order window), on first use — all or
+  nothing: a failed fetch stores nothing and THROWS (a reader says "could not check"; an empty answer would make the purchase
+  check reopen done tasks), only the source's own rows are detached on failure.
+- **Swag:** `SponsorSwagCatalogService` lists CEH's published products of the configured category (CEH price, picture
+  `/shop-image/{id}`, stock, "buy" = `/Sponsor/Shop/Product?id=`; the id stays the old webshop's product id where there is one,
+  so swag holds keep matching); `SwagCatalogCreditService` creates no webshop coupon — the credit is CEH's.
+- **Deploy B (2026-10-01):** the WooCommerce client, its options, settings, credential alert, the one-time fill path and the
+  `woocommerce` config block are GONE; the fill ran once on PROD (30 orders: 25 completed, 5 cancelled — verified).
+
+**Signing reminder loads the order's lines** (§1312, 2026-10-01): `ShopSigningService.SendSignRemindersAsync` reads the waiting
+orders WITH lines → product → category / images (as `ShopOrderService` does); it read them bare, so the reminder's PDF and
+totals were built from an empty order (ELDK27-0003: 0 €).
+
+**Event partners have organizer access** (§1312, 2026-10-01): `ParticipantRoleAccess.HasOrganizerAccess(role)` = Organizer or
+EventPartner — used by `OrganizerAuth.IsRealOrganizer` (still false while acting-as), every page's signed-in-person gate, the
+volunteer / scenario / question services' actor checks, `ReturnToOrganizer` and `NavBuilder` (management group). Data that
+means "the organizers" (notice lists, pickers, lunch counts, team leads) still asks for `ParticipantRole.Organizer`.
+
+**…read-only** (§1316, 2026-10-02): `EventPartnerReadOnlyFilter`, a global `IAsyncPageFilter` registered BEFORE
+`AuditPageFilter`, short-circuits any POST/PUT/PATCH/DELETE from an event partner (not acting-as) under `/Organizer` or
+`/Sponsor/Shop`, plus the GET handler `Callback` (LinkedIn connect stores a token). Allowed by name: POST handlers starting
+`Export` / `Pdf` (the reservation-rights export, the order PDF) — every other export is a GET. A form post is redirected back
+to the referring page with `?readonly=1`; a script call (non-HTML `Accept` or `X-Requested-With`) gets 403. `_Layout` shows
+partners a read-only banner on `/Organizer` pages and a small script disables the controls of every post form in `#main`
+except `?handler=Export…/Pdf…` ones. Switch-to-user is a POST, so partners cannot impersonate.
+
+**Coupon billing type `Ignored` (4)** (§1312, 2026-10-01): a plain discount code — skipped by `CouponDraftInvoiceService` like
+`NoInvoicing`, never `NeedsAttention`, never invoiceable, no agreement in the claim mail; `/Organizer/CouponInvoicing` lists it
+apart (collapsed "Ignored codes", "Stop ignoring" = back to Unmapped). Distinct from `NoInvoicing` (= free / included).
+
+**e-conomic is mirrored field for field** (§1312, 2026-10-01): `ShopCompanyService.ApplyErpBilling` compares every billing field on
+every run and follows e-conomic, a BLANK included (legal name, CVR normalised, address, zip, city, country name → ISO code,
+invoice e-mail, currency, VAT zone); only a value CEH cannot hold is skipped (blank legal name / currency, a non-zone, an
+unknown country). `ShopErpRoleSyncService` matches a contact by its e-conomic contact number (per company, active sponsor rows)
+before the e-mail, so an e-mail changed in e-conomic renames the same person; the name and the phone (per contact — no company
+phone) follow too; an e-mail that already belongs to another CEH person is warned, never taken over.
+
+**Sponsor file copies for people** (§1312, 2026-10-01): `SponsorFileMirrorService`, run by `SponsorFileMirrorJob` (Jobs host,
+10-minute interval, `JobSystem.SharePoint`). Copies, never renames — the originals keep the names their readers use:
+- SoMe sponsor graphic `sponsor-{id}.png` → `{SponsorGraphicsSponsors}/By name/{slug(public name)}-sponsor-{id}.png`. Public
+  name = `ShopCompany.PublicName`, else `SponsorCompanyNameService.LocalNameAsync`; no name → not copied (reported).
+- Exhibitor wall → `{SponsorExhibitorWall}/{Platinum|Diamond|Gold|Feature}/` (same file name), into EVERY level the company
+  bought: `SponsorInfo.Tier` ∪ the booth level of each completed old-webshop line (`IWebshopOrderSource`) ∪ each reserved /
+  awaiting / signed CEH shop line with a `BoothId` (`BoothTierOf`: per-level category first, then a "Booth E-NN" name).
+  `Other/` without a booth. The company comes from the `SponsorUploadAudit` row (Kind `wall`) of that file name.
+- Subfolders are invisible to every reader (`ListFolderFilesAsync` skips folders). Copy is server-side
+  (`SharePointUploadClient.CopyItemAsync` → Graph `/copy`, `conflictBehavior=replace`) when the copy is missing or older
+  than the original. Nothing is deleted (a renamed company / changed level leaves its old copy).
+- Data: the E-24 Appreciation and E-27 Lounge products (feature-size booths) were added to the "Exhibitor Tier Package
+  with Booth" + "Feature Exhibitor" categories, like the plain E-24 booth.
+
+**Invoice recipient address** (§1312, 2026-10-01): `BuildPayload` leaves out an address / zip / city the e-conomic customer
+does not have — the schema types them as optional strings and rejects a null (ELDK27-0009, a UK customer with the whole
+address on one line).
+
+**Agreed invoice date and payment term** (§1312, 2026-09-30): `ShopDraftInvoiceService` no longer holds an order back
+until `InvoiceNotBefore`; it invoices every signed order at once with `Date = InvoiceNotBefore ?? today`. When
+`PaymentDays` is set it reads e-conomic's `/payment-terms` (`IEconomicInvoiceClient.ListPaymentTermsAsync`) and
+`PickPaymentTerm` chooses a `net` term with exactly those `daysOfCredit`, else the `dueDate` term ("Forfaldsdato") with
+`dueDate = date + days` in the payload; with neither, the order is reported as an invoice problem (never silently the
+customer's terms). `EconomicDraftInvoice.PaymentTerms` overrides the customer's terms in `BuildPayload`; null keeps
+§811a (webshop/coupon invoices never set it). The contract prints "the invoice is dated …".
+
+**Company search** (§1312, 2026-09-30): `/Organizer/ShopCompanies?Q=` filters by legal / public name, company id (a leading
+`#` is ignored), e-conomic number and CVR (`ShopCompaniesModel.Matches`), combined with the Show filter.
+
+**Company Manager retired, people from e-conomic** (§1312, 2026-09-30): see *Companies, people and roles — e-conomic is
+the source* above.
+
+**Company-only SoMe tagging** (§1312, 2026-09-30): `SponsorInfo.SoMeTagContacts` (default true, migration
+`SponsorSoMeTagContacts`), set from the organizer's shop company page through `UpdateCehDataAsync`. When false,
+`SoMeVariableResolver.SponsorValuesAsync` returns null for `{SponsorSigner}` / `{SponsorEventCoordinators}` (optional
+variables — the line keeps `{SponsorCompanyMention}`).
+
+**Public vs legal name** (§1312, 2026-09-29): a registration stores `LegalName` as typed and `PublicName` =
+`CompanyLegalForm.Strip(LegalName)` (§1158's rule); the sponsor record's `CompanyName` takes the public name, so the event
+site, app, SoMe, Zoho and upload names use it, while the contract, the e-conomic customer and so the invoice use the legal
+name. The CEH shop owns the public name for EVERY company (orders come from the CEH webshop, not Company Manager): the
+order pull reads `ShopCompany.PublicName` first (then CM public, CM legal, billing), and an organizer's public-name edit
+is copied to `SponsorInfo.CompanyName` at once. **Fill once, then the operator's:** the ERP → CEH sync (`ApplyErpBilling`)
+keeps the legal/billing fields current and CREATES `PublicName` = `Strip(ERP name)` only while it is empty; a new company
+from Company Manager fills it once the same way; the order pull mirrors the shop's public name and otherwise only fills an
+empty sponsor name. Nothing automatic overwrites a public name — the operator edits it in the organizer companies table
+(`SetPublicNameAsync`), since the legal-form rule is right ~9 in 10 ("Admin By Request Nordics ApS" is "Admin By Request").
+Every public reader (uploads, SoMe, AI helper, public sponsor list, Zoho, the contract's announcement field) goes through
+`SponsorCompanyNameService` / `ShopCompany.PublicLabel`, never the legal name with its legal form.
+
+**Self-service reservations** (§1312): an offer offers *Order and sign* and *Request a reservation*, both through
+registration (the page carries a whitelisted `next` step). In the cart the request box (`#request`) sits BELOW the
+sign/PDF/send buttons under *Need more time to take a decision?* — signing is the primary path. A request is two nullable columns on the cart order
+(`ReservationRequestedAt/ByParticipantId`) — nothing is reserved while it waits, and the daily cart reminder skips it; the
+organizers get a notice with a deep link to the request on the reservations page. *Accept* turns the cart into an organizer
+reservation (requester = who asked, deadline and cadence from the organizer, stock taken) and sends the reservation mail;
+*Deny* clears it and sends `shop-reservation-answer`. A reservation mail carries *Review and sign*, *Ask for more time*
+(only with a deadline) and *Cancel reservation*; the last two open `/Sponsor/Shop/Reservation/{id}`, where cancelling is a
+button press (mail scanners follow links). A request for more time is four nullable columns (`ExtensionRequested*`); the
+deadline moves only when an organizer approves it. Code-built mail buttons use `ShopMailer.ButtonHtml`, whose
+`{{hubUrl}}` is filled with the recipient's own sign-in link.
+
+**Mail buttons fit their labels** (§1312): `OutlookButtonFit` runs inside `BrevoEmailSender.ApplyDefaultFont`, the tail of
+every send path. It widens each Outlook VML button to its label (capped at the mail's content width) and turns fixed-width
+pill links into padding + no-wrap, so no template width has to be guessed; a test fails on a label too long to fit.
+
+**Contract link and several companies** (§1312): the signing mail links to one order. The contract page first switches
+the person to that order's company when they are linked to it (the same link check as the company switcher), so a
+signer for several companies never lands on "not found for your company"; for anyone else nothing changes.
+
+**Reservation rights** (`ShopEntitlementService`): a JSON export of what each company had (booths, sessions,
+branding, packages — both shops) with its identity and signer/coordinator; the import in the next edition creates
+them as candidates and matches items by booth, then session length + timeslot, then name without edition codes.
+
+**Public catalogue** (`/sponsor-catalog`, anonymous and gated): organizer-edited Markdown pages (HTML disabled) with a
+contents list, product groups with live prices and availability, and the booth map — never company names.
+
+**Booth map** (`ShopBoothMapService`): booths drawn in percent over the layout picture, coloured free / reserved /
+sold from CEH orders and the webshop's live stock.
+
+**Tasks**: while `sponsor-webshop` is on, `{{configuratorUrl}}` resolves to `/Sponsor/Shop` for every sponsor task.
+
+### §1305 batch 3 — swag into the cart, invoicing, roles from e-conomic, foreign VAT (DEV only)
+
+**Swag.** The swag catalogue page stays the configurator (bag quantity, logo, holds, credits). While the shop is on,
+"Choose this" calls `ShopOrderService.AddSwagAsync`: one cart line for the webshop product with `PiecesPerUnit` =
+the bag quantity — ONE unit of stock (the webshop stocks each item once per sponsor), priced per piece × bags. An
+organizer-granted swag credit (`SwagCatalogCredit`) discounts swag lines only; it is marked used
+(`UsedOnShopOrderId`) when the order is reserved and released if the order is cancelled.
+
+**Discount allocation.** `ShopPricing` allocates the included-furniture allowance and the swag credit to the lines
+they reduce (`ShopPricedLine.DiscountEur`), so every line has a net amount and the lines sum to the contract total.
+
+**Invoicing** (`ShopDraftInvoiceService`, `ShopInvoiceJob`, hourly): a signed order without an invoice, whose "do not
+invoice before" date has passed, becomes an e-conomic draft invoice built with the webshop invoicer's parts —
+line composer (VAT by the customer's zone), EUR→customer-currency conversion rounded up, layout, heading, employee
+references, the signer as Att / Your reference. Lines are billed net; agreed payment days are printed; the
+reference `CehShopOrder-{number}` makes it idempotent. Invoice creation is PROD-only and honours `Invoicing:DryRun`;
+the outcome (draft number, dry-run note or problem) is stored on the order.
+
+**Roles from e-conomic** (`ShopErpRoleSyncService`, `ShopErpRoleSyncJob`, 30 min): for companies registered in the CEH
+shop, each e-conomic contact becomes a linked contact with the Signer / Event Coordinator roles from its notes and
+its contact number; people no longer in e-conomic lose the roles (kept linked). An empty answer changes nothing.
+Existing sponsors keep following e-conomic through the existing contact chain.
+
+**Foreign VAT** (`ShopVatChecker`): at registration, an EU (non-Danish) VAT number is checked in the EU VIES register
+(read-only). Invalid ⇒ the registration is refused; register unreachable ⇒ allowed and flagged; outside the EU ⇒ not
+checked. The outcome is stored on the company (`VatCheck`) and shown to organizers.
+
+### §1305 batch 4 — the contract as a legal document, organizer tools, product editor (DEV only)
+
+**The contract, in full, before signing.** The contract page renders every section of the PDF in the same order —
+cover (with the event logo from the logo-pack folder), event, organizer, sponsor, signer, coordinator, invoice, web &
+SoMe, products with their FULL descriptions, totals, agreed terms, payment details, all articles — and only then the
+signature panel. Agreed Terms = the organizer's special conditions plus any special billing terms ("invoice not
+before", payment days); with nothing agreed the section is left out of both the page and the PDF. The sign request
+carries the unsigned PDF and the signed mails carry the signed PDF.
+
+**PDF layout gates.** `ShopContractPdfService.RenderChecked` returns the PDF, its page count and a list of layout
+problems: content past the bottom margin, a heading left at the foot of a page, a last page holding only a stray
+line. Headings keep with what follows, labelled fields, short paragraphs and the totals block never split, and long
+boxes and product descriptions continue framed on the next page. Every page but the cover says "Page N of M". The
+tests render deliberately awkward contracts and fail on any reported problem; in production a problem is logged.
+
+**Cancelling releases the products.** A sponsor can cancel an unsigned order from the contract page or the order
+list, an organizer any order; cancelling gives the stock back to both shops and releases swag credits.
+
+**Sold out.** The organizers are told when a product sells out — when a CEH reservation takes the last unit, and when
+the catalogue sync sees a product go from in stock to sold out in the webshop (once per transition).
+
+**Groups.** Furniture and booth options are separate groups; the tier's included-furniture allowance applies to
+furniture only. While the CEH shop is on, the furniture task has no coupon code: its body lists every available
+furniture product with its price, states the tier allowance (deducted automatically in the cart) and links to the
+shop's furniture tab.
+
+**Product editor** (`/Organizer/ShopProduct/{id}`). Name, status, price, stock, descriptions, category, sort order,
+booth, timeslot and pictures. Stock is the shared counter and is written to the webshop at once under the stock
+write ceiling. **Stock is the only thing CEH ever writes back to the webshop**: every other edit stays in CEH, the
+product is marked managed in CEH so the sync keeps the edit, and "Hand back to the webshop" returns it to the sync.
+Pictures added in CEH are stored in the shop's products folder in the document library and served by CEH.
+
+**Invoicing a shop order from any host.** A signed order can be invoiced on demand from the organizer's order page —
+the same path as the hourly job, including the never-twice reference check. Shop invoices have their own write ceiling
+(`ErpShopInvoiceCreate`) and dry-run switch (`Shop:InvoiceDryRun`), separate from the ceiling that guards webshop and
+coupon invoicing, so a test environment can create shop invoices without being able to invoice webshop orders.
+
+**Swag in the shop.** Swag items are bought for every attendee bag with the sponsor's logo, so they enter a cart only
+through the swag configurator, which sets the bag quantity (one unit of stock, priced per piece × bags, quantity fixed
+at one). The shop's Swag tab opens the configurator. A product in the organizer-only group (the free-swag
+sponsorship) is never shown to sponsors; only an organizer can add it to a cart. Buying from the swag catalogue files
+the company under the Swag sponsor heading in the event platform.
+
+**Discounts, teaser and commercial corner.** An organizer can give a product a discounted price in CEH; every shop
+surface shows the normal price struck through beside the new one, and the contract states the discount. A teaser strip
+runs across the sponsor's start page and the shop with the branding options, sessions and swag still available. The
+commercial corner shows up to three products the organizer chose, one at a time with picture and price; a product
+that sells out leaves it and the organizer is told.
+
+**A price agreed with one company (§1312).** `ShopOrderLine.AgreedUnitPriceEur` (nullable) overrides the product's price
+for that line only; the product's list price is then the line's normal price (`NormalUnitPriceEur`) when higher. It is set on
+/Organizer/ShopOrders per line (`ShopOrderService.SetAgreedPriceAsync`) on any unsigned order — a reserved or sent order is
+re-frozen at once; a signed or cancelled order is refused.
+
+**Signed-contract mailbox (§1312).** `shop.<edition>.json → organizer.contractEmails` receive the signed-contract organizer
+notice (with the signed PDF) in addition to `notifyEmails` — and no other organizer notice.
+
+**Missing mandatory Get Started steps, every role (§1312).** `_Layout` shows a red "!" on the Get Started menu item for
+any role with an open mandatory step (cached 2 min per person). Sponsors: `SponsorWizardService` (a step with `Done` null or
+informational is optional). Personal wizards (speaker / role / attendee) mark optional steps done themselves, so
+`GetStartedSteps` treats every open step as mandatory except the optional-but-saved `calendar` step.
+The same "!" marks "/Tasks" and "/Sponsor/Tasks" when a MANDATORY task (`IsMandatory`) is overdue — due before today
+(UTC) and not Done — via `OverdueTasks` (person: assigned tasks; sponsor: the acting company's `sponsor:` tasks, not
+system-closed). Cached 2 min per person / company.
+
+**Swag is a contribution.** A swag item costs the sponsor their share of the item for every attendee bag — price per
+piece × a pricing quantity × the product's share (an edition default, 33 %) — shown as one amount; the event covers the
+rest. The per-piece price is never shown to the sponsor.
+
+**A prepared order finds the sponsor.** When the company has an unsigned order with items — typically one an organizer
+prepared — the sponsor's start page and every shop page open with a banner and one button straight to the contract
+("Review and sign" for the signer) or to the cart, so a prepared order can be accepted and signed without searching.
+
+**One shop in the sponsor's words.** While the shop is on, nothing a sponsor reads sends them to the old webshop: the
+company step of the Get-started wizard and the company details page point to the shop's company profile, the
+missing-links reminder mail links there, "Previous Orders" opens the combined order list, and texts that fit both shops
+use neutral wording. The note that payment is arranged separately (no card payment) stays in the tasks on purpose.
+
+**Tasks and the shop.** While the shop is on, the sponsor tasks' shop button points into the hub and the shop wording
+comes from placeholders; an in-hub button never shows the external-webshop login dialog. The old webshop's menu item
+steps aside for viewers who have the shop.
+
+**Booth detection.** Not offered: a vision model reads the booth numbers on a layout picture but does not place them
+precisely enough to mark the map. The layout's booth positions are built in (measured on the layout picture) and any
+booth can be redrawn by hand.
+
+**Organizer signature.** Every contract — draft, offer or signed — carries the contract owner's signature, dated when
+it was generated or when the sponsor signed. The picture is a file in the shop's contracts folder named in the
+edition's shop config (kept out of the repository); when it cannot be read, the name is written in an embedded
+handwriting face (Allura, SIL OFL 1.1) instead, so the organizer column is never blank.
+
+**Organizer order tools** (`/Organizer/ShopOrders`): a count and total of unconfirmed orders (carts with items,
+reserved, waiting for signature) with a filter; pre-staging products into any company's cart — sponsors and
+candidates — without acting as anyone; choosing the signer, coordinator and PO; sending the contract for signature;
+and an offer mail (`shop-offer`) to any address with the order's products, prices and the draft contract attached,
+which reserves nothing.
+
+**Shop page.** A sticky cart bar shows the item count and subtotal and flashes when something is added; sold-out
+products are hidden unless the sponsor ticks "Show sold-out items".

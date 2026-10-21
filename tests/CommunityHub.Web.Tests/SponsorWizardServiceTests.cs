@@ -37,14 +37,11 @@ public sealed class SponsorWizardServiceTests
     }
 
     /// <summary>
-    /// Service with the e-conomic / Company Manager integration DISABLED, so the
-    /// contacts step is left undeterminable (null) — the fail-soft path. The contacts
-    /// check short-circuits on disabled options before touching the HTTP clients.
+    /// Service with the e-conomic integration offline, so the contacts step is left
+    /// undeterminable (null) — the fail-soft path.
     /// </summary>
     private static SponsorWizardService OfflineSvc(CommunityHubDbContext db) =>
         new(db,
-            new CompanyManagerClient(new HttpClient(), new CompanyManagerOptions { Enabled = false }),
-            new CompanyManagerOptions { Enabled = false },
             new EconomicContactAdminService(new OfflineErpClient()),
             NullLogger<SponsorWizardService>.Instance);
 

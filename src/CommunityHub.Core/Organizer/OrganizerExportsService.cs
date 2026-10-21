@@ -505,8 +505,8 @@ public sealed class OrganizerExportsService
             {
                 a.Participant.FullName,
                 a.Participant.Email,
-                Bucket = a.Task.Subcategory.Category.Name,
-                Subcategory = a.Task.Subcategory.Name,
+                Bucket = a.Task.Category.Name,
+                Subcategory = a.Task.Subcategory != null ? a.Task.Subcategory.Name : null,
                 Task = a.Task.Title,
                 a.Task.DueDate,
                 a.Task.Shift,

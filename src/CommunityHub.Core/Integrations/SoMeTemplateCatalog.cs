@@ -126,7 +126,9 @@ public static class SoMeTemplateCatalog
         // Sample: "✨ Sponsor announcement: Truesec ✨" / "…as a Gold sponsor to the upcoming …"
         SoMeTemplateKind.Sponsor =>
             "✨ Sponsor announcement: {SponsorName} ✨"
-            + "\nWe are very proud to announce {SponsorLinkedInUrl} as a {SponsorTier} sponsor to the "
+            // §1300 — the NAME here; the company is TAGGED once, first in the Tag line (operator
+            // 2026-09-23: "it should tag the company in the tag area … and then people are mentioned").
+            + "\nWe are very proud to announce {SponsorName} as a {SponsorTier} sponsor to the "
             + "upcoming {EventDisplayName} on {EventDates}."
             + Break
             + "{SponsorSocialMediaCompanyDescription}"
@@ -137,7 +139,7 @@ public static class SoMeTemplateCatalog
             // sponsor with no mentionable contact simply has no "Tag:" line — it never publishes a
             // bare label. Both variables mention EVERY signer / coordinator, not just the first.
             + Break
-            + "Tag: {SponsorSigner} {SponsorEventCoordinators}"
+            + "Tag: {SponsorCompanyMention} {SponsorSigner} {SponsorEventCoordinators}"
             + Break
             + "{SponsorHashtag} " + Footer,
 
@@ -213,7 +215,7 @@ public static class SoMeTemplateCatalog
         // §884.3 — the sponsor's signer(s) and event coordinator(s), mentioned where LinkedIn allows
         // it and named in plain text otherwise. Measured follower rates: signers 7/14, coordinators
         // 6/15 — so roughly half of each will render as text, which is why the fallback is reported.
-        "{SponsorSigner}", "{SponsorEventCoordinators}",
+        "{SponsorSigner}", "{SponsorEventCoordinators}", "{SponsorCompanyMention}",
         // §885 — one call-to-action phrase drawn per post from the operator's own catalog, so a
         // campaign of 80+ posts does not close the same way every time. Rolled ONCE at creation and
         // stored on the post: varied across the campaign, fixed within a post.

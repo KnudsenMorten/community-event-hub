@@ -1,0 +1,30 @@
+@model CommunityHub.Core.Domain.ShopProduct
+@using CommunityHub.Pages.Sponsor.Shop
+@inject CommunityHub.Core.Integrations.Webshop.ShopSettings ShopSettingsForPrice
+@* §1305 — one price display for every shop surface. A discount shows the normal price struck through, the new price,
+   and a "−N%" badge (operator 2026-09-26: "so people can see normal price and new price"). A swag item shows the ONE
+   amount the sponsor pays — their contribution for every attendee bag — never a per-piece price (operator 2026-09-26:
+   "price reflected must be that instead of unit price of fx 11.50 euro"). *@
+@{
+    var swag = Model.PrimaryCategory?.Group == CommunityHub.Core.Domain.ShopGroup.Swag;
+    decimal now = Model.EffectivePriceEur, normal = Model.PriceEur;
+    if (swag)
+    {
+        var rule = ShopSettingsForPrice.Shop().SwagPricing;
+        now = CommunityHub.Core.Integrations.Webshop.ShopPricing.SwagContributionEur(Model, rule, 1);
+        normal = CommunityHub.Core.Integrations.Webshop.ShopPricing.SwagContributionEur(Model, rule, 1, normal: true);
+    }
+    var per = swag ? " for all attendee bags" : "";
+}
+@if (Model.IsDiscounted)
+{
+    <span class="shop-price is-discounted">
+        <s class="shop-price-normal" aria-label="Normal price">@ShopPageModel.Eur(normal)</s>
+        <span class="shop-price-now">@ShopPageModel.Eur(now)@per</span>
+        <span class="shop-discount-badge">−@Model.DiscountPercent%</span>
+    </span>
+}
+else
+{
+    <span class="shop-price"><span class="shop-price-now">@ShopPageModel.Eur(now)@per</span></span>
+}

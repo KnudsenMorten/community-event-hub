@@ -354,6 +354,91 @@ public sealed class EvaluationReportDebounceTests
         Assert.NotEqual(first, h.Db.EvaluationSessions.Single().PublishedReportVersion);
     }
 
+    /// <summary>
+    /// 🔒 §1271 — a session still inside its collection window is never published, however quiet it
+    /// has been: a lull mid-talk must not release a report that the end-of-talk rush then supersedes.
+    /// Once the window has closed (and it is quiet), it publishes.
+    /// </summary>
+    [Fact]
+    public async Task A_session_still_COLLECTING_is_not_published_even_after_a_quiet_half_hour()
+    {
+        var h = await SeedAsync();   // responses Start+0..11 min, window closes End+30 (Start+90)
+
+        h.Clock.Set(Start.AddMinutes(80));   // 69 min of quiet, but the window is still open
+        var during = await h.Svc.RunAsync(EventId);
+        Assert.Equal(0, during.Published);
+        Assert.Empty(h.Mail.Sent);
+        Assert.Equal(EvaluationReportDebounceService.Outcome.StillSettling, during.Sessions.Single().Outcome);
+
+        h.Clock.Set(Start.AddMinutes(90));   // the window has closed
+        Assert.Equal(1, (await h.Svc.RunAsync(EventId)).Published);
+    }
+
+    /// <summary>
+    /// 🔴 §1264 — the defect the operator hit on PROD: <i>"why do i continue to receive these"</i> ·
+    /// <i>"getting them every x min"</i>. The version folds in the EVENT's response count, so a press
+    /// in ANOTHER room — or an unattributed kiosk tap — changed every rated session's version, and
+    /// each pass mailed all their speakers "Updated evaluation results". A speaker is re-mailed only
+    /// when their OWN session moved.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]    // a press that belongs to no session (a kiosk tap outside every window)
+    [InlineData(false)]   // a press in another session
+    public async Task A_press_ELSEWHERE_in_the_event_does_not_re_mail_an_already_sent_report(bool unattributed)
+    {
+        var h = await SeedAsync();
+        await h.Svc.RunAsync(EventId);
+        h.Mail.Sent.Clear();
+        h.Store.Uploaded.Clear();
+
+        if (!unattributed)
+        {
+            h.Db.EvaluationSessions.Add(new EvaluationSession
+            {
+                Id = 901, EventId = EventId, Title = "Another room",
+                ScheduledStart = Start, ScheduledEnd = End,
+                CollectionWindowOpensAt = Start, CollectionWindowClosesAt = End.AddMinutes(30),
+            });
+        }
+        var elsewhere = h.Clock.GetUtcNow();
+        h.Db.EvaluationResponses.Add(new EvaluationResponse
+        {
+            EventId = EventId, SessionId = unattributed ? null : 901, Rating = 2,
+            CollectionTimestamp = elsewhere, ReceivedTimestamp = elsewhere,
+            Source = EvaluationResponseSources.Device,
+        });
+        await h.Db.SaveChangesAsync();
+
+        // Long past every quiet period — several job passes' worth.
+        for (var pass = 1; pass <= 3; pass++)
+        {
+            h.Clock.Set(elsewhere.AddMinutes(30 + pass * 5));
+            await h.Svc.RunAsync(EventId);
+        }
+
+        Assert.DoesNotContain(h.Mail.Sent, m => m.To == "ada@example.test");
+    }
+
+    /// <summary>
+    /// The other half of §1264: a change to the session ITSELF (a C3 retitle or room move) still
+    /// re-publishes, because the report's header is now wrong.
+    /// </summary>
+    [Fact]
+    public async Task A_change_to_the_session_itself_still_re_publishes()
+    {
+        var h = await SeedAsync();
+        await h.Svc.RunAsync(EventId);
+        h.Mail.Sent.Clear();
+
+        var row = h.Db.EvaluationSessions.Single(s => s.Id == 900);
+        row.Title = "Keeping identity very boring";
+        row.UpdatedAt = h.Clock.GetUtcNow().AddMinutes(1);
+        await h.Db.SaveChangesAsync();
+        h.Clock.Set(h.Clock.GetUtcNow().AddMinutes(5));
+
+        Assert.Equal(1, (await h.Svc.RunAsync(EventId)).Superseded);
+    }
+
     // ---- refusing correctly --------------------------------------------------------------------
 
     /// <summary>

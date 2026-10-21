@@ -1,5 +1,4 @@
 using System.Reflection;
-using CommunityHub.Core.Integrations.Erp;
 using CommunityHub.Core.Organizer;
 using CommunityHub.Jobs;
 using Microsoft.Extensions.Configuration;
@@ -15,7 +14,7 @@ namespace CommunityHub.Core.Tests;
 /// 🔴 §1114 — dependencies the jobs host declares OPTIONAL but cannot actually work without.
 /// </summary>
 /// <remarks>
-/// <para><b>The gap this exists to close.</b> <see cref="ErpWebshopContactSyncService"/> takes
+/// <para><b>The gap this exists to close.</b> The (since removed) ERP↔webshop reconcile took
 /// <see cref="ParticipantDeactivationService"/> as an optional constructor parameter, and only the
 /// WEB host registered it. In the jobs host it therefore arrived <c>null</c> on every run, and both
 /// branches that use it returned at their first line: §502's orphan pruning — <b>while the mail it
@@ -65,31 +64,8 @@ public sealed class JobsOptionalButLoadBearingDepsTests
         await using var sp = BuildJobsContainer();
         using var scope = sp.CreateScope();
 
-        // Without this the ERP reconcile deactivates nobody — and says it did.
+        // Without this a jobs-host deactivation silently does nothing.
         Assert.NotNull(scope.ServiceProvider.GetService<ParticipantDeactivationService>());
-    }
-
-    [Fact]
-    public async Task The_ERP_reconcile_really_HAS_its_db_and_its_deactivation_cascade()
-    {
-        await using var sp = BuildJobsContainer();
-        using var scope = sp.CreateScope();
-
-        var svc = scope.ServiceProvider.GetRequiredService<ErpWebshopContactSyncService>();
-
-        // 🔒 Asserting the FIELDS, not just that the container could supply them. The defect was a
-        // constructed service holding null — resolvable and inert — so "the container has one" is
-        // the question that already answered yes while the feature did nothing.
-        foreach (var name in new[] { "_db", "_deactivate" })
-        {
-            var field = typeof(ErpWebshopContactSyncService)
-                .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.True(field is not null, $"{name} no longer exists — update this guard.");
-            Assert.True(field!.GetValue(svc) is not null,
-                $"ErpWebshopContactSyncService.{name} is null in the jobs host, so orphan pruning "
-                + "(§502) and the de-sponsored sweep (§1112) both silently do nothing. Register the "
-                + "missing service in JobsServiceRegistration.");
-        }
     }
 
     /// <summary>

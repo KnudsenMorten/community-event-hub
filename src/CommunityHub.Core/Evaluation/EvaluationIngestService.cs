@@ -124,8 +124,13 @@ public sealed class EvaluationIngestService
     // -------------------------------------------------------------------------
 
     /// <summary>One record as the device sends it.</summary>
+    /// <param name="PositivePoint">§1278 — optional follow-up code; only the kiosk sends it.</param>
+    /// <param name="ImprovementPoint">§1278 — optional follow-up code; only the kiosk sends it.</param>
+    /// <param name="Policy">§1354 — the capture policy the kiosk asked the vote under; only the kiosk sends it.</param>
+    /// <param name="Symbols">§1355 — the rating-button symbols the kiosk showed; only the kiosk sends it.</param>
     public sealed record IncomingRecord(
-        string? DeviceRecordId, int Rating, DateTimeOffset? CollectionTimestamp);
+        string? DeviceRecordId, int Rating, DateTimeOffset? CollectionTimestamp,
+        string? PositivePoint = null, string? ImprovementPoint = null, int? Policy = null, int? Symbols = null);
 
     /// <summary>Per-record outcome. The device clears its cache from this, so it is load-bearing.</summary>
     public sealed record RecordResult(string? DeviceRecordId, string Status, string? Reason = null);
@@ -180,7 +185,9 @@ public sealed class EvaluationIngestService
 
         var known = incomingIds.Count == 0
             ? new HashSet<string>(StringComparer.Ordinal)
-            : (await _db.EvaluationResponses
+            // §1357 — INACTIVE rows too: a retried batch must never re-insert a vote an organizer set aside
+            // (and the unique index would refuse it anyway).
+            : (await _db.EvaluationResponses.IgnoreQueryFilters()
                 .Where(r => r.SerialNumber == device.SerialNumber
                             && r.DeviceRecordId != null
                             && incomingIds.Contains(r.DeviceRecordId))
@@ -194,9 +201,17 @@ public sealed class EvaluationIngestService
         // §743 C3 — the candidate sessions for THIS device's room, loaded once for the batch.
         // An unlinked device has none, and its presses stay venue-and-date only (§5.3) until an
         // organiser links it — at which point the sync's backfill attributes them retrospectively.
-        var roomSessions = device.RoomId is int roomId
+        // §1350 — every schedule room of the unit's physical room; the press time picks between them.
+        var linkedRooms = await EvaluationRoomMap.RoomIdsAsync(_db, device, ct);
+        FeedbackCapturePolicy? kioskPolicyNow = device.IsKiosk
+            ? await FeedbackCapturePolicies.ForDeviceAsync(_db, device, ct)
+            : null;
+        RatingSymbols? kioskSymbolsNow = device.IsKiosk
+            ? await RatingSymbolChoices.ForDeviceAsync(_db, device, ct)
+            : null;
+        var roomSessions = linkedRooms.Count > 0
             ? await _db.EvaluationSessions
-                .Where(s => s.EventId == device.EventId && s.RoomId == roomId)
+                .Where(s => s.EventId == device.EventId && s.RoomId != null && linkedRooms.Contains(s.RoomId.Value))
                 .ToListAsync(ct)
             : new List<Domain.Evaluation.EvaluationSession>();
 
@@ -251,13 +266,30 @@ public sealed class EvaluationIngestService
                 CollectionTimestamp = collected.ToUniversalTime(),
                 ReceivedTimestamp = now,
                 DeviceRecordId = rec.DeviceRecordId,
-                Source = EvaluationResponseSources.Device,
+                // §1259 — a kiosk press travels this exact path; only the recorded SOURCE differs,
+                // and that is for diagnostics, never for segmenting a score.
+                Source = device.IsKiosk
+                    ? EvaluationResponseSources.Kiosk
+                    : EvaluationResponseSources.Device,
                 FirmwareVersion = firmwareVersion,
                 ClockSyncedAt = clockSyncedAt,
                 // §5.5 — a collection time in the FUTURE beyond tolerance cannot be legitimate.
                 // Flagged, still counted: flagging is not filtering, and the flag is what lets an
                 // implausible result be traced to a drifting unit rather than blamed on a speaker.
                 TimestampSuspect = collected > now.AddMinutes(SkewToleranceMinutes),
+                // §1278 — the follow-ups, if any. An unknown code is DROPPED, never stored: they are
+                // counted, and a code outside the list cannot be. The rating stands either way.
+                PositivePoint = EvaluationFollowUps.NormalizePositive(rec.PositivePoint),
+                ImprovementPoint = EvaluationFollowUps.NormalizeImprovement(rec.ImprovementPoint),
+                // §1354 — what the kiosk says it asked (right even for a vote queued before a switch);
+                // a kiosk vote without it gets the policy in force now; a built box records none.
+                CapturePolicy = FeedbackCapturePolicies.IsDefined(rec.Policy)
+                    ? (FeedbackCapturePolicy)rec.Policy!.Value
+                    : kioskPolicyNow,
+                // §1355 — the same rule for the symbols the buttons showed.
+                RatingSymbols = RatingSymbolChoices.IsValid(rec.Symbols)
+                    ? (RatingSymbols)rec.Symbols!.Value
+                    : kioskSymbolsNow,
             });
 
             results.Add(new RecordResult(rec.DeviceRecordId, RecordStatus.Accepted));

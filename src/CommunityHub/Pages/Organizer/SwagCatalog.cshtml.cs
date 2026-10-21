@@ -237,7 +237,7 @@ public class SwagCatalogModel : PageModel
             me.Email, note, emails, edition ?? string.Empty, ct);
 
         ActionMessage = r.Ok
-            ? $"{company ?? companyId} now has a credit of {amount:N0} — code {r.Credit!.Code}"
+            ? $"{company ?? companyId} now has a credit of {CommunityHub.Core.Integrations.Webshop.ShopPricing.Amount(Math.Round(amount))} — code {r.Credit!.Code}"
               + (expires is null ? " (no expiry)." : $", valid until {expires:yyyy-MM-dd}.")
               + (emails.Count == 0
                     ? " ⚠️ They have no contacts on file, so the code is NOT locked to their e-mail addresses — anyone it is forwarded to can spend it."

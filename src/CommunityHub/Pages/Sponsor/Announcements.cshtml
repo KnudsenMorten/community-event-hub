@@ -42,10 +42,28 @@
         {
             @* 🔒 §834.1 — approved-only. "Nothing approved YET" is the honest phrasing: posts may
                well be planned already, and telling a sponsor "there are none" would be wrong. *@
-            <p class="muted">
-                Nothing is scheduled for you yet. Posts appear here once the organizers have approved
-                them — check back closer to the event.
-            </p>
+            @* §1312 — say WHY (operator 2026-09-27: "it should state why so sponsor knows it is him we are waiting for"). *@
+            var dates = string.Join(" and ", Model.PlannedDates
+                .Select(d => d.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)));
+            @if (Model.MissingSocialText)
+            {
+                <div role="alert" style="margin:12px 0;padding:12px 16px;border-left:4px solid #b91c1c;background:#fef2f2;border-radius:6px;">
+                    <p style="margin:0 0 6px;color:#b91c1c;font-weight:700;">We are waiting for your social-media text.</p>
+                    <p style="margin:0 0 10px;">
+                        @(Model.PlannedDates.Count > 0 ? $"Your announcements are planned for {dates}, but" : "Your announcements")
+                        can only be published once you have added the short text we post about your company.
+                    </p>
+                    <a class="btn-primary" asp-page="/Forms/Wizard" asp-route-step="company">Add your social-media text</a>
+                </div>
+            }
+            else if (Model.PlannedDates.Count > 0)
+            {
+                <p class="muted">Your announcements are planned for @dates. You will see each post here, with a preview, once we have approved it.</p>
+            }
+            else
+            {
+                <p class="muted">Your announcements have not been planned yet — check back closer to the event.</p>
+            }
         }
         else
         {

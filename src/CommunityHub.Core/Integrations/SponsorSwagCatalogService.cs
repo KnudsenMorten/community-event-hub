@@ -1,5 +1,8 @@
 using System.Globalization;
 using CommunityHub.Core.Config;
+using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Core.Integrations;
@@ -42,7 +45,7 @@ public sealed record SwagCatalogResult(
 }
 
 /// <summary>
-/// §1165 — the sponsor swag catalogue, read from the webshop.
+/// §1165 — the sponsor swag catalogue, read from CEH's own products (§1312 — the old webshop is closed).
 /// </summary>
 /// <remarks>
 /// <para>Operator 2026-09-01: <i>"a new sponsor swag catalog which can be used to put in attendees
@@ -64,7 +67,7 @@ public sealed record SwagCatalogResult(
 /// </remarks>
 public sealed class SponsorSwagCatalogService
 {
-    private readonly WooCommerceClient _woo;
+    private readonly CommunityHubDbContext _db;
     private readonly SponsorConfigLoader _configLoader;
     private readonly SponsorConfigOptions _configOptions;
     private readonly EventEditionConfigLoader? _eventConfigLoader;
@@ -72,7 +75,7 @@ public sealed class SponsorSwagCatalogService
     private readonly ILogger<SponsorSwagCatalogService> _log;
 
     public SponsorSwagCatalogService(
-        WooCommerceClient woo,
+        CommunityHubDbContext db,
         SponsorConfigLoader configLoader,
         SponsorConfigOptions configOptions,
         ILogger<SponsorSwagCatalogService> log,
@@ -81,7 +84,7 @@ public sealed class SponsorSwagCatalogService
         EventEditionConfigLoader? eventConfigLoader = null,
         EventConfigOptions? eventConfigOptions = null)
     {
-        _woo = woo;
+        _db = db;
         _configLoader = configLoader;
         _configOptions = configOptions;
         _log = log;
@@ -113,6 +116,43 @@ public sealed class SponsorSwagCatalogService
         return 0;
     }
 
+    /// <summary>One product as the catalogue renders it (the shape the old webshop read had).</summary>
+    private sealed record CatalogProduct(
+        long Id, string Name, string? Status, string? TeaserHtml, string? PriceText, string? ImageUrl, string? PermalinkUrl,
+        bool InStock, int? StockQuantity, IReadOnlyList<string> Categories);
+
+    /// <summary>
+    /// 🔴 §1312 — the active edition's products from CEH's own catalogue (operator 2026-10-01: "ceh ows the webshop functionality
+    /// 100%"): the price CEH sells at, the first picture CEH stores, the stock CEH counts, and "buy" = the CEH shop's product page.
+    /// The id stays the old webshop's product id where there is one, so existing swag reservations keep matching.
+    /// </summary>
+    private async Task<IReadOnlyList<CatalogProduct>> CehProductsAsync(CancellationToken ct)
+    {
+        var eventId = await _db.Events.AsNoTracking().Where(e => e.IsActive).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
+        if (eventId is not int ev) return Array.Empty<CatalogProduct>();
+        var rows = await _db.ShopProducts.AsNoTracking()
+            .Include(p => p.Categories).ThenInclude(c => c.Category)
+            .Include(p => p.Images)
+            .Where(p => p.EventId == ev)
+            .ToListAsync(ct);
+        return rows.Select(p =>
+        {
+            var price = p.SalePriceEur is decimal sale && sale > 0 && sale < p.PriceEur ? sale : p.PriceEur;
+            var picture = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault();
+            return new CatalogProduct(
+                Id: p.WooProductId ?? -p.Id,
+                Name: p.Name,
+                Status: p.Status == ShopProductStatus.Published ? "publish" : p.Status.ToString().ToLowerInvariant(),
+                TeaserHtml: p.ShortDescriptionHtml,
+                PriceText: price.ToString("0.00", CultureInfo.InvariantCulture),
+                ImageUrl: picture is null ? null : $"/shop-image/{picture.Id}",
+                PermalinkUrl: $"/Sponsor/Shop/Product?id={p.Id}",
+                InStock: p.InStock && (!p.ManageStock || p.StockQuantity is > 0),
+                StockQuantity: p.ManageStock ? p.StockQuantity : null,
+                Categories: p.Categories.Select(c => c.Category.Name).ToList());
+        }).ToList();
+    }
+
     /// <summary>Read the catalogue. Never throws for a configuration problem — it reports one.</summary>
     public async Task<SwagCatalogResult> GetAsync(CancellationToken ct = default)
     {
@@ -139,18 +179,18 @@ public sealed class SponsorSwagCatalogService
         var quantity = ResolveBagQuantity(swag);
         var currency = string.IsNullOrWhiteSpace(swag?.CurrencySymbol) ? null : swag!.CurrencySymbol!.Trim();
 
-        IReadOnlyList<WooCommerceClient.WooCatalogProduct> products;
+        IReadOnlyList<CatalogProduct> products;
         try
         {
-            products = await _woo.GetAllProductsAsync(ct);
+            products = await CehProductsAsync(ct);   // §1312 — CEH's own products (the old webshop is closed)
         }
         catch (Exception ex)
         {
             // ⚠️ A failed read is NOT an empty catalogue. Returning an empty list here would tell a
             // sponsor "there is nothing to buy" because the shop was briefly unreachable.
-            _log.LogWarning(ex, "§1165: could not read webshop products for the swag catalogue.");
+            _log.LogWarning(ex, "§1165: could not read the shop products for the swag catalogue.");
             return new(Array.Empty<SwagCatalogItem>(), category,
-                "The webshop could not be reached, so the catalogue is unavailable right now. "
+                "The shop products could not be read, so the catalogue is unavailable right now. "
                 + "This is not the same as the catalogue being empty.",
                 quantity, currency);
         }
@@ -204,9 +244,9 @@ public sealed class SponsorSwagCatalogService
         {
             // 🔴 The §767 guard: a needle that matches nothing must SAY so.
             var diagnostic =
-                $"No webshop product is in the category '{category}', so the swag catalogue is "
+                $"No shop product is in the category '{category}', so the swag catalogue is "
                 + $"empty. {products.Count} product(s) were read, so the shop answered — check the "
-                + "category name in sponsor config against the webshop, and that the products are "
+                + "category name in sponsor config against the shop catalogue, and that the products are "
                 + "published.";
             _log.LogWarning("§1165: {Diagnostic}", diagnostic);
             return new(items, category, diagnostic, quantity, currency);

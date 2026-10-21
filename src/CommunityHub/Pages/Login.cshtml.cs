@@ -36,13 +36,23 @@ public class LoginModel : PageModel
         PinLoginService pinLogin,
         IIdentityProvider identityProvider,
         CommunityHubDbContext db,
-        OneDayAccessGate? oneDayGate = null)
+        OneDayAccessGate? oneDayGate = null,
+        CommunityHub.Core.Integrations.Webshop.ShopCompanyDirectoryService? directory = null,
+        CommunityHub.Core.Settings.FeatureGateService? gate = null,
+        Microsoft.Extensions.Logging.ILogger<LoginModel>? log = null)
     {
+        _directory = directory;
+        _shopGate = gate;
+        _log = log;
         _pinLogin = pinLogin;
         _identityProvider = identityProvider;
         _db = db;
         _oneDayGate = oneDayGate;
     }
+
+    private readonly CommunityHub.Core.Integrations.Webshop.ShopCompanyDirectoryService? _directory;
+    private readonly CommunityHub.Core.Settings.FeatureGateService? _shopGate;
+    private readonly Microsoft.Extensions.Logging.ILogger<LoginModel>? _log;
 
     [BindProperty]
     public string Email { get; set; } = string.Empty;
@@ -159,6 +169,22 @@ public class LoginModel : PageModel
             IsError = true;
             Message = OneDayAccessGate.BlockedMessage;
             return Page();
+        }
+
+        // Sign-in by default for a potential sponsor's people (operator 2026-09-27: "sign-in must be enable by default for any
+        // potential sponsor and reservations"): a person known for a company from e-conomic / the old webshop becomes a
+        // contact now, so the PIN below can be sent. Only while the CEH shop is on; never blocks the login if it fails.
+        if (_directory is not null && _shopGate is not null)
+        {
+            try
+            {
+                if (await _shopGate.IsFeatureEnabledAsync("sponsor-webshop", activeEventId.Value, ct))
+                    await _directory.EnsureKnownPersonCanSignInAsync(activeEventId.Value, Email, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _log?.LogWarning(ex, "Sign-in for a known potential-sponsor person could not be prepared; the normal login continues.");
+            }
         }
 
         var result = await _pinLogin.RequestPinAsync(activeEventId.Value, Email, ct);

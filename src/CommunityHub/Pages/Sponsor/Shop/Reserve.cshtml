@@ -1,0 +1,58 @@
+@page
+@model CommunityHub.Pages.Sponsor.Shop.ReserveModel
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Reserve again";
+}
+
+<div class="card">
+    <h1>Reserve what you had last time</h1>
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info @(Model.MessageIsError ? "shop-msg-error" : "")" role="status">@Model.Message</p>
+        }
+        @if (Model.OpensOn is not null)
+        {
+            <p>Returning sponsors have first right to what they had last edition from
+               <strong>@Model.OpensOn.Value.ToString("d MMMM yyyy")</strong> to <strong>@Model.ClosesOn?.ToString("d MMMM yyyy")</strong>.
+               @(Model.WindowOpen ? "The window is open now." : "The window is not open right now.")</p>
+        }
+
+        @if (Model.Rights.Count == 0)
+        {
+            <p>There is nothing from a previous edition to reserve for your company.</p>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="Reserve">
+                <div style="overflow-x:auto;">
+                <table>
+                    <thead><tr><th></th><th>Last time</th><th>This edition</th><th>Availability</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var r in Model.Rights)
+                    {
+                        var a = r.MatchedProduct is null ? null : Model.Stock.GetValueOrDefault(r.MatchedProduct.Id);
+                        var can = r.ClaimedOrderLineId is null && r.DeclinedAt is null && a is { Available: true };
+                        <tr>
+                            <td>@if (can) { <input type="checkbox" name="rightIds" value="@r.Id" checked aria-label="Reserve @r.ProductName" /> }</td>
+                            <td>@r.ProductName <div style="font-size:12px;color:#6b7280;">@r.SourceEdition</div></td>
+                            <td>@(r.MatchedProduct?.Name ?? "The organizers will match this")</td>
+                            <td>@(r.ClaimedOrderLineId is not null ? "Reserved" : r.DeclinedAt is not null ? "Declined" : ShopPageModel.AvailabilityText(a))</td>
+                            <td>@if (r.ClaimedOrderLineId is null && r.DeclinedAt is null)
+                                {
+                                    <button type="submit" formaction="?handler=Decline&amp;rightId=@r.Id" formnovalidate>Not this time</button>
+                                }</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                </div>
+                <button type="submit" class="primary" style="margin-top:10px;">Reserve the ticked items</button>
+            </form>
+        }
+    }
+</div>

@@ -35,6 +35,11 @@
         new("/Organizer/VolunteerAvailability", "Volunteer availability",
             "Every volunteer's half-day availability, green/red per morning and afternoon, with a head-count per shift.",
             "volunteer-allocation"),
+        // §1297 — the worker roster. It belongs next to the availability overview: that page says
+        // what everybody answered, this one says who the planner may act on it for.
+        new("/Organizer/VolunteerWorkerRoster", "Worker roster",
+            "Which volunteers the auto-planner draws from — the ones here to work rather than attend, who can be scheduled all day. Everyone else is placed by hand.",
+            "volunteer-allocation"),
         new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value, "volunteer-tasks"),
         new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value, "volunteer-allocation"),
         new("/Organizer/AllocationScenarios", "Allocation scenarios", "Stage a bulk reshuffle, simulate the coverage impact, then commit it — or auto-seed a drop-out backfill.", "volunteer-allocation"),

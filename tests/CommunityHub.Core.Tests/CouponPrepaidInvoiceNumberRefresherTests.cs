@@ -110,6 +110,28 @@ public sealed class CouponPrepaidInvoiceNumberRefresherTests
         Assert.True(after.ErpInvoiceIsBooked);
     }
 
+    /// <summary>
+    /// 🔴 §1362, live 2026-10-20: the credit note for the purchase's invoice carries the same marker, and the refresh wrote
+    /// credit note 203 over invoice 199. The credit note is skipped, and a number it already overwrote is put back.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]   // credit note listed after the invoice (how e-conomic returned it)
+    [InlineData(false)]  // and before it
+    public async Task A_credit_note_for_the_invoice_never_replaces_its_number(bool creditNoteLast)
+    {
+        using var db = ScenarioFixture.NewDb();
+        var buy = await SeedPurchaseAsync(db, "203", booked: true);   // already overwritten by the old refresh
+        var reference = CouponPrepaidInvoiceService.ReferenceFor(buy.Id);
+        var invoice = new EconomicInvoiceReference(reference, 199, IsBooked: true);
+        var credit = new EconomicInvoiceReference(reference, 203, IsBooked: true, IsCreditNote: true);
+        var client = new FakeInvoiceClient(creditNoteLast ? new[] { invoice, credit } : new[] { credit, invoice });
+
+        var result = await NewRefresher(db, client).RefreshAsync(EventId);
+
+        Assert.Equal(1, result.Updated);
+        Assert.Equal("199", (await db.CouponPrepaidPurchases.SingleAsync()).ErpInvoiceNumber);
+    }
+
     [Fact]
     public async Task A_number_that_has_not_moved_is_left_alone()
     {
@@ -166,6 +188,79 @@ public sealed class CouponPrepaidInvoiceNumberRefresherTests
 
         Assert.Equal(0, result.Updated);
         Assert.Equal("182", (await db.CouponPrepaidPurchases.SingleAsync()).ErpInvoiceNumber);
+    }
+
+    /// <summary>An e-conomic that can also CREATE — for the §1312 self-heal.</summary>
+    private sealed class CreatingInvoiceClient : IEconomicInvoiceClient
+    {
+        public List<EconomicInvoiceReference> Refs { get; } = new();
+        public List<EconomicDraftInvoice> Created { get; } = new();
+        public bool CanWrite => true;
+        public Task<IReadOnlyCollection<EconomicInvoiceReference>> ListInvoiceReferencesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyCollection<EconomicInvoiceReference>>(Refs.ToList());
+        public Task<IReadOnlyCollection<string>> ListInvoicedOrderReferencesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyCollection<string>>(Refs.Select(r => r.Reference).ToList());
+        public Task<EconomicCustomerDetail?> GetCustomerAsync(int n, CancellationToken ct = default)
+            => Task.FromResult<EconomicCustomerDetail?>(new(n, "Partner A/S", null, null, null, "DK", "DKK", 1, null, 1, null, null, null, null));
+        public Task<(int LayoutNumber, string? Self)?> FindLayoutAsync(string s, CancellationToken ct = default)
+            => Task.FromResult<(int, string?)?>((7, "layout/7"));
+        public Task<int> CreateDraftInvoiceAsync(EconomicDraftInvoice i, CancellationToken ct = default)
+        {
+            Created.Add(i);
+            var number = 300 + Created.Count;
+            if (i.OtherReference is { } r) Refs.Add(new EconomicInvoiceReference(r, number, IsBooked: false));
+            return Task.FromResult(number);
+        }
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — operator 2026-09-29: "make the same fix for the coupon prepaid invoice". A prepaid draft CEH raised that
+    /// is deleted in e-conomic is raised AGAIN (same quantity and price) — while a typed number and an empty e-conomic
+    /// answer are never acted on.
+    /// </summary>
+    [Fact]
+    public async Task A_deleted_CEH_prepaid_draft_is_raised_again_and_nothing_else_is()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var buy = await SeedPurchaseAsync(db, "205");
+        db.CouponInvoicingSettings.Add(new CouponInvoicingSetting
+        {
+            Id = 11, EventId = EventId, CouponName = "ARROW-FI",
+            BillingType = CouponBillingType.AllocatedPrepaymentByCustomer, ErpCustomerNumber = 4242,
+        });
+        buy.UnitPriceDkk = 450m;
+        await db.SaveChangesAsync();
+
+        var client = new CreatingInvoiceClient();
+        client.Refs.Add(new EconomicInvoiceReference(CouponPrepaidInvoiceService.ReferenceFor(buy.Id), 205, IsBooked: false));
+        client.Refs.Add(new EconomicInvoiceReference("WebshopOrderId-10726", 178, IsBooked: false));
+        var create = new CouponPrepaidInvoiceService(client, new NoFx(), new EconomicErpOptions(), new InvoicingOptions { DryRun = false },
+            TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<CouponPrepaidInvoiceService>.Instance);
+        var refresher = new CouponPrepaidInvoiceNumberRefresher(db, client, create: create);
+
+        // 1 — found by CEH's reference ⇒ marked as CEH's own invoice; nothing created.
+        Assert.Empty((await refresher.RefreshAsync(EventId)).Recreated);
+        Assert.True((await db.CouponPrepaidPurchases.SingleAsync()).ErpInvoiceRaisedByCeh);
+
+        // 2 — the organizer deletes the draft in e-conomic ⇒ raised again, same quantity and price, new number stored.
+        client.Refs.RemoveAll(r => r.Reference == CouponPrepaidInvoiceService.ReferenceFor(buy.Id));
+        var healed = await refresher.RefreshAsync(EventId);
+        Assert.Single(healed.Recreated);
+        var draft = Assert.Single(client.Created);
+        Assert.Equal(CouponPrepaidInvoiceService.ReferenceFor(buy.Id), draft.OtherReference);
+        Assert.Equal("301", (await db.CouponPrepaidPurchases.SingleAsync()).ErpInvoiceNumber);
+
+        // 3 — present again ⇒ nothing more; an EMPTY answer ⇒ nothing (a failed read, not "deleted").
+        Assert.Empty((await refresher.RefreshAsync(EventId)).Recreated);
+        client.Refs.Clear();
+        Assert.Empty((await refresher.RefreshAsync(EventId)).Recreated);
+        Assert.Single(client.Created);
+    }
+
+    private sealed class NoFx : IFxRateProvider
+    {
+        public bool CanQuote => false;
+        public Task<decimal?> GetRateAsync(string b, string q, CancellationToken ct) => Task.FromResult<decimal?>(1m);
     }
 
     [Fact]

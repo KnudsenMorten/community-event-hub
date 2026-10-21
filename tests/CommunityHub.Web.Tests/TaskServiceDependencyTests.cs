@@ -59,10 +59,10 @@ public class TaskServiceDependencyTests
         services.AddSingleton(new IntegrationsConfigOptions());
         services.AddSingleton<IntegrationsConfigLoader>();
 
-        // WooCommerce + the shared purchase resolver.
-        services.AddSingleton(new WooCommerceOptions());
-        services.AddSingleton(sp => new WooCommerceClient(
-            new HttpClient(), sp.GetRequiredService<WooCommerceOptions>()));
+        // The old webshop's stored orders (§1312: read from CEH; the webshop client is gone) +
+        // the shared purchase resolver — registered as Program.cs and the Jobs host do.
+        services.AddScoped<CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource,
+            CommunityHub.Core.Integrations.Webshop.WebshopOrderArchiveSource>();
         services.AddScoped<SponsorPurchaseSummaryService>();
 
         // The §684/§687 task stack.

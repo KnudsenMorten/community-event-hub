@@ -194,7 +194,6 @@ function Build-Settings {
     # this script produces a KNOWN posture instead of leaving whatever was there before.
     $s['Zoho__Enabled']           = "$([bool]$EnableZoho)".ToLower()
     $s['Sessionize__Enabled']     = "$([bool]$EnableSessionize)".ToLower()
-    $s['WooCommerce__Enabled']    = "$([bool]$EnableWooCommerce)".ToLower()
     $s['EconomicErp__Enabled']    = "$([bool]$EnableEconomicErp)".ToLower()
     $s['EconomicRoles__Enabled']  = "$([bool]$EnableEconomicRoles)".ToLower()
     $s['LinkedIn__Enabled']       = "$([bool]$EnableLinkedIn)".ToLower()

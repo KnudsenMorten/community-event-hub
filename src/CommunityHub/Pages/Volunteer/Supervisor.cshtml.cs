@@ -77,11 +77,18 @@ public class SupervisorModel : PageModel
     public Task<IActionResult> OnPostCreateSubcategoryAsync(int categoryId, string name, CancellationToken ct)
         => RunAsync(async a => { await _svc.CreateSubcategoryAsync(a, categoryId, name, null, ct); return $"Subcategory '{name}' added."; });
 
-    public Task<IActionResult> OnPostCreateTaskAsync(int subcategoryId, string title, DateOnly? due, string? shift, CancellationToken ct)
-        => RunAsync(async a => { await _svc.CreateTaskAsync(a, subcategoryId, title, null, due, shift, ct: ct); return $"Task '{title}' added."; });
+    // §1299 — subcategory optional: without one the task goes directly under the category.
+    public Task<IActionResult> OnPostCreateTaskAsync(int? subcategoryId, int? categoryId, string title, DateOnly? due, string? shift, CancellationToken ct)
+        => RunAsync(async a =>
+        {
+            if (subcategoryId is int sid) await _svc.CreateTaskAsync(a, sid, title, null, due, shift, ct: ct);
+            else if (categoryId is int cid) await _svc.CreateTaskInCategoryAsync(a, cid, title, null, due, shift, ct: ct);
+            else return "Pick a category first.";
+            return $"Task '{title}' added.";
+        });
 
     public Task<IActionResult> OnPostAssignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
-        => RunAsync(async a => { await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer assigned."; });
+        => RunAsync(async a => { await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return CommunityHub.Pages.Organizer.VolunteerStructureModel.QueuedNotice; });
 
     public Task<IActionResult> OnPostSetTaskStatusAsync(int taskId, VolunteerTaskStatus status, CancellationToken ct)
         => RunAsync(async a => { await _svc.SetTaskStatusAsync(a, taskId, status, ct); return "Task status updated."; });

@@ -1,0 +1,27 @@
+Subject: Please sign the sponsor contract for {{companyName}} ({{orderNumber}}){{deadlineSubject}}
+<h2 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1a1a2e;">Hi {{firstName}},</h2>
+<p style="margin:0 0 16px;">The sponsor contract for <strong>{{companyName}}</strong> (order <strong>{{orderNumber}}</strong>) for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> is ready for your signature. The items are reserved for you:</p>
+{{itemsHtml}}
+{{deadlineHtml}}
+{{attachmentHtml}}
+<p style="margin:0 0 16px;">To sign, click the button below. It opens the contract in our sponsor portal — you are signed in automatically, no password needed. Read the contract and sign at the end by typing your name, drawing or uploading your signature.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 6px;"><tr>
+  <td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Sponsor/Shop/Contract/{{orderId}}" style="height:52px;v-text-anchor:middle;width:360px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Read and sign the contract</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/Sponsor/Shop/Contract/{{orderId}}" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;padding:0 32px;white-space:nowrap;-webkit-text-size-adjust:none;">Read and sign the contract</a>
+        <!--<![endif]-->
+      </td>
+    </tr></table>
+  </td>
+</tr></table>
+<p style="margin:0;font-size:16px;line-height:16px;mso-line-height-rule:exactly;">&nbsp;</p>
+{{extensionButtonHtml}}
+<p style="margin:16px 0 0;color:#6b7280;font-size:14px;">Questions or problems? Reply to this e-mail or write to <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>

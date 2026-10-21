@@ -377,17 +377,16 @@ public sealed class VolunteerTaskBulkOperationServiceTests
         Assert.Equal(0, result.Moved);
     }
 
-    // ------------------------------------------------ §942 move into a whole CATEGORY
+    // ------------------------------------------------ §1299 move into a whole CATEGORY
 
     /// <summary>
-    /// 🔴 THE CASE HE ACTUALLY ASKED FOR — <i>"move all tasks related to check-in to that
-    /// CATEGORY"</i> — and the one the sub-category-only version could not do. On the first live run
-    /// the move dropdown offered exactly ONE target, because Check-in had **no sub-categories** and
-    /// tasks hang off sub-categories. §942's own table said so ("Check-in: 0 subcategories, 0
-    /// tasks") and the implication was missed until the page was looked at.
+    /// §1299 — a CATEGORY target means exactly the category: the tasks sit directly under it and no
+    /// subcategory is created (operator 2026-09-23: <i>"move tasks must support both main category
+    /// and subcategory"</i> · <i>"not general as today"</i>). §942's version had to invent a
+    /// <c>General</c> subcategory because a task could not exist without one.
     /// </summary>
     [Fact]
-    public async Task Move_to_a_category_with_no_subcategory_creates_one_and_lands_there()
+    public async Task Move_to_a_category_lands_directly_under_it_and_creates_no_subcategory()
     {
         using var db = NewDb();
         var bucket = await SeedSubcategoryAsync(db, EventId);
@@ -403,20 +402,19 @@ public sealed class VolunteerTaskBulkOperationServiceTests
             .MoveToCategoryAsync(EventId, new[] { t.Id }, emptyCat.Id);
 
         Assert.Equal(1, result.Moved);
-        Assert.Equal("Check-in → General", landedIn);
-
-        var created = await db.VolunteerSubcategories
-            .SingleAsync(s => s.CategoryId == emptyCat.Id);
-        Assert.Equal("General", created.Name);
-        Assert.Equal(created.Id, (await db.VolunteerTasks.FindAsync(t.Id))!.SubcategoryId);
+        Assert.Equal("Check-in", landedIn);
+        var moved = (await db.VolunteerTasks.FindAsync(t.Id))!;
+        Assert.Equal(emptyCat.Id, moved.CategoryId);
+        Assert.Null(moved.SubcategoryId);
+        Assert.False(await db.VolunteerSubcategories.AnyAsync(s => s.CategoryId == emptyCat.Id));
     }
 
     /// <summary>
-    /// 🔒 It creates a container only when there is none. A category that already has sub-categories
-    /// must not sprout a "General" beside them every time somebody moves work in.
+    /// 🔒 A category that HAS subcategories (Monday, Tuesday…) is still a category target: the
+    /// tasks go under the category itself, not into whichever subcategory sorts first.
     /// </summary>
     [Fact]
-    public async Task Move_to_a_category_that_has_subcategories_reuses_the_first_and_creates_nothing()
+    public async Task Move_to_a_category_with_subcategories_does_not_pick_one()
     {
         using var db = NewDb();
         var bucket = await SeedSubcategoryAsync(db, EventId);
@@ -427,13 +425,36 @@ public sealed class VolunteerTaskBulkOperationServiceTests
         db.VolunteerTasks.Add(t);
         await db.SaveChangesAsync();
 
-        var (result, landedIn) = await new VolunteerTaskBulkOperationService(db)
+        var (result, _) = await new VolunteerTaskBulkOperationService(db)
             .MoveToCategoryAsync(EventId, new[] { t.Id }, catId);
 
         Assert.Equal(1, result.Moved);
-        Assert.Equal("Check-in → Desk", landedIn);
-        Assert.Equal(desk, (await db.VolunteerTasks.FindAsync(t.Id))!.SubcategoryId);
+        var moved = (await db.VolunteerTasks.FindAsync(t.Id))!;
+        Assert.Equal(catId, moved.CategoryId);
+        Assert.Null(moved.SubcategoryId);
         Assert.Single(await db.VolunteerSubcategories.Where(s => s.CategoryId == catId).ToListAsync());
+    }
+
+    /// <summary>§1299 — a SUBCATEGORY target moves the task there AND into that subcategory's
+    /// category; the two can never disagree.</summary>
+    [Fact]
+    public async Task Move_to_a_subcategory_in_another_category_moves_the_category_too()
+    {
+        using var db = NewDb();
+        var bucket = await SeedSubcategoryAsync(db, EventId);
+        var desk = await SeedSecondSubcategoryAsync(db, EventId, "Check-in", "Monday");
+        var catId = (await db.VolunteerSubcategories.FindAsync(desk))!.CategoryId;
+
+        var t = Task(EventId, bucket, "Check-in desk morning");
+        db.VolunteerTasks.Add(t);
+        await db.SaveChangesAsync();
+
+        var result = await new VolunteerTaskBulkOperationService(db).MoveAsync(EventId, new[] { t.Id }, desk);
+
+        Assert.Equal(1, result.Moved);
+        var moved = (await db.VolunteerTasks.FindAsync(t.Id))!;
+        Assert.Equal(desk, moved.SubcategoryId);
+        Assert.Equal(catId, moved.CategoryId);
     }
 
     /// <summary>🔒 Same event-scoping guarantee as the sub-category target.</summary>

@@ -1,0 +1,130 @@
+@page "{id:int}"
+@model CommunityHub.Pages.Organizer.ShopProductModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Organizer
+@{
+    ViewData["Title"] = Model.Product?.Name ?? "Shop product";
+}
+
+<div class="card">
+    @if (Model.AccessDenied)
+    {
+        <h1>Shop product</h1>
+        <p>Only organizers can edit shop products.</p>
+    }
+    else if (Model.Product is { } p)
+    {
+        <p><a asp-page="/Organizer/WebshopCatalog">&larr; Shop catalogue</a></p>
+        <h1>@p.Name</h1>
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info @(Model.MessageIsError ? "error" : "")" role="status">@Model.Message</p>
+        }
+        <p style="font-size:13px;color:#4b5563;">
+            @(p.WooProductId is long w ? $"From the old webshop (product #{w})" : "Created in CEH") ·
+            availability: <strong>@WebshopCatalogModel.AvailabilityText(p, Model.Live)</strong>
+        </p>
+        <form method="post" asp-page-handler="Save" asp-route-id="@p.Id" class="shop-editor">
+            <p class="hint">Everything here, the stock count included, is CEH's own — the old webshop is closed and no longer synced.</p>
+            <fieldset>
+                <legend>Product</legend>
+                <label>Name <input asp-for="Input.Name" required maxlength="300" /></label>
+                <div class="shop-editor-row">
+                    <label>Status
+                        <select asp-for="Input.Status">
+                            @foreach (var s in ShopProductModel.EditableStatuses)
+                            {
+                                <option value="@s">@(s == ShopProductStatus.Published ? "Published (visible to sponsors)" : s == ShopProductStatus.Private ? "Private (hidden)" : "Draft (hidden)")</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Price (EUR, excl. VAT) <input asp-for="Input.PriceEur" type="number" step="0.01" min="0" inputmode="decimal" /></label>
+                    <label>Discounted price (optional) <input asp-for="Input.SalePriceEur" type="number" step="0.01" min="0" inputmode="decimal" placeholder="no discount" /></label>
+                    @if (p.PrimaryCategory?.Group == CommunityHub.Core.Domain.ShopGroup.Swag)
+                    {
+                        <label>Sponsor's share (%) — ELDK covers the rest <input asp-for="Input.SponsorContributionPercent" type="number" step="0.01" min="1" max="100" inputmode="decimal" placeholder="default (33 %)" /></label>
+                    }
+                    <label>Sort order <input asp-for="Input.SortOrder" type="number" /></label>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Stock</legend>
+                <label style="display:flex;gap:8px;align-items:center;"><input asp-for="Input.ManageStock" type="checkbox" /> Count stock (untick = unlimited)</label>
+                <label>Units in stock <input asp-for="Input.StockQuantity" type="number" min="0" /></label>
+                <p class="hint">CEH is the one stock counter: a sale or reservation takes stock, a cancellation gives it back.</p>
+            </fieldset>
+
+            <fieldset>
+                <legend>Placement</legend>
+                <label>Category
+                    <select asp-for="Input.PrimaryCategoryId">
+                        <option value="">(none)</option>
+                        @foreach (var c in Model.Categories)
+                        {
+                            <option value="@c.Id">@WebshopCatalogModel.GroupLabel(c.Group) — @c.Name</option>
+                        }
+                    </select>
+                </label>
+                <div class="shop-editor-row">
+                    <label>Booth id <input asp-for="Input.BoothId" maxlength="20" placeholder="E-12" /></label>
+                    <label>Timeslot <input asp-for="Input.Timeslot" maxlength="40" /></label>
+                    <label>Timeslot time <input asp-for="Input.TimeslotTime" maxlength="60" /></label>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Descriptions</legend>
+                <label>Short description (HTML) <textarea asp-for="Input.ShortDescriptionHtml" rows="4"></textarea></label>
+                <label>Full description (HTML — printed on the contract) <textarea asp-for="Input.DescriptionHtml" rows="12"></textarea></label>
+                <p class="hint">Basic HTML only (paragraphs, lists, bold, links); scripts and attributes are removed.</p>
+            </fieldset>
+
+            <button type="submit" class="primary">Save</button>
+        </form>
+
+        <section class="shop-editor">
+            <fieldset>
+                <legend>Pictures</legend>
+                <p class="hint">The first picture is the one sponsors see in the shop. Pictures are stored in the SharePoint Products folder.</p>
+                <div class="shop-pics">
+                    @foreach (var img in p.Images.OrderBy(x => x.SortOrder))
+                    {
+                        var first = img.SortOrder == p.Images.Min(x => x.SortOrder);
+                        <div class="shop-pic">
+                            <img src="/shop-image/@img.Id?v=@(img.CopiedAt?.ToUnixTimeSeconds())" alt="@(img.AltText ?? p.Name)" />
+                            <div class="shop-pic-tag">@(first ? "Main" : "") @(img.IsCehUpload ? "· added in CEH" : "")</div>
+                            @if (!first)
+                            {
+                                <form method="post" asp-page-handler="FirstPicture" asp-route-id="@p.Id"><input type="hidden" name="imageId" value="@img.Id" /><button type="submit">Make main</button></form>
+                            }
+                            <form method="post" asp-page-handler="RemovePicture" asp-route-id="@p.Id" onsubmit="return confirm('Remove this picture from the CEH shop?');">
+                                <input type="hidden" name="imageId" value="@img.Id" /><button type="submit">Remove</button></form>
+                        </div>
+                    }
+                </div>
+                @* §1312 — operator 2026-09-27: "there should be only one button. upload if none exist. replace if one exist already". *@
+                <form method="post" asp-page-handler="AddPicture" asp-route-id="@p.Id" enctype="multipart/form-data" style="margin-top:10px;">
+                    <label>@(p.Images.Count == 0 ? "Upload a picture" : "Upload a new picture — it replaces the main picture") (PNG, JPG or WebP, max 8 MB) <input type="file" name="picture" accept="image/png,image/jpeg,image/webp" required /></label>
+                    <label>Description for screen readers (optional) <input name="altText" maxlength="300" /></label>
+                    <button type="submit">Upload</button>
+                </form>
+            </fieldset>
+        </section>
+    }
+</div>
+
+<style>
+    .shop-editor fieldset { border:1px solid #d1d5db; border-radius:8px; padding:10px 14px; margin:0 0 14px; }
+    .shop-editor legend { font-weight:600; padding:0 6px; }
+    .shop-editor label { display:block; margin:6px 0; }
+    .shop-editor input:not([type=checkbox]), .shop-editor select, .shop-editor textarea { width:100%; box-sizing:border-box; }
+    .shop-editor-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:0 12px; }
+    .shop-editor .hint { font-size:12.5px; color:#4b5563; margin:4px 0 0; }
+    .shop-editor button.primary { background:#1565c0; color:#fff; }
+    .shop-pics { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; }
+    .shop-pic { border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:grid; gap:4px; }
+    .shop-pic img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; }
+    .shop-pic-tag { font-size:12px; color:#4b5563; min-height:1em; }
+    .shop-pic form button { width:100%; }
+</style>

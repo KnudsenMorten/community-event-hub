@@ -40,7 +40,7 @@ public class SyncQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         if (!string.IsNullOrEmpty(Msg)) ActionMessage = Msg;
         Pending = await _queue.ListPendingAsync(me.EventId, ct);

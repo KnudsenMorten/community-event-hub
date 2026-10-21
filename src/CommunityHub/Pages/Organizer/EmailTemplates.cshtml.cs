@@ -72,7 +72,7 @@ public class EmailTemplatesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs) { AccessDenied = true; return Page(); }
 
         await LoadListAsync(me.EventId, ct);
         if (Editing)
@@ -116,7 +116,7 @@ public class EmailTemplatesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs) { AccessDenied = true; return Page(); }
 
         await LoadListAsync(me.EventId, ct);
         await LoadEditorAsync(me.EventId, Key ?? string.Empty, loadTextFromStore: false, ct);

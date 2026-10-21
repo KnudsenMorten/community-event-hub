@@ -63,7 +63,7 @@ public class TasksTableModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!me.Role.HasOrganizerAccess())
         {
             AccessDenied = true;
             return Page();

@@ -69,11 +69,8 @@ public sealed class PartyAndMasterClassAreChasedByTheDigestTests
 
     private static GetStartedDigestBuilder NewDigest(CommunityHubDbContext db, TimeProvider clock)
     {
-        var cmOptions = new CompanyManagerOptions();
         var sponsorWizard = new SponsorWizardService(
             db,
-            new CompanyManagerClient(new HttpClient(), cmOptions),
-            cmOptions,
             new EconomicContactAdminService(new NoEconomicClient()),
             NullLogger<SponsorWizardService>.Instance);
 

@@ -866,8 +866,14 @@ public sealed class SessionizeApiClient
             TagLine:           NullIfEmpty(GetString(s, "tagLine")),
             Biography:         NullIfEmpty(GetString(s, "bio")),
             Blog:              blog,
-            LinkedIn:          linkedIn,
-            Twitter:           twitter,
+            // 🔴 §1250 — cleaned HERE, at the edge, so CEH only ever stores a usable profile URL.
+            // Speakers paste these from a phone with `?utm_source=share…` or `?s=09` attached, and
+            // a `twitter.com/@handle` form is common; Zoho refuses all three, one of them with
+            // "Sorry, an unexpected error has occurred", which is unactionable for everyone.
+            // Cleaning on the way IN means the hub and the event platform hold the same value —
+            // cleaning only on the way out would make them disagree for ever.
+            LinkedIn:          SocialUrlNormalizer.Clean(linkedIn),
+            Twitter:           SocialUrlNormalizer.Clean(twitter),
             ProfilePictureUrl: NullIfEmpty(GetString(s, "profilePicture")),
             // The Sessionize speaker id (GUID) links sessions -> this speaker.
             SessionizeId:      GetString(s, "id").Trim());

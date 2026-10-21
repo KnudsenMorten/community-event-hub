@@ -414,8 +414,15 @@
                                                             e.value = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
                                                                 + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
                                                         }
-                                                        s.addEventListener('change', calc);
-                                                        l.addEventListener('change', calc);
+                                                        // 🔴 §1267 — 'input' as well as 'change'. A datetime-local
+                                                        // box fires 'change' only when it is committed (blur or the
+                                                        // picker), so TYPING a new start left the end stale until
+                                                        // Save (operator 2026-09-21: "the calculated value is not
+                                                        // updated until i click save button").
+                                                        ['input', 'change'].forEach(function (ev) {
+                                                            s.addEventListener(ev, calc);
+                                                            l.addEventListener(ev, calc);
+                                                        });
                                                     })();
                                                 </script>
                                             </div>
@@ -457,10 +464,34 @@
                                                 <select id="EditRoom_@r.Id" name="EditRoom"
                                                         asp-items="Model.RoomOptions(r.Room)"></select>
                                             </div>
+                                            @* 🔴 §1245 — TRACK IS TYPEABLE, not a closed dropdown.
+                                               Operator 2026-09-20: "i am missing the Community track in CEH".
+                                               The list is built from the tracks sessions ALREADY use (there is
+                                               no configured track registry the way there is for rooms), so a
+                                               track that exists only in Sessionize was unreachable: it was
+                                               absent BECAUSE no session used it, and no session could use it
+                                               BECAUSE it was absent. A closed list cannot introduce a value.
+                                               The datalist keeps the existing names one click away — which is
+                                               what stops typos creating a near-duplicate track — while letting
+                                               a genuinely new one be typed. *@
                                             <div style="flex:1 1 140px;">
                                                 <label for="EditTrack_@r.Id">Track</label>
-                                                <select id="EditTrack_@r.Id" name="EditTrack"
-                                                        asp-items="Model.TrackOptions(r.Track)"></select>
+                                                @* ⚠️ The placeholder is load-bearing. It first read
+                                                   "— none —", which is exactly how a SELECT renders
+                                                   its empty option — so the field looked closed and
+                                                   the operator reported he "cannot select Community"
+                                                   when he could simply have typed it. The browser
+                                                   draws a datalist input with the same chevron as a
+                                                   dropdown, so the placeholder is the only thing
+                                                   telling him it accepts typing. *@
+                                                <input id="EditTrack_@r.Id" name="EditTrack" type="text"
+                                                       list="ceh-known-tracks" value="@r.Track"
+                                                       autocomplete="off"
+                                                       placeholder="Type a track, or pick one…" />
+                                                <small style="display:block;color:#6b7280;font-size:12px;margin-top:2px;">
+                                                    Any name works — a new one is created the first
+                                                    time you type it. Leave empty for no track.
+                                                </small>
                                             </div>
                                             <div style="flex:1 1 140px;">
                                                 <label for="EditLevel_@r.Id">Level</label>
@@ -761,3 +792,13 @@
         }
     }
 </div>
+
+@* 🔴 §1245 — the known-track suggestions, rendered ONCE for every row's Track input.
+   Shared rather than per-row: the grid can hold 70+ sessions, and eight options repeated
+   seventy times is a lot of markup for a list that is identical every time. *@
+<datalist id="ceh-known-tracks">
+    @foreach (var t in Model.KnownTracks)
+    {
+        <option value="@t"></option>
+    }
+</datalist>

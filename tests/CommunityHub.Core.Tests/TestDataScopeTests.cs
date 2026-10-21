@@ -35,6 +35,67 @@ public sealed class TestDataScopeTests
             IsActive = true,
         });
 
+    /// <summary>
+    /// 🔴 §1347 — withdrawn means NO active row: a withdrawn company is out, while a company with an
+    /// active row is sponsoring whatever an older withdrawn row says.
+    /// </summary>
+    [Fact]
+    public async Task A_company_is_withdrawn_only_when_none_of_its_rows_is_active()
+    {
+        using var db = NewDb();
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-gone", Status = SponsorStatus.Withdrawn,
+        });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-back", Status = SponsorStatus.Withdrawn,
+        });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-back", Status = SponsorStatus.Active,
+        });
+        await db.SaveChangesAsync();
+
+        var withdrawn = await TestDataScope.WithdrawnSponsorCompanyIdsAsync(db, EventId);
+        var notAnnounceable = await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(db, EventId);
+
+        Assert.Contains("co-gone", withdrawn);
+        Assert.DoesNotContain("co-back", withdrawn);
+        Assert.Contains("co-gone", notAnnounceable);
+    }
+
+    /// <summary>
+    /// 🔴 §1348 — a booth package with no current booth order is a LAPSED tier (2linkIT: Gold, booth
+    /// order cancelled). A booth sponsor with a current order and a Silver sponsor are not.
+    /// </summary>
+    [Fact]
+    public async Task A_booth_tier_without_a_current_booth_order_is_lapsed()
+    {
+        using var db = NewDb();
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-lapsed", SponsorPackage = SponsorPackage.Gold,
+            HasCurrentBoothOrder = false,
+        });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-booth", SponsorPackage = SponsorPackage.Gold,
+            HasCurrentBoothOrder = true,
+        });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "co-silver", SponsorPackage = SponsorPackage.Silver,
+            HasCurrentBoothOrder = false,
+        });
+        await db.SaveChangesAsync();
+
+        var lapsed = await TestDataScope.LapsedBoothTierSponsorCompanyIdsAsync(db, EventId);
+
+        Assert.Equal(new[] { "co-lapsed" }, lapsed.ToArray());
+        Assert.Contains("co-lapsed", await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(db, EventId));
+    }
+
     [Fact]
     public async Task A_company_whose_every_contact_is_a_test_user_is_test()
     {

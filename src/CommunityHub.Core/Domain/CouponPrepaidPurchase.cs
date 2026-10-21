@@ -72,6 +72,15 @@ public class CouponPrepaidPurchase
     /// </remarks>
     public bool ErpInvoiceIsBooked { get; set; }
 
+    /// <summary>
+    /// 🔴 §1312 — TRUE when CEH raised this purchase's invoice itself (reference <c>CouponPrepaid-{Id}</c>). Only such a
+    /// purchase is invoiced AGAIN when its draft disappears from e-conomic (operator 2026-09-29: "make the same fix for the
+    /// coupon prepaid invoice" — a deleted draft must rebuild itself). A number an organizer TYPED is an invoice CEH did not
+    /// make and cannot see by reference, so it is never recreated. Set at creation, and by the refresher whenever it finds
+    /// the reference in e-conomic (which marks every invoice raised before this flag existed).
+    /// </summary>
+    public bool ErpInvoiceRaisedByCeh { get; set; }
+
     public DateTimeOffset? ErpInvoiceConfirmedAt { get; set; }
     public string? ErpInvoiceConfirmedByEmail { get; set; }
 

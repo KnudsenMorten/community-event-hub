@@ -2,7 +2,6 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
-using CommunityHub.Core.Integrations.Sessions;
 using CommunityHub.Core.Volunteers;
 using CommunityHub.Pages.Volunteer;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -48,10 +47,9 @@ public sealed class VolunteerAvailabilityFormModel
 /// encapsulates the form's ENTIRE behavior — the OnGet load (per-event-day rows with the
 /// slot→Level option set) and the OnPost persist + ALL side-effects that MUST be preserved:
 /// a FIRST submission (no existing rows) applies directly + emails the volunteer lead
-/// (<see cref="AvailabilityModel.NotifyEmail"/>, fail-soft); a later EDIT does NOT overwrite —
-/// it builds per-day old→new diffs and ENQUEUEs a Volunteer Update via
-/// <see cref="SyncDeltaQueueService"/> (NotifyNew throttled) so an organizer approves it
-/// (§59 delta-approval). Client-injected days outside the edition are ignored. Both the
+/// (<see cref="AvailabilityModel.NotifyEmail"/>, fail-soft); a later EDIT also applies directly
+/// and emails the lead the per-day old→new (§1346 — it used to be queued for organizer
+/// approval, §59). Client-injected days outside the edition are ignored. Both the
 /// standalone <c>/volunteer/availability</c> page AND the inline
 /// <see cref="VolunteerAvailabilityStepHandler"/> call this exact logic, so the two stay
 /// identical. Implements the <see cref="IWizardFormService"/> marker so it self-registers
@@ -63,7 +61,6 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly IEmailSender _email;
-    private readonly SyncDeltaQueueService _queue;
     private readonly ILogger<VolunteerAvailabilityFormService> _logger;
 
     public VolunteerAvailabilityFormService(
@@ -71,14 +68,12 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
         EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions,
         IEmailSender email,
-        SyncDeltaQueueService queue,
         ILogger<VolunteerAvailabilityFormService> logger)
     {
         _db = db;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _email = email;
-        _queue = queue;
         _logger = logger;
     }
 
@@ -109,8 +104,8 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
     /// Persist + run all side-effects (REQUIREMENTS §148) — the SAME logic the standalone
     /// page's OnPost ran. Days the client may have injected outside the edition are ignored.
     /// A FIRST-time submission (no existing rows) applies directly and emails the volunteer
-    /// lead (fail-soft); a later EDIT is NOT applied — it is enqueued as a Volunteer Update
-    /// delta for organizer approval, leaving the current (approved) availability in place.
+    /// lead (fail-soft); a later EDIT applies the changed days and emails the lead the
+    /// old→new (§1346).
     /// The post-save flash is written to <see cref="VolunteerAvailabilityFormModel.Notice"/>;
     /// the model's display state is reloaded for re-render. §234 UX: a save where any event
     /// day was left WITHOUT a choice is rejected (<see cref="WizardStepOutcome.Invalid"/> +
@@ -131,9 +126,8 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
             .Where(x => x.EventId == eventId && x.ParticipantId == participantId)
             .ToListAsync(ct);
 
-        // §59 DELTA-APPROVAL QUEUE (mirrors the §38e "first submission applies, a later
-        // CHANGE is queued" pattern). The presence of existing availability rows IS the
-        // "already submitted" baseline — no extra column needed.
+        // The presence of existing availability rows IS the "already submitted" baseline —
+        // it decides first-save vs change, which differ only in the lead's e-mail (§1346).
         var alreadySubmitted = existing.Count > 0;
 
         // Resolve each valid posted day to its desired (Level, Note) once.
@@ -175,8 +169,12 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
 
         if (alreadySubmitted)
         {
-            // EDIT after an initial submission → build per-day old→new diffs and ENQUEUE.
-            var changes = BuildAvailabilityChanges(existing, desired);
+            // §1346 (operator 2026-10-15) — a later EDIT now APPLIES DIRECTLY and the volunteer
+            // lead is e-mailed the old→new per changed day. It used to be queued for organizer
+            // approval (§59), but the menu lands on the Get Started step, which never showed the
+            // "submitted for review" flash: the volunteer saved, re-opened the form, saw her OLD
+            // values and re-submitted ~20 times while the change sat unapproved in the queue.
+            var changes = DiffDays(existing, desired, labelByDay);
             if (changes.Count == 0)
             {
                 model.Notice = "No changes detected — your current availability is unchanged.";
@@ -184,20 +182,37 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
                 return WizardStepOutcome.Advance;
             }
 
-            var before = await _queue.CountPendingAsync(eventId, ct);
-            await _queue.EnqueueVolunteerAvailabilityUpdateAsync(
-                eventId, participantId, fullName, changes, ct);
-            // Notify the organizer that a change is awaiting approval (throttled, never throws).
-            await _queue.NotifyNewAsync(eventId, before, ct);
+            var now = DateTimeOffset.UtcNow;
+            foreach (var d in desired)
+            {
+                var row = existing.FirstOrDefault(x => x.Day == d.Day);
+                if (row is null)
+                {
+                    _db.VolunteerDayAvailabilities.Add(new VolunteerDayAvailability
+                    {
+                        EventId = eventId, ParticipantId = participantId, Day = d.Day,
+                        Level = d.Level, Note = d.Note, UpdatedAt = now,
+                    });
+                }
+                else if (row.Level != d.Level
+                         || !string.Equals(NormalizeNote(row.Note), NormalizeNote(d.Note), StringComparison.Ordinal))
+                {
+                    row.Level = d.Level;
+                    row.Note = d.Note;
+                    row.UpdatedAt = now;
+                }
+            }
+            await _db.SaveChangesAsync(ct);
 
             _logger.LogInformation(
-                "Volunteer {ParticipantId} submitted an availability CHANGE for event {EventId} "
-                + "({Count} day(s)) — queued for organizer approval.",
+                "Volunteer {ParticipantId} changed availability for event {EventId} "
+                + "({Count} day(s)) — applied and sent to the volunteer lead.",
                 participantId, eventId, changes.Count);
 
-            model.Notice = "Your change has been submitted for organizer review. "
-                + "Until it is approved, your previously saved availability still applies — "
-                + "the days below show your current (approved) availability.";
+            await NotifyLeadAsync(eventId, participantId, fullName, email, validDays, labelByDay, changes, ct);
+
+            model.Notice = "Your change has been saved and sent to Morten Leth Hedegaard "
+                + "(mlh@expertslive.dk) so the schedule can be updated.";
             await ReloadAsync(model, eventId, participantId, ct);
             return WizardStepOutcome.Advance;
         }
@@ -223,7 +238,7 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
 
         // Notify the volunteer lead on every save (add OR update) so they can re-allocate
         // shifts (operator 2026-06-23). Fail-soft: a mail problem must not lose the save.
-        await NotifyLeadAsync(eventId, participantId, fullName, email, validDays, labelByDay, ct);
+        await NotifyLeadAsync(eventId, participantId, fullName, email, validDays, labelByDay, null, ct);
 
         model.Notice = "Your availability has been saved and sent to Morten Leth Hedegaard "
             + "(mlh@expertslive.dk) so the schedule can be planned. "
@@ -259,38 +274,37 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
         }).ToList();
     }
 
+    /// <summary>One changed day of a volunteer availability EDIT, as the lead's e-mail shows it.</summary>
+    internal sealed record DayChange(string DayLabel, string Before, string After);
+
     /// <summary>
-    /// Build the per-day old→new diff list for a volunteer availability EDIT. Only days whose
-    /// (Level, Note) actually changed are included; an empty result means nothing changed. The
-    /// new value carries the machine payload an Approve will apply (see
-    /// <see cref="SyncDeltaQueueService.BuildVolunteerAvailabilityChanges"/>).
+    /// The per-day old→new diff for a volunteer availability EDIT (§1346). Only days whose
+    /// (Level, Note) actually changed are included; an empty result means nothing changed.
     /// </summary>
-    private static IReadOnlyList<SyncFieldChange> BuildAvailabilityChanges(
+    private static IReadOnlyList<DayChange> DiffDays(
         IReadOnlyList<VolunteerDayAvailability> existing,
-        IReadOnlyList<(DateOnly Day, VolunteerAvailabilityLevel Level, string? Note)> desired)
+        IReadOnlyList<(DateOnly Day, VolunteerAvailabilityLevel Level, string? Note)> desired,
+        IReadOnlyDictionary<DateOnly, string> labelByDay)
     {
-        var rows = new List<(string, string, string, VolunteerAvailabilityLevel, string?)>();
+        var list = new List<DayChange>();
         foreach (var d in desired)
         {
             var old = existing.FirstOrDefault(x => x.Day == d.Day);
-            var oldLevel = old?.Level ?? VolunteerAvailabilityLevel.Full;
-            var oldNote = old?.Note;
             var noteChanged = !string.Equals(
-                NormalizeNote(oldNote), NormalizeNote(d.Note), StringComparison.Ordinal);
+                NormalizeNote(old?.Note), NormalizeNote(d.Note), StringComparison.Ordinal);
             if (old is not null && old.Level == d.Level && !noteChanged) continue; // unchanged
 
-            var oldLabel = old is null
-                ? "(not set)"
-                : VolunteerDayLabel(d.Day, oldLevel, oldNote);
-            var newLabel = VolunteerDayLabel(d.Day, d.Level, d.Note);
-            rows.Add((d.Day.ToString("yyyy-MM-dd"), oldLabel, newLabel, d.Level, d.Note));
+            list.Add(new DayChange(
+                labelByDay.TryGetValue(d.Day, out var l) ? l : d.Day.ToString("yyyy-MM-dd"),
+                old is null ? "(not set)" : VolunteerDayLabel(d.Day, old.Level, old.Note),
+                VolunteerDayLabel(d.Day, d.Level, d.Note)));
         }
-        return SyncDeltaQueueService.BuildVolunteerAvailabilityChanges(rows);
+        return list;
     }
 
     private static string? NormalizeNote(string? n) => string.IsNullOrWhiteSpace(n) ? null : n.Trim();
 
-    /// <summary>A human availability label for the queue UI: the chosen slot plus the free note.</summary>
+    /// <summary>A human availability label for the lead's e-mail: the chosen slot plus the free note.</summary>
     private static string VolunteerDayLabel(DateOnly day, VolunteerAvailabilityLevel level, string? note)
     {
         var slot = VolunteerDayOptions.DisplayLabel(day, level, note);
@@ -301,8 +315,9 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
     private async Task NotifyLeadAsync(
         int eventId, int participantId, string fullName, string email,
         HashSet<DateOnly> validDays, IReadOnlyDictionary<DateOnly, string> labelByDay,
-        CancellationToken ct)
+        IReadOnlyList<DayChange>? changes, CancellationToken ct)
     {
+        static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
         try
         {
             var rows = (await _db.VolunteerDayAvailabilities
@@ -320,10 +335,26 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
                 + "</b></td><td style=\"padding:4px 0;color:#555;\">"
                 + System.Net.WebUtility.HtmlEncode(VolunteerDayOptions.StripSlot(r.Note) ?? string.Empty) + "</td></tr>");
 
+            // §1346 — on a CHANGE, lead with what changed (old → new) so the lead does not have
+            // to diff the full table against the last mail; the full current table follows.
+            var changeHtml = changes is { Count: > 0 }
+                ? "<p><b>What changed:</b></p>"
+                    + "<table style=\"border-collapse:collapse;font-size:14px;\">"
+                    + "<tr><th align=\"left\" style=\"padding:4px 10px 4px 0;\">Day</th>"
+                    + "<th align=\"left\" style=\"padding:4px 10px;\">Before</th>"
+                    + "<th align=\"left\" style=\"padding:4px 0;\">Now</th></tr>"
+                    + string.Concat(changes.Select(c =>
+                        "<tr><td style=\"padding:4px 10px 4px 0;\">" + Enc(c.DayLabel)
+                        + "</td><td style=\"padding:4px 10px;color:#555;\">" + Enc(c.Before)
+                        + "</td><td style=\"padding:4px 0;\"><b>" + Enc(c.After) + "</b></td></tr>"))
+                    + "</table><p><b>Current availability:</b></p>"
+                : string.Empty;
+
             var html =
-                $"<p>Volunteer <b>{System.Net.WebUtility.HtmlEncode(fullName)}</b> "
-                + $"(<a href=\"mailto:{System.Net.WebUtility.HtmlEncode(email)}\">{System.Net.WebUtility.HtmlEncode(email)}</a>) "
-                + "saved their availability:</p>"
+                $"<p>Volunteer <b>{Enc(fullName)}</b> "
+                + $"(<a href=\"mailto:{Enc(email)}\">{Enc(email)}</a>) "
+                + (changes is { Count: > 0 } ? "changed their availability:</p>" : "saved their availability:</p>")
+                + changeHtml
                 + "<table style=\"border-collapse:collapse;font-size:14px;\">"
                 + "<tr><th align=\"left\" style=\"padding:4px 10px 4px 0;\">Day</th>"
                 + "<th align=\"left\" style=\"padding:4px 10px;\">Availability</th>"
@@ -333,7 +364,9 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
 
             await _email.SendAsync(
                 AvailabilityModel.NotifyEmail,
-                $"[Volunteer availability] {fullName} updated their availability",
+                changes is { Count: > 0 }
+                    ? $"[Volunteer availability] {fullName} changed their availability"
+                    : $"[Volunteer availability] {fullName} updated their availability",
                 html, ct);
         }
         catch (Exception ex)

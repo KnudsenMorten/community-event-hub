@@ -69,7 +69,7 @@ public class CommsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Snapshot = await _cockpit.BuildAsync(me.EventId, ct, includeDropped: ShowDropped);
         return Page();

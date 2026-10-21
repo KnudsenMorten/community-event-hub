@@ -46,7 +46,7 @@ public class VolunteerAvailabilityModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         // null ⇒ every volunteer in the edition, including the ones already onboarded. The
         // pre-selection queue narrows to its own rows; this page is the whole crew.

@@ -65,5 +65,13 @@ public class SwagCatalogCredit
 
     /// <summary>Live = granted, not withdrawn, and not past its expiry.</summary>
     public bool IsLiveOn(DateOnly today) =>
-        RevokedAt is null && (ExpiresOn is null || ExpiresOn.Value >= today);
+        RevokedAt is null && UsedOnShopOrderId is null && (ExpiresOn is null || ExpiresOn.Value >= today);
+
+    /// <summary>
+    /// §1305 — the CEH shop order this credit was spent on (as a discount on its swag lines). Set when the
+    /// order is reserved, cleared if that order is cancelled, so a credit is spent exactly once.
+    /// </summary>
+    public int? UsedOnShopOrderId { get; set; }
+
+    public DateTimeOffset? UsedAt { get; set; }
 }

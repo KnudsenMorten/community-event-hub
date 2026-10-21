@@ -45,7 +45,12 @@ namespace CommunityHub.Core.Navigation;
 // §297: SubSectionKey is an OPTIONAL resx key naming a NESTED sub-fold-out inside this item's
 // SectionKey section (two-level menu) — e.g. "Policies" (Code of Conduct + Privacy Policy) nested
 // inside "Event Info". Null = a direct leaf of the section.
-public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false, string? FeatureKey = null, ExternalRedirectKind Redirect = ExternalRedirectKind.None, string? SubSectionKey = null);
+public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false, string? FeatureKey = null, ExternalRedirectKind Redirect = ExternalRedirectKind.None, string? SubSectionKey = null,
+    // §1305 — the item is HIDDEN while this feature is on for the viewer (enabled and their ring is in scope): the old
+    // webshop link steps aside once the CEH shop is open (operator 2026-09-26: "remove link to old webshop in menuitem").
+    string? HiddenWhenFeatureKey = null,
+    // §1305 — draw a thin separator line above this item in its section's dropdown.
+    bool SeparatorBefore = false);
 
 /// <summary>
 /// Which third-party system a nav link redirects to, for the "you'll need to log in

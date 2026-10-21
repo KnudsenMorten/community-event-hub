@@ -109,8 +109,26 @@ public sealed class SessionizeDisappearanceDetector
             .ToListAsync(ct);
         var participantIdByProfileId = linkedSpeakers.ToDictionary(s => s.Id, s => s.ParticipantId);
 
+        // 🔒 §1256 — an APPROVED "disappeared" delta silences the speaker too. §1247 built exactly
+        // this for SESSIONS and stopped there, so approving a SPEAKER in the sync queue changed
+        // nothing: the next scan re-detected them, queued a FRESH Pending delta and mailed again.
+        // Measured in PROD 2026-09-20: delta #91 approved at 16:35, #92 raised at 17:50 for the same
+        // profile, and the alert arrived every 10 minutes because the answer was never read.
+        // Same predicate as the session branch below — Approved only (a Rejected row is a decision
+        // about the CEH value, a Pending one is what the mail exists to chase).
+        var acknowledgedSpeakerIds = await _db.SyncDeltas
+            .AsNoTracking()
+            .Where(d => d.EventId == eventId
+                        && d.EntityType == SyncDeltaEntityType.Speaker
+                        && d.ChangeKind == SyncDeltaChangeKind.Disappeared
+                        && d.Status == SyncDeltaStatus.Approved)
+            .Select(d => d.EntityId)
+            .ToListAsync(ct);
+        var acknowledgedSpeakers = new HashSet<string>(acknowledgedSpeakerIds, StringComparer.OrdinalIgnoreCase);
+
         var disappearedSpeakers = linkedSpeakers
             .Where(s => !presentSpeakers.Contains(s.SessionizeId))
+            .Where(s => !acknowledgedSpeakers.Contains(s.Id.ToString(CultureInfo.InvariantCulture)))
             .Select(s => (s.Id, Name: string.IsNullOrWhiteSpace(s.Name) ? "(no name)" : s.Name, s.SessionizeId))
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -125,8 +143,37 @@ public sealed class SessionizeDisappearanceDetector
             .Select(s => new { s.Id, s.SessionizeId, s.Title })
             .ToListAsync(ct);
 
+        // 🔴 §1247 — A SESSION THE ORGANIZER HAS ALREADY ACKNOWLEDGED IS NOT REPORTED AGAIN.
+        //
+        // Operator 2026-09-20, on two test sessions declined in Sessionize that he cannot delete
+        // (their master-class signups and questions block it, correctly): *"how can i avoid this
+        // message"*. There was no answer — the mail repeated on every run for ever, and nothing he
+        // could do would stop it.
+        //
+        // 🔑 §1231 fixed EXACTLY this for speakers — a deactivated speaker stops being reported,
+        // because that decision is what the mail was asking for — and left sessions with the same
+        // defect. This is the session half, using the acknowledgement that already exists: the
+        // §59 queue holds a Disappeared delta per session and APPROVING it is defined as
+        // "acknowledged, never deletes". The queue was already the right place to say *"I have
+        // dealt with this"*; the detector simply never read the answer, so approving changed
+        // nothing observable and the operator was told to act by a mail that ignored the action.
+        //
+        // 🔒 Scoped to APPROVED only. A REJECTED row means "I looked and I am keeping it", which is
+        // a decision about the CEH value, not a statement that the mail is finished — and a
+        // still-PENDING one is precisely what the mail exists to chase.
+        var acknowledgedSessionIds = await _db.SyncDeltas
+            .AsNoTracking()
+            .Where(d => d.EventId == eventId
+                        && d.EntityType == SyncDeltaEntityType.Session
+                        && d.ChangeKind == SyncDeltaChangeKind.Disappeared
+                        && d.Status == SyncDeltaStatus.Approved)
+            .Select(d => d.EntityId)
+            .ToListAsync(ct);
+        var acknowledged = new HashSet<string>(acknowledgedSessionIds, StringComparer.OrdinalIgnoreCase);
+
         var disappearedSessions = linkedSessions
             .Where(s => !presentSessions.Contains(s.SessionizeId))
+            .Where(s => !acknowledged.Contains(s.Id.ToString(CultureInfo.InvariantCulture)))
             .Select(s => (s.Id, Title: string.IsNullOrWhiteSpace(s.Title) ? "(untitled)" : s.Title, s.SessionizeId))
             .OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();

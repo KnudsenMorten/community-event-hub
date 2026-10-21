@@ -178,6 +178,40 @@ public sealed class SoMeSubjectScope
             keys[$"sponsor:{companyId}"] = $"sponsor company {who} — test data";
         }
 
+        // 🔴 §1347 — a WITHDRAWN sponsor's queued posts leave the planner too (the dispatcher's
+        // publish-time check was the only thing stopping them). Test wins the reason when both apply.
+        var withdrawnIds = await TestDataScope.WithdrawnSponsorCompanyIdsAsync(_db, eventId, ct);
+        withdrawnIds.ExceptWith(testCompanyIds);
+        if (withdrawnIds.Count > 0)
+        {
+            var withdrawnNames = await SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, eventId, withdrawnIds, ct);
+            foreach (var companyId in withdrawnIds)
+            {
+                var who = withdrawnNames.TryGetValue(companyId, out var nm)
+                    ? nm
+                    : SponsorCompanyName.UnresolvedName(companyId);
+                keys[$"sponsor:{companyId}"] = $"sponsor company {who} — withdrawn";
+            }
+        }
+
+        // 🔴 §1348 — a lapsed booth tier: the post would announce a tier the company no longer holds.
+        var lapsedIds = await TestDataScope.LapsedBoothTierSponsorCompanyIdsAsync(_db, eventId, ct);
+        lapsedIds.ExceptWith(testCompanyIds);
+        lapsedIds.ExceptWith(withdrawnIds);
+        if (lapsedIds.Count > 0)
+        {
+            var lapsedNames = await SponsorCompanyNameService.ResolveFromLocalAsync(
+                _db, eventId, lapsedIds, ct);
+            foreach (var companyId in lapsedIds)
+            {
+                var who = lapsedNames.TryGetValue(companyId, out var nm)
+                    ? nm
+                    : SponsorCompanyName.UnresolvedName(companyId);
+                keys[$"sponsor:{companyId}"] = $"sponsor company {who} — booth tier lapsed (no current booth order)";
+            }
+        }
+
         return keys;
     }
 }

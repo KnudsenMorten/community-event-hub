@@ -234,8 +234,11 @@
   <data name="Nav.VolunteerGift" xml:space="preserve"><value>Swag</value></data>
   <data name="Nav.SectionSponsorWebshop" xml:space="preserve"><value>Sponsor Webshop</value></data>
   <data name="Nav.SponsorBuyServices" xml:space="preserve"><value>Buy Extra Services &amp; Furniture</value></data>
-  <data name="Nav.SponsorOrders" xml:space="preserve"><value>Webshop Orders</value></data>
-  <data name="Nav.RedirectConfirmZoho" xml:space="preserve"><value>You will now be redirected to our event system Zoho, where you'll need to log in with your email. You'll then receive a one-time password.</value></data>
+  <data name="Nav.SponsorOrders" xml:space="preserve"><value>Previous Orders</value></data>
+  <data name="Nav.SponsorShop" xml:space="preserve"><value>Browse Webshop</value></data>
+  <data name="Nav.SponsorShopFurniture" xml:space="preserve"><value>Order Furniture</value></data>
+  <data name="Nav.SponsorShopSwag" xml:space="preserve"><value>Become a Swag Sponsor</value></data>
+  <data name="Nav.SponsorShopStaffTickets" xml:space="preserve"><value>Buy more Exhibitor tickets</value></data>  <data name="Nav.RedirectConfirmZoho" xml:space="preserve"><value>You will now be redirected to our event system Zoho, where you'll need to log in with your email. You'll then receive a one-time password.</value></data>
   <data name="Nav.RedirectConfirmWebshop" xml:space="preserve"><value>You will now be redirected to our sponsor webshop, where you'll need to log in with your email and password. If you can't remember your password, use the 'Lost your password' link.</value></data>
   <data name="Nav.ZohoDialogTitle" xml:space="preserve"><value>Opening Zoho Backstage</value></data>
   <data name="Nav.ZohoDialogBody1" xml:space="preserve"><value>Some services, such as leads and inquiries, are still handled directly in our event system, **Zoho Backstage**, due to API limitations. You'll need to **sign in there** — we'll open it in a **new browser tab**.</value></data>
@@ -574,6 +577,7 @@
   <data name="Nav.OrgPlatformHealth" xml:space="preserve"><value>Platform Health</value></data>
   <data name="Nav.OrgParticipantStatus" xml:space="preserve"><value>Participant Status</value></data>
   <data name="Nav.OrgJobs" xml:space="preserve"><value>Background Jobs</value></data>
+  <data name="Nav.OrgSessionEvaluation" xml:space="preserve"><value>Session Evaluation</value></data>
   <data name="Nav.OrgCouponInvoicing" xml:space="preserve"><value>Coupon Invoicing</value></data>
   <data name="Nav.OrgDataFreshness" xml:space="preserve"><value>Data Freshness</value></data>
 
@@ -637,14 +641,22 @@
   <!-- Forms: Hotel -->
   <data name="Hotel.Title" xml:space="preserve"><value>Hotel preference</value></data>
   <data name="Hotel.PolicyLead" xml:space="preserve"><value>Hotel policy:</value></data>
-  <data name="Hotel.PolicyBody" xml:space="preserve"><value>we arrange and cover &lt;strong&gt;1 night&lt;/strong&gt; hotel for speakers checking in the day BEFORE the main conference day, and &lt;strong&gt;2 nights&lt;/strong&gt; for master-class speakers and speakers running a workshop on the pre-day. Pick &lt;em&gt;Yes, I need a hotel room&lt;/em&gt; and your check-in / check-out dates, OR pick &lt;em&gt;No, I don't need a hotel&lt;/em&gt; — either is a valid completed answer.</value></data>
-  <!-- §725 (operator 2026-07-31): the recommended DATES were missing, so a speaker was told how many
-       nights we cover without being told which ones — and had to work the dates out themselves.
-       Master class speakers: 8-10 Feb 2027 (two nights). Main-day/technical session speakers:
-       9-10 Feb 2027 (one night). -->
-  <data name="Hotel.PolicySpeaker" xml:space="preserve"><value>If you'd like a hotel, we'll arrange and cover it based on the response you provide in the hub form. We will cover &lt;strong&gt;two nights for masterclass speakers (8-10 Feb 2027)&lt;/strong&gt; and &lt;strong&gt;one night for technical session speakers (main day) (9-10 Feb 2027)&lt;/strong&gt;. If you'd like to stay longer, any extra nights would be at your own expense.</value></data>
-  <data name="Hotel.PolicyVolunteer" xml:space="preserve"><value>We will arrange and cover hotel, if you want it, based on your response in the hub form. Hotel coverage depends on the days where you have agreed to help us.</value></data>
-  <data name="Hotel.PolicyCrew" xml:space="preserve"><value>We will arrange and cover hotel, if you want it, based on your response in the hub form. The organizer team confirms which nights are covered for your role — just tell us what you need below.</value></data>
+  <!-- 🗑 §1296 (2026-09-22) — Hotel.PolicyBody / PolicySpeaker / PolicyVolunteer / PolicyCrew are
+       DELETED. They stated the coverage rule in per-role prose, which became a second source of
+       truth the moment the rule itself became data (HotelCoverage + the Settings standards table),
+       and they had already drifted: PolicySpeaker named only the master-class and main-day cases,
+       never pre-day-only, and hard-coded ELDK27's own dates (8-10 Feb 2027) into a SHARED,
+       evergreen resource. PolicyBody was additionally dead — zero references in src/ or tests/.
+       The box is now generated per viewer from their own rule; the keys below are its parts.
+       🔒 Hotel.ExtraNightsCost SURVIVES: it is a price, not a rule. -->
+  <data name="Hotel.CoverageWholeStay" xml:space="preserve"><value>Experts Live Denmark covers your hotel for the whole stay — every night you book below.</value></data>
+  <data name="Hotel.CoverageNights" xml:space="preserve"><value>Experts Live Denmark covers {0} of your hotel stay.</value></data>
+  <data name="Hotel.CoverageNightsWithExtra" xml:space="preserve"><value>Experts Live Denmark covers {0} of your hotel stay ({1} as standard, plus {2} agreed with the organizers).</value></data>
+  <data name="Hotel.CoverageNone" xml:space="preserve"><value>Your hotel stay is not covered by Experts Live Denmark — please book what you need below and settle it with the hotel yourself.</value></data>
+  <data name="Hotel.CoverageSelected" xml:space="preserve"><value>You have selected {0}.</value></data>
+  <data name="Hotel.CoverageOwn" xml:space="preserve"><value>You pay for {0} yourself, directly to the hotel.</value></data>
+  <data name="Hotel.CoverageAllCovered" xml:space="preserve"><value>All of them are covered.</value></data>
+  <data name="Hotel.CoverageVolunteerHint" xml:space="preserve"><value>If you have agreed more nights with the organizers, they will adjust this for you.</value></data>
   <data name="Hotel.NotRelevant" xml:space="preserve"><value>Hotel isn't part of your participation — attendees and sponsors arrange their own accommodation.</value></data>
   <data name="Hotel.NeedsRoomLabel" xml:space="preserve"><value>Needs room:</value></data>
   <data name="Hotel.CheckInOut" xml:space="preserve"><value>Check-in: {0} · Check-out: {1}</value></data>
@@ -795,7 +807,7 @@
   <data name="SponsorWiz.Step.welcome" xml:space="preserve"><value>Welcome</value></data>
   <data name="SponsorWiz.Step.welcome.Desc" xml:space="preserve"><value>Start here — a quick hello, and what you will find in the Event Hub.</value></data>
   <data name="SponsorWiz.Step.company" xml:space="preserve"><value>Company details</value></data>
-  <data name="SponsorWiz.Step.company.Desc" xml:space="preserve"><value>Your company description, listing one-liner and social-media branding text. Your website comes from the webshop.</value></data>
+  <data name="SponsorWiz.Step.company.Desc" xml:space="preserve"><value>Your website, LinkedIn and X, your company description, listing one-liner and social-media branding text.</value></data>
   <!-- §1081 — the CEH-owned company content fields, named individually so a reminder can say WHICH
        one is blank (§854: what somebody has to act on must be named). Keys come from
        CommunityHub.Core.Sponsors.SponsorCompanyContent. -->
@@ -950,7 +962,7 @@
   <data name="Lead.NotesLabel" xml:space="preserve"><value>What were they interested in? (notes)</value></data>
   <data name="Lead.Save" xml:space="preserve"><value>Save lead</value></data>
   <data name="Lead.DownloadApi" xml:space="preserve"><value>Download / API for your leads →</value></data>
-  <data name="Lead.SponsorEngagement" xml:space="preserve"><value>Webshop orders</value></data>
+  <data name="Lead.SponsorEngagement" xml:space="preserve"><value>Previous orders</value></data>
   <data name="Lead.RecentTitle" xml:space="preserve"><value>Recently captured at your booth</value></data>
   <data name="Lead.RecentEmpty" xml:space="preserve"><value>No booth leads captured yet. The ones you add above will appear here.</value></data>
   <data name="Lead.RecentIntro" xml:space="preserve"><value>Your most recent booth entries (newest first). Everything you capture is also available via the download / API page above.</value></data>
@@ -1017,7 +1029,7 @@
   <data name="SponsorTasks.AllCaughtUp" xml:space="preserve"><value>All caught up — no pending tasks.</value></data>
   <data name="SponsorTasks.Completed" xml:space="preserve"><value>Completed Tasks ({0})</value></data>
   <data name="SponsorTasks.ClickToToggle" xml:space="preserve"><value>— click to show / hide</value></data>
-  <data name="SponsorTasks.BackEngagement" xml:space="preserve"><value>← Webshop orders</value></data>
+  <data name="SponsorTasks.BackEngagement" xml:space="preserve"><value>← Previous orders</value></data>
 
   <!-- §147: shared unified task-list panel (all three task pages) -->
   <data name="TaskList.ProgressHeading" xml:space="preserve"><value>Task checklist</value></data>
@@ -1407,7 +1419,12 @@
   <data name="OrgVolunteers.Buckets" xml:space="preserve"><value>Allocate volunteers into buckets and balance coverage across the work tree.</value></data>
   <data name="OrgLogistics.Title" xml:space="preserve"><value>Logistics</value></data>
   <data name="OrgLogistics.Intro" xml:space="preserve"><value>Hotels and rooming, swag, travel reimbursements, lunch headcount and company group photos.</value></data>
-  <data name="OrgLogistics.Hotels" xml:space="preserve"><value>Manage the hotel list, then assign participants to rooms and check-in/out dates.</value></data>
+  <!-- §1296b — these three were ONE string shared by the Hotels / Hotel Assignments / Room block
+       tiles, so the Logistics hub printed the same sentence three times and none of them described
+       the page behind it. Each tile now describes its own page. -->
+  <data name="OrgLogistics.Hotels" xml:space="preserve"><value>The hotel list for this edition — name, address, contact and the size of the room block reserved there.</value></data>
+  <data name="OrgLogistics.HotelAssignments" xml:space="preserve"><value>Place each person in a hotel, see the nights we cover against the nights they booked, and record their confirmation number.</value></data>
+  <data name="OrgLogistics.RoomBlocks" xml:space="preserve"><value>Rooms reserved versus people who need one, per hotel — what is left, what is oversubscribed and who still has no hotel.</value></data>
   <data name="OrgLogistics.Swag" xml:space="preserve"><value>Manage the swag order and per-person picks.</value></data>
   <data name="OrgLogistics.Travel" xml:space="preserve"><value>Review and approve travel reimbursement claims.</value></data>
   <data name="OrgLogistics.Lunch" xml:space="preserve"><value>Track the lunch headcount and dietary needs.</value></data>
@@ -1565,10 +1582,10 @@
   <data name="Settings.Feat.SponsorOrderPull.Desc" xml:space="preserve"><value>Pull completed sponsor and exhibitor orders from the webshop and expand their onboarding tasks.</value></data>
   <data name="Settings.Feat.SponsorSwagCatalog.Name" xml:space="preserve"><value>Sponsor swag catalogue</value></data>
   <data name="Settings.Feat.SponsorSwagCatalog.Desc" xml:space="preserve"><value>Show sponsors the catalogue of brandable items for the attendee bags, with price, picture and availability read from the webshop. While this is off the page has no menu entry and sponsors are told it is not available; organizers can still open it to review.</value></data>
+  <data name="Settings.Feat.SponsorWebshop.Name" xml:space="preserve"><value>CEH sponsor webshop</value></data>
+  <data name="Settings.Feat.SponsorWebshop.Desc" xml:space="preserve"><value>The new sponsor webshop inside CEH (being tested on DEV). Imports the product catalogue, prices, stock and pictures from the current webshop and keeps stock in step. While this is off sponsors see nothing; organizers can still open the catalogue page to review it.</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Name" xml:space="preserve"><value>Sponsor Zoho provisioning</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Desc" xml:space="preserve"><value>After the order pull, create or link each sponsor and exhibitor in Zoho Backstage from webshop data (replaces the legacy sync script). Existing companies are never overwritten.</value></data>
-  <data name="Settings.Feat.ErpWebshopReconcile.Name" xml:space="preserve"><value>ERP → webshop reconcile</value></data>
-  <data name="Settings.Feat.ErpWebshopReconcile.Desc" xml:space="preserve"><value>Every 30 minutes, create missing webshop users from the e-conomic group-1 sponsor contacts and set each company default signer + event coordinator from the contact roles (never overwriting a curated value). Contacts missing a role are emailed to the organizer. Replaces the legacy ERP-contacts sync script.</value></data>
   <data name="Settings.Feat.WebshopErpInvoicing.Name" xml:space="preserve"><value>Webshop → e-conomic draft invoices</value></data>
   <data name="Settings.Feat.WebshopErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn each completed webshop order into a DRAFT invoice in e-conomic. It stops at the draft — nothing is booked and nothing is sent to the customer until you book it yourself. Each order is invoiced once: the draft carries the web order number, and an order that already appears on a draft or booked invoice is skipped. Att person and Your reference are the company's default signer. An order is left uninvoiced, with the reason logged, when the company has no ERP customer number, when a line has no price, or when the customer invoices in a currency with no exchange rate — CEH will not guess any of those. Replaces the hourly webshop invoicing script: turn that script OFF before you turn this ON.</value></data>
   <data name="Settings.Feat.CouponErpInvoicing.Name" xml:space="preserve"><value>Coupon tickets → e-conomic draft invoices</value></data>
@@ -1615,7 +1632,9 @@
   <data name="Settings.Feat.SponsorReminders.Name" xml:space="preserve"><value>Sponsor reminders</value></data>
   <data name="Settings.Feat.SponsorReminders.Desc" xml:space="preserve"><value>Email reminders to sponsors (e.g. the app game).</value></data>
   <data name="Settings.Feat.VolunteerTasks.Name" xml:space="preserve"><value>Volunteer tasks &amp; assignment</value></data>
-  <data name="Settings.Feat.VolunteerTasks.Desc" xml:space="preserve"><value>Create volunteer tasks and assign volunteers — tasks appear to the assigned people.</value></data>
+  <data name="Settings.Feat.VolunteerTasks.Desc" xml:space="preserve"><value>The organizer's volunteer task tools — build the bucket/task tree, edit task definitions, the Excel round-trip. On/off shows or hides those tiles. It does NOT decide who may be assigned: that is "Volunteer task assignment (who gets work)".</value></data>
+  <data name="Settings.Feat.VolunteerAssignments.Name" xml:space="preserve"><value>Volunteer task assignment (who gets work)</value></data>
+  <data name="Settings.Feat.VolunteerAssignments.Desc" xml:space="preserve"><value>Whether volunteers get work at all. OFF (or a ring below theirs) means a volunteer can be onboarded and activated without ever being assigned a task: every assign path refuses — organizer page, supervisor dashboard, allocation commit, allocation scenarios, plan import — and their "My Schedule" page and menu item are hidden. Raise the ring to release it to test volunteers first (Ring 1 / Ring 2), then to everyone (Ring 3).</value></data>
   <data name="Settings.Feat.VolunteerAllocation.Name" xml:space="preserve"><value>Volunteer shift allocation</value></data>
   <data name="Settings.Feat.VolunteerAllocation.Desc" xml:space="preserve"><value>Commit volunteer shift / bucket allocations to many volunteers at once.</value></data>
   <data name="Settings.Feat.OrganizerAllocation.Name" xml:space="preserve"><value>Organizer task allocation</value></data>

@@ -26,6 +26,27 @@ public class SpeakerZohoGapReporterTests
         new("bs-1", "Per Larsen", tagline, bio, Country: country, linkedIn, twitter,
             Company: company, Skills: skills, Email: "per.larsen@microsoft.com");
 
+    // ---------- §1365 — only the Speaker role is in the mail ----------
+
+    [Theory]
+    [InlineData(ParticipantRole.Speaker, true)]
+    [InlineData(ParticipantRole.Organizer, false)]
+    [InlineData(ParticipantRole.Volunteer, false)]
+    [InlineData(ParticipantRole.Sponsor, false)]
+    public void Only_the_Speaker_role_is_reported(ParticipantRole role, bool reported)
+    {
+        // Operator 2026-10-21: "only take the role speaker … so we dont include organizers, volunteers, sponsors".
+        Assert.Equal(reported, SpeakerZohoGapReporter.IsReported(role));
+    }
+
+    [Fact]
+    public void No_role_other_than_Speaker_is_reported()
+    {
+        // Also covers Attendee, Media, EventPartner, and guards a role added later: it stays out of the mail unless someone decides otherwise.
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+            Assert.Equal(role == ParticipantRole.Speaker, SpeakerZohoGapReporter.IsReported(role));
+    }
+
     // ---------- the operator's own example ----------
 
     [Fact]
@@ -75,7 +96,7 @@ public class SpeakerZohoGapReporterTests
         var gap = Assert.Single(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
 
         Assert.Contains("DK", gap);
-        Assert.Contains("not set in Backstage", gap);
+        Assert.Equal("Country (new value in Zoho from hub) -> DK", gap);
         // The old wording was an unverifiable chore he could only silence with a tick-box.
         Assert.DoesNotContain("does not report this field", gap);
     }
@@ -106,15 +127,15 @@ public class SpeakerZohoGapReporterTests
         => Assert.True(SpeakerZohoGapReporter.CountryMatches(ceh, zoho));
 
     [Fact]
-    public void A_genuine_disagreement_IS_reported_with_both_values()
+    public void A_genuine_disagreement_IS_reported_with_the_CEH_value()
     {
         var ceh = new SpeakerProfile { Country = "Denmark" };
 
         var gap = Assert.Single(
             SpeakerZohoGapReporter.GapsFor(ceh, Zoho(country: "DE")), g => g.Contains("Country"));
 
-        Assert.Contains("Denmark", gap);
-        Assert.Contains("DE", gap);
+        // §1364 — the value to put in Backstage only; the old Backstage value is not shown.
+        Assert.Equal("Country (new value in Zoho from hub) -> Denmark", gap);
     }
 
     /// <summary>
@@ -157,7 +178,7 @@ public class SpeakerZohoGapReporterTests
         var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = "DK" };
 
         var gap = Assert.Single(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
-        Assert.Contains("not set in Backstage", gap);
+        Assert.Equal("Country (new value in Zoho from hub) -> DK", gap);
     }
 
     /// <summary>
@@ -247,6 +268,80 @@ public class SpeakerZohoGapReporterTests
         var gaps = SpeakerZohoGapReporter.GapsFor(new SpeakerProfile(), Zoho());
 
         Assert.Empty(gaps);
+    }
+
+    // ---------- §1364: CEH is the master — CONTENT must match, not only exist ----------
+
+    [Fact]
+    public void A_Backstage_value_that_differs_from_CEH_is_reported_with_both_values()
+    {
+        // Operator 2026-10-20: "they must match, with ceh as master". Before, only a BLANK Backstage field was seen.
+        var ceh = new SpeakerProfile
+        {
+            Tagline = "UgurLabs & OpenAdminOS | Microsoft MVP",
+            CompanyName = "UgurLabs",
+            Biography = "Builds admin tooling.",
+            Accreditation = "Microsoft Expert, Microsoft MVP",
+            Country = "DE",
+        };
+
+        var gaps = SpeakerZohoGapReporter.GapsFor(ceh, Zoho(
+            tagline: "VP of AI", company: "Robopack", bio: "<p>VP of AI at a vendor.</p>",
+            skills: "Microsoft MVP", country: "DK"));
+
+        // §1364 — each line is the field and the CEH value to put in Backstage; the Backstage value is never shown.
+        Assert.Contains(gaps, g => g.EndsWith("-> UgurLabs & OpenAdminOS | Microsoft MVP"));
+        Assert.Contains(gaps, g => g.EndsWith("-> UgurLabs"));
+        Assert.Contains(gaps, g => g.Contains("Description") && g.EndsWith("-> Builds admin tooling."));
+        Assert.Contains(gaps, g => g.Contains("Skills") && g.EndsWith("-> Microsoft Expert, Microsoft MVP"));
+        Assert.Contains(gaps, g => g == "Country (new value in Zoho from hub) -> DE");
+        Assert.DoesNotContain(gaps, g => g.Contains("VP of AI") || g.Contains("Robopack") || g.Contains("DK"));
+    }
+
+    /// <summary>
+    /// The OTHER direction: CEH is blank, Backstage has a value ⇒ "(add to CEH) &lt;- value", never "clear it" (operator:
+    /// "if field is blank in ceh, but exist in zoho. tell me so i can update ceh").
+    /// </summary>
+    [Fact]
+    public void A_value_only_Backstage_has_is_reported_as_add_to_CEH_with_the_Backstage_value()
+    {
+        var gaps = SpeakerZohoGapReporter.GapsFor(new SpeakerProfile(), Zoho(
+            tagline: "VP of AI", company: "Byskov IT Consult", bio: "<p>Text</p>", skills: "Microsoft MVP",
+            country: "DK", linkedIn: "https://linkedin.com/in/x"));
+
+        Assert.Contains("Company Name (new value in hub from Zoho) -> Byskov IT Consult", gaps);
+        Assert.Contains(gaps, g => g.EndsWith("(new value in hub from Zoho) -> VP of AI"));
+        Assert.Contains(gaps, g => g.Contains("Description") && g.EndsWith("(new value in hub from Zoho) -> Text"));
+        Assert.Contains(gaps, g => g.Contains("Skills") && g.EndsWith("(new value in hub from Zoho) -> Microsoft MVP"));
+        Assert.Contains(gaps, g => g.Contains("Country") && g.EndsWith("(new value in hub from Zoho) -> DK"));
+        Assert.Contains(gaps, g => g.EndsWith("(new value in hub from Zoho) -> https://linkedin.com/in/x"));
+        Assert.DoesNotContain(gaps, g => g.Contains("clear it") || g.Contains("(new value in Zoho from hub)"));
+    }
+
+    [Theory]
+    [InlineData("InSpark", "Inspark")]
+    [InlineData("Twoday", "twoday")]
+    public void A_company_that_differs_only_in_capitals_is_the_same(string cehCompany, string zohoCompany)
+    {
+        var ceh = new SpeakerProfile { CompanyName = cehCompany };
+        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho(company: zohoCompany)), g => g.Contains("Company"));
+    }
+
+    [Theory]
+    [InlineData("Microsoft Expert, Microsoft MVP", "Microsoft MVP,Microsoft Expert")]   // order and separator
+    [InlineData("Microsoft MVP", "microsoft mvp")]                                      // case
+    public void Skills_in_another_order_or_case_are_the_same(string cehSkills, string zohoSkills)
+    {
+        var ceh = new SpeakerProfile { Accreditation = cehSkills };
+        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho(skills: zohoSkills)), g => g.Contains("Skills"));
+    }
+
+    [Fact]
+    public void A_bio_that_differs_only_by_HTML_and_spacing_is_the_same()
+    {
+        var ceh = new SpeakerProfile { Biography = "Works on Intune &\nAutopilot." };
+        var gaps = SpeakerZohoGapReporter.GapsFor(ceh, Zoho(bio: "<p>Works on Intune &amp;</p>  <p>Autopilot.</p>"));
+        Assert.DoesNotContain(gaps, g => g.Contains("Description"));
     }
 
     [Fact]

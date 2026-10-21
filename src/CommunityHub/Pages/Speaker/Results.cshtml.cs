@@ -31,8 +31,6 @@ namespace CommunityHub.Pages.Speaker;
 [Authorize]
 public class ResultsModel : PageModel
 {
-    private static readonly ParticipantRole[] EligibleRoles = { ParticipantRole.Speaker };
-
     private readonly ICurrentParticipantAccessor _participant;
     private readonly CommunityHubDbContext _db;
     private readonly EvaluationScoreService _scores;
@@ -52,6 +50,14 @@ public class ResultsModel : PageModel
         _builder = builder;
         _reports = reports;
     }
+
+    /// <summary>
+    /// §1255 — speaker-hub access by CAPABILITY (a SpeakerProfile exists), not by
+    /// <c>Participant.Role</c>. See <see cref="ParticipantCapabilities"/>.
+    /// </summary>
+    private Task<bool> MayUseSpeakerHubAsync(CurrentParticipant me, CancellationToken ct) =>
+        ParticipantCapabilities.HasSpeakerHubAccessAsync(
+            _db, me.EventId, me.ParticipantId, me.Role, ct);
 
     public bool AccessDenied { get; private set; }
     public int Threshold => SatisfactionScore.MinimumResponses;
@@ -75,7 +81,9 @@ public class ResultsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
+        // §1255 — capability, not role: a speaker who is also an organizer / volunteer /
+        // attendee still owns her evaluation results.
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         Rows = await LoadAsync(me.EventId, me.Email, ct);
         return Page();
@@ -89,7 +97,7 @@ public class ResultsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (!EligibleRoles.Contains(me.Role)) return NotFound();
+        if (!await MayUseSpeakerHubAsync(me, ct)) return NotFound();
 
         var mine = await MySessionIdsAsync(me.EventId, me.Email, ct);
         if (!mine.Contains(sessionId)) return NotFound();

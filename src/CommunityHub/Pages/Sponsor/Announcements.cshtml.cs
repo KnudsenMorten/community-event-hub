@@ -72,7 +72,32 @@ public class AnnouncementsModel : PageModel
             return Page();
         }
 
+        // §1236 — the company the person is ACTING for (a contact of several companies switches), as every sponsor page.
+        var acting = HttpContext.RequestServices.GetService(typeof(CommunityHub.Sponsors.SponsorActingCompanyService)) as CommunityHub.Sponsors.SponsorActingCompanyService;
+        if (acting is not null && await acting.CurrentAsync(me.ParticipantId, me.EventId, ct) is { } actingId) companyId = actingId;
+
         Announcements = await _query.ForSponsorAsync(me.EventId, companyId!, ct);
+
+        // §1312 — WHY nothing shows (operator 2026-09-27: "it should state why so sponsor knows it is him we are waiting
+        // for"). Posts appear only once the sponsor is eligible — their social-media text delivered (§1028). A company with
+        // planned posts but no text is told exactly that, with the dates and where to add it.
+        if (Announcements.Total == 0)
+        {
+            var key = "sponsor:" + companyId;
+            PlannedDates = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+                _db.SoMePosts.Where(p => p.EventId == me.EventId && p.SubjectKey == key && !p.IsDeleted && p.PublishedAtUtc == null)
+                    .OrderBy(p => p.ScheduledAtUtc).Select(p => p.ScheduledAtUtc), ct);
+            var intro = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.IgnoreQueryFilters(_db.SponsorInfos)
+                    .Where(s => s.EventId == me.EventId && s.SponsorCompanyId == companyId).Select(s => s.SocialMediaIntro), ct);
+            MissingSocialText = string.IsNullOrWhiteSpace(intro);
+        }
         return Page();
     }
+
+    /// <summary>§1312 — when the company's posts are planned but not shown yet.</summary>
+    public IReadOnlyList<DateTimeOffset> PlannedDates { get; private set; } = Array.Empty<DateTimeOffset>();
+
+    /// <summary>§1312 — the sponsor has not delivered their social-media text (what the posts wait for).</summary>
+    public bool MissingSocialText { get; private set; }
 }

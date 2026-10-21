@@ -37,12 +37,30 @@
 
 <div class="card">
     <h1>@Localizer["Nav.OrgSyncQueue"]</h1>
+    @* 🔴 §1249 — TWO KINDS OF ROW, TWO DIFFERENT MEANINGS FOR THE SAME BUTTON.
+       Operator 2026-09-20, looking at four "Disappeared" rows: *"what to choose here. it is hard to
+       choose as instructions are not good"*. He was right — the old text described applying a
+       change and notifying somebody, which is what a CHANGE row does and what a DISAPPEARED row
+       cannot do: there is no value to write and nobody to tell. The one sentence that explained the
+       real behaviour was tacked on the end, so the paragraph read as an instruction to do something
+       destructive. Split by kind, and say plainly that nothing is deleted either way. *@
     <p class="info" style="margin-top:0;">
-        Detected sync changes wait here for your approval — they are
-        <strong>never auto-applied</strong>. Approve to apply a change (and notify the
-        affected person); reject to keep the current value. A disappeared item is only
-        acknowledged on approve — CEH never auto-deletes.
+        Detected sync changes wait here for your decision — they are
+        <strong>never auto-applied</strong>.
     </p>
+    <ul class="info" style="margin-top:0;font-size:13px;">
+        <li>
+            <strong>A changed field</strong> — <em>Approve</em> writes the new value and notifies the
+            affected person; <em>Reject</em> keeps the value the hub already has.
+        </li>
+        <li>
+            <strong>A “Disappeared” item</strong> (it is gone from the upstream system) —
+            <strong>neither button deletes anything, ever.</strong> <em>Approve</em> means
+            “I have dealt with this”, and stops it being reported again.
+            <em>Reject</em> means “I looked and I am keeping it”, and it stays on the list.
+            Removing the person or session, if that is what you want, is done on their own page.
+        </li>
+    </ul>
 
     @if (Model.AccessDenied)
     {

@@ -1,0 +1,403 @@
+@page "/sponsor-catalog/{slug?}"
+@model CommunityHub.Pages.SponsorCatalogModel
+@using CommunityHub.Core.Integrations.Webshop
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    Layout = "_PublicLayout";
+    ViewData["Title"] = (Model.Current?.Title ?? "Sponsor catalogue") + (Model.EventName is null ? "" : $" — {Model.EventName}");
+}
+
+<div class="catalog">
+    @if (Model.Closed)
+    {
+        <div class="card"><p class="info">The sponsor catalogue is not published yet.</p></div>
+    }
+    else if (Model.Pages.Count == 0)
+    {
+        <div class="card"><p class="info">The sponsor catalogue has no pages yet.</p></div>
+    }
+    else
+    {
+        <nav class="catalog-toc" aria-label="Contents">
+            <details open>
+                <summary><strong>@Model.EventName — sponsor catalogue</strong></summary>
+                @foreach (var chapter in Model.Pages.GroupBy(p => p.Chapter ?? ""))
+                {
+                    @if (!string.IsNullOrEmpty(chapter.Key)) { <h2>@chapter.Key</h2> }
+                    <ul>
+                        @foreach (var p in chapter)
+                        {
+                            <li><a href="/sponsor-catalog/@p.Slug" class="@(p.Id == Model.Current?.Id ? "current" : "")"
+                                   aria-current="@(p.Id == Model.Current?.Id ? "page" : null)">@p.Title@(p.IsPublished ? "" : " (draft)")</a></li>
+                        }
+                    </ul>
+                }
+            </details>
+        </nav>
+
+        <article class="card catalog-page">
+            @if (Model.IsPreview) { <p class="info" style="border-left:4px solid #b45309;"><strong>Preview</strong> — only organizers can see the catalogue while the shop is off.</p> }
+            <h1>@Model.Current!.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(Model.Current.MediaUrl))
+            {
+                var url = Model.Current.MediaUrl!;
+                if (Model.VideoEmbedUrl is not null)
+                {
+                    @* §1312 — the video plays in the page (YouTube / Vimeo player), 16:9 at any width. *@
+                    <div class="catalog-video"><iframe src="@Model.VideoEmbedUrl" title="@Model.Current.Title" loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                        allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+                }
+                else if (url.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+                {
+                    <video controls preload="metadata" style="width:100%;border-radius:8px;"><source src="@url" type="video/mp4" /></video>
+                }
+                else if (url.Contains("youtube.com", StringComparison.OrdinalIgnoreCase) || url.Contains("vimeo.com", StringComparison.OrdinalIgnoreCase) || url.Contains("video.", StringComparison.OrdinalIgnoreCase))
+                {
+                    <p><a href="@url" rel="noopener" target="_blank">Watch the video &rarr;</a></p>
+                }
+                else
+                {
+                    <img src="@url" alt="" style="width:100%;border-radius:8px;" />
+                }
+            }
+            <div class="catalog-body">@Html.Raw(Model.BodyHtml)</div>
+
+            @if (Model.Products.Count > 0)
+            {
+                <div class="shop-grid" style="margin-top:14px;">
+                    @foreach (var p in Model.Products)
+                    {
+                        var a = Model.Stock.GetValueOrDefault(p.Id);
+                        var pic = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault();
+                        <section class="shop-card">
+                            @if (pic is not null) { <img src="/shop-image/@pic.Id" alt="" loading="lazy" /> }
+                            <h3>@p.Name</h3>
+                            <div style="font-size:13px;color:#4b5563;">@ShopHtml.PlainText(p.ShortDescriptionHtml, 220)</div>
+                            <div class="price"><partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="p" /> <span style="font-weight:normal;font-size:12px;">excl. VAT</span></div>
+                            <div class="avail @(a is { Available: true } ? "" : "out")">@ShopPageModel.AvailabilityText(a)</div>
+                        </section>
+                    }
+                </div>
+            }
+            <div class="catalog-live" data-live="@(Model.Current.AvailabilityView != ShopCatalogAvailabilityView.None ? "1" : "0")">
+            @* §1312 — the booth map FIRST, then the lists (operator 2026-09-28: "move the graphics … up before the list"). *@
+            @{
+                var soldOutCount = Model.Packages.Count(r => r.Available <= 0 && !r.Unlimited);
+                var anyTaken = soldOutCount > 0 || Model.Packages.Any(r => r.Slots?.Any(s => s.State != ShopBoothState.Free) == true);
+                var listView = Model.Current.AvailabilityView is ShopCatalogAvailabilityView.Available or ShopCatalogAvailabilityView.Summary;
+            }
+            @* The filter and the colour key FIRST, above the map (operator 2026-09-28: "where is the show sold items button" —
+               under the big map it was not seen). *@
+            @if (listView && Model.Packages.Count > 0)
+            {
+                <div class="catalog-filterbar">
+                    @if (Model.Current.AvailabilityView == ShopCatalogAvailabilityView.Summary)
+                    {
+                        <span class="slot-legend"><span class="slot free">free</span> <span class="slot reserved">reserved</span> <span class="slot sold">sold</span></span>
+                    }
+                    @if (anyTaken)
+                    {
+                        @* Operator 2026-09-28: "show people can see confirmed/reserved options, if they tick on" · "it should be
+                           easier to see" — off: only what is still available; on: also reserved and sold, and who. *@
+                        <label class="catalog-taken-switch"><input type="checkbox" class="catalog-soldout-toggle" />
+                            <span class="switch" aria-hidden="true"></span>
+                            <span>Show reserved &amp; sold <small>(who has booked what · @soldOutCount sold-out package@(soldOutCount == 1 ? "" : "s"))</small></span></label>
+                    }
+                </div>
+            }
+            @if (Model.MapView is not null) { <partial name="_ShopBoothMap" model="Model.MapView" /> }
+            @if (Model.Packages.Count > 0)
+            {
+                var view = Model.Current.AvailabilityView;
+                @* §1312 — live package lines. An availability page lists every package in one of two views (operator: "show
+                   both available and reserved/confirmed - 2 views"); any other page lists its own packages. Who holds a
+                   package is shown to organizers only. *@
+                @if (view == ShopCatalogAvailabilityView.None)
+                {
+                    <table class="catalog-packages">
+                        <thead><tr><th>Package</th><th>Price excl. VAT</th><th>Availability</th></tr></thead>
+                        <tbody>
+                        @foreach (var r in Model.Packages)
+                        {
+                            <tr>
+                                <td>@r.Label</td>
+                                <td><partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="r.PriceProduct" /></td>
+                                <td class="@(r.Available > 0 || r.Unlimited ? "ok" : "out")">@AvailabilityText(r)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    @foreach (var g in Model.Packages.GroupBy(r => r.Group))
+                    {
+                        var allSold = g.All(r => r.Available <= 0 && !r.Unlimited);
+                        @:<section class="catalog-packages-section@(view is ShopCatalogAvailabilityView.Available or ShopCatalogAvailabilityView.Summary && allSold ? " all-soldout" : "")">
+                        <h2 class="catalog-packages-group">@CommunityHub.Pages.Sponsor.Shop.ShopPageModel.GroupLabel(g.Key)</h2>
+                        <table class="catalog-packages">
+                            @if (view == ShopCatalogAvailabilityView.Summary)
+                            {
+                                @* §1312 — ONE availability table (operator 2026-09-28: "merge reserved/taken/available into one
+                                   page/table/graphic … much easier to communicate with colors" · "one Availability page that includes
+                                   everything"): per package the price, what is left, and every booth / slot as a coloured chip — free,
+                                   reserved + who, sold + who. The booked amount is organizers only. *@
+                                @* 🔒 No money on the catalogue, not even for a signed-in organizer (operator 2026-09-28: "dont expose this
+                                   public") — it is the public page, shown and shared as such. *@
+                                <thead><tr><th>Package</th><th>Price excl. VAT</th><th>Left</th><th>Booths / slots</th></tr></thead>
+                                <tbody>
+                                @foreach (var r in g)
+                                {
+                                    <tr class="@(r.Available > 0 || r.Unlimited ? "" : "soldout")">
+                                        <td>@PackageCell(r)</td>
+                                        <td><partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="r.PriceProduct" /></td>
+                                        <td class="@(r.Available > 0 || r.Unlimited ? "ok" : "out")" style="white-space:nowrap;">@(r.Unlimited ? "No limit" : r.Available > 0 ? $"{r.Available} of {r.Maximum}" : "Sold out")</td>
+                                        <td>@SlotChips(r)</td>
+                                    </tr>
+                                }
+                                </tbody>
+                            }
+                            else if (view == ShopCatalogAvailabilityView.Available)
+                            {
+                                <thead><tr><th>Package</th><th>Price excl. VAT</th><th>Remaining</th><th>Maximum</th></tr></thead>
+                                <tbody>
+                                @foreach (var r in g)
+                                {
+                                    @* §1312 — sold-out lines hidden until asked for (operator 2026-09-28: "hide sold out items, so list
+                                       shows only available - make button to shown sold out items"); free booths / timeslots named. *@
+                                    <tr class="@(r.Available > 0 || r.Unlimited ? "" : "soldout")">
+                                        <td>@PackageCell(r)</td>
+                                        <td><partial name="/Pages/Sponsor/Shop/_ShopPrice.cshtml" model="r.PriceProduct" /></td>
+                                        <td class="@(r.Available > 0 || r.Unlimited ? "ok" : "out")">@(r.Unlimited ? "No limit" : r.Available > 0 ? r.Available.ToString() : "Sold out")@FreeSlots(r)</td>
+                                        <td>@(r.Maximum?.ToString() ?? "No limit")</td>
+                                    </tr>
+                                }
+                                </tbody>
+                            }
+                            else
+                            {
+                                <thead><tr><th>Package</th><th>Reserved</th><th>Confirmed</th><th>Taken</th></tr></thead>
+                                <tbody>
+                                @foreach (var r in g)
+                                {
+                                    <tr>
+                                        <td>@PackageCell(r)</td>
+                                        <td>@r.Reserved</td>
+                                        <td>@r.Confirmed</td>
+                                        <td>
+                                            @if (r.Takers.Count == 0) { <span class="muted">—</span> }
+                                            @Takers(r, confirmed: false)
+                                            @Takers(r, confirmed: true)
+                                        </td>
+                                    </tr>
+                                }
+                                </tbody>
+                            }
+                        </table>
+                        @:</section>
+                    }
+                }
+            }
+            @if (Model.Current.AvailabilityView != ShopCatalogAvailabilityView.None)
+            {
+                <p class="catalog-updated">Live — updated <time datetime="@DateTimeOffset.UtcNow.ToString("o")">@DateTimeOffset.UtcNow.ToString("HH:mm") UTC</time></p>
+            }
+            </div>
+
+            <nav class="catalog-pager" aria-label="Pages">
+                @if (Model.Previous is not null) { <a href="/sponsor-catalog/@Model.Previous.Slug">&larr; @Model.Previous.Title</a> } else { <span></span> }
+                @if (Model.Next is not null) { <a href="/sponsor-catalog/@Model.Next.Slug">@Model.Next.Title &rarr;</a> }
+            </nav>
+            <p style="margin-top:18px;"><a href="/sponsor-registration">Interested? Register your company &rarr;</a></p>
+        </article>
+    }
+</div>
+<style>
+    .shop-price-normal { color:#6b7280; font-weight:normal; font-size:0.85em; margin-right:4px; }
+    .shop-price.is-discounted .shop-price-now { color:#b91c1c; }
+    .shop-discount-badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; background:#b91c1c; color:#fff; font-size:12px; font-weight:700; vertical-align:middle; }
+    .catalog { display:grid; grid-template-columns:260px 1fr; gap:16px; max-width:1200px; margin:0 auto; }
+    .catalog-toc { position:sticky; top:10px; align-self:start; font-size:14px; }
+    .catalog-toc h2 { font-size:13px; text-transform:uppercase; color:#6b7280; margin:12px 0 4px; }
+    .catalog-toc ul { list-style:none; padding:0; margin:0; }
+    .catalog-toc a { display:block; padding:4px 6px; border-radius:4px; text-decoration:none; }
+    .catalog-toc a.current { background:#1565c0; color:#fff; }
+    /* §1312 — pictures imported from the sponsor deck sit in the text; tables scroll on a phone instead of widening it. */
+    .catalog-body img { max-width:100%; height:auto; border-radius:8px; margin:8px 0; }
+    /* §1312 — a slide's pictures side by side with their captions (not one full-width picture after another), a video
+       that plays in the page, and the live package tables. */
+    .catalog-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin:8px 0 14px; }
+    .catalog-gallery figure { margin:0; display:flex; flex-direction:column; gap:4px; }
+    .catalog-gallery figure:only-child { grid-column:1 / -1; }
+    .catalog-gallery figure p { margin:0; }
+    .catalog-gallery img { width:100%; max-height:420px; object-fit:contain; margin:0; background:#f3f4f6; }
+    .catalog-gallery figure:only-child img { max-height:560px; }
+    .catalog-gallery figcaption { font-size:13px; color:#4b5563; text-align:center; }
+    .catalog-video { position:relative; width:100%; aspect-ratio:16/9; margin:0 0 12px; }
+    .catalog-video iframe { position:absolute; inset:0; width:100%; height:100%; border:0; border-radius:8px; }
+    .catalog-packages-group { font-size:16px; margin:18px 0 6px; }
+    .catalog-packages { width:100%; border-collapse:collapse; margin:8px 0 12px; font-size:14px; }
+    .catalog-packages th, .catalog-packages td { border:1px solid #e5e7eb; padding:6px 8px; text-align:left; vertical-align:top; }
+    .catalog-packages th { background:#f9fafb; }
+    .catalog-packages td.ok { color:#166534; font-weight:600; }
+    .catalog-packages td.out { color:#b91c1c; font-weight:600; }
+    .catalog-packages .taker { display:inline-block; margin:1px 6px 1px 0; padding:1px 6px; border-radius:999px; font-size:12px; }
+    .catalog-packages .taker.confirmed { background:#fee2e2; color:#991b1b; }
+    .catalog-packages .taker.reserved { background:#fef3c7; color:#92400e; }
+    .catalog-packages .muted { color:#9ca3af; }
+    .catalog-packages td.num { text-align:right; white-space:nowrap; }
+    .catalog-packages .free-slots { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; font-weight:normal; }
+    .catalog-packages .free-slot { padding:1px 6px; border-radius:999px; background:#dcfce7; color:#166534; font-size:12px; white-space:nowrap; }
+    /* Sold-out lines (and a group with nothing left) stay hidden until "Show sold-out packages" is pressed. */
+    .catalog-page:not(.show-soldout) .catalog-packages tr.soldout,
+    .catalog-page:not(.show-soldout) .catalog-packages-section.all-soldout,
+    .catalog-page:not(.show-soldout) .catalog-packages .slot.reserved,
+    .catalog-page:not(.show-soldout) .catalog-packages .slot.sold { display:none; }
+    .package-highlight { margin-top:4px; font-size:13px; line-height:1.4; color:#14532d; background:#f0fdf4; border-left:3px solid #16a34a; padding:4px 8px; border-radius:4px; }
+    .slot { display:inline-block; margin:2px 4px 2px 0; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid; white-space:nowrap; }
+    .slot.free { background:#dcfce7; border-color:#16a34a; color:#14532d; }
+    .slot.reserved { background:#fef3c7; border-color:#d97706; color:#78350f; }
+    .slot.sold { background:#fee2e2; border-color:#dc2626; color:#7f1d1d; }
+    .slot-legend .slot { font-size:13px; }
+    .catalog-filterbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; }
+    .catalog-filterbar { padding:12px 14px; border:2px solid #1565c0; border-radius:10px; background:#eff6ff; }
+    .catalog-taken-switch { display:inline-flex; align-items:center; gap:10px; font-size:16px; font-weight:700; color:#1e3a8a; cursor:pointer; }
+    .catalog-taken-switch small { font-weight:normal; color:#475569; font-size:13px; }
+    .catalog-taken-switch input { position:absolute; opacity:0; width:1px; height:1px; }
+    .catalog-taken-switch .switch { position:relative; width:52px; height:28px; border-radius:999px; background:#94a3b8; flex:none; transition:background .15s; }
+    .catalog-taken-switch .switch::after { content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .15s; }
+    .catalog-taken-switch input:checked + .switch { background:#16a34a; }
+    .catalog-taken-switch input:checked + .switch::after { left:27px; }
+    .catalog-taken-switch input:focus-visible + .switch { outline:3px solid #1565c0; outline-offset:2px; }
+    .catalog-packages tr.total td { font-weight:700; background:#f9fafb; }
+    .catalog-grand-total { margin:10px 0; font-size:14px; }
+    .catalog-updated { font-size:12px; color:#6b7280; margin:8px 0 0; }
+    .catalog-body table { display:block; overflow-x:auto; border-collapse:collapse; margin:0 0 12px; }
+    .catalog-body th, .catalog-body td { border:1px solid #e5e7eb; padding:6px 8px; text-align:left; vertical-align:top; }
+    .catalog-pager { display:flex; justify-content:space-between; gap:10px; margin-top:20px; flex-wrap:wrap; }
+    .shop-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+    .shop-card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:8px; }
+    .shop-card img { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:6px; }
+    .shop-card h3 { font-size:15px; margin:0; }
+    .shop-card .price { font-weight:700; }
+    .shop-card .avail.out { color:#b91c1c; }
+    @@media (max-width:760px) {
+        .catalog { grid-template-columns:1fr; }
+        .catalog-toc { position:static; }
+        .catalog-toc details:not([open]) + * { margin-top:0; }
+        .catalog-packages { font-size:13px; }
+        .catalog-packages th, .catalog-packages td { padding:4px 5px; }
+        .catalog-gallery { grid-template-columns:1fr 1fr; gap:8px; }
+        .catalog-live { overflow-x:auto; }
+    }
+</style>
+@if (Model.Current is { AvailabilityView: not ShopCatalogAvailabilityView.None })
+{
+    <script>
+        // §1312 — the availability pages keep themselves current while open (operator: "page must be live updated"):
+        // every minute the live part is fetched again and swapped in; the time is shown in the reader's own clock.
+        (function () {
+            function localTime() {
+                document.querySelectorAll('.catalog-updated time').forEach(function (t) {
+                    var d = new Date(t.getAttribute('datetime'));
+                    if (!isNaN(d)) t.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                });
+            }
+            localTime();
+            // Sold-out packages: hidden until asked for; the choice lives on the page, so a refresh keeps it.
+            function syncSoldOut() {
+                var page = document.querySelector('.catalog-page');
+                var on = !!page && page.classList.contains('show-soldout');
+                document.querySelectorAll('.catalog-soldout-toggle').forEach(function (b) { b.checked = on; });
+            }
+            document.addEventListener('change', function (e) {
+                if (!e.target.classList || !e.target.classList.contains('catalog-soldout-toggle')) return;
+                document.querySelector('.catalog-page').classList.toggle('show-soldout', e.target.checked);
+                syncSoldOut();
+            });
+            setInterval(function () {
+                if (document.hidden) return;
+                fetch(location.href, { cache: 'no-store', credentials: 'same-origin' })
+                    .then(function (r) { return r.ok ? r.text() : null; })
+                    .then(function (html) {
+                        if (!html) return;
+                        var fresh = new DOMParser().parseFromString(html, 'text/html').querySelector('.catalog-live');
+                        var here = document.querySelector('.catalog-live');
+                        if (fresh && here) { here.innerHTML = fresh.innerHTML; localTime(); syncSoldOut(); }
+                    })
+                    .catch(function () { });
+            }, 60000);
+        })();
+    </script>
+}
+@functions {
+    /// <summary>§1312 — a package's name, linked to the page that says what is included (operator: "can the overview include links").</summary>
+    private Microsoft.AspNetCore.Html.IHtmlContent PackageName(ShopPackageRow r)
+    {
+        var label = System.Net.WebUtility.HtmlEncode(r.Label);
+        var page = Model.PackagePages.GetValueOrDefault(r);
+        return new Microsoft.AspNetCore.Html.HtmlString(page is null ? label
+            : $"<a href=\"/sponsor-catalog/{Uri.EscapeDataString(page.Slug)}\">{label}</a>");
+    }
+
+    /// <summary>§1312 — who reserved / confirmed a package: "E-1 Acme" per slot (public, as the deck's "Sold to" was).</summary>
+    private static Microsoft.AspNetCore.Html.IHtmlContent Takers(ShopPackageRow r, bool confirmed)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in r.Takers.Where(t => t.Confirmed == confirmed))
+        {
+            var text = string.Join(" ", new[] { t.Slot, t.Company }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            if (text.Length == 0) text = confirmed ? "sold" : "reserved";
+            sb.Append($"<span class=\"taker {(confirmed ? "confirmed" : "reserved")}\">{System.Net.WebUtility.HtmlEncode(text)}</span>");
+        }
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+
+    /// <summary>§1312 — the free booths / timeslots of a package, under its count ("E-16 · E-19", "slot 2 (11:30-12:30)").</summary>
+    private static Microsoft.AspNetCore.Html.IHtmlContent FreeSlots(ShopPackageRow r) =>
+        new Microsoft.AspNetCore.Html.HtmlString(r.FreeSlots is { Count: > 0 } free
+            ? "<div class=\"free-slots\">" + string.Concat(free.Select(s => $"<span class=\"free-slot\">{System.Net.WebUtility.HtmlEncode(s)}</span>")) + "</div>"
+            : string.Empty);
+
+    /// <summary>§1312 — the package name, then its selling line under it.</summary>
+    private Microsoft.AspNetCore.Html.IHtmlContent PackageCell(ShopPackageRow r)
+    {
+        var line = Model.Highlights.GetValueOrDefault(r);
+        var name = PackageName(r);
+        if (string.IsNullOrWhiteSpace(line)) return name;
+        using var w = new System.IO.StringWriter();
+        name.WriteTo(w, System.Text.Encodings.Web.HtmlEncoder.Default);
+        return new Microsoft.AspNetCore.Html.HtmlString(w + $"<div class=\"package-highlight\">{System.Net.WebUtility.HtmlEncode(line)}</div>");
+    }
+
+    /// <summary>§1312 — every booth / slot of a package as a coloured chip: free (green), reserved + who (amber), sold + who (red).</summary>
+    private static Microsoft.AspNetCore.Html.IHtmlContent SlotChips(ShopPackageRow r)
+    {
+        if (r.Slots is not { Count: > 0 } slots)
+            return new Microsoft.AspNetCore.Html.HtmlString(r.Unlimited ? "<span class=\"slot free\">available</span>" : "<span class=\"muted\">—</span>");
+        var sb = new System.Text.StringBuilder();
+        foreach (var s in slots)
+        {
+            var (css, word) = s.State switch
+            {
+                CommunityHub.Core.Integrations.Webshop.ShopBoothState.Free => ("free", "available"),
+                CommunityHub.Core.Integrations.Webshop.ShopBoothState.Reserved => ("reserved", "reserved"),
+                _ => ("sold", "sold"),
+            };
+            var text = string.Join(" · ", new[] { s.Label, s.Company }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            sb.Append($"<span class=\"slot {css}\" title=\"{word}\">{System.Net.WebUtility.HtmlEncode(text.Length > 0 ? text : word)}</span>");
+        }
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+
+
+    /// <summary>§1312 — one package's availability in words: "3 of 16 available · 2 reserved", "Available", "Sold out".</summary>
+    private static string AvailabilityText(ShopPackageRow r)
+    {
+        if (r.Unlimited) return "Available";
+        if (r.Available <= 0) return r.Reserved > 0 && r.Confirmed == 0 ? "Reserved" : "Sold out";
+        var s = r.Maximum > 1 ? $"{r.Available} of {r.Maximum} available" : "Available";
+        return r.Reserved > 0 ? $"{s} · {r.Reserved} reserved" : s;
+    }
+}

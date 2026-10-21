@@ -70,7 +70,7 @@ internal static class EvaluationReportLayout
         // reading "QR code: 5 (20%)" above and "everyone in the room pressed" here is being told two
         // different stories. Both routes lead to the SAME four buttons and are weighted identically —
         // that is the reassuring part, and it only lands if the QR code is named.
-        "Everyone chose one of four buttons — on the feedback device in the room, or by scanning the",
+        "Everyone chose one of four buttons — on the kiosk in the room, or by scanning the",
         "QR code on your slide. Both count exactly the same. Each button is worth points: very happy",
         "100, happy 67, somewhat unhappy 33, unhappy 0. The score is simply the average of those",
         "points, so 100 would mean every single person pressed the darkest green, and 0 that nobody did.",

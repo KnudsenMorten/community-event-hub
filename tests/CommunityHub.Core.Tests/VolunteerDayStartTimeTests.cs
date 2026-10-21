@@ -28,7 +28,7 @@ public sealed class VolunteerDayStartTimeTests
     // ── The three start times, on the three right days ───────────────────────────────────
 
     [Theory]
-    [InlineData(2027, 2, 8, "09:00")]   // Setup day
+    [InlineData(2027, 2, 8, "09:00")]   // Setup day (§1297: briefly 08:00, reverted — we do not start 8am Monday)
     [InlineData(2027, 2, 9, "07:00")]   // Pre-day (master class)
     [InlineData(2027, 2, 10, "06:40")]  // Main conference day
     public void Full_day_states_when_that_day_starts(int y, int m, int d, string expected)

@@ -75,13 +75,20 @@ public sealed class ParticipantBulkOperationServiceTests
         Assert.Equal(ParticipantLifecycleState.Active, reloaded.LifecycleState);
     }
 
+    /// <summary>
+    /// 🔴 §1294 — "Deactivate selected" means the same as the row's red "Deactivate": an inactive row
+    /// that no organizer has deactivated yet (a Sessionize placeholder, a never-onboarded applicant)
+    /// IS deactivated — stamped, so it leaves Pending speakers and the other queues. It used to be
+    /// skipped as "already inactive", which made the bulk button a silent no-op on exactly those rows
+    /// (operator 2026-09-21: "we need to fix the name of this, as it is confusing").
+    /// </summary>
     [Fact]
-    public async Task Deactivate_flips_only_active_rows_and_counts_real_changes()
+    public async Task Deactivate_also_retires_inactive_rows_no_organizer_has_deactivated()
     {
         using var db = NewDb();
         var a = P(EventId, "a@example.test", active: true);
         var b = P(EventId, "b@example.test", active: true);
-        var c = P(EventId, "c@example.test", active: false); // already inactive
+        var c = P(EventId, "c@example.test", active: false); // inactive, never deactivated by an organizer
         db.Participants.AddRange(a, b, c);
         await db.SaveChangesAsync();
 
@@ -89,10 +96,29 @@ public sealed class ParticipantBulkOperationServiceTests
         var result = await svc.DeactivateAsync(EventId, new[] { a.Id, b.Id, c.Id }, default);
 
         Assert.Equal(3, result.Matched);
-        Assert.Equal(2, result.Changed);           // only a + b moved; c was already inactive
-        Assert.False((await db.Participants.FindAsync(a.Id))!.IsActive);
-        Assert.False((await db.Participants.FindAsync(b.Id))!.IsActive);
-        Assert.False((await db.Participants.FindAsync(c.Id))!.IsActive);
+        Assert.Equal(3, result.Changed);
+        foreach (var id in new[] { a.Id, b.Id, c.Id })
+        {
+            var p = (await db.Participants.FindAsync(id))!;
+            Assert.False(p.IsActive);
+            Assert.NotNull(p.DeactivatedByOrganizerAt);   // the stamp is what takes it off the queues
+        }
+    }
+
+    [Fact]
+    public async Task Deactivate_leaves_a_row_an_organizer_already_deactivated_alone()
+    {
+        using var db = NewDb();
+        var c = P(EventId, "c@example.test", active: false);
+        var stamped = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        c.DeactivatedByOrganizerAt = stamped;
+        db.Participants.Add(c);
+        await db.SaveChangesAsync();
+
+        var result = await NewSvc(db).DeactivateAsync(EventId, new[] { c.Id }, default);
+
+        Assert.Equal(0, result.Changed);
+        Assert.Equal(stamped, (await db.Participants.FindAsync(c.Id))!.DeactivatedByOrganizerAt);
     }
 
     [Fact]

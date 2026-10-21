@@ -123,6 +123,29 @@ public sealed class WelcomeReconcileJob
             }
         }
 
+        // §1307 — the SPEAKER welcome for a volunteer / organizer who speaks (categorised speaker profile). Its own
+        // once-ever key, so it never repeats and never touches their role welcome.
+        var hatIds = await _db.Participants
+            .Where(p => p.EventId == eventId.Value && p.IsActive && CommunityHub.Core.Data.SpeakerHat.Roles.Contains(p.Role)
+                        && _db.SpeakerProfiles.Any(s => s.EventId == eventId.Value && s.ParticipantId == p.Id && s.Category != null))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+        foreach (var id in hatIds)
+        {
+            try
+            {
+                if (await _welcome.SendSpeakerHatWelcomeAsync(id, ct))
+                {
+                    sent++;
+                    if (_pacer is not null) await _pacer.PaceAsync(ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "WelcomeReconcileJob: failed to send the speaker welcome to participant {Id}.", id);
+            }
+        }
+
         if (sent > 0)
         {
             _log.LogInformation(

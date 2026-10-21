@@ -124,6 +124,36 @@ public static class ExternalSystems
     public const string ErpInvoiceCreate = "e-conomic invoice creation";
 
     /// <summary>
+    /// 🔴 §1305 — CHANGING THE WEBSHOP'S STOCK COUNT, as its own ceiling, separate from the rest of
+    /// <see cref="Webshop"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-26, for the new CEH sponsor shop tested on DEV: <i>"i accept the risk with
+    /// dev writing to cm, it is controlled, as i will be the operator only on dev and can control stock
+    /// in woocommerce"</i>. The shop must lower and raise the live webshop's stock from DEV.</para>
+    ///
+    /// <para>⚠️ <b>Why not simply open <see cref="Webshop"/> on DEV.</b> That was done and reverted the
+    /// same day: <see cref="Webshop"/> also governs the existing Company Manager writes — the Zoho sync
+    /// pushing company fields, the ERP→webshop reconcile — which run on DEV from DEV's older copy of the
+    /// data and would overwrite the live Company Manager. He accepted the SHOP's writes, not those.
+    /// Same shape as <see cref="ErpInvoiceCreate"/>: a narrower ceiling for the one thing allowed.</para>
+    /// </remarks>
+    public const string WebshopStock = "Webshop stock";
+
+    /// <summary>
+    /// 🔴 §1305 — creating an e-conomic draft invoice for a CEH SHOP order, as its own ceiling, narrower than
+    /// <see cref="ErpInvoiceCreate"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-09-26: <i>"you can create invoice from dev also so we can verify it works"</i> — for the
+    /// new CEH shop. ⚠️ Opening <see cref="ErpInvoiceCreate"/> on DEV would ALSO let DEV's webshop and coupon
+    /// sweeps create invoices for real WooCommerce orders, which §1119 forbids ("no erp create of invoice from
+    /// dev"). So only the shop's own invoices get this key; everything else still asks <see cref="ErpInvoiceCreate"/>.
+    /// Unset ⇒ <c>Integrations:AllowExternalWrites</c> (false on DEV, true on PROD).</para>
+    /// </remarks>
+    public const string ErpShopInvoiceCreate = "e-conomic invoice creation (CEH shop)";
+
+    /// <summary>
     /// The settings key for a system name. 🔑 An ALIAS, not a slug of the display name: nobody
     /// should have to write <c>Integrations:ExternalWrites:Zoho Backstage</c> (a key with a space)
     /// or guess that e-conomic's hyphen survives.
@@ -136,6 +166,8 @@ public static class ExternalSystems
         LinkedIn => "LinkedIn",
         SharePoint => "SharePoint",
         Webshop => "Webshop",
+        WebshopStock => "WebshopStock",
+        ErpShopInvoiceCreate => "ErpShopInvoiceCreate",
         // An unrecognised system keeps its own name as the key, so a new integration is
         // configurable the day it is added rather than silently falling through for ever.
         _ => system,
@@ -365,6 +397,7 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
             // "e-conomic=ALLOWED, e-conomic invoice creation=BLOCKED" is the whole policy in a line,
             // and it is the line that answers "can the app in front of me invoice a customer".
             ExternalSystems.ErpInvoiceCreate,
+            ExternalSystems.ErpShopInvoiceCreate,
         ];
 
         var parts = systems.Select(s =>

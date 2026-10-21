@@ -62,8 +62,13 @@ public sealed class OrganizerAllocationServiceTests
         return t.Id;
     }
 
-    private static void SeedEvent(CommunityHubDbContext db) =>
+    private static void SeedEvent(CommunityHubDbContext db)
+    {
         db.Events.Add(new Event { Id = EventId, CommunityName = "C", DisplayName = "C27", Code = "C27", IsActive = true });
+        db.SaveChanges();
+        // §1295 — the volunteer-side commits in these tests need assignment released.
+        CommunityHub.Core.Tests.VolunteerAssignmentRelease.ToBroad(db, EventId);
+    }
 
     private static OrganizerAllocationService NewOrgSvc(CommunityHubDbContext db) =>
         new(db, new FixedClock(), new FeatureGateService(db), new RingResolver(db));

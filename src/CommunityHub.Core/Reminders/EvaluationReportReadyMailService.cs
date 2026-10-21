@@ -105,8 +105,26 @@ public sealed class EvaluationReportReadyMailService
         // Resolve each linked speaker back to their CEH participant, then to the inbox they read.
         var participants = await _db.Participants
             .Where(p => p.EventId == eventId && p.IsActive && keys.Contains(p.Email))
-            .Select(p => new { p.Id, p.Email, p.FullName })
+            .Select(p => new { p.Id, p.Email, p.FullName, p.Ring })
             .ToListAsync(ct);
+
+        // 🔒 §1263 — a TEST session reports only to the operator accounts (ring 0/1), the same
+        // audience a TEST session is visible to. The template's own ring row cannot do this: it is
+        // Ring 3 in PROD, so a real speaker left linked to a test session got a real report
+        // (audit 2026-09-21, after the operator moved a test session to "now" to try the kiosk).
+        var isTest = session.CehSessionId is int cehId
+            && await _db.Sessions.AnyAsync(s => s.Id == cehId && s.UsedForTesting, ct);
+        if (isTest)
+        {
+            var skipped = participants.Where(p => p.Ring > CommunityHub.Core.Settings.Ring.Ring1).ToList();
+            foreach (var p in skipped)
+            {
+                _log.LogInformation(
+                    "Report ready for TEST session {SessionId}: not sent to participant {ParticipantId} (ring {Ring}).",
+                    session.Id, p.Id, p.Ring);
+            }
+            participants = participants.Where(p => p.Ring <= CommunityHub.Core.Settings.Ring.Ring1).ToList();
+        }
 
         var overrides = await _db.SpeakerProfiles
             .Where(sp => sp.ContactEmailOverride != null && sp.ContactEmailOverride != "")

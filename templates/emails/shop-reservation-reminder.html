@@ -1,0 +1,30 @@
+Subject: Reserve your spot again for {{eventDisplayName}} — {{companyName}}
+<h2 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1a1a2e;">Hi {{firstName}},</h2>
+<p style="margin:0 0 16px;">Reservations for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> are open, and <strong>{{companyName}}</strong> has first right to what you had last time until <strong>{{closesOn}}</strong>:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 6px;">
+  <tr><td style="background-color:#f8f9fb;border-left:3px solid {{brandColor}};padding:14px 18px;border-radius:4px;">
+    <ul style="margin:0;padding:0 0 0 18px;line-height:1.6;">{{itemsHtml}}</ul>
+  </td></tr>
+</table>
+<p style="margin:0;font-size:16px;line-height:16px;mso-line-height-rule:exactly;">&nbsp;</p>
+<p style="margin:0 0 16px;">After that date anything not reserved goes back on sale to everyone.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 6px;"><tr>
+  <td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Sponsor/Shop/Reserve" style="height:52px;v-text-anchor:middle;width:296px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Reserve now</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/Sponsor/Shop/Reserve" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;padding:0 32px;white-space:nowrap;-webkit-text-size-adjust:none;">Reserve now</a>
+        <!--<![endif]-->
+      </td>
+    </tr></table>
+  </td>
+</tr></table>
+<p style="margin:0;font-size:16px;line-height:16px;mso-line-height-rule:exactly;">&nbsp;</p>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">You'll be signed in automatically. You get this reminder once a week until everything is reserved or declined.</p>
+<p style="margin:16px 0 0;color:#6b7280;font-size:14px;">Questions? Email <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>

@@ -314,9 +314,22 @@ public sealed class SpeakerBackstagePushService
             // categories complement, full labels) — the old "MvpCategories ?? Accreditation"
             // masked the accreditation whenever MVP categories were set (Skills landed
             // empty/partial in Zoho); company rides when CEH captured it.
+            // 🔴 §1250b — cleaned HERE TOO, not only on import.
+            //
+            // §1250 cleans these at the import and repairs what is already stored, which is the
+            // right home for it: one stored value, and the hub and the platform agree. But it only
+            // takes effect once an IMPORT has run — so between the fix shipping and the next
+            // import, the same four speakers kept failing, and the operator saw a fix that had
+            // apparently done nothing ("i still see these issues in zoho").
+            //
+            // 🔑 The divergence objection that kept this out of the push originally does not apply
+            // once the import cleans too: both paths now produce the SAME value, so this is a
+            // no-op whenever the import has run and a rescue when it has not. It also covers a URL
+            // typed straight into the hub, which the importer never sees.
             var create = await _zoho.CreateSpeakerAsync(
                 token, email, p.FirstName, p.LastName, p.Country,
-                p.Tagline, p.Biography, p.LinkedIn, p.Twitter,
+                p.Tagline, p.Biography,
+                SocialUrlNormalizer.Clean(p.LinkedIn), SocialUrlNormalizer.Clean(p.Twitter),
                 skills: ZohoFieldMap.SpeakerSkills(p),
                 featured: p.SelectedForPublish, ct,
                 company: p.CompanyName);
@@ -335,8 +348,16 @@ public sealed class SpeakerBackstagePushService
             if (create.Error is not null)
             {
                 failed++;
+                // 🔴 §1246 — say what the SPEAKER has to change, not just what Zoho said.
+                // Operator 2026-09-20: *"send correct error message so we can escalate to
+                // speakers"*. Three of four failures carried Zoho's "Sorry, an unexpected error has
+                // occurred. Please try again later." — which names no field, implies the fault is
+                // transient when it is permanent, and cannot be forwarded to anybody. All three
+                // were a malformed social URL, diagnosable from the values we just sent.
+                var why = SpeakerPushDiagnostics.Explain(p.LinkedIn, p.Twitter);
                 items.Add(new SpeakerPushResult(p.ParticipantId, email, PushAction.Failed, null,
-                    $"Zoho speaker create failed: {create.Error}"));
+                    $"Zoho speaker create failed: {create.Error}"
+                    + (why is null ? string.Empty : "\n  " + why)));
                 continue;
             }
             var id = create.Id ?? string.Empty;

@@ -37,15 +37,18 @@ public sealed class SpeakerMentionResolutionJob
     private readonly SpeakerMentionResolutionService _resolver;
     private readonly ILogger<SpeakerMentionResolutionJob> _log;
     private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+    private readonly SponsorOrganizationResolutionService? _sponsorOrgs;
 
     public SpeakerMentionResolutionJob(
         CommunityHubDbContext db,
         FeatureGateService gate,
         SpeakerMentionResolutionService resolver,
         ILogger<SpeakerMentionResolutionJob> log,
-        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null,
+        SponsorOrganizationResolutionService? sponsorOrgs = null)
     {
         _db = db; _gate = gate; _resolver = resolver; _log = log; _activity = activity;
+        _sponsorOrgs = sponsorOrgs;
     }
 
     // Base tick only (§510/§869.3) — the operator's interval on the Jobs page is the real cadence.
@@ -65,6 +68,14 @@ public sealed class SpeakerMentionResolutionJob
             _activity?.ReportInactive(
                 "LinkedIn posting is switched off, so speaker mentions are not being resolved.");
             return;
+        }
+
+        // §1300 — sponsor COMPANIES first: it needs only the LinkedIn token, not the company-page
+        // setting below, and a failure here must not stop the people sweep (it never throws).
+        if (_sponsorOrgs is not null)
+        {
+            var orgs = await _sponsorOrgs.ResolveAsync(eventId.Value, ct);
+            _log.LogInformation("Sponsor organization resolution — {Result}", orgs);
         }
 
         var org = await _db.SoMeSettings

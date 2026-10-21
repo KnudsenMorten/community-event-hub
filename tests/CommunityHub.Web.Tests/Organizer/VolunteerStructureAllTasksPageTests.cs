@@ -51,12 +51,13 @@ public sealed class VolunteerStructureAllTasksPageTests
     private static VolunteerStructureModel NewModel(CommunityHubDbContext db, HttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        var structure = new VolunteerStructureService(db, TimeProvider.System, new HeuristicTaskGuidanceGenerator());
+        var structure = new VolunteerStructureService(db, TimeProvider.System, VolunteerAssignmentGate.For(db), new HeuristicTaskGuidanceGenerator());
         return new VolunteerStructureModel(
             db, accessor, structure,
             new VolunteerTaskBulkOperationService(db),
             new FeatureGateService(db),
-            new RingResolver(db))
+            new RingResolver(db),
+            new VolunteerPlanningRosterService(db, TimeProvider.System))
         {
             PageContext = new PageContext { HttpContext = http },
         };

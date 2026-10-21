@@ -37,6 +37,15 @@ public class SponsorZohoProvisionLinkedReconcileTests
     {
         public List<ZohoCall> Calls { get; } = new();
 
+        /// <summary>§1312 — the exhibitor's company_social_pages as Zoho holds it (blank by default).</summary>
+        public string ExhibitorSocialJson { get; set; } = "{}";
+
+        /// <summary>§1312 — the booths the event has (label → id); empty by default.</summary>
+        public Dictionary<string, string> Booths { get; } = new();
+
+        /// <summary>§1312 — when set, a PUT of an exhibitor's booth is refused with this 400 message.</summary>
+        public string? BoothPutRefusal { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -49,9 +58,23 @@ public class SponsorZohoProvisionLinkedReconcileTests
             if (path.Contains("/oauth/v2/token", StringComparison.OrdinalIgnoreCase))
                 return Json("{\"access_token\":\"stub-token\"}");
 
+            // §1312 — a booth PUT the test wants refused.
+            if (request.Method == HttpMethod.Put && BoothPutRefusal is not null && body?.Contains("booth_id") == true)
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent($"{{\"status_code\":\"400\",\"message\":\"{BoothPutRefusal}\"}}", Encoding.UTF8, "application/json"),
+                };
+
             // PUT update (sponsor/exhibitor) — accept.
             if (request.Method == HttpMethod.Put)
                 return Json("{\"ok\":true}");
+
+            // §1312 — an exhibitor CREATE answers with a new id.
+            if (request.Method == HttpMethod.Post && path.EndsWith("/exhibitors", StringComparison.Ordinal))
+                return Json("{\"exhibitor\":{\"id\":\"ZEX-NEW\"}}");
+
+            if (path.EndsWith("/booths", StringComparison.Ordinal))
+                return Json("{\"booths\":[" + string.Join(",", Booths.Select(b => $"{{\"id\":\"{b.Value}\",\"booth_label\":\"{b.Key}\"}}")) + "]}");
 
             // GET a single sponsor by id: blank social/web/description → safe to fill.
             if (request.Method == HttpMethod.Get
@@ -59,7 +82,7 @@ public class SponsorZohoProvisionLinkedReconcileTests
             {
                 return Json(
                     "{\"sponsor\":{\"website_url\":\"\",\"description\":\"\"," +
-                    "\"company_social_pages\":{}}}");
+                    "\"company_social_pages\":" + ExhibitorSocialJson + "}}");
             }
 
             // GET a single EXHIBITOR by id: blank social/web/overview → safe to fill.
@@ -69,7 +92,7 @@ public class SponsorZohoProvisionLinkedReconcileTests
             {
                 return Json(
                     "{\"exhibitor\":{\"website_url\":\"\",\"company_overview\":\"\"," +
-                    "\"company_social_pages\":{}}}");
+                    "\"company_social_pages\":" + ExhibitorSocialJson + "}}");
             }
 
             // GET list endpoints. The linked sponsor/exhibitor MUST appear here so the
@@ -109,17 +132,13 @@ public class SponsorZohoProvisionLinkedReconcileTests
         };
         var zoho = new ZohoClient(http, zohoOptions, NullLogger<ZohoClient>.Instance);
 
-        // Company Manager OFF → ProvisionAsync skips the webshop/coordinator calls and the
-        // reconcile's webshop round-trip; the only network is the stub Zoho above.
-        var cmOptions = new CompanyManagerOptions { Enabled = false };
-        var cm = new CompanyManagerClient(new HttpClient(handler), cmOptions);
-
+        // The only network is the stub Zoho above.
         var sync = new SponsorZohoSyncService(
-            zoho, db, zohoOptions, cm, cmOptions,
+            zoho, db, zohoOptions,
             NullLogger<SponsorZohoSyncService>.Instance);
 
         var provision = new SponsorZohoProvisionService(
-            zoho, db, zohoOptions, cm, cmOptions,
+            zoho, db, zohoOptions,
             exhibitorApi: null!, new EventEditionConfigLoader(), new EventConfigOptions(),
             sync, NullLogger<SponsorZohoProvisionService>.Instance);
 
@@ -141,10 +160,9 @@ public class SponsorZohoProvisionLinkedReconcileTests
             ClientSecret = "secret",
             RefreshToken = "refresh",
         };
-        var cmOptions = new CompanyManagerOptions { Enabled = false };
         return new SponsorZohoSyncService(
             new ZohoClient(http, zohoOptions, NullLogger<ZohoClient>.Instance),
-            db, zohoOptions, new CompanyManagerClient(new HttpClient(handler), cmOptions), cmOptions,
+            db, zohoOptions,
             NullLogger<SponsorZohoSyncService>.Instance);
     }
 
@@ -415,6 +433,115 @@ public class SponsorZohoProvisionLinkedReconcileTests
         db.Events.Add(ev);
         await db.SaveChangesAsync();
         return ev.Id;
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — a company that registered through the CEH shop (<c>ceh-…</c> id, no Company Manager record) must still
+    /// send a CONTACT on the exhibitor create. Operator 2026-09-29: Master Packager SIA's create went out with no contact
+    /// and Zoho answered a bare HTTP 400 — the coordinator was only ever filled from Company Manager. The shop's own
+    /// company contacts (event coordinator first, else the signer) fill it.
+    /// </summary>
+    [Fact]
+    public async Task A_shop_registered_company_sends_its_shop_coordinator_as_the_exhibitor_contact()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+        var signer = new Participant { EventId = eventId, FullName = "Sam Signer", Email = "sam@shop.example" };
+        var coord = new Participant { EventId = eventId, FullName = "Edda Van Coordinator", Email = "edda@shop.example" };
+        db.Participants.AddRange(signer, coord);
+        await db.SaveChangesAsync();
+        db.SponsorCompanyContacts.AddRange(
+            new SponsorCompanyContact { EventId = eventId, SponsorCompanyId = "ceh-abc123", ParticipantId = signer.Id, IsSigner = true },
+            new SponsorCompanyContact { EventId = eventId, SponsorCompanyId = "ceh-abc123", ParticipantId = coord.Id, IsEventCoordinator = true });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId, SponsorCompanyId = "ceh-abc123", CompanyName = "Shop Company SIA",
+            SponsorPackage = SponsorPackage.Gold, Tier = BoothTier.Gold, IsExhibitor = true, HasCurrentBoothOrder = true,
+        });
+        await db.SaveChangesAsync();
+
+        var (provision, handler) = NewService(db);
+        await provision.ProvisionAsync(eventId);
+
+        var create = Assert.Single(handler.Calls,
+            c => c.Method == HttpMethod.Post && c.Path.EndsWith("/exhibitors", StringComparison.Ordinal));
+        using var doc = JsonDocument.Parse(create.Body!);
+        var contact = doc.RootElement.GetProperty("contact");
+        Assert.Equal("edda@shop.example", contact.GetProperty("email").GetString());   // the coordinator, not the signer
+        Assert.Equal("Edda Van", contact.GetProperty("first_name").GetString());
+        Assert.Equal("Coordinator", contact.GetProperty("last_name").GetString());
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — a NEW exhibitor gets its booth in the SAME run (the create sends none since §1163; the assign step
+    /// used to assume it did and skipped), and a booth Zoho refuses is REPORTED with Zoho's reason, not only logged
+    /// (operator 2026-09-29: Master Packager's E-21 was a PLATINUM booth sold as Gold; he found it in the Backstage GUI).
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("The selected booth belongs to a different exhibitor category.")]
+    public async Task A_new_exhibitor_gets_its_booth_in_the_same_run_and_a_refusal_is_reported(string? refusal)
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+        var coord = new Participant { EventId = eventId, FullName = "Edda Coordinator", Email = "edda@shop.example" };
+        db.Participants.Add(coord);
+        await db.SaveChangesAsync();
+        db.SponsorCompanyContacts.Add(new SponsorCompanyContact
+            { EventId = eventId, SponsorCompanyId = "ceh-booth", ParticipantId = coord.Id, IsEventCoordinator = true });
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId, SponsorCompanyId = "ceh-booth", CompanyName = "Booth Company SIA",
+            SponsorPackage = SponsorPackage.Gold, Tier = BoothTier.Gold, IsExhibitor = true, HasCurrentBoothOrder = true,
+            BoothLabel = "E-21",
+        });
+        await db.SaveChangesAsync();
+
+        var (provision, handler) = NewService(db);
+        handler.Booths["E-21"] = "BOOTH-21";
+        handler.BoothPutRefusal = refusal;
+        var result = await provision.ProvisionAsync(eventId);
+
+        var put = Assert.Single(handler.Calls, c => c.Method == HttpMethod.Put && c.Path.EndsWith("/exhibitors/ZEX-NEW", StringComparison.Ordinal)
+                                                   && c.Body!.Contains("booth_id"));
+        Assert.Contains("BOOTH-21", put.Body);
+        if (refusal is null)
+            Assert.Contains(result.Notes, n => n.Contains("booth E-21 assigned"));
+        else
+        {
+            Assert.Contains(result.Notes, n => n.Contains("booth E-21 NOT assigned") && n.Contains("different exhibitor category"));
+            Assert.True(result.Skipped > 0);   // ⇒ the drift mail goes out
+        }
+    }
+
+    /// <summary>
+    /// 🔴 §1312 — operator 2026-09-30: "it keeps sending mails about codetwo". Zoho's company_social_pages is one object and
+    /// a PUT replaces it whole; pushing only the missing X link wiped LinkedIn, and the next run pushed LinkedIn alone and wiped
+    /// X — for ever (measured on CodeTwo: 14:05 LinkedIn only, 14:12 X only). Whenever one link is pushed, BOTH go.
+    /// </summary>
+    [Fact]
+    public async Task Pushing_one_social_link_sends_both_so_the_other_is_not_wiped()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId, SponsorCompanyId = "10", SponsorPackage = SponsorPackage.Gold,
+            ZohoSponsorId = "ZSP-10", ZohoExhibitorId = "ZEX-10",
+            LinkedInUrl = "https://www.linkedin.com/company/codetwo/", TwitterUrl = "https://x.com/CodeTwoSoftware",
+            EventCoordinatorEmail = "coord@example.com", ZohoContactEmail = "coord@example.com",
+        });
+        await db.SaveChangesAsync();
+
+        var (provision, handler) = NewService(db);
+        handler.ExhibitorSocialJson = "{\"linkedin\":\"https://www.linkedin.com/company/codetwo/\"}";   // X missing in Zoho
+        await provision.ProvisionAsync(eventId);
+
+        var put = Assert.Single(handler.Calls, c => c.Method == HttpMethod.Put && c.Path.EndsWith("/exhibitors/ZEX-10", StringComparison.Ordinal));
+        using var doc = JsonDocument.Parse(put.Body!);
+        var social = doc.RootElement.GetProperty("company_social_pages");
+        Assert.Equal("https://x.com/CodeTwoSoftware", social.GetProperty("twitter").GetString());
+        Assert.Equal("https://www.linkedin.com/company/codetwo/", social.GetProperty("linkedin").GetString());   // NOT wiped
     }
 
     /// <summary>

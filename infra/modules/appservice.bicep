@@ -203,6 +203,15 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Integrations__ExternalWrites__Webshop'
           value: string(allowExternalWrites)
         }
+        // §1305 — the CEH sponsor shop's STOCK writes to the live webshop, 'true' on BOTH environments.
+        // Operator 2026-09-26: "i accept the risk with dev writing to cm, it is controlled, as i will be
+        // the operator only on dev and can control stock in woocommerce". A separate ceiling on purpose:
+        // opening Webshop above on DEV would also let the Zoho sync and the ERP reconcile overwrite the
+        // live Company Manager from DEV's copy of the data (tried and reverted 2026-09-26).
+        {
+          name: 'Integrations__ExternalWrites__WebshopStock'
+          value: 'true'
+        }
       ]
     }
   }

@@ -4,7 +4,7 @@
     ViewData["Title"] = "Swag catalogue — logistics";
     var money = (decimal? v) => v is null
         ? "—"
-        : (Model.CurrencySymbol ?? string.Empty) + v.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        : (Model.CurrencySymbol ?? string.Empty) + CommunityHub.Core.Integrations.Webshop.ShopPricing.Amount(Math.Round(v.Value));
 }
 
 <div class="card">
@@ -36,8 +36,8 @@
            too, not only attendees. Shown next to the live headcount so a gap is visible NOW rather
            than at packing, when it is 250 people with an incomplete bag. *@
         <p style="font-size:13px;color:#4b5563;">
-            Ordering against <strong>@Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</strong> bags.
-            CEH currently counts <strong>@Model.ReceivingHeadcount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</strong>
+            Ordering against <strong>@Model.BagQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture)</strong> bags.
+            CEH currently counts <strong>@Model.ReceivingHeadcount.ToString(System.Globalization.CultureInfo.InvariantCulture)</strong>
             active people across every role that receives one (attendees, speakers, volunteers, crew).
             @if (Model.BagQuantity > 0 && Model.ReceivingHeadcount > Model.BagQuantity)
             {
@@ -55,7 +55,7 @@
                     <tr>
                         <th>Item</th>
                         <th>Per piece</th>
-                        <th>Total &times; @Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</th>
+                        <th>Total &times; @Model.BagQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture)</th>
                         <th>Status</th>
                         <th>Artwork</th>
                         <th></th>

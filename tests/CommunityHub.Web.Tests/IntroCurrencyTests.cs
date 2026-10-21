@@ -175,6 +175,53 @@ public sealed class IntroCurrencyTests
               + "mails and draft post text; no new capability.",
         [234] = "ERP→webshop company creation (§1238). Back-office plumbing between the finance "
               + "system and the webshop; nothing a sponsor or attendee sees.",
+        [235] = "One person reaching both of their hubs (§1255). From the person's side there is "
+              + "nothing to learn or do: they sign in as before and the speaker area is simply "
+              + "there. The change is a GATE moving from a role field to a capability, which is "
+              + "invisible when it works. ⚠️ Honest note: the two-hats SITUATION may deserve an "
+              + "intro passage one day (people do ask 'I organise and I speak — which login?'), "
+              + "but that is a passage about the event, not about this fix.",
+        [238] = "Session feedback on ordinary tablets (§1259). The intro describes the HUB a "
+              + "speaker, sponsor, volunteer or attendee signs into; this is a stand in a corridor "
+              + "with four faces, which nobody logs into and nobody needs told about — you walk "
+              + "past and tap. The organizer-side setup (enrol, approve, link to a room) is an "
+              + "operations task. ⚠️ If the intro ever gains a 'what you'll see at the venue' "
+              + "section, this belongs in it.",
+        [236] = "Catering counted per human (§1257/§1258). A COUNTING correction in organizer "
+              + "pages and the venue spreadsheets — the numbers behind the order, not something "
+              + "a speaker or attendee ever operates. The de-duplication link is an organizer "
+              + "decision on the people list; an attendee's experience is identical either way.",
+        [237] = "Fewer, better organizer emails (§1256). Four ops-alert defects: an alert that "
+              + "ignored an approval, a throttle that reset on restart, stray markup in a "
+              + "copy-paste block, and a change report for an invisible difference. Every one of "
+              + "them lands in the ORGANIZER inbox; describing the absence of a bad email is not "
+              + "a capability a reader would recognise.",
+        [239] = "Sponsor announcements tag the company first (§1300). A refinement of the social "
+              + "tagging the intro already describes for the sponsor's own people (#76): the company "
+              + "is now looked up and tagged too, and a bare 'Tag:' line no longer publishes. The "
+              + "sponsor does nothing new — their post simply tags them.",
+        [240] = "Prepaid ticket invoices name the ticket type (§1301). A wording fix on the "
+              + "partner's e-conomic invoice line; the intro does not describe invoice layout, and "
+              + "a partner does nothing new.",
+        [241] = "Booth tasks give the right furniture coupon code (§1302). A wrong code in "
+              + "task text corrected; no new capability for the sponsor.",
+        [249] = "Lower monitoring cost: quiet logging by default with an on-demand detail switch (§1317). An operations "
+            + "change with no visible behaviour for organizers, sponsors or speakers.",
+        [248] ="Public Sponsors page shows the real names and logos (§1315). A display fix on an existing public page; "
+              + "nothing new for any role to learn.",
+        [247] ="Long Zoho bios stored whole; a job's own failure no longer reported as a database outage (§1314). An "
+              + "internal robustness fix; nothing new for any role to learn.",
+        [246] ="SoMe organizer mails show the post as it will publish, picture attached (§1313). Internal organizer "
+              + "notices made complete; nothing new for a speaker, sponsor or attendee to learn.",
+        [245] = "Missing mandatory steps and overdue tasks marked red for every role (§1312). A small visibility cue on "
+              + "existing Get Started and task pages, not a new capability the intro needs to explain.",
+        // 2026-10-01 intro refresh (operator: "update the ceh intro"): §244, the sponsor shop, got its passage
+        // ("Buying, reserving and signing") and left this list. §242/§243 stay excused on their own reasons.
+        [243] = "SoMe posts never go out with a missing speaker photo (§1304). A publishing safeguard "
+              + "for the company-page posts the intro already covers; nobody does anything new.",
+        [242] = "Evaluation tablets managed by Intune (§1303). Organiser-side device setup for the "
+              + "session-feedback kiosk; attendees tap the same faces, and the intro describes the hub people "
+              + "sign into, not the corridor stand (the §238 decision).",
         [166] = "Volunteer photos filed under both name and id. A FILING convention inside the "
               + "organizers' own library — the §153 decision for the back-fill of it. The volunteer "
               + "uploads one picture either way and sees no difference.",

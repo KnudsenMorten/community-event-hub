@@ -543,24 +543,28 @@ public static class FeatureCatalog
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // §1305 — the CEH sponsor webshop. 🔒 OFF by default and DEV-ONLY until the operator approves
+        // it (2026-09-26: "it should only be deployed to DEV (not prod)"). The code ships on main, so
+        // this switch is what keeps a PROD deploy of an unrelated fix from exposing it: while off, the
+        // catalogue job no-ops and sponsors see nothing. Ring 1 (testing) — the catalogue rule is that
+        // no feature is born Ring 0 — so even switched on it reaches only ring 0 + ring 1 testers.
+        new("sponsor-webshop", "Settings.Feat.SponsorWebshop.Name",
+            "Settings.Feat.SponsorWebshop.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+
         new("sponsor-zoho-provision", "Settings.Feat.SponsorZohoProvision.Name",
             "Settings.Feat.SponsorZohoProvision.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
-        // ENGINE (operator 2026-06-24): scheduled ERP→webshop contact reconcile (the C#
-        // port of Sync-ERP-Contacts-to-Webshop.ps1). Off by default — the org enables it
-        // to retire the legacy script. The service self-guards on e-conomic+CM config.
-        new("erp-webshop-reconcile", "Settings.Feat.ErpWebshopReconcile.Name",
-            "Settings.Feat.ErpWebshopReconcile.Desc",
-            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+        // 🗑 §1312 — erp-webshop-reconcile REMOVED with Company Manager (2026-09-30): its job and dashboard action are gone.
 
         // §786 ENGINE (operator 2026-08-04): hourly webshop order → e-conomic DRAFT invoice (the C#
         // port of Sync-Webshop-Orders-Create-ERP-Invoice.ps1). 🔒 OFF by default, and turning it ON
         // IS THE CUTOVER — the scheduled script must be switched off first, or two systems are
         // invoicing the same orders and only the shared WebshopOrderId-<n> marker is stopping a
-        // duplicate (§786.2). Same shape as erp-webshop-reconcile above, for the same reason.
+        // duplicate (§786.2). (Same shape the retired erp-webshop-reconcile had, for the same reason.)
         new("webshop-erp-invoicing", "Settings.Feat.WebshopErpInvoicing.Name",
             "Settings.Feat.WebshopErpInvoicing.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
@@ -878,6 +882,35 @@ public static class FeatureCatalog
             FeatureGroup.Volunteers, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
+
+        // 🔒 §1295 (operator 2026-09-21: *"i want to start onboarding and activation of volunteers.
+        // but i dont want volunteer task assignment to happen. we just put ring gate on that
+        // functionality if not made"* · *"remember to add settings entry so we can move things to
+        // next rings"*) — the switch that decides whether a volunteer GETS WORK AT ALL: both halves
+        // of it, because both are things a volunteer notices.
+        //   • may this volunteer be ASSIGNED (every write path to VolunteerTaskAssignment), and
+        //   • may they SEE their assignments (/volunteer/myschedule + its menu item).
+        // See VolunteerAssignmentGate, which is the only thing that reads this key.
+        //
+        // 🔑 WHY A NEW KEY RATHER THAN THE TWO QUEUE ROWS ABOVE. Their ring cannot be moved from
+        // the GUI at all: `IsRingScoped` is `UserImpact && !TileOnly`, so a Queue row renders
+        // "not ring-scoped" with NO ring selector (§589 — "queues are managed by an organizer who
+        // approves, so no need for a ring-gate here"). Re-classifying them would hand the ring a
+        // control, but it would also hand _HubGrid a reason to HIDE the organizer's own Volunteers
+        // tiles — those two keys badge and gate them, and both are catalog-default OFF. A gate that
+        // locks the organizer out of the page they gate it from is not a gate, it is an outage.
+        // ⇒ The rollout control lives here, on a UserImpact key nothing tiles against, and the two
+        // Queue rows keep meaning exactly what they meant: which organizer TOOLS are on.
+        //
+        // Born OFF at Ring 1: assignment is held for everyone until he turns it on, then widens
+        // ring by ring. ⚠️ A persisted per-feature override or a Volunteers GROUP ring WINS over
+        // this default (FeatureGateService.GetReleasedRingAsync) — read the Settings page rather
+        // than assuming the default is in force.
+        new("volunteer-assignments", "Settings.Feat.VolunteerAssignments.Name",
+            "Settings.Feat.VolunteerAssignments.Desc",
+            FeatureGroup.Volunteers, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
 
         // §150 ORGANIZER allocation queue — the organizer-side mirror of
         // volunteer-allocation (allocates ELDK / ELDK-MOK organizers to tasks). Same

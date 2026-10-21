@@ -57,8 +57,8 @@ public sealed class WebshopDraftInvoiceService
     /// <summary>The webshop's own currency. Prices arrive from WooCommerce in this.</summary>
     public const string WebshopCurrency = "EUR";
 
-    private readonly WooCommerceClient _woo;
-    private readonly CompanyManagerClient _cm;
+    private readonly Webshop.IWebshopOrderSource _orders;
+    private readonly Data.CommunityHubDbContext _db;
     private readonly IEconomicInvoiceClient _invoices;
     private readonly IEconomicContactAdminClient _contacts;
     private readonly IFxRateProvider _fx;
@@ -68,8 +68,8 @@ public sealed class WebshopDraftInvoiceService
     private readonly ILogger<WebshopDraftInvoiceService> _log;
 
     public WebshopDraftInvoiceService(
-        WooCommerceClient woo,
-        CompanyManagerClient cm,
+        Webshop.IWebshopOrderSource orders,
+        Data.CommunityHubDbContext db,
         IEconomicInvoiceClient invoices,
         IEconomicContactAdminClient contacts,
         IFxRateProvider fx,
@@ -78,8 +78,8 @@ public sealed class WebshopDraftInvoiceService
         TimeProvider clock,
         ILogger<WebshopDraftInvoiceService> log)
     {
-        _woo = woo;
-        _cm = cm;
+        _orders = orders;
+        _db = db;
         _invoices = invoices;
         _contacts = contacts;
         _fx = fx;
@@ -101,7 +101,8 @@ public sealed class WebshopDraftInvoiceService
                 + "created. Nothing was attempted.");
         }
 
-        var orders = await _woo.GetOrdersAsync("completed", ct, enrichCategories: false);
+        // §1312 — the old webshop's orders from CEH's own store (the webshop is closed and no longer read).
+        var orders = await _orders.GetOrdersAsync("completed", ct, enrichCategories: false);
 
         // Legacy orders predate the Company Manager design and carry no company id; the retired
         // script skipped them and so does this. They are not a problem to report — they are simply
@@ -175,30 +176,27 @@ public sealed class WebshopDraftInvoiceService
         WooOrder order, string reference, List<string> wouldCreate,
         List<CreatedDraftInvoice> createdDrafts, CancellationToken ct)
     {
-        if (!int.TryParse(order.CompanyId, out var companyId))
-        {
-            return $"Order {order.OrderId}: company id '{order.CompanyId}' is not a number.";
-        }
-
-        var company = await _cm.GetCompanyAsync(companyId, ct);
+        // 🔴 §1312 — the company is CEH's own record (Company Manager is retired): e-conomic number and billing reference.
+        var companyKey = (order.CompanyId ?? string.Empty).Trim();
+        var company = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+            _db.ShopCompanies.Where(c => c.SponsorCompanyId == companyKey).OrderByDescending(c => c.EventId), ct);
         if (company is null)
         {
-            return $"Order {order.OrderId}: Company Manager company {companyId} could not be read.";
+            return $"Order {order.OrderId}: company {companyKey} is not a company in CEH.";
         }
 
         if (!int.TryParse(company.ErpCustomerNumber, out var erpCustomerNumber) || erpCustomerNumber <= 0)
         {
-            // The script reported this too. It is the single most common reason an order does not
-            // become an invoice, and it is fixable only in Company Manager — so it is named.
-            return $"Order {order.OrderId}: company '{company.Name}' has no erp_customer_number set "
-                   + "in Company Manager, so there is no e-conomic customer to invoice.";
+            // The single most common reason an order does not become an invoice — so it is named.
+            return $"Order {order.OrderId}: company '{company.LegalName}' has no e-conomic customer number in CEH, "
+                   + "so there is no e-conomic customer to invoice.";
         }
 
         var customer = await _invoices.GetCustomerAsync(erpCustomerNumber, ct);
         if (customer is null)
         {
             return $"Order {order.OrderId}: e-conomic customer {erpCustomerNumber} "
-                   + $"(from company '{company.Name}') does not exist.";
+                   + $"(from company '{company.LegalName}') does not exist.";
         }
 
         // §1017 — carry the pre/post-coupon line totals and the order's coupon codes through, so a
@@ -293,7 +291,7 @@ public sealed class WebshopDraftInvoiceService
         }
 
         // §786.1(a)+(b) — Att person AND Your reference are both the company's DEFAULT SIGNER.
-        var signerContact = await ResolveDefaultSignerContactAsync(company, erpCustomerNumber, ct);
+        var signerContact = await ResolveDefaultSignerContactAsync(company.LegalName, erpCustomerNumber, ct);
 
         var invoice = new EconomicDraftInvoice(
             Customer: customer,
@@ -352,54 +350,25 @@ public sealed class WebshopDraftInvoiceService
     }
 
     /// <summary>
-    /// §786.1(a)+(b) — resolve the company's DEFAULT SIGNER to an e-conomic customer-contact number.
+    /// §786.1(a)+(b) — the company's SIGNER as an e-conomic customer-contact number (Att person / Your reference).
     /// </summary>
     /// <remarks>
-    /// <para>The chain is: Company Manager company → <c>default_signer_id</c> (a CM user) → that
-    /// user's e-mail → the e-conomic contact on this customer with the same e-mail → its
-    /// <c>customerContactNumber</c>. E-mail is the join because it is the only field both systems
-    /// hold for the same person; <c>ErpWebshopContactSyncService</c> already keeps the two sides in
-    /// step, which is what makes the match reliable.</para>
-    ///
-    /// <para>⚠️ Returns null rather than throwing when any hop is missing (no signer set, no e-mail,
-    /// no matching contact). The caller then falls back to whatever the CUSTOMER record already
-    /// points at — the pre-§786 behaviour. 🔒 That is deliberate: an unset default signer is a data
-    /// gap in Company Manager, and refusing to invoice over it would hold up a sponsor's billing for
-    /// a field they cannot see. The fallback is logged so the gap is visible.</para>
+    /// 🔴 §1312 — read straight from e-conomic, the master of people: the contact on this customer with Role:1 in its notes.
+    /// (It used to go Company Manager default_signer_id → that user's e-mail → the e-conomic contact; Company Manager is
+    /// retired.) ⚠️ Null when e-conomic names no signer: the invoice then keeps the customer's own attention contact —
+    /// refusing to invoice over it would hold up a sponsor's billing. Logged so the gap is visible.
     /// </remarks>
-    private async Task<int?> ResolveDefaultSignerContactAsync(
-        CompanyManagerCompany company, int erpCustomerNumber, CancellationToken ct)
+    private async Task<int?> ResolveDefaultSignerContactAsync(string companyName, int erpCustomerNumber, CancellationToken ct)
     {
-        if (company.DefaultSignerUserId <= 0)
+        var contacts = await _contacts.ListContactsAsync(erpCustomerNumber, ct);
+        var signer = contacts.FirstOrDefault(c => EconomicContactNotesRoles.IsSigner(c.Notes));
+        if (signer is null)
         {
             _log.LogInformation(
-                "§786.1: company '{Company}' has no default signer set in Company Manager; the "
-                + "invoice keeps the e-conomic customer's own attention contact.", company.Name);
+                "§786.1: '{Company}' has no signer (Role:1) on e-conomic customer {Customer}; the invoice keeps the "
+                + "customer's own attention contact.", companyName, erpCustomerNumber);
             return null;
         }
-
-        var signer = await _cm.GetUserAsync(company.DefaultSignerUserId, ct);
-        if (signer is null || string.IsNullOrWhiteSpace(signer.Email))
-        {
-            _log.LogWarning(
-                "§786.1: default signer {UserId} for '{Company}' has no readable e-mail, so it could "
-                + "not be matched to an e-conomic contact.", company.DefaultSignerUserId, company.Name);
-            return null;
-        }
-
-        var contacts = await _contacts.ListContactsAsync(erpCustomerNumber, ct);
-        var match = contacts.FirstOrDefault(c =>
-            string.Equals(c.Email?.Trim(), signer.Email.Trim(), StringComparison.OrdinalIgnoreCase));
-
-        if (match is null)
-        {
-            _log.LogWarning(
-                "§786.1: default signer '{Email}' for '{Company}' is not a contact on e-conomic "
-                + "customer {Customer}, so Att person / Your reference fall back to the customer "
-                + "default.", signer.Email, company.Name, erpCustomerNumber);
-            return null;
-        }
-
-        return match.ContactNumber;
+        return signer.ContactNumber;
     }
 }

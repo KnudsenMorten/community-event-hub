@@ -86,16 +86,15 @@ public sealed class SponsorTasksDeliverablesPageTests
                 new CommunityHub.Core.Config.SponsorConfigLoader(),
                 new CommunityHub.Core.Config.SponsorConfigOptions(),
                 NullLogger<CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder>.Instance),
-            // §687.8 — the purchase reconciler. Given a REAL instance with a webshop-less summary
-            // service: it then reports "could not check" for every category, and the reconciler's
-            // outage guard means it changes NOTHING. That is exactly the behaviour these tests want
-            // (they assert the task LIST and the rollup), and it exercises the guard for free.
+            // §687.8 — the purchase reconciler. Given a REAL instance with a summary service whose
+            // stored old-webshop orders cannot be read (§1312): it then reports "could not check" for
+            // every category, and the reconciler's outage guard means it changes NOTHING. That is
+            // exactly the behaviour these tests want (they assert the task LIST and the rollup), and
+            // it exercises the guard for free.
             new CommunityHub.Core.Tasks.PurchaseTaskReconciler(
                 db,
                 new CommunityHub.Core.Integrations.SponsorPurchaseSummaryService(
-                    new CommunityHub.Core.Integrations.WooCommerceClient(
-                        new HttpClient(), new CommunityHub.Core.Integrations.WooCommerceOptions()),
-                    new CommunityHub.Core.Integrations.WooCommerceOptions(),
+                    new UnreadableOldOrders(),
                     new Microsoft.Extensions.Caching.Memory.MemoryCache(
                         new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
                     NullLogger<CommunityHub.Core.Integrations.SponsorPurchaseSummaryService>.Instance),
@@ -199,6 +198,14 @@ public sealed class SponsorTasksDeliverablesPageTests
         // No company link -> nothing to roll up; the view omits the card.
         Assert.True(model.NoCompanyLink);
         Assert.Null(model.Deliverables);
+    }
+
+    /// <summary>§1312 — the old webshop's stored orders, unreadable (a failed first fill throws, as the archive does).</summary>
+    private sealed class UnreadableOldOrders : CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource
+    {
+        public Task<IReadOnlyList<CommunityHub.Core.Integrations.WooOrder>> GetOrdersAsync(
+            string status = "completed", CancellationToken ct = default, bool enrichCategories = true) =>
+            throw new InvalidOperationException("The old webshop's orders could not be stored in CEH yet.");
     }
 
     private sealed class NoopEmailSender : CommunityHub.Core.Email.IEmailSender

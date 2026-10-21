@@ -47,17 +47,26 @@ public sealed class BreadcrumbHubCardCoverageTests
             // §833 — carded on SoMe + Comms. Primary = SoMe: "where is the post editor?" is a SoMe
             // question, and being filed only under Comms is exactly why he could not find it.
             ["/Organizer/SoMeTemplates"] = "/Organizer/SoMe",
-            // §1146b — carded on People + Volunteers. Primary stays PEOPLE, where it has always
-            // lived and where its breadcrumb points; the Volunteers card is the shortcut, added
-            // because §756 made the queue volunteers-only, so the one page you preselect
-            // volunteers from was unreachable from the volunteer hub.
+            // §1146b + §1244 — carded on People, Volunteers AND Content. Primary stays PEOPLE,
+            // where it has always lived and where its breadcrumb points; the other two are
+            // shortcuts. §756 made the queue volunteers-only (so it had to be reachable from the
+            // volunteer hub), and §1244 added the Sessions & Speakers door because email-less
+            // SPEAKERS land here too.
             ["/Organizer/PreselectionQueue"] = "/Organizer/People",
+            // §1244 — carded on People + Content (the Sessions & Speakers hub). Primary stays
+            // PEOPLE: approving a speaker is a people action and that is where the page has always
+            // lived. The Content card is the shortcut, because the hub you run the Sessionize
+            // import from is the hub you then look on to approve what it brought in.
+            ["/Organizer/PendingSpeakers"] = "/Organizer/People",
             // §1155 — carded on People + SponsorAdmin. Primary stays PEOPLE, where §501 filed them
             // and where their breadcrumb points; the SponsorAdmin cards are the shortcut. Both
             // readings are true — a sponsor contact is a person AND part of running a sponsor —
             // which is why they kept being looked for in two places.
+            // §1265 — carded on Setup + Content. Primary stays SETUP, where the device board has
+            // always lived and where its breadcrumb points; the Content card sits beside Session
+            // feedback so everything about session evaluation is reachable from one hub.
+            ["/Organizer/EvaluationDevices"] = "/Organizer/Setup",
             ["/Organizer/EconomicContacts"] = "/Organizer/People",
-            ["/Organizer/SponsorWebshopCompany"] = "/Organizer/People",
         };
 
     private static string PagesDir()

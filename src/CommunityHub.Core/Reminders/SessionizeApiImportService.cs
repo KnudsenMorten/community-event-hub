@@ -93,11 +93,60 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
                 0, 0, 0, 0, fetched.Warnings, fetched.Error);
         }
 
-        // 1. Speakers first, so the participants exist for the session links. §204:
+        // 🔴 §1243 — FETCH the sessions BEFORE importing speakers, so the speaker import can be
+        // gated on confirmation too.
+        //
+        // Operator 2026-09-20: *"importer should NOT import sessions or speakers that have not
+        // approved yet"*. §1241 gated SESSIONS; speakers came in regardless and landed in the
+        // Pending-speakers queue — where approving one sets their category, which is exactly what
+        // makes Zoho create and INVITE them (§326bx). So the queue was inviting him to invite four
+        // people who had not agreed to speak.
+        //
+        // 🔑 Only the FETCH moves. The order of WRITES is unchanged — speakers are still imported
+        // before sessions, so the participants exist for the session links to resolve against.
+        var source = await _sessionSource.ResolveAsync(eventId, ct);
+        var sessionFetch = await source.FetchSessionsAsync(eventId, fetched.Speakers, ct);
+
+        // Sessionize has NO speaker-level confirmation flag (verified against the live v2 payload):
+        // it exists only per SESSION. So "this speaker has not confirmed" has to be derived —
+        // a speaker is held when EVERY session they are on is unconfirmed. One confirmed session
+        // means they have committed to the event, even if another of their talks is still open.
+        var speakersToImport = fetched.Speakers;
+        var heldSpeakerNames = new List<string>();
+        var speakerWarnings = new List<string>(fetched.Warnings);
+
+        // 🔒 FAIL-OPEN, AND THIS IS THE IMPORTANT PART. The gate applies ONLY when the session
+        // fetch actually succeeded AND returned sessions. A failed or empty session view would
+        // otherwise make EVERY speaker look unconfirmed and import nobody at all — silently, with
+        // no failure anywhere. That is §326ax's lesson (an empty join is not evidence) and §1241's
+        // (an absent signal must never read as a negative one), and it is worse here because
+        // speakers are the critical path: the whole edition would quietly stop importing.
+        if (sessionFetch.Error is null)
+        {
+            var held = UnconfirmedSpeakers(fetched.Speakers, sessionFetch.Sessions);
+            if (held.Count > 0)
+            {
+                var heldIds = held.Select(h => h.SessionizeId)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                speakersToImport = fetched.Speakers
+                    .Where(s => !heldIds.Contains(s.SessionizeId)).ToList();
+                foreach (var h in held)
+                {
+                    var name = $"{h.FirstName} {h.LastName}".Trim();
+                    heldSpeakerNames.Add(string.IsNullOrWhiteSpace(name) ? h.Email : name);
+                }
+                speakerWarnings.Add(
+                    $"{held.Count} speaker(s) not imported — none of their sessions is confirmed "
+                    + $"in Sessionize yet: {string.Join(", ", heldSpeakerNames)}. They import by "
+                    + "themselves once they confirm.");
+            }
+        }
+
+        // 1. Speakers, so the participants exist for the session links. §204:
         //    pass the email-less speakers too so they land in the pre-selection queue
         //    (inactive, keyed by Sessionize id) instead of being silently dropped.
         var speakerResult = await _import.ImportSpeakersAsync(
-            eventId, fetched.Speakers, fetched.Warnings, ct, sendWelcome, mode,
+            eventId, speakersToImport, speakerWarnings, ct, sendWelcome, mode,
             emailLessSpeakers: fetched.EmailLessSpeakers);
 
         // 2. Then SESSIONS, from the same v2 view API, linked to the speakers we
@@ -105,11 +154,6 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
         //    participant). Same upsert/never-delete delta semantics as speakers.
         //    A session fetch problem is reported but never fails the (already
         //    committed) speaker import - speakers are the critical path.
-        // SESSIONS come from the edition's ACTIVE session source (default
-        // Sessionize; switchable to Zoho Backstage per REQUIREMENTS §6). The
-        // source returns the sessions + the speaker list to link them by.
-        var source = await _sessionSource.ResolveAsync(eventId, ct);
-        var sessionFetch = await source.FetchSessionsAsync(eventId, fetched.Speakers, ct);
         SessionImportResult sessionResult;
         if (sessionFetch.Error is not null)
         {
@@ -170,5 +214,49 @@ public sealed class SessionizeApiImportService : ISessionizeApiImportService
         }
 
         return speakerResult with { Sessions = sessionResult };
+    }
+
+    /// <summary>
+    /// 🔴 §1243 — the speakers to HOLD BACK: those on at least one session, none of which is
+    /// confirmed. Public and static so the tests exercise THIS code rather than a copy of the rule
+    /// (a duplicated derivation is a derivation that drifts).
+    /// </summary>
+    /// <remarks>
+    /// <para>Sessionize has no speaker-level confirmation flag — verified against the live v2
+    /// payload, it exists only per SESSION — so "has not confirmed" must be derived. One confirmed
+    /// session is enough: a speaker with a second, still-open talk HAS committed to the event.</para>
+    ///
+    /// <para>🔒 <b>An EMPTY session list holds NOBODY.</b> A failed or empty session view makes
+    /// every speaker look unconfirmed; acting on that would silently stop the whole edition from
+    /// importing speakers, with no error anywhere. Fail open, loudly wrong rather than quietly
+    /// empty — §326ax (an empty join is not evidence) and §1241 (an absent signal is not a
+    /// negative one).</para>
+    ///
+    /// <para>⚠️ A speaker on NO session at all is NOT held: they have nothing to confirm, and
+    /// treating "never asked" as "declined" would drop somebody for a state they were never in.</para>
+    /// </remarks>
+    public static IReadOnlyList<SessionizeSpeaker> UnconfirmedSpeakers(
+        IReadOnlyList<SessionizeSpeaker> speakers,
+        IReadOnlyList<SessionizeSession> sessions)
+    {
+        if (sessions.Count == 0) return Array.Empty<SessionizeSpeaker>();
+
+        var confirmed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in sessions)
+        {
+            foreach (var id in s.SpeakerIds)
+            {
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                seen.Add(id);
+                if (s.IsConfirmed) confirmed.Add(id);
+            }
+        }
+
+        return speakers
+            .Where(s => !string.IsNullOrWhiteSpace(s.SessionizeId)
+                        && seen.Contains(s.SessionizeId)
+                        && !confirmed.Contains(s.SessionizeId))
+            .ToList();
     }
 }

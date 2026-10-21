@@ -124,6 +124,12 @@ public static class EmailTemplateCatalog
             // "ELDK is announcing you, here is when". Operator 2026-08-11: *"that template is
             // different and separate"*.
             ["some-announcement"]          = ("Speaker/sponsor: your announcement is scheduled", "some-scheduling"),
+            // §1290 — the third moment: the post is LIVE, with the link to it (operator 2026-09-21:
+            // "do we have an email for speakers that inform them about when their social media is
+            // scheduled and where they can be seen"). Same audience and feature as the one above;
+            // its OWN ring, so it can be released separately — and like every new mail it starts
+            // held back until he sets one.
+            ["some-post-live"]             = ("Speaker/sponsor: your announcement is live", "some-scheduling"),
             // §705.13 (operator 2026-07-29: "session-change-alert is just an email" … "if you have
             // not created it as an email, then you need to change that"). Both templates SHIP and
             // SEND today but had NO registry entry, so neither appeared on the Settings page — a
@@ -148,6 +154,20 @@ public static class EmailTemplateCatalog
             // designated organizer, never a participant), so they list without a ring.
             ["some-speaker-prealert"]      = ("SoMe: speaker post publishes in ~5 min", "some-scheduling"),
             ["some-published"]             = ("SoMe: company-page post published", "some-scheduling"),
+            // §1304 — CRITICAL ops alert: a due post was hard-blocked because its graphic is
+            // missing a speaker photo. Organizer list only, ring-exempt, once per post and reason.
+            ["some-graphic-blocked"]       = ("SoMe: post BLOCKED — graphic missing a speaker photo", "some-scheduling"),
+            // §1305 — the CEH sponsor webshop (DEV-only until approved; gated by `sponsor-webshop`).
+            ["shop-registration-code"]     = ("Sponsor shop: registration code", "sponsor-webshop"),
+            ["shop-sign-request"]          = ("Sponsor shop: please sign the contract", "sponsor-webshop"),
+            ["shop-order-signed"]          = ("Sponsor shop: contract signed", "sponsor-webshop"),
+            ["shop-organizer-notice"]      = ("Sponsor shop: organizer notice", "sponsor-webshop"),
+            ["shop-offer"]                 = ("Sponsor shop: offer with draft contract", "sponsor-webshop"),
+            ["shop-organizer-reservation"] = ("Sponsor shop: reservation reminder with deadline", "sponsor-webshop"),
+            ["shop-reservation-answer"]    = ("Sponsor shop: answer to a reservation or extension request", "sponsor-webshop"),
+            ["shop-order-cancelled"]       = ("Sponsor shop: reservation / order cancelled", "sponsor-webshop"),
+            ["shop-reservation-reminder"]  = ("Sponsor shop: weekly reservation reminder", "sponsor-webshop"),
+            ["shop-cart-reminder"]         = ("Sponsor shop: daily reminder — unsigned order waiting", "sponsor-webshop"),
             // §705.14 — the three mails the audit found reaching a ROLE with no identity at all: they
             // compose their bodies in code, so they had no template key and therefore no Settings row and
             // no ring of their own. Their send sites now pass these keys as EmailContext.TemplateName.
@@ -309,6 +329,19 @@ public static class EmailTemplateCatalog
             // An ops alert must not be silenceable by a participant rollout ring.
             "some-speaker-prealert",
             "some-published",
+            "some-graphic-blocked",
+            // §1305 — the sponsor shop's registration code (the registrant is not a participant yet and
+            // has no ring — same reasoning as pin-signin) and its organizer notices (a mailbox list).
+            "shop-registration-code",
+            "shop-organizer-notice",
+            // An offer the ORGANIZER sends by hand to a potential sponsor — usually not a participant, so no ring.
+            "shop-offer",
+            // §1308 — the reminder for an ORGANIZER reservation, to the requester the organizer typed (often not a participant).
+            "shop-organizer-reservation",
+            // §1312 — the organizers' answer to a reservation / extension request, to the person who asked for it.
+            "shop-reservation-answer",
+            // §1312 — a cancelled reservation / order, to that order's own people.
+            "shop-order-cancelled",
             // §707.27 F — the three internal mails registered read-only for visibility. Each send
             // site already passes `RingExempt: true`; this list is what stops the page from offering
             // a ring control that would govern nothing (§326bx). None reaches a participant.
@@ -399,6 +432,7 @@ public static class EmailTemplateCatalog
             // there) makes the row lie about the mail that actually goes out.
             ["some-speaker-prealert"] = "{event}: Speaker post publishes in ~5 min — insert the LinkedIn handle",
             ["some-published"]        = "{event}: A LinkedIn company-page post was published",
+            ["some-graphic-blocked"]  = "{event}: CRITICAL — SoMe post blocked, graphic missing a photo",
             // §705.14 — subjects are built per send from the class title / the person's assignments, so
             // the token is shown UNRESOLVED exactly as §695.1 requires ("a subject with tokens should be
             // shown with the tokens visible, not resolved — that IS how it is identified").
@@ -457,6 +491,28 @@ public static class EmailTemplateCatalog
         "some-published" =>
             "Always sent — never ring-gated. It goes to the organizer notification list to confirm a "
             + "company-page post went live, and reaches no participant.",
+        "some-graphic-blocked" =>
+            "Always sent — never ring-gated. CRITICAL ops alert to the organizer notification list: a "
+            + "LinkedIn post that was due was hard-blocked because its graphic is missing a speaker "
+            + "photo. Sent once per post and reason; reaches no participant.",
+        "shop-registration-code" =>
+            "Always sent — never ring-gated. A company registering as a sponsor asked for this code and "
+            + "is not a participant yet, so it has no ring; a ring would drop the one mail that lets them in.",
+        "shop-organizer-notice" =>
+            "Always sent — never ring-gated. It goes to the shop's organizer notification list (a "
+            + "registration, a signed contract) and reaches no participant.",
+        "shop-offer" =>
+            "Always sent — never ring-gated. An organizer sends it by hand to a potential sponsor, who is "
+            + "usually not a participant yet and has no ring.",
+        "shop-organizer-reservation" =>
+            "Always sent — never ring-gated. It goes to the requester an organizer entered on a reservation, on the "
+            + "cadence set for that reservation (or never, when switched off there); the requester usually has no ring.",
+        "shop-reservation-answer" =>
+            "Always sent — never ring-gated. It answers the one person who just asked for a reservation or for more "
+            + "time, when an organizer declines it; a ring would leave them waiting for an answer that never comes.",
+        "shop-order-cancelled" =>
+            "Always sent — never ring-gated. It tells the people of one reservation or order that it was cancelled "
+            + "and its items released; leaving someone out would leave them believing they still hold them.",
         // §707.27 F — the three internal mails. Same reasoning in each case: the recipient is a
         // MAILBOX, not a ring-gated person, so there is no audience for a ring to narrow.
         "travel-reimbursement-erp" =>
@@ -502,6 +558,7 @@ public static class EmailTemplateCatalog
         // audience and the enum has no "both" — the per-send recipient list is what actually
         // decides who gets it (SoMeAnnouncementNotifier.AudienceForAsync).
         "some-announcement"              => EmailAudience.Speaker,
+        "some-post-live"                 => EmailAudience.Speaker,
         "getstarted-digest"              => EmailAudience.Speaker,
         "getstarted-deadline-reminder"   => EmailAudience.Speaker,
         "onboarding-getting-started"     => EmailAudience.Speaker,
@@ -560,6 +617,18 @@ public static class EmailTemplateCatalog
         // §704.1c — found by the audit: organizer mail that had no Settings row at all.
         "some-speaker-prealert"          => EmailAudience.Organizer,
         "some-published"                 => EmailAudience.Organizer,
+        "some-graphic-blocked"           => EmailAudience.Organizer,
+        // §1305 — the sponsor shop.
+        "shop-registration-code"         => EmailAudience.Sponsor,
+        "shop-sign-request"              => EmailAudience.Sponsor,
+        "shop-order-signed"              => EmailAudience.Sponsor,
+        "shop-reservation-reminder"      => EmailAudience.Sponsor,
+        "shop-cart-reminder"             => EmailAudience.Sponsor,
+        "shop-organizer-notice"          => EmailAudience.Organizer,
+        "shop-offer"                     => EmailAudience.Sponsor,
+        "shop-organizer-reservation"     => EmailAudience.Sponsor,
+        "shop-reservation-answer"        => EmailAudience.Sponsor,
+        "shop-order-cancelled"           => EmailAudience.Sponsor,
         // §707.27 F — internal ops mail to a MAILBOX (ERP, organizer ops inbox, engine alerts).
         // Filed under Organizer because that is who reads them, not who they are about: the travel
         // claim concerns a speaker but no speaker ever receives it.
@@ -623,6 +692,13 @@ public static class EmailTemplateCatalog
             // 2026-09-14. Those four had no per-role ring row to set; they resolved to the all-roles
             // ring, and still do until a per-role row is saved, so no send changes.
             "getstarted-digest" => AllRoles,
+
+            // §1287 — the SoMe announcement notice reaches the speakers of a session post AND a
+            // sponsor's signers/coordinators (SoMeAnnouncementNotifier.AudienceForAsync). Filed only
+            // under Speaker, it was invisible in the Sponsors section with no sponsor ring to set
+            // (operator 2026-09-21: "but i dont see it under sponsor"). Listing only — a sponsor
+            // recipient follows the mail's all-roles ring until a sponsor row is saved, as before.
+            "some-announcement" or "some-post-live" => new[] { ParticipantRole.Speaker, ParticipantRole.Sponsor },
 
             // The generic welcome is the fallback for roles with no welcome-{role} variant.
             "welcome" => new[] { ParticipantRole.Organizer, ParticipantRole.Attendee },
@@ -784,6 +860,8 @@ public static class EmailTemplateCatalog
         "speaker-graphics-ready"       => "A speaker whose promo graphics have just been released.",
         "some-announcement"            => "The speaker or sponsor a scheduled social-media post is "
                                         + "about — once when it is scheduled, once the day before.",
+        "some-post-live"               => "The speaker or sponsor a social-media post is about — once, "
+                                        + "when it has gone live on LinkedIn, with the link to the post.",
         // §1227 — every role with a Get Started wizard, on the cadence set per role; not "speakers, biweekly".
         "getstarted-digest"            => "Anyone who has not finished Get Started — repeated on the configured cadence until they do.",
         "getstarted-deadline-reminder" => "Speakers with Get Started still open, once, before the deadline.",
@@ -838,6 +916,17 @@ public static class EmailTemplateCatalog
         "group-photo-invite"    => "Organizers only — event logistics, not a speaker mail (§561).",
         "some-speaker-prealert" => "One designated organizer — ~5 minutes before a speaker post goes live, to paste in the LinkedIn handle. Never a speaker.",
         "some-published"        => "The SoMe notification list (organizers) — confirms a company-page post went live.",
+        "some-graphic-blocked"  => "The SoMe notification list (organizers) — CRITICAL: a due post was blocked because its graphic is missing a speaker photo.",
+        "shop-registration-code"    => "Whoever starts a sponsor registration — the code proves they own the address. Not yet a participant.",
+        "shop-sign-request"         => "The signer chosen on a sponsor shop order — a magic link to read, download and sign the contract.",
+        "shop-order-signed"         => "The signer and event coordinator of a signed sponsor shop order — a link to the signed contract.",
+        "shop-reservation-reminder" => "The signer and default event coordinator of a company with unreserved items from last edition — weekly while the reservation window is open.",
+        "shop-organizer-notice"     => "The sponsor shop's organizer notification list (shop.<edition>.json) — new registrations and signed contracts.",
+        "shop-offer"                => "A potential sponsor, at the address the organizer types — the cart's products and prices with the draft contract attached.",
+        "shop-organizer-reservation" => "The requester of an organizer reservation — what is reserved and the deadline, on the reservation's own cadence.",
+        "shop-reservation-answer"    => "The sponsor contact who asked for a reservation or for more time — the organizers' answer when it is declined.",
+        "shop-order-cancelled"       => "The signer, coordinator and reservation requester of a reservation or order that was cancelled — by them or the organizers.",
+        "shop-cart-reminder"        => "The default signer and default event coordinator of a company with an unsigned order that has items — daily until it is emptied, cancelled or signed.",
         // §707.27 F — say the MAILBOX, since none of these reaches a person in a role.
         "travel-reimbursement-erp" => "The ERP mailbox — a speaker's travel-reimbursement claim and receipts, for payment. The speaker never receives it.",
         "feedback-intake"          => "The organizer ops inbox — a bug, feature idea or question raised through AiHelper, with Reply-To set to the person who asked.",

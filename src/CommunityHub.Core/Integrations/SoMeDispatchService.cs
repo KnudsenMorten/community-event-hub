@@ -188,69 +188,14 @@ public sealed class SoMeDispatchService
     private async Task<(byte[]? Bytes, string? Alt)> ResolveImageAsync(
         SoMePost post, CancellationToken ct)
     {
-        // 🔴 §917 — THE SUBJECT'S CURRENT GRAPHIC WINS OVER THE ONE STAMPED AT PLAN TIME.
-        //
-        // Operator 2026-08-06: *"the picture … takes the current list of speaker - and not stamp
-        // them at planning time. so i dont have to worry about wrong speaker assigned"*. §901
-        // already gave the WORDS that property; §915 accidentally took it away from the PICTURE by
-        // copying the file name onto the post when it was planned.
-        //
-        // ⚠️ The session graphic is the case that breaks: one speaker renders `session-12.png`,
-        // two render `session-12.gif` (§767 — the extension carries single-vs-multi). A second
-        // speaker joining a session leaves the stamped `.png` pointing at artwork that no longer
-        // shows the line-up. §767 Round 8 named this exactly: "a queued SoMe post must point at the
-        // asset ROW and not a copied path".
-        //
-        // 🔒 Types 1–4 ONLY (SoMeSubjectGraphic.IsSubjectOwned). Type 5 names its own file in the
-        // deck and an ad-hoc post has no subject — for those the stored ref IS the answer, and
-        // overriding it would discard a choice somebody made deliberately.
-        var imageRef = post.ImageRef;
-        var current = await new SoMeSubjectGraphic(_db).CurrentFileNameAsync(post, ct);
-        if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current, imageRef, StringComparison.OrdinalIgnoreCase))
-        {
-            _log?.LogInformation(
-                "§917: post {PostId} publishes with its subject's CURRENT graphic {Current} "
-                + "(the post was planned with {Stamped}).", post.Id, current, imageRef ?? "none");
-            imageRef = current;
-        }
-
-        if (string.IsNullOrWhiteSpace(imageRef)) return (null, null);
-
-        try
-        {
-            // The legacy path: a generated graphic tracked as a GraphicAssets row, referenced by
-            // its SharePoint URL or path.
-            if (_fileStore is { CanRead: true })
-            {
-                var graphic = await _db.GraphicAssets.AsNoTracking().FirstOrDefaultAsync(
-                    g => g.EventId == post.EventId
-                         && (g.SharePointUrl == imageRef || g.SharePointPath == imageRef),
-                    ct);
-
-                if (graphic?.StorageItemId is { Length: > 0 } itemId)
-                {
-                    var bytes = await _fileStore.DownloadAsync(itemId, ct);
-                    if (bytes is { Length: > 0 }) return (bytes, "Session graphic");
-                }
-            }
-
-            // §828/§844: a bare FILE NAME in the library folder for this post's type. This is how
-            // every imported event post and every hand-picked graphic is stored.
-            if (_mediaLibrary is not null)
-            {
-                var file = await _mediaLibrary.GetAsync(
-                    imageRef, post.TemplateKind, Domain.SoMePostMediaKind.Graphic, ct);
-                if (file is not null) return (file.Content, "Experts Live Denmark");
-            }
-
-            return (null, null);
-        }
-        catch (Exception ex)
-        {
-            _log?.LogWarning(ex, "SoMeDispatch: image resolve failed for post {PostId}.", post.Id);
-            return (null, null);
-        }
+        // §1313 — one resolver for the publish AND the reminder mails (SoMeMailPreview), so the picture a reminder shows
+        // is the picture LinkedIn gets. The §917 "current graphic wins" rule and both sources moved there unchanged.
+        var (bytes, alt, _) = await Preview().ResolveImageAsync(post, ct);
+        return (bytes, alt);
     }
+
+    /// <summary>§1313 — the post as it will publish, built from this service's own composer and picture sources.</summary>
+    private SoMeMailPreview Preview() => new(_db, _composer, _fileStore, _mediaLibrary, _log);
 
     /// <summary>
     /// §844 — the VIDEO bytes for a post whose medium is Video, or null.
@@ -376,11 +321,28 @@ public sealed class SoMeDispatchService
                 if (_approvalGate is not null
                     && await _approvalGate.BlockedReasonAsync(post, ct) is { } notEligible)
                 {
+                    var previousError = post.LastError;
                     post.LastError = notEligible;
                     _log?.LogWarning(
                         "SoMeDispatch: post {PostId} is approved but no longer eligible — {Reason}",
                         post.Id, notEligible);
                     await _db.SaveChangesAsync(ct);
+
+                    // 🔴 §1304 — HARD BLOCK on the graphic, and the operator must know (*"we can not
+                    // release a some post if pic missing. hard block"* · *"i must know that"* · *"opt
+                    // a"*). A speaker graphic missing a face is un-released by the sweep, so the gate
+                    // answers "waiting for the social-media graphic" here and the post does NOT go out.
+                    // CRITICAL in the log every time; the e-mail only when the reason is NEW for this
+                    // post — the dispatcher re-checks every few minutes and must not mail each run.
+                    if (IsGraphicBlock(notEligible))
+                    {
+                        _log?.LogError(
+                            "§1304 CRITICAL: SoMe post {PostId} ({Type}, {Subject}) was due and is BLOCKED — "
+                            + "its graphic is not released (a speaker photo is missing). {Reason}",
+                            post.Id, post.Type, post.SubjectKey, notEligible);
+                        if (!string.Equals(previousError, notEligible, StringComparison.Ordinal))
+                            await NotifyGraphicBlockedAsync(eventId, settings, post, notEligible, ct);
+                    }
                     continue;
                 }
 
@@ -634,7 +596,11 @@ public sealed class SoMeDispatchService
                 + $"(at {post.ScheduledAtUtc:u}).</p>"
                 + "<p>The LinkedIn API cannot tag an external speaker, so please open the "
                 + "post and manually add the speaker's real LinkedIn handle now.</p>"
-                + $"<p><strong>Post text:</strong><br/>{System.Net.WebUtility.HtmlEncode(post.EffectiveText)}</p>";
+                // §1313 — the REAL text and the picture (operator 2026-09-28: "it shows only the template … i need real
+                // text and picture"). It printed the stored template with {TrackName} / {Speakers} unresolved.
+                + "";
+            var preview = await Preview().BuildAsync(post, ct);
+            body += SoMeMailPreview.Html(preview);
 
             try
             {
@@ -645,7 +611,10 @@ public sealed class SoMeDispatchService
                 using (_emailContext?.Set(new EmailContext(
                     PreAlertCategory, eventId, RingExempt: true)))
                 {
-                    await _email.SendToManyAsync(preAlertTo, subject, body, ct);
+                    if (preview.Picture is not null)
+                        await _email.SendWithAttachmentsAsync(preAlertTo[0], subject, body, new[] { preview.Picture }, preAlertTo.Skip(1).ToList(), ct);
+                    else
+                        await _email.SendToManyAsync(preAlertTo, subject, body, ct);
                 }
                 post.SpeakerPreAlertSent = true;
                 await _db.SaveChangesAsync(ct);
@@ -722,6 +691,15 @@ public sealed class SoMeDispatchService
         body += "<p><strong>Text as published:</strong><br/>"
               + $"{System.Net.WebUtility.HtmlEncode(publishedText).Replace("\n", "<br/>")}</p>";
 
+        // §1313 — the picture itself, attached (it was only NAMED, although §865.3 asked for "graphics"): the same
+        // resolver the publish used, so this is the picture that went out.
+        Email.EmailAttachment? picture = null;
+        if (post.MediaKind != SoMePostMediaKind.Video && !string.IsNullOrWhiteSpace(post.ImageRef))
+        {
+            var preview = await Preview().BuildAsync(post, ct);
+            picture = preview.Picture;
+        }
+
         foreach (var to in recipients)
         {
             try
@@ -732,13 +710,67 @@ public sealed class SoMeDispatchService
                 using (_emailContext?.Set(new EmailContext(
                     NotifyCategory, eventId, RingExempt: true)))
                 {
-                    await _email.SendAsync(to, subject, body, ct);
+                    if (picture is not null) await _email.SendWithAttachmentsAsync(to, subject, body, new[] { picture }, ct);
+                    else await _email.SendAsync(to, subject, body, ct);
                 }
             }
             catch (Exception ex)
             {
                 _log?.LogWarning(ex,
                     "SoMeDispatch: publish notification to {To} failed (post already live).", to);
+            }
+        }
+    }
+
+    /// <summary>EmailLog category for the §1304 critical "post blocked, graphic incomplete" alert.</summary>
+    public const string GraphicBlockedCategory = "some-graphic-blocked";
+
+    /// <summary>§1304 — the gate's graphic reasons (see <c>SoMeApprovalGate.GraphicBlockerAsync</c>).</summary>
+    internal static bool IsGraphicBlock(string reason) =>
+        reason.StartsWith("waiting for the social-media graphic", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 🔴 §1304 — CRITICAL ops mail: a due post was hard-blocked because its graphic is not released
+    /// (the face gate un-released it, or it was never built, because a speaker photo is missing).
+    /// Organizer notification list only, ring-exempt; never a participant.
+    /// </summary>
+    private async Task NotifyGraphicBlockedAsync(
+        int eventId, SoMeSettings? settings, SoMePost post, string reason, CancellationToken ct)
+    {
+        var recipients = settings?.NotificationEmailList ?? (IReadOnlyList<string>)Array.Empty<string>();
+        if (recipients.Count == 0)
+        {
+            _log?.LogError(
+                "§1304 CRITICAL: post {PostId} is blocked on its graphic, but NO alert was mailed — the "
+                + "SoMe notification e-mail list is EMPTY. Set it on /Organizer/SoMeSettings.", post.Id);
+            return;
+        }
+
+        var subject = WithEventPrefix(
+            await EventDisplayNameAsync(eventId, ct), "CRITICAL — SoMe post blocked, graphic missing a photo");
+        var body =
+            "<p><strong>A LinkedIn company-page post that was due has been BLOCKED and was not published.</strong></p>"
+            + "<p>Its graphic is not released because a speaker on it has no photo — a graphic with a "
+            + "blank face is never published.</p>"
+            + $"<p><strong>Post:</strong> #{post.Id} · {post.Type} · {System.Net.WebUtility.HtmlEncode(post.SubjectKey ?? "")}</p>"
+            + $"<p><strong>Scheduled:</strong> {SoMeDisplayTime.ToDanish(post.ScheduledAtUtc):ddd dd MMM yyyy HH:mm} (Danish time)</p>"
+            + $"<p><strong>Reason:</strong> {System.Net.WebUtility.HtmlEncode(reason)}</p>"
+            + "<p><strong>To fix:</strong> add the missing speaker photo. The next graphics sweep rebuilds "
+            + "the graphic with every face and releases it; the post then publishes at its next run. "
+            + "The sweep log names the speaker (\"no photo matched for …\").</p>";
+
+        foreach (var to in recipients)
+        {
+            try
+            {
+                using (_emailContext?.Set(new EmailContext(GraphicBlockedCategory, eventId, RingExempt: true)))
+                {
+                    await _email.SendAsync(to, subject, body, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.LogError(ex, "§1304: graphic-blocked alert to {To} failed (post {PostId}).", to, post.Id);
             }
         }
     }

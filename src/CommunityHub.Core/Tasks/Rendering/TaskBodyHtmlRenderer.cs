@@ -80,7 +80,12 @@ public sealed class TaskBodyHtmlRenderer : TaskBodyRenderer
 
         sb.Append("<a class=\"").Append(cssClass).Append("\" href=\"").Append(Escape(href)).Append('"');
 
-        if (block.Target == TaskLinkTarget.External)
+        // §1305 — a placeholder can turn an external webshop link into an IN-HUB one ({{configuratorUrl}} is
+        // /Sponsor/Shop while the CEH shop is on). An in-hub link stays in this tab and never shows the external
+        // webshop's "log in with your webshop password" dialog, whatever the task file declares.
+        var inHub = href.StartsWith('/') && !href.StartsWith("//", StringComparison.Ordinal);
+
+        if (block.Target == TaskLinkTarget.External && !inHub)
         {
             sb.Append(" target=\"_blank\" rel=\"noopener noreferrer\"");
         }
@@ -88,7 +93,7 @@ public sealed class TaskBodyHtmlRenderer : TaskBodyRenderer
         // §672 — the marker read by the layout's interstitial handler, chosen by declared KIND
         // rather than by sniffing the URL. Separate storage keys mean dismissing one does not
         // silently dismiss the other.
-        sb.Append(block.Interstitial switch
+        sb.Append((inHub ? TaskInterstitial.None : block.Interstitial) switch
         {
             TaskInterstitial.Webshop => " data-webshop-interstitial=\"1\"",
             TaskInterstitial.Zoho => " data-zoho-interstitial=\"1\"",
@@ -96,7 +101,7 @@ public sealed class TaskBodyHtmlRenderer : TaskBodyRenderer
             _ => throw new NotSupportedException($"Unhandled interstitial {block.Interstitial}."),
         });
 
-        sb.Append('>').Append(Escape(block.Label));
+        sb.Append('>').Append(Escape(context.ResolveText(block.Label)));
 
         // §653 — an external button SAYS it leaves the hub, with the same ↗ the navigation uses.
         // 🔒 §671: this follows the declared TARGET, so an in-hub button can no longer promise

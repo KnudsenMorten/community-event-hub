@@ -98,14 +98,20 @@
                 }
 
                 <h4 style="margin:14px 0 8px;">Work</h4>
-                <p class="info" style="font-size:13px;margin:0 0 8px;">Create a subcategory first,
-                   then add tasks to it, assign a volunteer to each task, and update its status as the
-                   work progresses.</p>
-                @foreach (var sub in cat.Subcategories.OrderBy(s => s.Name))
+                <p class="info" style="font-size:13px;margin:0 0 8px;">Add tasks to the category (or to an optional subcategory, e.g. Monday),
+                   assign a volunteer to each task, and update its status as the
+                   work progresses. Assigning <strong>queues</strong> the volunteer — they see the task once an organizer publishes the queue.</p>
+                @{
+                    // §1299 — tasks directly under the category first, then each optional subcategory.
+                    var groups = new List<(string Name, int? SubId, IEnumerable<CommunityHub.Core.Domain.VolunteerTask> Tasks)>
+                    { ($"{cat.Name} (no subcategory)", null, cat.Tasks.Where(t => t.SubcategoryId is null)) };
+                    groups.AddRange(cat.Subcategories.OrderBy(s => s.Name).Select(s => (s.Name, (int?)s.Id, (IEnumerable<CommunityHub.Core.Domain.VolunteerTask>)s.Tasks)));
+                }
+                @foreach (var grp in groups)
                 {
                     <div class="sv-sub">
-                        <h4 style="margin:0 0 6px;">@sub.Name</h4>
-                        @foreach (var t in sub.Tasks.OrderBy(t => t.Title))
+                        <h4 style="margin:0 0 6px;">@grp.Name</h4>
+                        @foreach (var t in grp.Tasks.OrderBy(t => t.Title))
                         {
                             <div class="sv-task">
                                 <strong>@t.Title</strong> &middot; @t.Status
@@ -117,7 +123,7 @@
                                         @foreach (var v in Model.VolunteerOptions)
                                         { <option value="@v.Value">@v.Text</option> }
                                     </select>
-                                    <button type="submit">Assign</button>
+                                    <button type="submit">Assign (queue)</button>
                                 </form>
                                 <form method="post" asp-page-handler="SetTaskStatus" class="sv-form">
                                     <input type="hidden" name="taskId" value="@t.Id" />
@@ -133,7 +139,7 @@
                             </div>
                         }
                         <form method="post" asp-page-handler="CreateTask" class="sv-form">
-                            <input type="hidden" name="subcategoryId" value="@sub.Id" />
+                            @if (grp.SubId is int gsid) { <input type="hidden" name="subcategoryId" value="@gsid" /> } else { <input type="hidden" name="categoryId" value="@cat.Id" /> }
                             <input type="text" name="title" placeholder="New task title" maxlength="300" required />
                             <input type="date" name="due" />
                             <input type="text" name="shift" placeholder="Shift (optional)" maxlength="200" />
@@ -144,7 +150,7 @@
 
                 <form method="post" asp-page-handler="CreateSubcategory" class="sv-form">
                     <input type="hidden" name="categoryId" value="@cat.Id" />
-                    <input type="text" name="name" placeholder="New subcategory name" maxlength="200" required />
+                    <input type="text" name="name" placeholder="New subcategory (optional — e.g. Monday)" maxlength="200" required />
                     <button type="submit">Add subcategory</button>
                 </form>
             </div>

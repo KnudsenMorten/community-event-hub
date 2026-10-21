@@ -95,7 +95,8 @@ public sealed class EvaluationReportDebounceService
             .Where(s => s.EventId == eventId && s.CehSessionId != null)
             .Select(s => new
             {
-                s.Id, s.Title, s.CehSessionId, s.PublishedReportVersion,
+                s.Id, s.Title, s.CehSessionId, s.PublishedReportVersion, s.PublishedReportAt, s.UpdatedAt,
+                s.CollectionWindowClosesAt,
             })
             .ToListAsync(ct);
 
@@ -148,9 +149,39 @@ public sealed class EvaluationReportDebounceService
                 continue;
             }
 
+            // 🔒 §1271 — never while the session is still COLLECTING. The rule (operator 2026-09-21,
+            // confirmed): feedback is open from the start until 30 minutes after the scheduled end,
+            // then it closes. Quiet alone was not enough: a lull of 30 minutes between early presses
+            // and the end-of-talk rush released a report mid-session, and the real one went out
+            // afterwards as an "Updated" mail. A report describes a CLOSED window.
+            if (now < s.CollectionWindowClosesAt)
+            {
+                outcomes.Add(new(s.Id, s.Title, Outcome.StillSettling));
+                continue;
+            }
+
             if (lastReceived.TryGetValue(s.Id, out var last) && last > quietBefore)
             {
                 outcomes.Add(new(s.Id, s.Title, Outcome.StillSettling));
+                continue;
+            }
+
+            // 🔴 §1264 — a report already sent is re-sent ONLY when THIS session moved: a response of
+            // its own arrived, or the session itself was changed (a C3 retitle or room move), after
+            // it was last published. The version also folds in the EVENT's response count, because
+            // the PDF prints the pooled event figure — so every press in ANY room changed the version
+            // of every rated session, and each pass mailed all of their speakers "Updated evaluation
+            // results". Operator 2026-09-21: *"why do i continue to receive these"* · *"getting them
+            // every x min"*. At the event that is every rated speaker, every five minutes.
+            // ⇒ The event figure in an already-sent PDF may lag; it catches up with the session's
+            // next own change. A speaker is not mailed about somebody else's room.
+            if (s.PublishedReportAt is { } publishedAt
+                && !string.IsNullOrEmpty(s.PublishedReportVersion)
+                // STRICTLY before: a press stamped at the publish instant may not be in that PDF.
+                && last < publishedAt
+                && s.UpdatedAt < publishedAt)
+            {
+                outcomes.Add(new(s.Id, s.Title, Outcome.AlreadyCurrent));
                 continue;
             }
 

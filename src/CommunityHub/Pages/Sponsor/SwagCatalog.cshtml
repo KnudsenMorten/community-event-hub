@@ -4,11 +4,16 @@
     ViewData["Title"] = "Swag catalogue";
     var money = (decimal? v) => v is null
         ? null
-        : (Model.CurrencySymbol ?? string.Empty) + v.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        : (Model.CurrencySymbol ?? string.Empty) + CommunityHub.Core.Integrations.Webshop.ShopPricing.Amount(Math.Round(v.Value));
 }
 
 <div class="card">
     <h1>Swag catalogue</h1>
+    @if (!string.IsNullOrEmpty(Model.ShopMessage))
+    {
+        <p class="@(Model.ShopMessageIsError ? "error" : "info")" role="status">@Model.ShopMessage
+            @if (!Model.ShopMessageIsError) { <a href="/Sponsor/Shop/Cart">Review, sign and confirm in your cart &rarr;</a> }</p>
+    }
 
     @if (Model.NotAvailableYet)
     {
@@ -41,7 +46,7 @@
            promise they never read. *@
         <p><strong>Every item in this catalogue is branded with your logo.</strong>
            Pick one, and it goes into all @(Model.BagQuantity > 0
-               ? Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " "
+               ? Model.BagQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture) + " "
                : "")attendee bags with your logo on it.
            We handle the artwork, the order, the delivery and the packing — you choose the item and
            give us a logo, and that is the whole job.</p>
@@ -70,8 +75,10 @@
                 @foreach (var credit in Model.Credits)
                 {
                     <p style="margin:0 0 4px;">
-                        <strong>You have a @((Model.CurrencySymbol ?? string.Empty) + credit.Amount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)) credit</strong>
-                        towards the catalogue. Use code <code>@credit.Code</code> at checkout.
+                        <strong>You have a @((Model.CurrencySymbol ?? string.Empty) + CommunityHub.Core.Integrations.Webshop.ShopPricing.Amount(Math.Round(credit.Amount))) credit</strong>
+                        towards the catalogue.
+                        @if (Model.OrderInCehShop) { <text>It is deducted automatically from your order.</text> }
+                        else { <text>Use code <code>@credit.Code</code> at checkout.</text> }
                         @if (credit.ExpiresOn is not null)
                         {
                             <span style="color:#065f46;">Valid until @credit.ExpiresOn.Value.ToString("d MMMM yyyy").</span>
@@ -138,16 +145,36 @@
                                    checkout. *@
                                 @if (item.UnitPrice is not null)
                                 {
-                                    <div style="border-top:1px solid #f3f4f6;padding-top:8px;font-size:13.5px;">
-                                        <div style="display:flex;justify-content:space-between;">
-                                            <span style="color:#6b7280;">Per piece</span>
-                                            <span>@money(item.UnitPrice)</span>
-                                        </div>
-                                        @if (Model.BagQuantity > 0 && item.TotalPrice is not null)
+                                    @* §1305 — the TOTAL is the headline: the item goes into every attendee bag. The
+                                       per-piece price is the small print (operator 2026-09-26: sponsors read €11.50 as
+                                       the price of the order). *@
+                                    <div style="border-top:1px solid #f3f4f6;padding-top:8px;">
+                                        @if (Model.Contribution.TryGetValue(item.ProductId, out var share))
                                         {
-                                            <div style="display:flex;justify-content:space-between;font-weight:600;margin-top:2px;">
-                                                <span>Total &times; @Model.BagQuantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
-                                                <span>@money(item.TotalPrice)</span>
+                                            @* §1305 — what the sponsor pays, and why (operator 2026-09-26: "include the sponsors
+                                               contribution rest price is covered by ELDK, full price - and mention attendee count
+                                               (1250) … show the sponsors price in bold and larger"). *@
+                                            <div class="swag-split">
+                                                <div class="swag-split-label">Your sponsor contribution (@share.Percent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)&nbsp;%)</div>
+                                                <div class="swag-split-price">@money(share.ShareEur)</div>
+                                                <div class="swag-split-note">
+                                                    Full price for @share.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture) attendees: <strong>@money(share.FullEur)</strong><br />
+                                                    ELDK covers the rest: <strong>@money(share.EldkEur)</strong><br />
+                                                    With your logo in every attendee bag.
+                                                </div>
+                                            </div>
+                                        }
+                                        else if (Model.BagQuantity > 0 && item.TotalPrice is not null)
+                                        {
+                                            <div style="font-size:20px;font-weight:700;color:#1a1a2e;">@money(item.TotalPrice)</div>
+                                            <div style="font-size:13px;color:#374151;">with your logo in all @Model.BagQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture) attendee bags</div>
+                                            <div style="font-size:12.5px;color:#6b7280;margin-top:2px;">@money(item.UnitPrice) per piece × @Model.BagQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture)</div>
+                                        }
+                                        else
+                                        {
+                                            <div style="display:flex;justify-content:space-between;font-size:13.5px;">
+                                                <span style="color:#6b7280;">Per piece</span>
+                                                <span>@money(item.UnitPrice)</span>
                                             </div>
                                         }
                                     </div>
@@ -187,7 +214,14 @@
                                             <span style="display:inline-block;padding:3px 9px;border-radius:999px;background:#dbeafe;color:#1e40af;font-size:12px;margin-right:8px;">
                                                 Reserved for you
                                             </span>
-                                            @if (!string.IsNullOrWhiteSpace(item.BuyUrl))
+                                            @if (Model.OrderInCehShop)
+                                            {
+                                                <form method="post" asp-page-handler="AddToOrder" style="display:inline;">
+                                                    <input type="hidden" name="productId" value="@item.ProductId" />
+                                                    <button type="submit">Confirm it — add to my order</button>
+                                                </form>
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(item.BuyUrl))
                                             {
                                                 <a href="@item.BuyUrl" target="_blank" rel="noopener noreferrer">Confirm it</a>
                                             }
@@ -200,7 +234,14 @@
                                                     @left left
                                                 </span>
                                             }
-                                            @if (!string.IsNullOrWhiteSpace(item.BuyUrl))
+                                            @if (Model.OrderInCehShop)
+                                            {
+                                                <form method="post" asp-page-handler="AddToOrder" style="display:inline;">
+                                                    <input type="hidden" name="productId" value="@item.ProductId" />
+                                                    <button type="submit">Choose this — add to my order</button>
+                                                </form>
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(item.BuyUrl))
                                             {
                                                 <a href="@item.BuyUrl" target="_blank" rel="noopener noreferrer">Choose this</a>
                                             }
@@ -245,3 +286,9 @@
         <p style="margin-top:18px;"><a asp-page="/Index">Back to hub</a></p>
     }
 </div>
+<style>
+    .swag-split { display:grid; gap:4px; padding:4px 0; }
+    .swag-split-label { font-size:15px; font-weight:600; color:#374151; }
+    .swag-split-price { font-size:30px; font-weight:800; color:#1a1a2e; line-height:1.15; }
+    .swag-split-note { font-size:15px; color:#374151; line-height:1.5; }
+</style>

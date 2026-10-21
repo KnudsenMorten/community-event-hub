@@ -59,7 +59,7 @@ public sealed class HotelLogisticsProducerTests
     }
 
     private static async Task<IReadOnlyList<HotelLogisticsFile>> BuildAsync(CommunityHubDbContext db) =>
-        await new HotelLogisticsProducer(db).BuildAllAsync(EventId, "ELDK27");
+        await new HotelLogisticsProducer(db, new CommunityHub.Core.Entitlements.HotelCoverageService(db, TimeProvider.System)).BuildAllAsync(EventId, "ELDK27");
 
     private static List<string> Names(GeneratedFile f)
     {
@@ -150,7 +150,7 @@ public sealed class HotelLogisticsProducerTests
         await AddGuestAsync(db, "Grace Hopper", hotelId: null);
 
         var files = await BuildAsync(db);
-        var unplaced = await new HotelLogisticsProducer(db).UnplacedAsync(EventId);
+        var unplaced = await new HotelLogisticsProducer(db, new CommunityHub.Core.Entitlements.HotelCoverageService(db, TimeProvider.System)).UnplacedAsync(EventId);
 
         Assert.Equal(["Ada Lovelace"], Names(files.Single().File));
         Assert.Equal(["Grace Hopper"], unplaced);
@@ -236,5 +236,84 @@ public sealed class HotelLogisticsProducerTests
         var second = await BuildAsync(db);
 
         Assert.Equal(first.Single().File.ContentKey, second.Single().File.ContentKey);
+    }
+
+    // =====================================================================
+    //  §1296 — the coverage columns (operator 2026-09-22: "the excel file for hotel must be
+    //  updated with 2 more columns … coverage (eldk, own expenses)")
+    // =====================================================================
+
+    /// <summary>Read one guest row's (Nights, ELDK, own expenses) triple.</summary>
+    private static (int Nights, int Eldk, int Own) Split(GeneratedFile f, string name)
+    {
+        using var wb = new XLWorkbook(new MemoryStream(f.Content));
+        var ws = wb.Worksheet("Rooming list");
+        for (var r = 2; ; r++)
+        {
+            var cell = ws.Cell(r, 1).GetString();
+            if (string.IsNullOrWhiteSpace(cell)) break;
+            if (cell != name) continue;
+            return ((int)ws.Cell(r, 6).GetDouble(),
+                    (int)ws.Cell(r, 7).GetDouble(),
+                    (int)ws.Cell(r, 8).GetDouble());
+        }
+        throw new Xunit.Sdk.XunitException($"No row for {name}.");
+    }
+
+    /// <summary>Categorize a seeded speaker, which is what gives them a coverage class at all.</summary>
+    private static async Task CategorizeAsync(
+        CommunityHubDbContext db, int participantId, SpeakerCategory category)
+    {
+        db.SpeakerProfiles.Add(new SpeakerProfile
+        {
+            EventId = EventId, ParticipantId = participantId, Category = category,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task The_sheet_splits_each_stay_into_ELDK_and_own_expense_nights()
+    {
+        using var db = NewDb();
+        var scandic = await AddHotelAsync(db, "Scandic Copenhagen");
+
+        // A Community speaker with no linked sessions ⇒ the main-day class ⇒ 1 night standard,
+        // against a three-night booking.
+        var ada = await AddGuestAsync(db, "Ada Lovelace", scandic,
+            checkIn: new DateOnly(2027, 2, 8), checkOut: new DateOnly(2027, 2, 11));
+        await CategorizeAsync(db, ada, SpeakerCategory.Community);
+
+        var file = (await BuildAsync(db)).Single();
+        var (nights, eldk, own) = Split(file.File, "Ada Lovelace");
+
+        Assert.Equal(3, nights);
+        Assert.Equal(1, eldk);
+        Assert.Equal(2, own);   // 3 booked − 1 covered, and the hotel can split the bill
+    }
+
+    /// <summary>
+    /// 🔒 The coverage numbers are part of the CONTENT KEY. §6.4 mails a hotel its file when the
+    /// file changes, so a key that ignored these columns would let a coverage decision reach the
+    /// sheet and never reach the hotel.
+    /// </summary>
+    [Fact]
+    public async Task Changing_what_we_cover_changes_the_content_key()
+    {
+        using var db = NewDb();
+        var scandic = await AddHotelAsync(db, "Scandic Copenhagen");
+        var ada = await AddGuestAsync(db, "Ada Lovelace", scandic,
+            checkIn: new DateOnly(2027, 2, 8), checkOut: new DateOnly(2027, 2, 11));
+        await CategorizeAsync(db, ada, SpeakerCategory.Community);
+
+        var before = (await BuildAsync(db)).Single();
+        Assert.Equal((3, 1, 2), Split(before.File, "Ada Lovelace"));
+
+        // An organizer grants her one extra night on her own page.
+        await new CommunityHub.Core.Entitlements.HotelCoverageService(db, TimeProvider.System)
+            .SetExtraNightsAsync(EventId, ada, 1, "agreed", "org@example.test");
+
+        var after = (await BuildAsync(db)).Single();
+        Assert.Equal((3, 2, 1), Split(after.File, "Ada Lovelace"));
+        Assert.NotEqual(before.File.ContentKey, after.File.ContentKey);
     }
 }

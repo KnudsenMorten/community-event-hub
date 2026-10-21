@@ -48,8 +48,11 @@ public sealed class SoMeNext24HoursDigest
         // §1170 — a human subject and a clickable link. Optional so existing constructions and
         // tests are unchanged; both are registered in the hosts that actually send this.
         SoMeSubjectLabeller? labeller = null,
-        Microsoft.Extensions.Options.IOptions<Email.EmailTemplateOptions>? branding = null)
+        Microsoft.Extensions.Options.IOptions<Email.EmailTemplateOptions>? branding = null,
+        // §1313 — each post's real text and picture in the notice (operator 2026-09-28).
+        SoMeMailPreview? preview = null)
     {
+        _preview = preview;
         _db = db;
         _email = email;
         _ctx = ctx;
@@ -58,6 +61,8 @@ public sealed class SoMeNext24HoursDigest
         _labeller = labeller;
         _hubUrl = (branding?.Value.HubUrl ?? string.Empty).TrimEnd('/');
     }
+
+    private readonly SoMeMailPreview? _preview;
 
     /// <summary>Returns how many posts the digest listed; 0 means nothing was sent.</summary>
     public async Task<int> RunAsync(int eventId, CancellationToken ct = default)
@@ -174,19 +179,43 @@ public sealed class SoMeNext24HoursDigest
             + "<p style=\"color:#6b7280;font-size:13px;\">Anything you do not want published: open it "
             + "and move the date, or switch it off.</p>";
 
+        // 🔴 §1313 — THE POSTS THEMSELVES, AS THEY WILL GO OUT. Operator 2026-09-28: "all the reminder emails … must
+        // include the graphics that go out as well so we can validate the picture". The table said WHEN and WHICH; this
+        // says WHAT — the resolved text, and the picture attached (the same resolver the publish uses).
+        var pictures = new List<Email.EmailAttachment>();
+        if (_preview is not null)
+        {
+            foreach (var p in due)
+            {
+                try
+                {
+                    var preview = await _preview.BuildAsync(p, ct);
+                    body += "<hr style=\"border:0;border-top:1px solid #e5e7eb;margin:18px 0;\"/>"
+                            + $"<h3 style=\"margin:0 0 6px;font-size:15px;\">{SoMeDisplayTime.ToDanish(p.ScheduledAtUtc):ddd dd MMM HH:mm} · "
+                            + $"{WebUtility.HtmlEncode(Label(p))}</h3>"
+                            + SoMeMailPreview.Html(preview);
+                    if (preview.Picture is not null) pictures.Add(preview.Picture);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _log?.LogWarning(ex, "§1313: preview for post {PostId} unavailable; the notice lists it without.", p.Id);
+                }
+            }
+        }
+
         try
         {
             // 🔴 RING-EXEMPT — the §1061 lesson, applied at the moment of writing rather than after
             // PROD proved it. info@ is an organizer MAILBOX, not a participant row, so without this
             // the mail is dropped as an "unknown recipient" and the only symptom is an empty inbox.
             using var _ = _ctx?.Set(new EmailContext("some-24h-digest", RingExempt: true));
-            await _email.SendAsync(
-                NoticeEmail,
-                due.Count == 1
-                    ? $"SoMe: \"{Label(soonest)}\" publishes in {hoursLeft}h"
-                    : $"SoMe: {due.Count} post(s) publish within 24 hours",
-                body,
-                ct);
+            var digestSubject = due.Count == 1
+                ? $"SoMe: \"{Label(soonest)}\" publishes in {hoursLeft}h"
+                : $"SoMe: {due.Count} post(s) publish within 24 hours";
+            if (pictures.Count > 0)
+                await _email.SendWithAttachmentsAsync(NoticeEmail, digestSubject, body, pictures, ct);
+            else
+                await _email.SendAsync(NoticeEmail, digestSubject, body, ct);
 
             // 🔴 §1190 — STAMPED ONLY AFTER THE MAIL WENT. Inside the try, after the send: stamping
             // before it would mean a Brevo outage silently consumed the one warning he gets, and the

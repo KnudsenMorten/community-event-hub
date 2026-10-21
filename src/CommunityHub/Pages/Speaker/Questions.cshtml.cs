@@ -29,16 +29,23 @@ public class QuestionsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly MasterClassPrepService _prep;
 
-    public QuestionsModel(ICurrentParticipantAccessor participant, MasterClassPrepService prep)
+    private readonly CommunityHub.Core.Domain.SpeakerAccessService _access;
+
+    public QuestionsModel(
+        ICurrentParticipantAccessor participant, MasterClassPrepService prep,
+        CommunityHub.Core.Domain.SpeakerAccessService access)
     {
         _participant = participant;
         _prep = prep;
+        _access = access;
     }
 
-    public static readonly ParticipantRole[] EligibleRoles =
-    {
-        ParticipantRole.Speaker,
-    };
+    /// <summary>
+    /// §1255 — speaker-hub access by CAPABILITY (a SpeakerProfile exists), not by
+    /// <c>Participant.Role</c>. See <see cref="CommunityHub.Core.Domain.ParticipantCapabilities"/>.
+    /// </summary>
+    private Task<bool> MayUseSpeakerHubAsync(CurrentParticipant me, CancellationToken ct) =>
+        _access.HasSpeakerHubAccessAsync(me.EventId, me.ParticipantId, me.Role, ct);
 
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }
@@ -63,7 +70,7 @@ public class QuestionsModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
+        if (!await MayUseSpeakerHubAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         Notice = Msg;
         await LoadAsync(me, ct);
@@ -81,7 +88,7 @@ public class QuestionsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (!EligibleRoles.Contains(me.Role)) return Forbid();
+        if (!await MayUseSpeakerHubAsync(me, ct)) return Forbid();
 
         try
         {

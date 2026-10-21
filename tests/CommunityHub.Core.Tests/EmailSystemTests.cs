@@ -196,6 +196,33 @@ public sealed class EmailSystemTests
         Assert.True(log.Success);
     }
 
+    /// <summary>
+    /// 🔴 §1312 — the logging decorator (the one PROD sends through) passes the CC of an ATTACHMENT mail on. It used to fall
+    /// through to the interface default, which dropped the CC: every shop mail with an attachment (reservation + booth map,
+    /// signing request + contract, offer, signed contract) reached the sponsor without the organizers' copy — and no test
+    /// caught it, because the shop tests send straight to a capturing fake, never through this decorator.
+    /// </summary>
+    [Fact]
+    public async Task Logging_decorator_passes_the_cc_of_an_attachment_mail_through_and_logs_it()
+    {
+        using var db = NewDb();
+        var (eventId, p) = await SeedActiveAsync(db);
+        var ctx = new EmailContextAccessor();
+        var inner = new CapturingEmailSender();
+        var logger = MakeLoggingSender(db, inner, ctx);
+
+        using (ctx.Set(new EmailContext("shop-sign-request", eventId, p.Id, "Test Person")))
+        {
+            await logger.SendWithAttachmentsAsync("to@example.test", "Please sign", "<p>x</p>",
+                new[] { new EmailAttachment("contract.pdf", new byte[] { 1 }, "application/pdf") },
+                new[] { "mok@example.test", "info@example.test" });
+        }
+
+        var sent = Assert.Single(inner.AttachmentCc);
+        Assert.Equal(new[] { "mok@example.test", "info@example.test" }, sent.Cc);   // reached the real sender
+        Assert.Contains("info@example.test", (await db.EmailLogs.SingleAsync()).CcEmails);  // and the log says so
+    }
+
     [Fact]
     public async Task Logging_decorator_records_a_failed_send_then_rethrows()
     {

@@ -173,6 +173,8 @@ public static class BreadcrumbBuilder
             ["/organizer/editvolunteertask"]     = "/organizer/volunteers",
             ["/organizer/organizerallocation"]   = "/organizer/volunteers",
             ["/organizer/volunteertasksexcel"]   = "/organizer/volunteers",
+            // §1297 — the worker roster (the planner's scope list).
+            ["/organizer/volunteerworkerroster"] = "/organizer/volunteers",
 
             // Logistics hub
             ["/organizer/hotels"]                = "/organizer/logistics",

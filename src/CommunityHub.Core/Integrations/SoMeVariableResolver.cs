@@ -331,12 +331,15 @@ public sealed class SoMeVariableResolver
             .Where(x => x.EventId == eventId && x.SponsorCompanyId == sponsorCompanyId)
             .Select(x => new
             {
-                x.CompanyName, x.SponsorPackage, x.SocialMediaIntro, x.WebsiteUrl,
-                x.LinkedInUrl, x.LinkedInOrganizationId,
+                x.CompanyName, x.SponsorPackage, x.SocialMediaIntro,
+                x.LinkedInOrganizationId, x.SoMeTagContacts,
             })
             .FirstOrDefaultAsync(ct);
 
         if (s is null) return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        // §1360 — website / LinkedIn are ONE field, on the company page.
+        var links = await Webshop.CompanyLinks.ForAsync(_db, eventId, sponsorCompanyId, ct);
 
         // §824.16 — the DB-local mirrored name. The full public→legal→billing chain (DESIGN §6) lives
         // in Company Manager; a background post composer must not depend on a third-party API being
@@ -349,6 +352,10 @@ public sealed class SoMeVariableResolver
         var contacts = await _db.Participants
             .Where(p => p.EventId == eventId
                         && p.IsActive
+                        // 🔴 §1347 — never tag a TEST account. A real company can carry seeded test
+                        // contacts (TestDataScope: 2linkIT has them alongside real ones), and every
+                        // other mention list here already excludes them.
+                        && !p.IsTestUser
                         && p.Role == ParticipantRole.Sponsor
                         && p.SponsorCompanyId == sponsorCompanyId
                         && (p.IsSigner || p.IsEventCoordinator))
@@ -364,14 +371,19 @@ public sealed class SoMeVariableResolver
         {
             ["SponsorName"]    = name,
             ["SponsorTier"]    = s.SponsorPackage.ToString(),
-            ["SponsorWebsite"] = TrimScheme(s.WebsiteUrl),
+            ["SponsorWebsite"] = TrimScheme(links.Website),
             ["SponsorSocialMediaCompanyDescription"] = s.SocialMediaIntro,
             ["SponsorHashtag"] = Hashtag(name),
-            ["SponsorLinkedInUrl"] = MentionOrName(name, s.LinkedInOrganizationId, s.LinkedInUrl),
+            ["SponsorLinkedInUrl"] = MentionOrName(name, s.LinkedInOrganizationId, links.LinkedIn),
+            // §1300 — the COMPANY for the Tag line: a real mention, or EMPTY when we hold no id — never
+            // the plain name, which in a "Tag:" line would read as a tag that failed.
+            ["SponsorCompanyMention"] = MentionOrNull(name, s.LinkedInOrganizationId, links.LinkedIn),
             // 🔒 A person who is BOTH signer and coordinator appears once, under signer — being
             // tagged twice in one post reads as a mistake.
-            ["SponsorSigner"] = MentionList(signers),
-            ["SponsorEventCoordinators"] = MentionList(coordinators),
+            // 🔴 §1312 — a sponsor can opt out of having its PEOPLE tagged (CodeTwo: "only tag their company on linkedin");
+            // both are optional variables, so an empty value simply drops them and the company tag stays.
+            ["SponsorSigner"] = s.SoMeTagContacts ? MentionList(signers) : null,
+            ["SponsorEventCoordinators"] = s.SoMeTagContacts ? MentionList(coordinators) : null,
         };
     }
 
@@ -383,19 +395,21 @@ public sealed class SoMeVariableResolver
             .Where(x => x.EventId == eventId && x.SponsorPackage == tier)
             .Select(x => new
             {
-                x.SponsorCompanyId, x.CompanyName, x.LinkedInOrganizationId, x.LinkedInUrl,
+                x.SponsorCompanyId, x.CompanyName, x.LinkedInOrganizationId,
             })
             .ToListAsync(ct);
+        var links = await Webshop.CompanyLinks.AllAsync(_db, eventId, ct);   // §1360 — the company page's LinkedIn
 
         // 🔴 §905 — a TEST company is not named in a tier announcement. Operator 2026-08-06:
         // *"sponsor categories and sponsor individual of type test should not be included"*.
-        var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+        // 🔴 §1347 — nor a WITHDRAWN one: it has stopped being a sponsor in that tier.
+        var testCompanies = await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(_db, eventId, ct);
 
         var listed = rows
             .Where(r => r.SponsorCompanyId == null || !testCompanies.Contains(r.SponsorCompanyId))
             .Select(r => MentionOrName(
                 SponsorCompanyName.Resolve(r.CompanyName, null, null, r.SponsorCompanyId),
-                r.LinkedInOrganizationId, r.LinkedInUrl))
+                r.LinkedInOrganizationId, Webshop.CompanyLinks.Of(links, r.SponsorCompanyId).LinkedIn))
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -424,6 +438,13 @@ public sealed class SoMeVariableResolver
     {
         var urn = LinkedInUrlParser.TryBuildOrganizationUrn(organizationId, linkedInUrl);
         return urn is null ? name : $"@[{name}]({urn})";
+    }
+
+    /// <summary>§1300 — the company mention, or null when no organization id is known.</summary>
+    internal static string? MentionOrNull(string name, string? organizationId, string? linkedInUrl)
+    {
+        var urn = LinkedInUrlParser.TryBuildOrganizationUrn(organizationId, linkedInUrl);
+        return urn is null ? null : $"@[{name}]({urn})";
     }
 
     /// <summary>"Truesec" → "#Truesec", as the Type 4 sample leads its tag block.</summary>

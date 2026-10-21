@@ -26,6 +26,21 @@ public sealed class LayoutSectionsTests
         throw new DirectoryNotFoundException("Could not locate src/CommunityHub/Pages from " + AppContext.BaseDirectory);
     }
 
+    /// <summary>
+    /// 🔒 §1312 — the "replaced by a feature" rule mirrors the ring rule: a NOT-ring-scoped feature is on for everyone once
+    /// enabled. Testing only the ring kept the old webshop link AND the old "Previous Orders" on PROD beside the new ones
+    /// (operator 2026-09-27: "previous orders is shown twice" · "this links to the old webshop").
+    /// </summary>
+    [Fact]
+    public void An_item_replaced_by_a_feature_hides_whenever_its_replacement_shows()
+    {
+        var layout = File.ReadAllText(Path.Combine(PagesDir(), "Shared", "_Layout.cshtml"));
+        var start = layout.IndexOf("replacedByFeature = it =>", StringComparison.Ordinal);
+        Assert.True(start > 0, "replacedByFeature not found in _Layout.cshtml");
+        var rule = layout.Substring(start, layout.IndexOf(';', start) - start);
+        Assert.Contains("!fs.Descriptor.IsRingScoped", rule);
+    }
+
     [Fact]
     public void Every_section_a_page_defines_is_rendered_by_the_layout()
     {

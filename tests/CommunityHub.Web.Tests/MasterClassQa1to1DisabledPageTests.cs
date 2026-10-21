@@ -179,7 +179,7 @@ public sealed class MasterClassQa1to1DisabledPageTests
 
         var http = new DefaultHttpContext { User = Session(seed.Speaker) };
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        var model = new QuestionsModel(accessor, Prep(db))
+        var model = new QuestionsModel(accessor, Prep(db), new CommunityHub.Core.Domain.SpeakerAccessService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -204,7 +204,7 @@ public sealed class MasterClassQa1to1DisabledPageTests
 
         var http = new DefaultHttpContext { User = Session(seed.Speaker) };
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        var model = new QuestionsModel(accessor, Prep(db))
+        var model = new QuestionsModel(accessor, Prep(db), new CommunityHub.Core.Domain.SpeakerAccessService(db))
         {
             PageContext = new PageContext { HttpContext = http },
             ReplyBody = "See the prep notes for setup.",

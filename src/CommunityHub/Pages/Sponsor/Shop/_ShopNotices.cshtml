@@ -1,0 +1,121 @@
+@model CommunityHub.Pages.Sponsor.Shop.ShopPageModel
+@* §1305 — the shared notices of every sponsor-shop page, and the shop's small sub-navigation. *@
+@if (Model.NotAvailableYet)
+{
+    <p class="info" role="status">The sponsor shop is not open yet. Please contact the organizers.</p>
+}
+else if (Model.NoCompany)
+{
+    <p class="info" role="status">Your sign-in is not linked to a sponsor company, so there is nothing to buy for yet.
+       If you are an organizer, act as a company contact to prepare their cart.</p>
+}
+else
+{
+    @if (Model.IsPreview)
+    {
+        <p class="info" role="status" style="border-left:4px solid #b45309;">
+            <strong>Preview</strong> — the shop is switched off (<code>@CommunityHub.Pages.Sponsor.Shop.ShopPageModel.FeatureKey</code>); sponsors cannot see it yet.
+        </p>
+    }
+    var here = ViewContext.RouteData.Values["page"] as string ?? string.Empty;
+    string Cur(string page) => string.Equals(here, page, StringComparison.OrdinalIgnoreCase) ? "current" : "";
+    @* The tabs sit right under the page title; the order banner and the teaser come after them (operator 2026-09-26:
+       "this page also looks weird with cart info in the middle"). *@
+    <nav class="shop-subnav" aria-label="Sponsor shop">
+        <a class="@Cur("/Sponsor/Shop/Index")" aria-current="@(Cur("/Sponsor/Shop/Index") == "" ? null : "page")" asp-page="/Sponsor/Shop/Index">Shop</a>
+        <a class="@Cur("/Sponsor/Shop/Cart")" aria-current="@(Cur("/Sponsor/Shop/Cart") == "" ? null : "page")" asp-page="/Sponsor/Shop/Cart">Cart &amp; company</a>
+        <a class="@Cur("/Sponsor/Shop/Orders")" aria-current="@(Cur("/Sponsor/Shop/Orders") == "" ? null : "page")" asp-page="/Sponsor/Shop/Orders">Orders</a>
+        <a class="@Cur("/Sponsor/Shop/BoothMap")" aria-current="@(Cur("/Sponsor/Shop/BoothMap") == "" ? null : "page")" asp-page="/Sponsor/Shop/BoothMap">Booth map</a>
+        @* "Reservations" is hidden (operator 2026-09-26: "i told you to hide reservations"); the page stays for the
+           ELDK28 reservation window. *@
+        @if (Model.Company is not null)
+        {
+            @if (Model.CompanyOptions.Count > 1)
+            {
+                @* §1309 — "Ordering for … Switch", like the old webshop: the cart, orders and signing all follow the chosen company. *@
+                <form method="post" asp-page="/Sponsor/SwitchCompany" class="shop-company shop-switch">
+                    <input type="hidden" name="returnUrl" value="@Context.Request.Path@Context.Request.QueryString" />
+                    <label for="shop-switch-co">Buying for</label>
+                    <select id="shop-switch-co" name="companyId" onchange="this.form.submit();">
+                        @foreach (var o in Model.CompanyOptions)
+                        {
+                            <option value="@o.CompanyId" selected="@(o.CompanyId == Model.CompanyId)">@o.DisplayName</option>
+                        }
+                    </select>
+                    <button type="submit">Switch</button>
+                    @if (Model.Company.State == CommunityHub.Core.Domain.ShopCompanyState.Candidate) { <span>(registered — not yet a sponsor)</span> }
+                </form>
+            }
+            else
+            {
+                <span class="shop-company">Buying for <strong>@Model.Company.LegalLabel</strong>@(Model.Company.State == CommunityHub.Core.Domain.ShopCompanyState.Candidate ? " (registered — not yet a sponsor)" : "")</span>
+            }
+        }
+    </nav>
+    @if (here is not "/Sponsor/Shop/Contract" and not "/Sponsor/Shop/Cart")
+    {
+        @await Component.InvokeAsync("ShopOrderReady")
+    }
+    @* The teaser bar lives under the site menu now (_Layout), on every sponsor page. *@
+}
+<style>
+    .shop-subnav { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; margin:8px 0 16px; font-size:14px; }
+    /* Readable at a glance (operator 2026-09-26: "buttons are hard to read"): dark text on white with a clear border,
+       the page you are on filled. */
+    .shop-subnav a { text-decoration:none; padding:8px 14px; border-radius:999px; background:#fff; color:#0d47a1 !important;
+                     border:2px solid #1565c0; font-weight:600; font-size:15px; }
+    .shop-subnav a:hover, .shop-subnav a:focus-visible { background:#e8f0fb; }
+    .shop-subnav a.current { background:#1565c0; color:#fff !important; }
+    .shop-company { color:#4b5563; font-size:13px; flex-basis:100%; }
+    .shop-switch { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; margin:0; font-size:14px; }
+    .shop-switch select { font-size:15px; padding:6px 8px; font-weight:700; max-width:100%; }
+    .shop-switch button { padding:6px 14px; border-radius:999px; background:#1565c0; color:#fff; font-weight:700; }
+    /* [hidden] must win over display:grid — without this the Swag tab showed its cards with "Add to cart" anyway. */
+    .shop-grid[hidden] { display:none; }
+    .shop-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+    .shop-card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:8px; background:#fff; }
+    .shop-card img { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:6px; background:#f3f4f6; }
+    .shop-card h3 { font-size:15px; margin:0; line-height:1.3; }
+    .shop-card .price { font-weight:700; }
+    .shop-card .avail { font-size:13px; }
+    .shop-card .avail.out { color:#b91c1c; }
+    .shop-card form { display:flex; gap:6px; margin-top:auto; }
+    .shop-card input[type=number] { width:64px; }
+    .shop-cartbar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; justify-content:space-between;
+                    padding:10px 14px; margin:0 0 12px; background:#eef4fb; border:1px solid #bcd3ee; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.06); }
+    .shop-cartbar.added { background:#e8f5e9; border-color:#81c784; animation:shopflash 1.2s ease-out 1; }
+    .shop-cartbar-btn { background:#1565c0; color:#fff !important; padding:8px 14px; border-radius:8px; text-decoration:none; font-weight:600; white-space:nowrap; }
+    @@keyframes shopflash { from { box-shadow:0 0 0 4px rgba(76,175,80,.45); } to { box-shadow:0 2px 6px rgba(0,0,0,.06); } }
+    .shop-soldout-toggle { margin:0 0 12px; font-size:14px; }
+    /* The category buttons: one colour per group — tinted when not chosen, solid when chosen (operator 2026-09-26:
+       "make colors on the buttons to select booths, sponsor packages, session, it is very hard to see"). */
+    .shop-tabs { display:flex; flex-wrap:wrap; gap:8px; padding-bottom:6px; margin-bottom:14px; }
+    .shop-tabs a { --c:#1565c0; --t:#e8f0fb; white-space:nowrap; padding:9px 16px; border:2px solid var(--c); border-radius:999px;
+                   text-decoration:none; font-size:15px; font-weight:600; color:var(--c) !important; background:var(--t); }
+    .shop-tabs a:hover, .shop-tabs a:focus-visible { filter:brightness(0.95); box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+    .shop-tabs a.active { background:var(--c); color:#fff !important; box-shadow:0 2px 6px rgba(0,0,0,.18); }
+    .shop-tabs a.g-Booths { --c:#1565c0; --t:#e8f0fb; }
+    .shop-tabs a.g-Packages { --c:#6a1b9a; --t:#f3e8f8; }
+    .shop-tabs a.g-Sessions { --c:#00796b; --t:#e0f2ef; }
+    .shop-tabs a.g-Branding { --c:#c2185b; --t:#fbe7ef; }
+    .shop-tabs a.g-Furniture { --c:#e65100; --t:#fdefe3; }
+    .shop-tabs a.g-BoothOptions { --c:#6d4c41; --t:#f3ece9; }
+    .shop-tabs a.g-PackageHandling { --c:#37474f; --t:#eceff1; }
+    .shop-tabs a.g-Swag { --c:#2e7d32; --t:#e7f3e8; }
+    .shop-tabs a.g-Tickets { --c:#b71c1c; --t:#fbe9e9; }
+    @@media (max-width:480px) { .shop-tabs a { flex:1 1 calc(50% - 8px); text-align:center; padding:10px 8px; } }
+    .shop-msg-error { border-left:4px solid #b91c1c; }
+    .shop-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(200px,20%); gap:16px; align-items:start; }
+    .shop-layout-main { grid-column:1; grid-row:1; min-width:0; }
+    .shop-layout-corner { grid-column:2; grid-row:1; position:sticky; top:72px; }
+    .shop-layout-corner:empty { display:none; }
+    .shop-layout:has(.shop-layout-corner:empty) { grid-template-columns:1fr; }
+    @@media (max-width:760px) { .shop-layout { grid-template-columns:1fr; } .shop-layout-corner { grid-column:1; grid-row:1; position:static; } .shop-layout-main { grid-row:2; } }
+    .shop-price-normal { color:#6b7280; font-weight:normal; font-size:0.85em; margin-right:4px; }
+    .shop-price.is-discounted .shop-price-now { color:#b91c1c; }
+    .shop-discount-badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; background:#b91c1c; color:#fff;
+                           font-size:12px; font-weight:700; vertical-align:middle; }
+    .shop-swag-door { border:2px solid #2e7d32; background:#f1f8f2; border-radius:12px; padding:16px 18px; margin:0 0 14px; }
+    .shop-swag-door h2 { margin:0 0 6px; font-size:19px; color:#1b5e20; }
+    @@media (max-width: 480px) { .shop-grid { grid-template-columns:1fr; } }
+</style>

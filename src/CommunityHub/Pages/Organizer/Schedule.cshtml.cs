@@ -53,7 +53,7 @@ public class ScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         await _schedule.EnsureSeededAsync(me.EventId, me.Email, ct);   // seed defaults on first visit
         Entries = await _schedule.GetAllAsync(me.EventId, ct);

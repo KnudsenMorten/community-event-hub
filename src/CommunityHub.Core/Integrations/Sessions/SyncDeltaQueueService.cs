@@ -47,6 +47,13 @@ public sealed class SyncDeltaQueueService
     public const string FieldCountry = "Country";
     public const string FieldLinkedIn = "LinkedIn";
     public const string FieldTwitter = "Twitter";
+    /// <summary>§1363 — Zoho's own first / last name, carried beside <see cref="FieldName"/> when the name changed.</summary>
+    public const string FieldFirstName = "FirstName";
+    public const string FieldLastName = "LastName";
+
+    /// <summary>§1364 — what approving a Zoho→CEH change says: it is acknowledged, and CEH is not changed.</summary>
+    public const string ZohoToCehRefusal =
+        "Acknowledged — nothing from Zoho is written into CEH (CEH is the master, §1364). Change CEH by hand if needed.";
 
     /// <summary>§559 — the dead external id carried by a <see cref="SyncDeltaChangeKind.StaleLink"/>.</summary>
     public const string FieldBackstageId = "BackstageId";
@@ -492,9 +499,11 @@ public sealed class SyncDeltaQueueService
             SyncDeltaEntityType.Speaker when delta.ChangeKind == SyncDeltaChangeKind.Update
                                              && delta.Source == SessionSyncDirection.CehToZoho
                 => await ApplySpeakerPushToZohoAsync(delta, ct),
-            SyncDeltaEntityType.Speaker when delta.ChangeKind == SyncDeltaChangeKind.Update
-                                             && delta.Source == SessionSyncDirection.ZohoToCeh
-                => await ApplySpeakerUpdateFromZohoAsync(delta, ct),
+            // 🔴 §1364 — NOTHING FROM ZOHO IS EVER WRITTEN INTO CEH (operator 2026-10-20: "we have NO chg from zoho to
+            // hub. hub is master !!!"). An old ZohoToCeh row still in the queue — speaker OR session — is ACKNOWLEDGED,
+            // never applied.
+            _ when delta.ChangeKind == SyncDeltaChangeKind.Update && delta.Source == SessionSyncDirection.ZohoToCeh
+                => (false, false, ZohoToCehRefusal),
             SyncDeltaEntityType.Session when delta.ChangeKind == SyncDeltaChangeKind.Update
                 => await ApplySessionUpdateAsync(delta, ct),
             SyncDeltaEntityType.Volunteer when delta.ChangeKind == SyncDeltaChangeKind.Update
@@ -660,7 +669,13 @@ public sealed class SyncDeltaQueueService
         // Name: split the Zoho display name into First/Last (best-effort) when it changed.
         if (Changed(changes, FieldName) && !string.IsNullOrWhiteSpace(newName))
         {
-            var (first, last) = SplitName(newName!);
+            // §1363 — Zoho's own split when the delta carries it ("Matias Julian" + "Christoffersen", "Anna" + "van der
+            // Berg"); the guess from the full name only for a delta recorded before it did.
+            var zohoFirst = changes.FirstOrDefault(c => string.Equals(c.Field, FieldFirstName, StringComparison.OrdinalIgnoreCase))?.NewValue;
+            var zohoLast = changes.FirstOrDefault(c => string.Equals(c.Field, FieldLastName, StringComparison.OrdinalIgnoreCase))?.NewValue;
+            var (first, last) = !string.IsNullOrWhiteSpace(zohoFirst) || !string.IsNullOrWhiteSpace(zohoLast)
+                ? (zohoFirst?.Trim() ?? string.Empty, string.IsNullOrWhiteSpace(zohoLast) ? null : zohoLast.Trim())
+                : SplitName(newName!);
             profile.FirstName = first;
             profile.LastName = last;
         }
@@ -700,7 +715,8 @@ public sealed class SyncDeltaQueueService
     /// </summary>
     public static IReadOnlyList<SyncFieldChange> BuildSpeakerZohoChanges(
         string? oldName, string? oldTagline, string? oldBio, string? oldCountry, string? oldLinkedIn, string? oldTwitter,
-        string? newName, string? newTagline, string? newBio, string? newCountry, string? newLinkedIn, string? newTwitter)
+        string? newName, string? newTagline, string? newBio, string? newCountry, string? newLinkedIn, string? newTwitter,
+        string? newFirstName = null, string? newLastName = null)
     {
         var list = new List<SyncFieldChange>();
         void Add(string field, string? oldV, string? newV)
@@ -708,6 +724,12 @@ public sealed class SyncDeltaQueueService
             if (!TextEquals(oldV, newV)) list.Add(new SyncFieldChange(field, oldV, newV));
         }
         Add(FieldName, oldName, newName);
+        // §1363 — with a name change, Zoho's own split travels with it so the apply never has to guess.
+        if (list.Count > 0 && (newFirstName is not null || newLastName is not null))
+        {
+            list.Add(new SyncFieldChange(FieldFirstName, null, newFirstName));
+            list.Add(new SyncFieldChange(FieldLastName, null, newLastName));
+        }
         Add(FieldTagline, oldTagline, newTagline);
         Add(FieldBio, oldBio, newBio);
         Add(FieldCountry, oldCountry, newCountry);

@@ -51,7 +51,11 @@ public sealed class ParticipantBulkOperationService
         public int Skipped(int requested) => Math.Max(0, requested - Matched);
     }
 
-    /// <summary>Deactivate every selected participant (no-op for already-inactive).</summary>
+    /// <summary>
+    /// Deactivate every selected participant — including inactive rows no organizer has deactivated
+    /// yet (§1294), exactly like the single-row "Deactivate". No-op only for rows already deactivated
+    /// by an organizer.
+    /// </summary>
     public Task<BulkResult> DeactivateAsync(
         int eventId, IEnumerable<int> participantIds, CancellationToken ct = default)
         => SetActiveAsync(eventId, participantIds, active: false, ct);
@@ -79,7 +83,16 @@ public sealed class ParticipantBulkOperationService
             // LifecycleState != Active (so it still reads as "Inactive"). Activating
             // must therefore set BOTH; otherwise reactivate said "already active" and
             // never cleared the lifecycle gate (operator 2026-06-23).
-            if (ParticipantActivation.IsActive(p) == active) continue;
+            // 🔴 §1294 — DEACTIVATE means the same as the grid's red "Deactivate": an inactive row
+            // that no ORGANIZER has deactivated yet (a Sessionize placeholder, an applicant who never
+            // onboarded) still gets the cascade, which stamps DeactivatedByOrganizerAt and so takes it
+            // off Pending speakers and the other queues. Skipping every inactive row made "Deactivate
+            // selected" a silent no-op on exactly those rows (operator 2026-09-21: "we need to fix the
+            // name of this, as it is confusing").
+            var alreadyDone = active
+                ? ParticipantActivation.IsActive(p)
+                : !ParticipantActivation.IsActive(p) && p.DeactivatedByOrganizerAt is not null;
+            if (alreadyDone) continue;
             if (active)
             {
                 // §253 G1: re-activation clears flags + tombstone and restores

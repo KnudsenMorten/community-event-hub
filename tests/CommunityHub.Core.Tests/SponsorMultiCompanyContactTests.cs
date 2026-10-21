@@ -1,10 +1,7 @@
-using System.Net;
-using System.Text;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace CommunityHub.Core.Tests;
@@ -34,56 +31,36 @@ public sealed class SponsorMultiCompanyContactTests
             .UseInMemoryDatabase($"multico-{Guid.NewGuid():N}")
             .Options);
 
-    private sealed class StubHandler : HttpMessageHandler
+    private const string Cmo = "cmo@group.test";
+    private const string Coord = "coord@group.test";
+
+    /// <summary>
+    /// Seeds one company's roster the way the role sync leaves it: the SAME two humans serve every
+    /// division; a person's first company is their primary, later ones only add a link.
+    /// </summary>
+    private static async Task LinkRosterAsync(
+        CommunityHubDbContext db, int eventId, int companyId, string signer, string coordinator)
     {
-        private readonly Func<string, string> _byPath;
-        public StubHandler(Func<string, string> byPath) => _byPath = byPath;
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken ct) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    _byPath(request.RequestUri!.AbsolutePath), Encoding.UTF8, "application/json"),
-            });
-    }
-
-    /// <summary>The SAME two humans are the users of BOTH companies — the real group shape.</summary>
-    private static string UsersJson() => """
-        [
-          { "user_id": "68", "user_email": "cmo@group.test", "full_name": "Global CMO", "display_name": "CMO" },
-          { "user_id": "77", "user_email": "coord@group.test", "full_name": "Global Coordinator", "display_name": "Coord" }
-        ]
-        """;
-
-    private static string CompanyJson(int id, int signerId, int coordinatorId) => $$"""
-        {
-          "id": {{id}},
-          "name": "Group Division {{id}}",
-          "company_name_public": "Group {{id}}",
-          "default_signer_id": {{signerId}},
-          "event_coordination_default_contact_id": {{coordinatorId}}
-        }
-        """;
-
-    private static (SponsorContactSyncService Svc, SponsorCompanyMembershipService Members) NewSync(
-        CommunityHubDbContext db, int companyId, int signerId, int coordinatorId)
-    {
-        var options = new CompanyManagerOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://example.test/wp-json/company-manager/v1",
-            Username = "u",
-            Password = "p",
-        };
-        var http = new HttpClient(new StubHandler(path =>
-            path.EndsWith("/users", StringComparison.Ordinal)
-                ? UsersJson()
-                : CompanyJson(companyId, signerId, coordinatorId)));
         var members = new SponsorCompanyMembershipService(db, Scenario.ScenarioFixture.Clock);
-        var svc = new SponsorContactSyncService(
-            db, new CompanyManagerClient(http, options), options, Scenario.ScenarioFixture.Clock,
-            NullLogger<SponsorContactSyncService>.Instance, erpContacts: null, membership: members);
-        return (svc, members);
+        foreach (var (email, name) in new[] { (Cmo, "Global CMO"), (Coord, "Global Coordinator") })
+        {
+            var p = await db.Participants.SingleOrDefaultAsync(x => x.EventId == eventId && x.Email == email);
+            var isNew = p is null;
+            if (p is null)
+            {
+                p = new Participant
+                {
+                    EventId = eventId, Email = email, FullName = name, Role = ParticipantRole.Sponsor,
+                    SponsorCompanyId = companyId.ToString(), IsActive = true,
+                    IsSigner = email == signer, IsEventCoordinator = email == coordinator,
+                };
+                db.Participants.Add(p);
+                await db.SaveChangesAsync();
+            }
+            await members.LinkAsync(eventId, p.Id, companyId.ToString(),
+                isSigner: email == signer, isEventCoordinator: email == coordinator, isPrimary: isNew);
+        }
+        await db.SaveChangesAsync();
     }
 
     private static async Task<Event> SeedAsync(CommunityHubDbContext db)
@@ -111,79 +88,6 @@ public sealed class SponsorMultiCompanyContactTests
     }
 
     /// <summary>
-    /// 🔴 THE HEADLINE: the same person synced under a second company is ONE participant with TWO
-    /// links — not a moved row, and not a duplicate (the e-mail is unique per edition).
-    /// </summary>
-    [Fact]
-    public async Task A_contact_shared_by_two_companies_keeps_one_row_and_gains_a_link()
-    {
-        using var db = NewDb();
-        var ev = await SeedAsync(db);
-
-        var (syncA, members) = NewSync(db, CompanyA, signerId: 68, coordinatorId: 77);
-        await syncA.SyncCompanyAsync(ev.Id, CompanyA);
-
-        var (syncB, _) = NewSync(db, CompanyB, signerId: 68, coordinatorId: 77);
-        await syncB.SyncCompanyAsync(ev.Id, CompanyB);
-
-        var cmo = await db.Participants.SingleAsync(p => p.Email == "cmo@group.test");
-
-        // 🔒 THE FLAP IS GONE: the first company stays primary; the second only ADDS a link.
-        Assert.Equal(CompanyA.ToString(), cmo.SponsorCompanyId);
-
-        var links = await members.ForParticipantAsync(ev.Id, cmo.Id);
-        Assert.Equal(2, links.Count);
-        Assert.Contains(links, l => l.SponsorCompanyId == CompanyA.ToString() && l.IsPrimary);
-        Assert.Contains(links, l => l.SponsorCompanyId == CompanyB.ToString() && !l.IsPrimary);
-        // Signing is per company, and this person signs for both.
-        Assert.All(links, l => Assert.True(l.IsSigner));
-    }
-
-    /// <summary>Re-running both syncs (every ~15 min in production) changes nothing — no flap, no growth.</summary>
-    [Fact]
-    public async Task Repeated_syncs_are_idempotent_and_never_move_the_primary_company()
-    {
-        using var db = NewDb();
-        var ev = await SeedAsync(db);
-
-        for (var i = 0; i < 3; i++)
-        {
-            await NewSync(db, CompanyA, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyA);
-            await NewSync(db, CompanyB, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyB);
-        }
-
-        var cmo = await db.Participants.SingleAsync(p => p.Email == "cmo@group.test");
-        Assert.Equal(CompanyA.ToString(), cmo.SponsorCompanyId);
-        Assert.Equal(2, await db.SponsorCompanyContacts.CountAsync(x => x.ParticipantId == cmo.Id));
-        Assert.Equal(2, await db.Participants.CountAsync());   // two humans, not four rows
-    }
-
-    /// <summary>
-    /// §1235 — ARROW's shape: the coordinator is shared, the signers differ. The flags must answer
-    /// PER COMPANY, which is why they live on the link.
-    /// </summary>
-    [Fact]
-    public async Task Flags_are_per_company_so_a_shared_coordinator_can_sign_for_only_one()
-    {
-        using var db = NewDb();
-        var ev = await SeedAsync(db);
-
-        // Division A: the CMO signs, the coordinator coordinates.
-        await NewSync(db, CompanyA, signerId: 68, coordinatorId: 77).Svc.SyncCompanyAsync(ev.Id, CompanyA);
-        // Division B: a DIFFERENT signer (the coordinator), same coordinator.
-        await NewSync(db, CompanyB, signerId: 77, coordinatorId: 77).Svc.SyncCompanyAsync(ev.Id, CompanyB);
-
-        var cmo = await db.Participants.SingleAsync(p => p.Email == "cmo@group.test");
-        var linkA = await db.SponsorCompanyContacts.SingleAsync(
-            x => x.ParticipantId == cmo.Id && x.SponsorCompanyId == CompanyA.ToString());
-        var linkB = await db.SponsorCompanyContacts.SingleAsync(
-            x => x.ParticipantId == cmo.Id && x.SponsorCompanyId == CompanyB.ToString());
-
-        Assert.True(linkA.IsSigner);    // signs for A
-        Assert.False(linkB.IsSigner);   // …but not for B
-    }
-
-    /// <summary>
     /// 🔴 §1235 — THE COMPANY'S MAIL REACHES A COORDINATOR WHOSE PRIMARY COMPANY IS ANOTHER DIVISION.
     /// Without the link-aware audience, division B's coordinator mail resolved to NOBODY and was
     /// silently not sent — the exact loss the operator is protecting against.
@@ -194,8 +98,8 @@ public sealed class SponsorMultiCompanyContactTests
         using var db = NewDb();
         var ev = await SeedAsync(db);
 
-        await NewSync(db, CompanyA, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyA);
-        await NewSync(db, CompanyB, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyB);
+        await LinkRosterAsync(db, ev.Id, CompanyA, signer: Cmo, coordinator: Coord);
+        await LinkRosterAsync(db, ev.Id, CompanyB, signer: Cmo, coordinator: Coord);
 
         var resolver = new Email.SponsorRecipientResolver(db);
         var forB = await resolver.ResolveAsync(ev.Id, CompanyB.ToString());
@@ -213,10 +117,10 @@ public sealed class SponsorMultiCompanyContactTests
         using var db = NewDb();
         var ev = await SeedAsync(db);
 
-        // A: the coordinator (77) coordinates — that is their person-level flag.
-        await NewSync(db, CompanyA, signerId: 68, coordinatorId: 77).Svc.SyncCompanyAsync(ev.Id, CompanyA);
-        // B: person 77 only SIGNS; 68 coordinates there.
-        await NewSync(db, CompanyB, signerId: 77, coordinatorId: 68).Svc.SyncCompanyAsync(ev.Id, CompanyB);
+        // A: the coordinator coordinates — that is their person-level flag.
+        await LinkRosterAsync(db, ev.Id, CompanyA, signer: Cmo, coordinator: Coord);
+        // B: the coordinator only SIGNS; the CMO coordinates there.
+        await LinkRosterAsync(db, ev.Id, CompanyB, signer: Coord, coordinator: Cmo);
 
         var forB = await new Email.SponsorRecipientResolver(db).ResolveAsync(ev.Id, CompanyB.ToString());
 
@@ -234,9 +138,9 @@ public sealed class SponsorMultiCompanyContactTests
         using var db = NewDb();
         var ev = await SeedAsync(db);
 
-        await NewSync(db, CompanyA, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyA);
-        var (_, members) = NewSync(db, CompanyB, 68, 77);
-        await NewSync(db, CompanyB, 68, 77).Svc.SyncCompanyAsync(ev.Id, CompanyB);
+        await LinkRosterAsync(db, ev.Id, CompanyA, signer: Cmo, coordinator: Coord);
+        var members = new SponsorCompanyMembershipService(db, Scenario.ScenarioFixture.Clock);
+        await LinkRosterAsync(db, ev.Id, CompanyB, signer: Cmo, coordinator: Coord);
 
         var cmo = await db.Participants.SingleAsync(p => p.Email == "cmo@group.test");
         Assert.True(await members.UnlinkAsync(ev.Id, cmo.Id, CompanyA.ToString()));

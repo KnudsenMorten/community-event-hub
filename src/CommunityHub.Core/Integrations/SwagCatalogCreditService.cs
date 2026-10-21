@@ -22,33 +22,24 @@ public sealed record GrantCreditResult(SwagCatalogCredit? Credit, string? Error)
 /// <para>Operator 2026-09-01: <i>"add option to provide a coupon/discount code i provide them with a
 /// euro value"</i>, and — asked who creates it — <b>CEH, through the Woo API</b>.</para>
 ///
-/// <para>🔴 <b>THE ORDER OF THE TWO WRITES IS THE DESIGN.</b> The coupon is created in the webshop
-/// FIRST, and only a confirmed coupon is recorded in CEH. The other order is far worse than it
-/// looks: a stored credit whose coupon does not exist tells a sponsor they have €500 and then fails
-/// in front of them at checkout, which costs a conversation and their confidence. The failure this
-/// way round is a coupon in the shop that CEH does not list — invisible, harmless, and it cannot
-/// spend anything, because it is restricted to that sponsor's own e-mail addresses.</para>
-///
-/// <para>🔒 <b>CEH never decides that a discount is valid.</b> The shop applies it at checkout. A bug
-/// here can misreport a credit; it can never give money away.</para>
+/// <para>🔴 §1312 — <b>the credit is CEH's alone</b> (the old webshop is closed; operator 2026-10-01: "ceh ows the webshop
+/// functionality 100%"). It used to be created as a webshop coupon first; now the CEH shop spends it on swag items when the
+/// sponsor orders (<see cref="Webshop.ShopOrderService"/> pricing) and gives it back if the order is cancelled.</para>
 /// </remarks>
 public sealed class SwagCatalogCreditService
 {
     private readonly CommunityHubDbContext _db;
-    private readonly WooCommerceClient _woo;
     private readonly SponsorConfigLoader _configLoader;
     private readonly SponsorConfigOptions _configOptions;
     private readonly ILogger<SwagCatalogCreditService> _log;
 
     public SwagCatalogCreditService(
         CommunityHubDbContext db,
-        WooCommerceClient woo,
         SponsorConfigLoader configLoader,
         SponsorConfigOptions configOptions,
         ILogger<SwagCatalogCreditService> log)
     {
         _db = db;
-        _woo = woo;
         _configLoader = configLoader;
         _configOptions = configOptions;
         _log = log;
@@ -83,8 +74,8 @@ public sealed class SwagCatalogCreditService
     }
 
     /// <summary>
-    /// Create the coupon in the webshop and record the credit. Nothing is stored unless the shop
-    /// confirmed the coupon.
+    /// Record the credit in CEH (§1312 — no webshop coupon any more; the CEH shop spends it on swag items).
+    ///
     /// </summary>
     /// <param name="restrictToEmails">
     /// The sponsor's own contact addresses. ⚠️ Strongly recommended: without them a forwarded code
@@ -128,46 +119,9 @@ public sealed class SwagCatalogCreditService
                 + "is, and an unrestricted credit is spendable on anything in the shop.");
         }
 
-        long? categoryId;
-        try
-        {
-            categoryId = await _woo.FindProductCategoryIdAsync(category!, ct);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "§1165k: could not resolve the catalogue category id.");
-            return new(null, "The webshop could not be reached to resolve the catalogue category.");
-        }
-
-        if (categoryId is null)
-        {
-            return new(null,
-                $"The webshop has no product category called '{category}', so the credit cannot be "
-                + "limited to catalogue items. Nothing was created.");
-        }
-
+        // 🔴 §1312 — the credit lives in CEH only (the old webshop is closed, so no webshop coupon is created): the CEH shop
+        // spends it on swag items alone when the sponsor orders (ShopOrderService pricing), and gives it back on a cancel.
         var code = NewCode(editionCode, companyName);
-
-        // ⚠️ The shop first. See the class remarks: a stored credit whose coupon does not exist
-        // fails in front of the sponsor at checkout.
-        WooCommerceClient.WooCouponResult created;
-        try
-        {
-            created = await _woo.CreateCouponAsync(
-                code, amount, categoryId, expiresOn, restrictToEmails,
-                description: $"Swag catalogue credit for {companyName} (granted in CEH by {grantedByEmail}).",
-                ct);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "§1165k: coupon create threw for {Company}.", sponsorCompanyId);
-            return new(null, $"The webshop could not be reached to create the coupon: {ex.Message}");
-        }
-
-        if (!created.Ok)
-        {
-            return new(null, $"The webshop refused the coupon: {created.Error}");
-        }
 
         var credit = new SwagCatalogCredit
         {
@@ -176,7 +130,7 @@ public sealed class SwagCatalogCreditService
             CompanyName = companyName,
             Code = code,
             Amount = amount,
-            WooCouponId = created.Id,
+            WooCouponId = null,   // §1312 — CEH-only credit
             ExpiresOn = expiresOn,
             CreatedByEmail = grantedByEmail,
             Note = note,

@@ -1,0 +1,114 @@
+@page
+@model CommunityHub.Pages.Sponsor.Shop.IndexModel
+@using CommunityHub.Core.Integrations.Webshop
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Sponsor shop";
+}
+
+<div class="card">
+    <h1>Sponsor shop</h1>
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        @* The cart stays in view while shopping — it used to be one small link in a sentence (operator
+           2026-09-26: "the cart above is also to hidden when i add something to the cart"). *@
+        var justAdded = !string.IsNullOrEmpty(Model.Message) && !Model.MessageIsError;
+        <div class="shop-cartbar @(justAdded ? "added" : "")" role="status" aria-live="polite">
+            <span class="shop-cartbar-text">
+                @if (!string.IsNullOrEmpty(Model.Message)) { <strong class="@(Model.MessageIsError ? "shop-msg-error" : "")">@Model.Message</strong><br /> }
+                🛒 @(Model.CartCount == 0 ? "Your cart is empty" : $"{Model.CartCount} item{(Model.CartCount == 1 ? "" : "s")} in the cart")@(Model.CartTotalEur is decimal t ? $" · {ShopPageModel.Eur(t)} excl. VAT" : "")
+            </span>
+            @if (Model.CartCount > 0) { <a class="shop-cartbar-btn" asp-page="/Sponsor/Shop/Cart">Go to cart &rarr;</a> }
+        </div>
+
+        <p>Pick what you need — availability is live, so what you see here is what is still available.
+           Prices are in EUR excl. VAT (Danish companies pay 25% VAT).</p>
+
+        <div class="shop-tabs" role="tablist">
+            @foreach (var g in Model.Groups)
+            {
+                <a asp-page="/Sponsor/Shop/Index" asp-route-Group="@g" asp-route-ShowSoldOut="@(Model.ShowSoldOut ? "true" : null)" class="g-@g @(g == Model.Group ? "active" : "")"
+                   role="tab" aria-selected="@(g == Model.Group ? "true" : "false")">@ShopPageModel.GroupLabel(g)</a>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Model.Find))
+        {
+            <p class="shop-soldout-toggle">Showing only “@Model.Find” in @ShopPageModel.GroupLabel(Model.Group ?? CommunityHub.Core.Domain.ShopGroup.Unassigned) ·
+                <a asp-page="/Sponsor/Shop/Index" asp-route-Group="@Model.Group">show everything</a></p>
+        }
+        <form method="get" class="shop-soldout-toggle">
+            <input type="hidden" name="Group" value="@Model.Group" />
+            @if (!string.IsNullOrWhiteSpace(Model.Find)) { <input type="hidden" name="Find" value="@Model.Find" /> }
+            <label><input type="checkbox" name="ShowSoldOut" value="true" @(Model.ShowSoldOut ? "checked" : "") onchange="this.form.submit()" />
+                Show sold-out items@(Model.SoldOutCount > 0 ? $" ({Model.SoldOutCount})" : "")</label>
+            <noscript><button type="submit">Apply</button></noscript>
+        </form>
+
+        @if (Model.Group == CommunityHub.Core.Domain.ShopGroup.Booths)
+        {
+            <p><a asp-page="/Sponsor/Shop/BoothMap">See the booths on the expo map &rarr;</a></p>
+        }
+
+        @if (Model.Group == CommunityHub.Core.Domain.ShopGroup.Swag)
+        {
+            @* §1305 — swag is bought for EVERY attendee bag with the sponsor's logo, so it is chosen in the swag
+               configurator (which sets the bag quantity), never added here one piece at a time. *@
+            <section class="shop-swag-door">
+                <h2>Swag with your logo — in every attendee bag</h2>
+                <p>Choose one item and we brand it with your logo and put it in every attendee bag. The configurator shows the
+                   total for all bags, what is still available, and uses the logo we already have from you.
+                   Your choice goes straight into your cart and on to the contract.</p>
+                <a class="shop-cartbar-btn" asp-page="/Sponsor/SwagCatalog">Open the swag configurator &rarr;</a>
+            </section>
+        }
+        else if (Model.Products.Count == 0)
+        {
+            <p>@(Model.SoldOutCount > 0 ? "Everything here is sold out. Tick \"Show sold-out items\" to see it anyway." : "No products here yet.")</p>
+        }
+        @* §1305 — the commercial corner sits beside the products (a column on the right on a wide screen, a card
+           above them on a phone). *@
+        <div class="shop-layout">
+        <div class="shop-layout-corner">@await Component.InvokeAsync("ShopPromotions", new { kind = "corner" })</div>
+        <div class="shop-layout-main">
+        <div class="shop-grid" @(Model.Group == CommunityHub.Core.Domain.ShopGroup.Swag ? "hidden" : "")>
+            @foreach (var p in Model.Products)
+            {
+                var a = Model.Stock.GetValueOrDefault(p.Id);
+                var pic = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault();
+                <article class="shop-card">
+                    <a asp-page="/Sponsor/Shop/Product" asp-route-id="@p.Id">
+                        @if (pic is not null) { <img src="/shop-image/@pic.Id" alt="" loading="lazy" /> }
+                    </a>
+                    <h3><a asp-page="/Sponsor/Shop/Product" asp-route-id="@p.Id">@p.Name</a></h3>
+                    @if (p.TimeslotTime is not null) { <div style="font-size:13px;">Slot @p.Timeslot · @p.TimeslotTime</div> }
+                    <div style="font-size:13px;color:#4b5563;">@ShopHtml.PlainText(p.ShortDescriptionHtml, 140)</div>
+                    <div class="price"><partial name="_ShopPrice" model="p" /></div>
+                    <div class="avail @(a is { Available: true } ? "" : "out")">@(Model.ReservedIds.Contains(p.Id) && a is not { Available: true } ? "Reserved" : ShopPageModel.AvailabilityText(a))</div>
+                    @if (a is { Available: true })
+                    {
+                        <form method="post" asp-page-handler="Add">
+                            <input type="hidden" name="productId" value="@p.Id" />
+                            <input type="hidden" name="Group" value="@Model.Group" />
+                            @if (Model.ShowSoldOut) { <input type="hidden" name="ShowSoldOut" value="true" /> }
+                            @if (a.Unlimited || (a.Remaining ?? 1) > 1)
+                            {
+                                <label class="sr-only" for="q-@p.Id">Quantity</label>
+                                <input id="q-@p.Id" type="number" name="quantity" value="1" min="1" max="@(a.Unlimited ? 99 : a.Remaining)" />
+                            }
+                            else
+                            {
+                                <input type="hidden" name="quantity" value="1" />
+                            }
+                            <button type="submit">Add to cart</button>
+                        </form>
+                    }
+                </article>
+            }
+        </div>
+        </div>
+        </div>
+    }
+</div>

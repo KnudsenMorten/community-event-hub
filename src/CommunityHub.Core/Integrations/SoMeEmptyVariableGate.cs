@@ -59,6 +59,7 @@ public static class SoMeEmptyVariableGate
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "SponsorSigner",
+            "SponsorCompanyMention",   // §1300 — empty until the company's LinkedIn id is known
             "SponsorEventCoordinators",
             "Action_catalog_random",
             "SponsorHashtag",

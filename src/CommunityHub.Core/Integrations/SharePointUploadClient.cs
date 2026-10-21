@@ -624,6 +624,44 @@ public sealed class SharePointUploadClient
     }
 
     /// <summary>
+    /// §1312 — a SERVER-SIDE copy of a drive item into <paramref name="destinationFolderPath"/> (drive-relative, created when
+    /// missing) under <paramref name="newName"/>, REPLACING a file of that name. SharePoint copies the bytes itself — nothing
+    /// passes through this host, which matters for exhibitor-wall artwork of up to 1 GB. Graph runs the copy asynchronously
+    /// (202 Accepted); the copy appears moments later. Returns false when the source item no longer exists.
+    /// </summary>
+    public async Task<bool> CopyItemAsync(
+        string siteUrl, string driveName, string itemId, string destinationFolderPath, string newName,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var folderId = await EnsureFolderAsync(driveId, destinationFolderPath.Trim('/'), ct);
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post, GraphRoot + $"/drives/{driveId}/items/{itemId}/copy?@microsoft.graph.conflictBehavior=replace");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+        req.Content = JsonContent.Create(new
+        {
+            parentReference = new { driveId, id = folderId },
+            name = newName,
+        });
+
+        using var resp = await _http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return false; // source gone — tolerate
+        if (!resp.IsSuccessStatusCode)
+        {
+            var raw = await resp.Content.ReadAsStringAsync(ct);
+            throw new SharePointUploadException(
+                $"Graph copy of item {itemId} to {destinationFolderPath}/{newName} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Delete the file at <c>{rootFolderPath}/{relativePath}</c>. Idempotent — a
     /// 404 (already gone) is treated as success so callers can delete freely.
     /// </summary>
@@ -672,6 +710,24 @@ public sealed class SharePointUploadClient
     }
 
     // ----- internals -------------------------------------------------------
+
+    /// <summary>
+    /// §1303 — a read-only Graph GET with this registration's token, for callers outside SharePoint
+    /// (the Intune kiosk directory). Throws <see cref="SharePointUploadException"/> on a non-2xx.
+    /// </summary>
+    public async Task<JsonDocument> GetGraphJsonAsync(string absoluteUrl, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, absoluteUrl);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+        using var resp = await _http.SendAsync(req, ct);
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new SharePointUploadException(
+                $"Graph GET failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+        }
+        return JsonDocument.Parse(raw);
+    }
 
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)
     {

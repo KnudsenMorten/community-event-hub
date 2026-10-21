@@ -25,16 +25,19 @@ public sealed class AllocationScenarioService
 {
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly VolunteerAssignmentGate _assignmentGate;
 
-    public AllocationScenarioService(CommunityHubDbContext db, TimeProvider clock)
+    public AllocationScenarioService(
+        CommunityHubDbContext db, TimeProvider clock, VolunteerAssignmentGate assignmentGate)
     {
         _db = db;
         _clock = clock;
+        _assignmentGate = assignmentGate;
     }
 
     private static void RequireOrganizer(VolunteerStructureService.ActorContext actor)
     {
-        if (actor.Role != ParticipantRole.Organizer)
+        if (!actor.Role.HasOrganizerAccess())
             throw new VolunteerAccessDeniedException("Organizer role required for allocation scenarios.");
     }
 
@@ -304,6 +307,38 @@ public sealed class AllocationScenarioService
             throw new VolunteerValidationException(
                 $"This would over-fill {sim.Breaches.Count} task(s) beyond their needed resources. "
                 + "Re-check the plan, or commit again acknowledging the over-capacity.");
+
+        // 🔒 §1295 — ring gate, per VOLUNTEER target of an ASSIGN move. Organizer targets are out
+        // of scope here (they ride organizer-allocation), and an UNASSIGN is never gated: taking
+        // work away is always safe.
+        //
+        // 🔑 REFUSES THE WHOLE COMMIT rather than skipping the held moves, which is the opposite of
+        // VolunteerAllocationService's "leave the draft in the queue" — and deliberately so. A
+        // scenario commits atomically and is then stamped Committed, so skipping would silently
+        // drop those moves with no queue left to re-commit from. Better to name them and let the
+        // organizer promote the ring or unstage them.
+        var assignTargets = moves
+            .Where(m => m.TaskId is int && m.Op == AllocationMoveOp.Assign)
+            .Select(m => m.ParticipantId)
+            .Distinct()
+            .ToList();
+        if (assignTargets.Count > 0)
+        {
+            var volunteerTargets = await _db.Participants
+                .Where(p => p.EventId == actor.EventId
+                            && assignTargets.Contains(p.Id)
+                            && p.Role == ParticipantRole.Volunteer)
+                .Select(p => p.Id)
+                .ToListAsync(ct);
+
+            var assignable = await _assignmentGate.FilterAssignableAsync(
+                actor.EventId, volunteerTargets, ct);
+            var held = volunteerTargets.Count(id => !assignable.Contains(id));
+            if (held > 0)
+                throw new VolunteerValidationException(
+                    $"{held} volunteer(s) in this scenario are above the released ring for volunteer "
+                    + "task assignment, so nothing was committed. " + VolunteerAssignmentGate.OutOfRingMessage);
+        }
 
         var now = _clock.GetUtcNow();
         var strategy = _db.Database.CreateExecutionStrategy();

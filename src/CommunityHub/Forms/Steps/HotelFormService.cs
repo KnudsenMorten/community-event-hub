@@ -70,6 +70,39 @@ public sealed class HotelFormModel
 
     /// <inheritdoc cref="StayWindowStart"/>
     [BindNever] public DateOnly? StayWindowEnd { get; set; }
+
+    // ----- §1296 hotel coverage -------------------------------------------
+    /// <summary>
+    /// §1296 — which coverage class this person falls in, or null when hotel coverage does not
+    /// apply to them at all (then the form says nothing about money, as it does today).
+    /// </summary>
+    [BindNever] public CommunityHub.Core.Entitlements.HotelCoverageClass? CoverageClass { get; set; }
+
+    /// <summary>The edition's standard for <see cref="CoverageClass"/>.</summary>
+    [BindNever] public CommunityHub.Core.Entitlements.HotelCoverageRule CoverageRule { get; set; }
+        = CommunityHub.Core.Entitlements.HotelCoverageRule.Nothing;
+
+    /// <summary>Their organizer-granted extra nights on top of the standard (0 when none).</summary>
+    [BindNever] public int CoverageExtraNights { get; set; }
+
+    /// <summary>
+    /// §1296 — the coverage as it stands for the dates CURRENTLY IN THE MODEL, so the partial can
+    /// render the same numbers the client-side script recomputes while the person edits.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Derived, never stored on the model: a cached split would be one date-change away from
+    /// telling somebody the wrong thing about their own money.
+    /// </remarks>
+    public CommunityHub.Core.Entitlements.HotelCoverageResult CoverageFor(
+        DateOnly? checkIn, DateOnly? checkOut) =>
+        CommunityHub.Core.Entitlements.HotelCoverage.Resolve(
+            CoverageRule,
+            CoverageExtraNights,
+            CommunityHub.Core.Entitlements.HotelCoverage.NightsBetween(checkIn, checkOut));
+
+    /// <summary>The coverage for the dates the person has entered right now.</summary>
+    public CommunityHub.Core.Entitlements.HotelCoverageResult Coverage =>
+        CoverageFor(CheckInDate, CheckOutDate);
 }
 
 /// <summary>
@@ -96,12 +129,18 @@ public sealed class HotelFormService : IWizardFormService
     // below, reusing the same UID). The inviter was still being injected and assigned to a field
     // that nothing read, which is what made the feature look orphaned on the Settings page.
     // The inviter itself is still live — the ORGANIZER's confirmation re-issue calls it.
+    /// <param name="coverage">
+    /// §1296 — REQUIRED, unlike the optional dependencies after it. It supplies the "we cover N
+    /// nights, you pay the rest" line, and an optional one would mean a form that silently stops
+    /// telling somebody what they owe — the one failure mode this feature exists to prevent.
+    /// </param>
     public HotelFormService(
         CommunityHubDbContext db,
         TimeProvider clock,
         OrganizerActionItemService actions,
         IStringLocalizer<SharedResource> loc,
         ILogger<HotelFormService> logger,
+        CommunityHub.Core.Entitlements.HotelCoverageService coverage,
         // §322n: optional + last (existing unit tests need not construct it; DI injects).
         CommunityHub.Core.Email.CalendarInviteEmailService? calendarInvite = null,
         // §403: same optional-DI pattern — the edition's own dates drive the picker's min/max.
@@ -113,11 +152,13 @@ public sealed class HotelFormService : IWizardFormService
         _actions = actions;
         _loc = loc;
         _logger = logger;
+        _coverage = coverage;
         _calendarInvite = calendarInvite;
         (_stayWindowStart, _stayWindowEnd) = ResolveStayWindow(configLoader, configOptions);
         (_defaultCheckIn, _defaultCheckOut) = ResolveDefaultStay(configLoader, configOptions);
     }
 
+    private readonly CommunityHub.Core.Entitlements.HotelCoverageService _coverage;
     private readonly CommunityHub.Core.Email.CalendarInviteEmailService? _calendarInvite;
     private readonly DateOnly? _stayWindowStart;
     private readonly DateOnly? _stayWindowEnd;
@@ -282,6 +323,20 @@ public sealed class HotelFormService : IWizardFormService
             .FirstOrDefaultAsync(ct);
     }
 
+    /// <summary>
+    /// §1296 — load the coverage RULE + this person's extra nights onto the model. The split itself
+    /// is derived from whatever dates the model is carrying (<see cref="HotelFormModel.Coverage"/>),
+    /// so a re-render after an invalid post shows the numbers for what they just typed.
+    /// </summary>
+    private async Task PopulateCoverageAsync(
+        HotelFormModel model, int eventId, int participantId, CancellationToken ct)
+    {
+        var resolved = await _coverage.ResolveAsync(eventId, participantId, ct);
+        model.CoverageClass = resolved.Class;
+        model.CoverageRule = resolved.Rule;
+        model.CoverageExtraNights = resolved.Result.Extra;
+    }
+
     /// <summary>Completion detection (REQUIREMENTS §148) — a <see cref="HotelBooking"/> row exists.
     /// Mirrors SpeakerWizardService / RoleWizardService.</summary>
     public Task<bool> IsDoneAsync(int eventId, int participantId, CancellationToken ct) =>
@@ -296,6 +351,7 @@ public sealed class HotelFormService : IWizardFormService
     {
         var model = new HotelFormModel { Role = role };
         await PopulateSpeakerCategoryAsync(model, eventId, participantId, role, ct);
+        await PopulateCoverageAsync(model, eventId, participantId, ct);   // §1296
 
         model.IsLocked = await IsEditingLockedAsync(eventId, ct);
         await EnsureHotelTaskExistsAsync(eventId, participantId, ct);
@@ -337,6 +393,7 @@ public sealed class HotelFormService : IWizardFormService
         model.Role = role;
         // §326q: the re-rendered form (invalid post / lock) needs the category too.
         await PopulateSpeakerCategoryAsync(model, eventId, participantId, role, ct);
+        await PopulateCoverageAsync(model, eventId, participantId, ct);   // §1296
 
         // Relevance is re-checked server-side (never trusted from the post).
         if (!await IsRelevantAsync(eventId, participantId, role, ct))

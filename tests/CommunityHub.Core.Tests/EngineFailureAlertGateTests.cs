@@ -95,6 +95,24 @@ public sealed class EngineFailureAlertGateTests
         new(configuredLabel: null, siteName: siteName);
 
     [Fact]
+    public async Task A_job_whose_own_save_failed_is_still_counted_and_not_reported_as_a_database_outage()
+    {
+        // §1314 — PROD 2026-09-28: SpeakerChangeDetectionJob failed saving a too-long bio. The counter shares the job's
+        // DbContext, so saving it re-sent that failed write: the counter was lost, the gate failed OPEN and the mail said
+        // "the database was unreachable" (coalesced — other engines' alerts held back for 6 hours).
+        using var db = NewDb();
+        db.JobHealthMarkers.Add(new CommunityHub.Core.Domain.JobHealthMarker { JobKey = null! });   // the job's failed write, still tracked
+        await Assert.ThrowsAnyAsync<Exception>(() => db.SaveChangesAsync());
+        var mail = new RecordingEmailSender();
+        var fn = NewFn();
+
+        await NewGate(db, mail).OnFailureAsync(fn, new InvalidOperationException("String or binary data would be truncated"));
+
+        Assert.Equal(0, mail.Sends);                                              // a first failure: recorded, no fail-open mail
+        Assert.Equal(1, (await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn)).ConsecutiveFailures);
+    }
+
+    [Fact]
     public async Task First_failure_records_but_does_not_alert()
     {
         using var db = NewDb();

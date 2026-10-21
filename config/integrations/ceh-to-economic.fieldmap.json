@@ -1,11 +1,11 @@
 {
-  "$comment": "§323 fieldmap SCHEMA v2 for the ERPSystem hop (OUTBOUND: CEH/Company Manager is the source; e-conomic mirrors customers + contacts). The payload contract is the operator's PROVEN legacy automation (tools/legacy-automation webhook-customer / webhook-contact), now implemented live in LiveEconomicErpClient. ORDER→INVOICE is deliberately NOT a CEH write: the legacy Azure Function webhook-syncorders owns it (documented in the Order record below as owned-by-legacy-webhook).",
+  "$comment": "§323 fieldmap SCHEMA v2 for the ERPSystem hop (OUTBOUND: CEH is the source of a registered customer; e-conomic then owns contacts + roles, §1312). The payload contract is the operator's PROVEN legacy automation (tools/legacy-automation webhook-customer / webhook-contact), now implemented live in LiveEconomicErpClient. ORDER→INVOICE is deliberately NOT a CEH write: the legacy Azure Function webhook-syncorders owns it (documented in the Order record below as owned-by-legacy-webhook).",
   "integration": "ceh-to-economic",
   "direction": "Outbound",
   "source": {
     "system": "CEH",
     "kind": "internal-sql",
-    "notes": "Customer facts originate in Company Manager (WordPress) and are mirrored by CEH; the resolved PUBLIC company name chain is public → legal → billing → 'Company {id}'."
+    "notes": "Customer facts are CEH's ShopCompany (§1312 — Company Manager is retired); the resolved PUBLIC company name chain is public → legal → billing → 'Company {id}'."
   },
   "target": {
     "system": "e-conomic",
@@ -15,7 +15,7 @@
   },
   "records": {
     "Customer": {
-      "source": { "record": "CompanyManagerCompany (+ resolved contact e-mail)" },
+      "source": { "record": "ShopCompany (+ resolved contact e-mail)" },
       "target": {
         "record": "customer",
         "guiPanel": "e-conomic → Customers",
@@ -71,7 +71,7 @@
       ]
     },
     "Contact": {
-      "source": { "record": "CompanyManagerUser (+ company default role pointers)" },
+      "source": { "record": "Participant (+ SponsorCompanyContact roles)" },
       "target": {
         "record": "customer contact",
         "guiPanel": "e-conomic → Customer → Contacts",

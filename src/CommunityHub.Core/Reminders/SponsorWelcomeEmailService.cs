@@ -95,6 +95,17 @@ public sealed class SponsorWelcomeEmailService
         // for a welcome to wait for. If a future upload model ever needs preparing again, gate on
         // THAT model's own readiness signal, never on a row a retired service used to write.
 
+        // 🔒 §1309.0 — ONLY A SPONSOR IS WELCOMED. A potential sponsor (registered in the CEH shop, pre-loaded, or
+        // holding a reservation) has a sponsor record with IsSponsor = false until it signs; its coordinator must get
+        // nothing automatic. Proven defect 2026-09-27: the registrant (made coordinator) got the full sponsor welcome.
+        // Operator: "we need to be able to clearly define per company level if they participate as a sponsor or just
+        // potential sponsor. we will not onboard all these companies as sponsors and send emails". A company with NO
+        // sponsor record keeps today's behaviour (every existing Company Manager sponsor has one with IsSponsor = true).
+        var potentialOnly = await _db.SponsorInfos.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(s => s.EventId == eventId && s.SponsorCompanyId == sponsorCompanyId && !s.IsSponsor, ct);
+        if (potentialOnly)
+            return new SponsorWelcomeResult(sponsorCompanyId, 0, 0, 0, Reason: "Potential sponsor — no welcome until the company is a sponsor.");
+
         var coordinators = await _recipients.ResolveAsync(eventId, sponsorCompanyId, ct);
         int sent = 0, skipped = 0;
         foreach (var c in coordinators)

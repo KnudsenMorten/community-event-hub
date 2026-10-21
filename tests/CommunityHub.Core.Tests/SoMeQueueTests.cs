@@ -392,6 +392,85 @@ public sealed class SoMeQueueTests
         Assert.Single(sender.Sent);
     }
 
+    private sealed class PictureStore : ISharePointFileStore
+    {
+        public static readonly byte[] Png = { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+        public bool CanStore => false;
+        public bool CanRead => true;
+        public Task<StoredFile> UploadToFolderAsync(string f, string n, byte[] c, string t, CancellationToken ct = default) => throw new InvalidOperationException();
+        public Task<StoredFile> StoreAsync(string p, byte[] c, string t, CancellationToken ct = default) => throw new InvalidOperationException();
+        public Task DeleteAsync(string p, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteFromFolderAsync(string f, string n, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<SharePointFileRef>> ListAsync(string f, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SharePointFileRef>>(Array.Empty<SharePointFileRef>());
+        public Task<byte[]?> DownloadAsync(string id, CancellationToken ct = default) => Task.FromResult<byte[]?>(id == "item-1" ? Png : null);
+    }
+
+    [Fact]
+    public async Task Pre_alert_shows_the_post_as_it_will_publish_with_its_picture_attached()
+    {
+        // Operator 2026-09-28: "this email is missing important info as it shows only the template … i need real text and
+        // picture" — it printed {TrackName} / {Speakers} and named no picture.
+        using var db = TestDb.New();
+        var (eventId, _, speakerId, _) = await SeedAsync(db);
+        await NewSettings(db).SaveAsync(eventId, true, "urn:li:organization:1",
+            speakerPreAlertOrganizerEmail: "alert@example.test", null, false, null);
+        await NewQueue(db).CreateSpeakerPostAsync(eventId, speakerId, null, Now.AddMinutes(3), autoGenerate: true, byEmail: "org@example.test");
+        var post = await db.SoMePosts.SingleAsync();
+        post.ManualTextOverride = "Meet our speakers at {EventNameShort} — see you there";      // a template, as in the reported mail
+        post.ImageRef = "https://sp.test/graphics/speaker-card.png";
+        db.GraphicAssets.Add(new GraphicAsset
+        {
+            EventId = eventId, StableKey = "speaker:test", SharePointUrl = post.ImageRef, StorageItemId = "item-1", FileName = "speaker-card.png",
+        });
+        await db.SaveChangesAsync();
+
+        var composer = new SoMePostComposer(db, new SoMeVariableResolver(db));
+        var expected = composer.Resolve(post.EffectiveText, await composer.ValuesForAsync(post));
+        Assert.NotEqual(post.EffectiveText, expected);                                                  // the template HAD variables
+        var sender = new CapturingEmailSender();
+        var dispatch = new SoMeDispatchService(db, new RecordingPublisher(), NewSettings(db), sender, Clock, new EmailContextAccessor(),
+            fileStore: new PictureStore(), composer: composer);
+
+        Assert.Equal(1, (await dispatch.DispatchDueAsync(eventId)).PreAlertsSent);
+
+        var mail = Assert.Single(sender.AttachmentMessages);
+        Assert.Equal("alert@example.test", mail.To);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode(expected).Replace("\n", "<br/>"), mail.Html);   // the text as it publishes
+        var picture = Assert.Single(mail.Attachments);
+        Assert.Equal(PictureStore.Png, picture.Content);                                                // the picture that goes out
+        Assert.Equal("image/png", picture.ContentType);
+        Assert.Contains("Picture attached", mail.Html);
+    }
+
+    [Fact]
+    public async Task The_24_hour_notice_carries_each_post_as_it_will_publish_and_its_picture()
+    {
+        // Operator 2026-09-28: "all the reminder emails for some messages must include the graphics that go out as well so we
+        // can validate the picture as well".
+        using var db = TestDb.New();
+        var (eventId, _, speakerId, _) = await SeedAsync(db);
+        await NewQueue(db).CreateSpeakerPostAsync(eventId, speakerId, null, Now.AddHours(5), autoGenerate: true, byEmail: "org@example.test");
+        var post = await db.SoMePosts.SingleAsync();
+        post.IsActive = true;
+        post.ManualTextOverride = "Meet our speakers at {EventNameShort}";
+        post.ImageRef = "https://sp.test/graphics/speaker-card.png";
+        db.GraphicAssets.Add(new GraphicAsset { EventId = eventId, StableKey = "speaker:test", SharePointUrl = post.ImageRef, StorageItemId = "item-1" });
+        await db.SaveChangesAsync();
+        var composer = new SoMePostComposer(db, new SoMeVariableResolver(db));
+        var expected = composer.Resolve(post.EffectiveText, await composer.ValuesForAsync(post));
+        var sender = new CapturingEmailSender();
+
+        var listed = await new SoMeNext24HoursDigest(db, sender, new EmailContextAccessor(), Clock,
+            preview: new SoMeMailPreview(db, composer, new PictureStore())).RunAsync(eventId);
+
+        Assert.Equal(1, listed);
+        var mail = Assert.Single(sender.AttachmentMessages);
+        Assert.DoesNotContain("{EventNameShort}", mail.Html);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode(expected), mail.Html);
+        Assert.Equal(PictureStore.Png, Assert.Single(mail.Attachments).Content);
+    }
+
     [Fact]
     public async Task No_pre_alert_when_no_designated_organizer_is_set()
     {

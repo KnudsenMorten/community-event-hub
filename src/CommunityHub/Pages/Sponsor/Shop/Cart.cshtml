@@ -1,0 +1,240 @@
+@page
+@model CommunityHub.Pages.Sponsor.Shop.CartModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Integrations.Webshop
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Cart & company";
+}
+
+@functions {
+    private Microsoft.AspNetCore.Html.IHtmlContent TotalsTable(ShopTotals t)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<table style=\"max-width:420px;margin-left:auto;\"><tbody>");
+        sb.Append($"<tr><td>Subtotal</td><td style=\"text-align:right\">{ShopPageModel.Eur(t.SubtotalEur)}</td></tr>");
+        if (t.IncludedFurnitureEur > 0)
+            sb.Append($"<tr><td>{System.Net.WebUtility.HtmlEncode(t.IncludedFurnitureLabel ?? "Included furniture")}</td><td style=\"text-align:right\">- {ShopPageModel.Eur(t.IncludedFurnitureEur)}</td></tr>");
+        if (t.SwagCreditEur > 0)
+            sb.Append($"<tr><td>Swag credit</td><td style=\"text-align:right\">- {ShopPageModel.Eur(t.SwagCreditEur)}</td></tr>");
+        sb.Append($"<tr><td>{(t.VatRatePercent > 0 ? $"VAT {t.VatRatePercent:0}% (Danish customer)" : "VAT (not charged — non-Danish customer)")}</td><td style=\"text-align:right\">{ShopPageModel.Eur(t.VatEur)}</td></tr>");
+        sb.Append($"<tr><td><strong>Total</strong></td><td style=\"text-align:right\"><strong>{ShopPageModel.Eur(t.TotalEur)}</strong></td></tr>");
+        sb.Append("</tbody></table>");
+        if (t.LateSurchargeApplies)
+            sb.Append("<p style=\"font-size:13px;color:#b45309;text-align:right;\">Includes the late-order surcharge (ordered less than 30 days before the event).</p>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+}
+
+<div class="card">
+    <h1>Cart &amp; company</h1>
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        var co = Model.Company!;
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info @(Model.MessageIsError ? "shop-msg-error" : "")" role="status">@Model.Message</p>
+        }
+
+        <h2>Cart</h2>
+        @if (Model.Cart is null || Model.Cart.Lines.Count == 0)
+        {
+            <p>Your cart is empty. <a asp-page="/Sponsor/Shop/Index">Browse the shop</a></p>
+        }
+        else
+        {
+            var cart = Model.Cart;
+            <p style="font-size:13px;color:#4b5563;">The cart belongs to <strong>@co.LegalLabel</strong>: your signer and event coordinator both see it.
+               Nothing is held until you sign.</p>
+            @* The totals share the item table's width so they sit under the prices, not at the card's far edge
+               (operator 2026-09-26: "why is this so much to the right"). *@
+            <div style="width:fit-content;max-width:100%;">
+            <div style="overflow-x:auto;">
+            <table>
+                <thead><tr><th>Product</th><th>Qty</th><th style="text-align:right;">Price</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var line in Model.Totals!.Lines)
+                {
+                    <tr>
+                        <td><a asp-page="/Sponsor/Shop/Product" asp-route-id="@line.ProductId">@line.Name</a>
+                            @if (Model.SwagNotes.TryGetValue(line.LineId, out var swagNote)) { <div style="font-size:13px;color:#1b5e20;">@swagNote</div> }
+                            @if (line.SurchargePercent > 0) { <div style="font-size:12px;color:#b45309;">+@line.SurchargePercent.ToString("0")% late-order</div> }
+                            @if (line.NormalUnitEur is decimal normal) { <div style="font-size:12px;"><span class="shop-discount-badge" style="margin-left:0;">Discount</span> normal price <s>@ShopPageModel.Eur(normal * line.Quantity)</s></div> }</td>
+                        <td>
+                            @if (line.Group == CommunityHub.Core.Domain.ShopGroup.Swag)
+                            {
+                                @* A swag item already covers every attendee bag — it is ordered once. *@
+                                <span title="Covers every attendee bag">1</span>
+                            }
+                            else
+                            {
+                                <form method="post" asp-page-handler="Quantity" style="display:flex;gap:4px;">
+                                    <input type="hidden" name="lineId" value="@line.LineId" />
+                                    <input type="number" name="quantity" value="@line.Quantity" min="0" max="99" style="width:60px;" aria-label="Quantity for @line.Name" />
+                                    <button type="submit">Update</button>
+                                </form>
+                            }
+                        </td>
+                        <td style="text-align:right;white-space:nowrap;">@ShopPageModel.Eur(line.LineEur)</td>
+                        <td>
+                            <form method="post" asp-page-handler="Remove">
+                                <input type="hidden" name="lineId" value="@line.LineId" />
+                                <button type="submit" aria-label="Remove @line.Name">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+            @TotalsTable(Model.Totals!)
+            </div>
+
+            <h3>Order details</h3>
+            <form method="post" asp-page-handler="Details" class="shop-form">
+                <input type="hidden" name="orderId" value="@cart.Id" />
+                <label>Purchase order / reference <input name="purchaseOrderRef" value="@cart.PurchaseOrderRef" /></label>
+                <label>Signer
+                    <select name="signerId">
+                        <option value="">— choose —</option>
+                        @foreach (var c in Model.Contacts)
+                        {
+                            <option value="@c.ParticipantId" selected="@(cart.SignerParticipantId == c.ParticipantId)">@c.Name (@c.Email)@(c.IsSigner ? " · default signer" : "")</option>
+                        }
+                    </select>
+                </label>
+                <label>Event coordinator
+                    <select name="coordinatorId">
+                        <option value="">— choose —</option>
+                        @foreach (var c in Model.Contacts)
+                        {
+                            <option value="@c.ParticipantId" selected="@(cart.CoordinatorParticipantId == c.ParticipantId)">@c.Name (@c.Email)@(c.IsEventCoordinator ? " · default coordinator" : "")</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit">Save order details</button>
+            </form>
+
+            <div class="shop-actions">
+                @if (Model.ContractConfigured)
+                {
+                    @* Only the signer can sign — anyone else sends the link (operator 2026-09-26). *@
+                    @if (Model.ViewerMaySign)
+                    {
+                        <form method="post" asp-page-handler="Sign"><input type="hidden" name="orderId" value="@cart.Id" /><button type="submit" class="primary">Digitally Sign Contract Now</button></form>
+                    }
+                    <form method="post" asp-page-handler="Pdf"><input type="hidden" name="orderId" value="@cart.Id" /><button type="submit">Build Contract (offline PDF)</button></form>
+                    <form method="post" asp-page-handler="Send"><input type="hidden" name="orderId" value="@cart.Id" /><button type="submit">Send Contract Link to Signer for Digitally Signing</button></form>
+                }
+                @if (Model.OrganizerMayConfirm)
+                {
+                    <partial name="_ShopConfirmOffline" model="cart.Id" />
+                }
+                @* "Reserve only (hold the items)" is hidden (operator 2026-09-26: "reserve button can not be there now (hide it)"):
+                   §1312: nothing is held until the contract is SIGNED (or an organizer confirms an offline signature). The handler stays for the ELDK28 reservation flow. *@
+                <form method="post" asp-page-handler="Empty" onsubmit="return confirm('Empty the cart? This stops the daily reminder.');"><button type="submit">Empty cart</button></form>
+            </div>
+
+            @* §1312 — ask the organizers to reserve the cart (operator 2026-09-27: "reservation request (which i can approve)").
+               Sits BELOW the sign buttons under its own heading (operator 2026-09-29: "people are confused what to do") —
+               signing is the main path, the reservation is the fallback. *@
+            <div id="request" class="shop-request" style="margin-top:28px;">
+                <h3>Need more time to take a decision?</h3>
+                @if (cart.HasOpenReservationRequest)
+                {
+                    <p><strong>Reservation requested</strong> on @cart.ReservationRequestedAt!.Value.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)
+                       — the organizers will answer by e-mail. Nothing is reserved until they accept it; you can still sign right away.</p>
+                }
+                else
+                {
+                    <p>Ask us to <strong>reserve</strong> these items for you while you decide. Nothing is reserved until we accept — availability is first come, first served.</p>
+                    <form method="post" asp-page-handler="Request"><input type="hidden" name="orderId" value="@cart.Id" /><button type="submit">Request a reservation</button></form>
+                }
+            </div>
+        }
+
+        @if (Model.OpenOrders.Count > 0)
+        {
+            <h2>Waiting for signature</h2>
+            @foreach (var (o, t) in Model.OpenOrders)
+            {
+                <section class="shop-open-order">
+                    <h3>@o.Number · @(o.Status == ShopOrderStatus.Reserved ? "Reserved" : "Waiting for signature")</h3>
+                    @if (o.IsOrganizerReservation)
+                    {
+                        <p style="margin:0 0 8px;">Held for you@(o.ReservationDeadline is DateOnly dl ? $" until {dl:d MMMM yyyy}" : "") — nobody else can book these items. Sign to confirm.</p>
+                    }
+                    @if (o.HasOpenExtensionRequest)
+                    {
+                        <p style="margin:0 0 8px;">You asked for more time (until @o.ExtensionRequestedDeadline!.Value.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) — the organizers will answer by e-mail.</p>
+                    }
+                    else if (o.CanAskForMoreTime)
+                    {
+                        <p style="margin:0 0 8px;"><a asp-page="/Sponsor/Shop/Reservation" asp-route-id="@o.Id" asp-fragment="more-time">Ask for more time</a></p>
+                    }
+                    @* The list and its totals share one width, so the totals sit under the amounts rather than at the
+                       card's far edge (operator 2026-09-26: "why is this so much to the right"). *@
+                    <div style="max-width:640px;">
+                        <ul>@foreach (var l in t.Lines) { <li>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "") — @ShopPageModel.Eur(l.LineEur)</li> }</ul>
+                        @TotalsTable(t)
+                    </div>
+                    @* §1308 — "flip a reservation to an order in the cart and sign": what is in the cart joins this order, so one
+                       contract covers both; the reserved items stay held. *@
+                    @if (o.Status == ShopOrderStatus.Reserved && Model.Cart is { Lines.Count: > 0 } addCart)
+                    {
+                        <form method="post" asp-page-handler="Merge" style="margin:8px 0;">
+                            <input type="hidden" name="orderId" value="@o.Id" />
+                            <button type="submit">Add my cart's @addCart.Lines.Sum(l => l.Quantity) item(s) to this order</button>
+                        </form>
+                    }
+                    <div class="shop-actions">
+                        @* Same rules and names as the cart: only the signer signs; anyone may read it or send the link. *@
+                        @if (Model.MaySignOrder(o))
+                        {
+                            <a class="shop-sign-link" asp-page="/Sponsor/Shop/Contract" asp-route-id="@o.Id" asp-fragment="sign-panel">Digitally Sign Contract Now</a>
+                        }
+                        else
+                        {
+                            <a asp-page="/Sponsor/Shop/Contract" asp-route-id="@o.Id">Read the contract</a>
+                        }
+                        <form method="post" asp-page-handler="Send"><input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Send Contract Link to Signer for Digitally Signing</button></form>
+                        <form method="post" asp-page-handler="Pdf"><input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Download PDF</button></form>
+                        <form method="post" asp-page-handler="Cancel" onsubmit="return confirm('Cancel this order and release the items?');"><input type="hidden" name="orderId" value="@o.Id" /><button type="submit">Cancel</button></form>
+                        @if (Model.OrganizerMayConfirm) { <partial name="_ShopConfirmOffline" model="o.Id" /> }
+                    </div>
+                </section>
+            }
+        }
+
+        <h2>Company</h2>
+        <dl class="shop-dl">
+            <dt>Legal name</dt><dd>@co.LegalName</dd>
+            <dt>CVR / VAT</dt><dd>@(co.Cvr ?? "—")</dd>
+            <dt>Address</dt><dd>@string.Join(", ", new[] { co.Address, co.Postcode + " " + co.City, co.CountryIso2 }.Where(s => !string.IsNullOrWhiteSpace(s)))</dd>
+            <dt>Invoice currency</dt><dd>@co.Currency</dd>
+        </dl>
+        <p style="font-size:13px;color:#4b5563;">Legal name, CVR and address come from our accounting system. Ask the organizers to change them.</p>
+        <form method="post" asp-page-handler="Profile" class="shop-form">
+            <label>Name used in announcements <input name="publicName" value="@co.PublicName" /></label>
+            <label>Website <input name="website" type="url" value="@co.Website" /></label>
+            <label>LinkedIn <input name="linkedIn" value="@co.LinkedInUrl" /></label>
+            <label>X / Twitter <input name="twitter" value="@co.TwitterUrl" /></label>
+            <label>Invoice e-mail <input name="invoiceEmail" type="email" value="@co.InvoiceEmail" /></label>
+            <button type="submit">Save company details</button>
+        </form>
+    }
+</div>
+<style>
+    .shop-form { display:grid; gap:12px; max-width:760px; }
+    .shop-form input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]), .shop-form select, .shop-form textarea {
+        width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px; border:1px solid #9ca3af; border-radius:8px; background:#fff; }
+    .shop-form label { display:grid; gap:5px; font-size:15px; font-weight:600; }
+    .shop-actions { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; align-items:center; }
+    .shop-actions button.primary { background:#1565c0; color:#fff; }
+    .shop-actions a.shop-sign-link { background:#1565c0; color:#fff !important; font-weight:700; text-decoration:none; padding:8px 16px; border-radius:6px; }
+    .shop-open-order { border:1px solid #e5e7eb; border-radius:8px; padding:10px 14px; margin-bottom:12px; }
+    .shop-dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; }
+    @@media (max-width:480px) { .shop-dl { grid-template-columns:1fr; } }
+</style>

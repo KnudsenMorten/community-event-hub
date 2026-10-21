@@ -104,7 +104,8 @@ public sealed class HotelInviteWordingTests
         var svc = new HotelFormService(
             db, clock,
             new OrganizerActionItemService(db, clock), Loc(),
-            NullLogger<HotelFormService>.Instance, invite);
+            NullLogger<HotelFormService>.Instance,
+            new CommunityHub.Core.Entitlements.HotelCoverageService(db, clock), invite);
 
         return (svc, spy, p.Id);
     }

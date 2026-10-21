@@ -34,6 +34,28 @@ public class Event
     /// <summary>Optional pre-day (master classes), the day before StartDate.</summary>
     public DateOnly? PreDayDate { get; set; }
 
+    /// <summary>
+    /// §1354 — the edition's DEFAULT kiosk capture policy (a device may override it). Null =
+    /// <see cref="CommunityHub.Core.Evaluation.FeedbackCapturePolicies.DefaultKiosk"/>. Replaces §1353's
+    /// one-tap switch (*"easily and quickly turn off the wider context capture if people queue up"*):
+    /// Rating only IS one-tap mode. Reaches the tablets with their next session refresh (≤ 60 s).
+    /// Nullable so no database default/sentinel is needed.
+    /// </summary>
+    public CommunityHub.Core.Evaluation.FeedbackCapturePolicy? KioskCapturePolicy { get; set; }
+
+    /// <summary>
+    /// §1354 — the edition's DEFAULT QR capture policy (a physical room may override it). Null =
+    /// <see cref="CommunityHub.Core.Evaluation.FeedbackCapturePolicies.DefaultQr"/> (rating + both
+    /// follow-ups + free text — the QR page as it was).
+    /// </summary>
+    public CommunityHub.Core.Evaluation.FeedbackCapturePolicy? QrCapturePolicy { get; set; }
+
+    /// <summary>§1355 — the default symbols on the kiosk's rating buttons (null = faces).</summary>
+    public CommunityHub.Core.Evaluation.RatingSymbols? KioskRatingSymbols { get; set; }
+
+    /// <summary>§1355 — the default symbols on the QR page's rating buttons (null = faces).</summary>
+    public CommunityHub.Core.Evaluation.RatingSymbols? QrRatingSymbols { get; set; }
+
     /// <summary>Venue name, e.g. "Bella Center Copenhagen".</summary>
     public string VenueName { get; set; } = string.Empty;
 

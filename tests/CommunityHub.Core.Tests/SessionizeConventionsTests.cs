@@ -331,6 +331,77 @@ public sealed class SessionizeConventionsTests
     }
 
     [Fact]
+    public async Task A_common_session_IS_created_under_the_configured_fallback_track()
+    {
+        // 🔴 §1251. Operator 2026-09-20: *"you must create it to link the zoho id to ceh. that will
+        // not work if i create it manually"* — the deciding argument, and it is about the LINK. A
+        // hand-made Backstage session never returns its id, so the two are never linked and every
+        // later check has nothing to hold.
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db);
+        await ImportAsync(db, Src("sz-key", "Keynote [Placeholder]", "Common"));
+
+        var (zoho, handler) = NewZoho();   // the fake exposes one track: "Security"
+        var opts = new ZohoOptions { CommonSessionFallbackTrack = "Security" };
+        var push = new SessionBackstagePushService(
+            db, zoho, opts, tokenOverride: _ => Task.FromResult<string?>("tok"));
+
+        var r = await push.RunAsync(EventId);
+
+        Assert.Equal(1, r.Created);
+        // 🔑 The whole point: the Backstage id is now STORED, so the session is linked.
+        Assert.Equal("new-id", db.Sessions.Single().BackstageSessionId);
+        // It went over with the fallback track, and no track was invented.
+        var post = Assert.Single(handler.Calls,
+            c => c.Method == HttpMethod.Post && c.Url.Contains("/sessions"));
+        Assert.Contains("track-sec", post.Body);
+        Assert.DoesNotContain(handler.Calls,
+            c => c.Method == HttpMethod.Post && c.Url.Contains("/tracks"));
+    }
+
+    [Fact]
+    public void The_create_mail_tells_him_to_clear_the_placeholder_track()
+    {
+        // ⚠️ The session is WRONG IN PUBLIC until he acts, so this line must read as an
+        // instruction with its consequence, not as one more "the API could not send this" entry.
+        var common = new Session { Title = "Keynote", IsCommonForAllTracks = true };
+
+        var gaps = SessionBackstagePushService.DescribeCreateGaps(
+            common, venueId: "hall", speakerEmails: new[] { "a@b.c" }, trackSent: true);
+
+        Assert.Contains("CLEAR the Track field NOW", gaps);
+        Assert.Contains("public agenda", gaps);
+    }
+
+    [Fact]
+    public async Task With_NO_fallback_configured_a_common_session_is_skipped_not_failed()
+    {
+        // 🔴 §1248 — PROVEN on PROD 2026-09-20: a track-less create is refused with
+        // HTTP 400 "`track` is a required parameter". §1240d had removed this skip arguing the
+        // requirement was never verified; trying it verified it, at the cost of one failed pass
+        // that wrote nothing. The original behaviour was right and this pins it.
+        //
+        // 🔑 SKIPPED, not FAILED: no CEH edit could ever clear the failure, so a failure line
+        // would arrive on every pass for ever — the §594 failure the operator actually reported
+        // ("still getting this").
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db);
+        await ImportAsync(db, Src("sz-key", "ELDK27 Closing", "Common"));
+
+        var (zoho, handler) = NewZoho();
+        var r = await NewPush(db, zoho).RunAsync(EventId);
+
+        Assert.Equal(0, r.Created);
+        Assert.Equal(0, r.Failed);
+        Assert.Equal(1, r.Skipped);
+        Assert.Contains(r.Items, i => i.Error!.Contains("Create this one by hand"));
+        // Nothing was written to Zoho — no session, and certainly no "Common" track.
+        Assert.DoesNotContain(handler.Calls, c => c.Method != HttpMethod.Get);
+    }
+
+    [Fact(Skip = "§1248 — superseded: the live API refuses a track-less create (HTTP 400). Kept as "
+               + "the record of what was tried and why, since the reasoning for trying it was sound "
+               + "even though the answer went the other way.")]
     public async Task A_common_session_IS_created_in_zoho_with_NO_track_at_all()
     {
         // 🔴 §1240d. Operator 2026-09-20: *"these 2 should be created as well, why would you skip

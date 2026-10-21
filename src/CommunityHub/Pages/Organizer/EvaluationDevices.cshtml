@@ -1,5 +1,6 @@
 @page
 @model CommunityHub.Pages.Organizer.EvaluationDevicesModel
+@using CommunityHub.Core.Evaluation
 @{
     ViewData["Title"] = "Evaluation Devices";
 }
@@ -44,6 +45,74 @@
         @if (!string.IsNullOrWhiteSpace(Model.Message))
         {
             <p class="notice">@Model.Message</p>
+        }
+
+        @* §1259 — the web-kiosk pairing code. Shown ONCE, like a key, and for the same reason:
+           only its hash is stored. Big and monospaced because it is read off this screen and typed
+           on an iPad by someone standing up. *@
+        @if (Model.PairingCode is not null)
+        {
+            <div class="card" style="border:2px solid #1d4ed8;background:#eff6ff;">
+                <h2 style="margin-top:0;">Pair a kiosk device &mdash; @Model.PairingCodeFor</h2>
+                <p style="font-family:ui-monospace,Menlo,monospace;font-size:44px;font-weight:700;
+                          letter-spacing:.12em;user-select:all;margin:10px 0;">@Model.PairingCode</p>
+                <ol style="margin:0 0 6px 18px;">
+                    <li>On the kiosk device, open <code>/eval</code> on this site.</li>
+                    <li>Tap the <strong>top-left corner five times</strong> to open setup.</li>
+                    <li>Type the code above and press <strong>Pair with code</strong>.</li>
+                </ol>
+                <p class="set-deps">
+                    Single use, expires @(Model.PairingCodeExpiresAt?.ToLocalTime().ToString("HH:mm") ?? "shortly").
+                    Pairing issues a fresh device key, so pairing a replacement device revokes the old one.
+                    Link the device to a room first, or the kiosk cannot name the session on screen.
+                </p>
+            </div>
+        }
+
+        @* §1259d — how a screen gets onto the kiosk page at all: scan, or type. Shown always, at
+           the top, because it is the first thing anyone setting up a stand needs. *@
+        <div class="card" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">
+            @if (Model.KioskQrDataUri is not null)
+            {
+                <img src="@Model.KioskQrDataUri" alt="QR code for the kiosk page" width="150" height="150"
+                     style="image-rendering:pixelated;border:6px solid #fff;border-radius:6px;" />
+            }
+            <div style="flex:1 1 320px;">
+                <h2 style="margin-top:0;">Set up a screen</h2>
+                <p style="margin:.2em 0;">
+                    <strong>Scan the code</strong> with the tablet's camera, or open
+                    <code style="user-select:all;">@Model.KioskUrl</code> in any browser &mdash; a
+                    Windows laptop works exactly the same for testing.
+                </p>
+                <p class="set-deps" style="margin:.4em 0 0;">
+                    On the page: tap the <strong>top-left corner five times</strong> &rarr;
+                    <strong>Enroll this device</strong> &rarr; name it. It appears below under
+                    <strong>pending approvals</strong>; approve it and the screen starts working by
+                    itself. Link it to a room so it can name the session.
+                </p>
+            </div>
+        </div>
+
+        @* §1259c — the enrolment link. Shown once; only its hash is stored. This is the one an
+           iPad keeps on its Home Screen, and the reason a kiosk never needs a daily login. *@
+        @if (Model.EnrolmentLink is not null)
+        {
+            <div class="card" style="border:2px solid #047857;background:#ecfdf5;">
+                <h2 style="margin-top:0;">Enrollment link &mdash; @Model.EnrolmentLinkFor</h2>
+                <p><code style="user-select:all;word-break:break-all;font-size:15px;">@Model.EnrolmentLink</code></p>
+                <ol style="margin:0 0 6px 18px;">
+                    <li>Open this once on that kiosk device (scan it, or type it).</li>
+                    <li>Run it full screen
+                        so there is no address bar.</li>
+                    <li>Lock the device to it (Intune kiosk mode, or the device's app pinning).</li>
+                </ol>
+                <p class="set-deps">
+                    The kiosk re-connects itself from this link whenever its browser storage is cleared
+                    or the device is replaced &mdash; no code to type, no daily login. Issuing a new
+                    link revokes this one. <strong>Treat it like a key</strong>: it can add ratings for
+                    this room and nothing else.
+                </p>
+            </div>
         }
 
         @* 🔒 The ONLY moment a key is ever visible. We store a PBKDF2 hash, so nobody — including
@@ -91,26 +160,56 @@
             <button type="submit" class="set-btn">Register</button>
         </form>
 
-        <h2 style="margin-top:24px;">Registered (@Model.Devices.Count)</h2>
+        var revokedCount = Model.Devices.Count(x => !x.IsActive);
+        <h2 style="margin-top:24px;">Registered (@(Model.Devices.Count - revokedCount))</h2>
+        @if (revokedCount > 0)
+        {
+            @* §1277 — revoked devices are hidden by default; one click shows them (to Restore one). *@
+            <label style="font-size:13px;display:inline-flex;gap:6px;align-items:center;cursor:pointer;">
+                <input type="checkbox" onchange="document.querySelectorAll('tr.dev-revoked').forEach(function (r) { r.hidden = !this.checked; }, this);" />
+                Show revoked (@revokedCount)
+            </label>
+        }
         @if (Model.Devices.Count == 0)
         {
             <p>No devices registered yet. Until at least one is, every upload will be refused.</p>
         }
         else
         {
+            @* §1266 — operator 2026-09-21: *"relevans and errors, looks cramped"*. One row per device,
+               NAME first; only the health figures that kind of device actually reports (an iPad has
+               no battery or signal reading, a box has both); times in Danish wall time (Last seen was
+               printed in UTC); rare and destructive actions folded under "More". *@
+            <style>
+                .dev-grid td { vertical-align: top; padding: 10px 12px; }
+                .dev-grid .dev-name { font-size: 15px; font-weight: 700; color: #1e293b; }
+                .dev-grid .dev-sub { font-size: 12px; color: #64748b; }
+                .dev-grid .dev-room select { width: 100%; max-width: 360px; }
+                /* §1354 — wide enough for "Default — Rating + 2 questions (3 pages)" in full (operator:
+                   "extend the length of this so i can see the whole length"); phones keep the fluid cell. */
+                @@media (min-width: 700px) { .dev-grid .dev-room { min-width: 340px; } }
+                .dev-grid .dev-state { font-weight: 600; }
+                .dev-grid .dev-state.online { color: #15803d; }
+                .dev-grid .dev-state.late { color: #b45309; }
+                .dev-grid .dev-state.silent, .dev-grid .dev-state.never { color: #64748b; }
+                .dev-grid .dev-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+                .dev-grid .dev-actions form { margin: 0; }
+                .dev-grid details > summary { cursor: pointer; font-size: 13px; color: #1d4ed8; }
+                .dev-grid details[open] > summary { margin-bottom: 6px; }
+                .dev-grid .dev-more { display: flex; flex-wrap: wrap; gap: 6px; }
+                .dev-grid .dev-rename { display: flex; gap: 6px; margin-top: 6px; }
+                .dev-grid .dev-rename input[name=label] { min-width: 0; flex: 1; max-width: 220px; }
+                .dev-grid .dev-alert { color: #b91c1c; font-weight: 600; }
+            </style>
             <div style="overflow-x:auto;">
-            <table class="grid">
+            <table class="grid dev-grid">
                 <thead>
                     <tr>
-                        <th>Identifier</th>
+                        <th>Device</th>
                         <th>Room</th>
                         <th>Status</th>
-                        <th>Last seen</th>
-                        <th>Battery</th>
-                        <th>Signal</th>
-                        <th>Cached</th>
+                        <th>Health</th>
                         <th>Responses</th>
-                        <th>Firmware</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -118,83 +217,203 @@
                 @foreach (var d in Model.Devices)
                 {
                     var status = Model.StatusOf(d);
+                    var contact = CommunityHub.Pages.Organizer.EvaluationDevicesModel.LastContact(d);
                     var lowBattery = d.LastBatteryPercent is int b && b < CommunityHub.Pages.Organizer.EvaluationDevicesModel.LowBatteryPercent;
                     var stuckCache = d.CachedRecordCount is int c && c >= CommunityHub.Pages.Organizer.EvaluationDevicesModel.CachedRecordAlert;
-                    <tr style="@(d.IsActive ? "" : "opacity:.55;")">
+                    var name = CommunityHub.Pages.Organizer.EvaluationDevicesModel.DisplayName(d);
+                    var customName = CommunityHub.Pages.Organizer.EvaluationDevicesModel.HasCustomName(d);
+                    <tr class="@(d.IsActive ? "" : "dev-revoked")" hidden="@(!d.IsActive)" style="@(d.IsActive ? "" : "opacity:.55;")">
                         <td>
-                            <code>@d.SerialNumber</code>
-                            @if (!d.IsActive) { <br /><strong style="color:#b91c1c;">revoked</strong> }
-                            @if (!string.IsNullOrWhiteSpace(d.Label)) { <br /><span class="set-deps">@d.Label</span> }
-                            @if (d.PreviousKeyHash is not null)
-                            {
-                                <br /><span class="set-deps">old key still accepted</span>
-                            }
+                            <div class="dev-name">@name</div>
+                            <div class="dev-sub">
+                                @if (customName) { <code>@d.SerialNumber</code><text> · </text> }
+                                @(d.IsKiosk ? "Kiosk" : "Kiosk (box)")@(d.FirmwareVersion is null || d.IsKiosk ? "" : " · " + d.FirmwareVersion)
+                            </div>
+                            @if (!d.IsActive) { <div><strong style="color:#b91c1c;">revoked</strong></div> }
+                            @if (d.PreviousKeyHash is not null) { <div class="dev-sub">old key still accepted</div> }
+                            @* §1265 — the name is editable in place; presentation only, never matched on. *@
+                            <details>
+                                <summary>Rename</summary>
+                                <form method="post" asp-page-handler="Rename" class="dev-rename">
+                                    <input type="hidden" name="id" value="@d.Id" />
+                                    <input name="label" value="@(customName ? d.Label : "")" maxlength="200"
+                                           placeholder="e.g. Room 16 stand" aria-label="Name for @name" />
+                                    <button type="submit" class="set-btn">Save</button>
+                                </form>
+                            </details>
                         </td>
-                        @* 🔑 device → room → session is the whole attribution chain. An unlinked
-                           unit collects presses that can never reach a session. *@
-                        <td>
-                            <form method="post" asp-page-handler="SetRoom" style="display:inline;">
+                        @* 🔑 §1350 — device → PHYSICAL room → schedule rooms → session is the whole
+                           attribution chain. An unlinked unit collects presses that reach no session. *@
+                        <td class="dev-room">
+                            <form method="post" asp-page-handler="SetPhysicalRoom" style="display:inline;">
                                 <input type="hidden" name="id" value="@d.Id" />
-                                <select name="roomId" onchange="this.form.submit()"
-                                        aria-label="Room for @d.SerialNumber">
+                                <select name="physicalRoomId" onchange="this.form.submit()"
+                                        aria-label="Physical room for @name">
                                     <option value="">— not linked —</option>
-                                    @foreach (var room in Model.Rooms)
+                                    @foreach (var pr in Model.PhysicalRooms)
                                     {
-                                        <option value="@room.Id" selected="@(room.Id == d.RoomId)">@room.Name</option>
+                                        <option value="@pr.Id" selected="@(pr.Id == d.PhysicalRoomId)">@pr.Name</option>
                                     }
                                 </select>
                             </form>
-                            @if (d.RoomId is null)
+                            @if (d.PhysicalRoomId is null && (d.RoomId is not null || d.MasterClassRoomId is not null))
                             {
-                                <br /><span class="set-deps" style="color:#b45309;">presses cannot be attributed</span>
+                                @* §1349 direct links still count until a physical room is chosen. *@
+                                <div class="dev-sub">direct link: @string.Join(" + ", Model.Rooms.Where(r => r.Id == d.RoomId || r.Id == d.MasterClassRoomId).Select(r => r.Name))</div>
+                            }
+                            else if (d.PhysicalRoomId is null)
+                            {
+                                <div class="set-deps" style="color:#b45309;">presses cannot be attributed</div>
+                            }
+                            @* §1354 — this tablet's own capture policy, to compare policies side by side. *@
+                            @if (d.IsKiosk)
+                            {
+                                <form method="post" asp-page-handler="SetDevicePolicy" style="margin-top:6px;">
+                                    <input type="hidden" name="id" value="@d.Id" />
+                                    <label class="dev-sub" style="display:block;">Asks</label>
+                                    <select name="policy" onchange="this.form.submit()" aria-label="Capture policy for @name">
+                                        <option value="">Default — @FeedbackCapturePolicies.Label(Model.DefaultKioskPolicy)</option>
+                                        @foreach (var pol in FeedbackCapturePolicies.KioskChoices)
+                                        {
+                                            <option value="@((int)pol)" selected="@(d.CapturePolicy == pol)">@FeedbackCapturePolicies.Label(pol)</option>
+                                        }
+                                    </select>
+                                </form>
+                                @* §1355 — this tablet's own symbols. *@
+                                <form method="post" asp-page-handler="SetDeviceSymbols" style="margin-top:6px;">
+                                    <input type="hidden" name="id" value="@d.Id" />
+                                    <label class="dev-sub" style="display:block;">Shows</label>
+                                    <select name="symbols" onchange="this.form.submit()" aria-label="Symbols for @name">
+                                        <option value="">Default — @RatingSymbolChoices.Label(Model.DefaultKioskSymbols)</option>
+                                        @foreach (var s in RatingSymbolChoices.All)
+                                        {
+                                            <option value="@((int)s)" selected="@(d.RatingSymbols == s)">@RatingSymbolChoices.Label(s)</option>
+                                        }
+                                    </select>
+                                </form>
                             }
                         </td>
-                        <td>@status</td>
-                        <td>@(d.LastSeenAt?.ToString("dd MMM HH:mm") ?? "&mdash;")</td>
-                        <td style="@(lowBattery ? "color:#b91c1c;font-weight:600;" : "")">
-                            @(d.LastBatteryPercent is null ? "—" : d.LastBatteryPercent + "%")
+                        <td>
+                            <span class="dev-state @(status == "never seen" ? "never" : status)">@status</span>
+                            <div class="dev-sub">@(contact is DateTimeOffset seen ? Model.ShortLocal(seen) : "—")</div>
                         </td>
-                        <td>@(d.LastSignalQuality?.ToString() ?? "—")</td>
-                        @* 🔑 The column that catches SILENT failure: a unit that is online and
-                           heartbeating but not draining its buffer is losing presses, and nothing
-                           else on this board would show it. *@
-                        <td style="@(stuckCache ? "color:#b91c1c;font-weight:600;" : "")">
-                            @(d.CachedRecordCount?.ToString() ?? "—")
+                        @* 🔑 Health shows what THIS kind of device reports. The figure that catches
+                           SILENT failure on both is the unsent count: online and reporting but not
+                           draining its queue means presses are being lost. *@
+                        <td>
+                            @if (d.IsKiosk)
+                            {
+                                <div class="@(stuckCache ? "dev-alert" : "")">Unsent votes: @(d.CachedRecordCount?.ToString() ?? "—")</div>
+                                @* §1358 — a tablet reports its battery when its browser can tell (Chrome on Android). *@
+                                @if (d.LastBatteryPercent is int kb)
+                                {
+                                    <div class="@(lowBattery ? "dev-alert" : "")">Battery: @(kb)%</div>
+                                }
+                            }
+                            else
+                            {
+                                <div class="@(lowBattery ? "dev-alert" : "")">Battery: @(d.LastBatteryPercent is null ? "—" : d.LastBatteryPercent + "%")</div>
+                                <div>Signal: @(d.LastSignalQuality?.ToString() ?? "—")</div>
+                                <div class="@(stuckCache ? "dev-alert" : "")">Unsent: @(d.CachedRecordCount?.ToString() ?? "—")</div>
+                            }
                         </td>
                         <td>
                             @(Model.ResponseCounts.TryGetValue(d.SerialNumber, out var n) ? n : 0)
                             @if (Model.UnattributedCounts.TryGetValue(d.SerialNumber, out var un) && un > 0)
                             {
-                                <br />
-                                <span class="set-deps" style="color:#b45309;" title="Presses that fell outside every session window — often a drifted device clock or a schedule that no longer matches reality.">
-                                    @un unattributed
-                                </span>
+                                @* Neutral, not a warning: a press outside every session window is
+                                   normal between sessions and while testing. It still counts toward
+                                   the event figure. *@
+                                <div class="dev-sub" title="Pressed when no session was running in this room — still counted in the event total; if it keeps rising during sessions, check the device's room and clock.">
+                                    @un outside any session
+                                </div>
                             }
                         </td>
-                        <td>@(d.FirmwareVersion ?? "—")</td>
-                        <td style="white-space:nowrap;">
-                            <form method="post" asp-page-handler="Rotate" style="display:inline;">
-                                <input type="hidden" name="id" value="@d.Id" />
-                                <button type="submit" class="set-btn">New key</button>
-                            </form>
-                            @if (d.PreviousKeyHash is not null)
-                            {
-                                <form method="post" asp-page-handler="RetirePrevious" style="display:inline;">
-                                    <input type="hidden" name="id" value="@d.Id" />
-                                    <button type="submit" class="set-btn">Retire old key</button>
-                                </form>
-                            }
-                            <form method="post" asp-page-handler="SetActive" style="display:inline;">
-                                <input type="hidden" name="id" value="@d.Id" />
-                                <input type="hidden" name="active" value="@((!d.IsActive).ToString().ToLowerInvariant())" />
-                                <button type="submit" class="set-btn @(d.IsActive ? "off" : "")">
-                                    @(d.IsActive ? "Revoke" : "Restore")
-                                </button>
-                            </form>
-                            <form method="post" asp-page-handler="Delete" style="display:inline;">
-                                <input type="hidden" name="id" value="@d.Id" />
-                                <button type="submit" class="set-btn off">Delete</button>
-                            </form>
+                        <td>
+                            <div class="dev-actions">
+                                @if (d.IsKiosk)
+                                {
+                                    @* §1259c — the self-healing route: one link, kept on the Home Screen. *@
+                                    <form method="post" asp-page-handler="EnrolLink">
+                                        <input type="hidden" name="id" value="@d.Id" />
+                                        <button type="submit" class="set-btn" title="Issue the URL this kiosk keeps; it re-connects itself from it">
+                                            @(d.KioskEnrolmentTokenHash is null ? "Enrollment link" : "New enrollment link")
+                                        </button>
+                                    </form>
+                                    <form method="post" asp-page-handler="Pair">
+                                        <input type="hidden" name="id" value="@d.Id" />
+                                        <button type="submit" class="set-btn" title="Issue a one-time code so a kiosk device running /eval becomes this device">Re-pair</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <form method="post" asp-page-handler="Rotate">
+                                        <input type="hidden" name="id" value="@d.Id" />
+                                        <button type="submit" class="set-btn">New key</button>
+                                    </form>
+                                    @if (d.PreviousKeyHash is not null)
+                                    {
+                                        <form method="post" asp-page-handler="RetirePrevious">
+                                            <input type="hidden" name="id" value="@d.Id" />
+                                            <button type="submit" class="set-btn">Retire old key</button>
+                                        </form>
+                                    }
+                                }
+                            </div>
+                            <details style="margin-top:6px;">
+                                <summary>More</summary>
+                                <div class="dev-more">
+                                    @if (d.IsKiosk && d.KioskEnrolmentTokenHash is not null)
+                                    {
+                                        <form method="post" asp-page-handler="RevokeEnrol">
+                                            <input type="hidden" name="id" value="@d.Id" />
+                                            <button type="submit" class="set-btn" title="Stop this kiosk re-connecting (lost or stolen)">Revoke link</button>
+                                        </form>
+                                    }
+                                    @if (d.IsKiosk && d.PreviousKeyHash is not null)
+                                    {
+                                        <form method="post" asp-page-handler="RetirePrevious">
+                                            <input type="hidden" name="id" value="@d.Id" />
+                                            <button type="submit" class="set-btn">Retire old key</button>
+                                        </form>
+                                    }
+                                    @if (!d.IsKiosk)
+                                    {
+                                        @* §1259 — a box's identity can be taken over by an iPad (spare). *@
+                                        <form method="post" asp-page-handler="Pair">
+                                            <input type="hidden" name="id" value="@d.Id" />
+                                            <button type="submit" class="set-btn" title="Issue a one-time code so a kiosk device running /eval becomes this device">Pair kiosk</button>
+                                        </form>
+                                    }
+                                    <form method="post" asp-page-handler="SetActive">
+                                        <input type="hidden" name="id" value="@d.Id" />
+                                        <input type="hidden" name="active" value="@((!d.IsActive).ToString().ToLowerInvariant())" />
+                                        <button type="submit" class="set-btn @(d.IsActive ? "off" : "")">
+                                            @(d.IsActive ? "Revoke" : "Restore")
+                                        </button>
+                                    </form>
+                                    @* §1277 — Delete is offered only where it will WORK. A device that has
+                                       collected feedback is refused (its responses would point at a unit
+                                       nobody can identify), and the refusal used to appear at the top of
+                                       the page where it was missed (operator 2026-09-21: "i pressed delete
+                                       but they doont remove from page"). Revoke retires it instead, and a
+                                       revoked device drops out of this list. *@
+                                    @if (Model.ResponseCounts.TryGetValue(d.SerialNumber, out var held) && held > 0)
+                                    {
+                                        <span class="dev-sub" style="flex-basis:100%;">
+                                            Has @held response(s), so it cannot be deleted &mdash; <strong>Revoke</strong>
+                                            retires it and hides it from this list, keeping its feedback.
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <form method="post" asp-page-handler="Delete">
+                                            <input type="hidden" name="id" value="@d.Id" />
+                                            <button type="submit" class="set-btn off">Delete</button>
+                                        </form>
+                                    }
+                                </div>
+                            </details>
                         </td>
                     </tr>
                 }
@@ -203,15 +422,207 @@
             </div>
 
             <p class="set-deps" style="margin-top:10px;">
-                <strong>Status is last-seen, not a live connection.</strong> These units are battery
-                powered and sleep between uploads, so &ldquo;silent&rdquo; overnight is normal.
-                Battery turns red below @CommunityHub.Pages.Organizer.EvaluationDevicesModel.LowBatteryPercent%,
-                and <em>Cached</em> turns red at @CommunityHub.Pages.Organizer.EvaluationDevicesModel.CachedRecordAlert
-                &mdash; a device that is reporting but not draining its cache is losing presses.
+                <strong>Status is the last sign of life, not a live connection</strong> (Danish time).
+                Boxes are battery powered and sleep between uploads, and a tablet kiosk stops reporting while
+                its screen is off, so &ldquo;silent&rdquo; overnight is normal. Battery turns red below
+                @CommunityHub.Pages.Organizer.EvaluationDevicesModel.LowBatteryPercent%, and
+                <em>Unsent</em> turns red at @CommunityHub.Pages.Organizer.EvaluationDevicesModel.CachedRecordAlert
+                &mdash; a device that is reporting but not sending its votes is losing presses.
             </p>
         }
     }
 </div>
+
+@* ================================================================================
+   §1350 — PHYSICAL ROOMS. Operator 2026-10-19: *"define rooms and link virtual rooms linked to
+   sessions and link them to physical rooms where the device is"*. A tablet stands in ONE physical
+   room; a physical room holds one or more schedule rooms (pre-day "-MC" + main day), and a combined
+   pre-day room may sit under several physical rooms (5-7-MC under Room 5 AND Room 6-7).
+   ================================================================================ *@
+@* §1353 — one switch: rating + follow-ups, or rating only when people queue up. *@
+@if (!Model.AccessDenied)
+{
+    <style>
+        .kq-toggle { display: flex; flex-wrap: wrap; gap: 0; border: 2px solid #1d4ed8; border-radius: 10px; overflow: hidden; max-width: 640px; }
+        .kq-toggle form { flex: 1 1 240px; margin: 0; }
+        .kq-toggle button { width: 100%; height: 100%; border: 0; padding: 12px 14px; text-align: left; cursor: pointer;
+                            background: #fff; color: #1e293b; font: inherit; }
+        .kq-toggle button strong { display: block; font-size: 15px; }
+        .kq-toggle button span { display: block; font-size: 12px; color: #64748b; margin-top: 2px; }
+        .kq-toggle button[aria-pressed=true] { background: #1d4ed8; color: #fff; cursor: default; }
+        .kq-toggle button[aria-pressed=true] span { color: #dbeafe; }
+        .kq-toggle button:disabled { opacity: 1; }
+    </style>
+    <div class="card">
+        <h2 style="margin-top:0;">Feedback capture policies</h2>
+        <p class="set-deps">What attendees are asked. The defaults below apply everywhere; a tablet (in its row) and a
+            physical room's QR codes (under Physical rooms) can run their own policy, so policies can be compared.
+            Every response records the policy it was captured under.</p>
+
+        <h3 style="margin:14px 0 6px;">Default for kiosk tablets</h3>
+        <div class="kq-toggle" role="group" aria-label="Default kiosk policy">
+            @foreach (var (pol, hint) in new[]
+            {
+                (FeedbackCapturePolicy.RatingFollowUps, "More context for the speaker · about 10–20 s per person"),
+                (FeedbackCapturePolicy.RatingOnly, "One tap — fastest when people queue up"),
+            })
+            {
+                var on = Model.DefaultKioskPolicy == pol;
+                <form method="post" asp-page-handler="SetDefaultPolicy">
+                    <input type="hidden" name="channel" value="kiosk" />
+                    <input type="hidden" name="policy" value="@((int)pol)" />
+                    <button type="submit" aria-pressed="@(on ? "true" : "false")" disabled="@on">
+                        <strong>@FeedbackCapturePolicies.Label(pol)</strong><span>@hint</span>
+                    </button>
+                </form>
+            }
+        </div>
+        <p class="set-deps" style="margin-top:6px;">Tablets switch within a minute — nothing to do on the devices.</p>
+
+        <h3 style="margin:16px 0 6px;">Default for QR codes</h3>
+        <div class="kq-toggle" role="group" aria-label="Default QR policy">
+            @foreach (var pol in FeedbackCapturePolicies.QrChoices)
+            {
+                var on = Model.DefaultQrPolicy == pol;
+                <form method="post" asp-page-handler="SetDefaultPolicy">
+                    <input type="hidden" name="channel" value="qr" />
+                    <input type="hidden" name="policy" value="@((int)pol)" />
+                    <button type="submit" aria-pressed="@(on ? "true" : "false")" disabled="@on">
+                        <strong>@FeedbackCapturePolicies.Label(pol)</strong>
+                    </button>
+                </form>
+            }
+        </div>
+        <p class="set-deps" style="margin-top:6px;">Applies from the next scan.</p>
+
+        @* §1355 — the symbols on the four rating buttons, one or two at once. *@
+        <h3 style="margin:16px 0 6px;">Symbols on the rating buttons</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:12px 24px;">
+            @foreach (var (channel, label, current) in new[] { ("kiosk", "Kiosk tablets", Model.DefaultKioskSymbols), ("qr", "QR codes", Model.DefaultQrSymbols) })
+            {
+                <form method="post" asp-page-handler="SetDefaultSymbols">
+                    <input type="hidden" name="channel" value="@channel" />
+                    <label class="dev-sub" style="display:block;">@label</label>
+                    <select name="symbols" onchange="this.form.submit()" aria-label="Default symbols for @label" style="min-width:220px;">
+                        @foreach (var s in RatingSymbolChoices.All)
+                        {
+                            <option value="@((int)s)" selected="@(current == s)">@RatingSymbolChoices.Label(s)</option>
+                        }
+                    </select>
+                </form>
+            }
+        </div>
+        <p class="set-deps" style="margin-top:6px;">Faces, stars (1–4) and points (1–4) — one or two together. The colour and the
+            word stay on every button; the stored rating is the same whatever is shown.</p>
+    </div>
+}
+
+@if (!Model.AccessDenied)
+{
+    <style>
+        .pr-grid td { vertical-align: top; padding: 10px 12px; }
+        .pr-grid .pr-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 12px; }
+        .pr-grid .pr-rooms label { font-size: 13px; display: flex; gap: 6px; align-items: flex-start; }
+        .pr-grid .pr-name { width: 100%; max-width: 200px; }
+        @@media (min-width: 700px) { .pr-grid td:first-child { min-width: 340px; } }
+        .pr-warn { color: #b45309; margin: 4px 0; }
+        @@media (max-width: 600px) {
+            .pr-grid .pr-rooms { grid-template-columns: 1fr; }
+        }
+    </style>
+    <div class="card">
+        <h2 style="margin-top:0;">Physical rooms (@Model.PhysicalRooms.Count)</h2>
+        <p class="set-deps">
+            A tablet is linked to the <strong>physical room</strong> it stands in. Tick every schedule room held
+            in that space &mdash; e.g. the pre-day <em>-MC</em> room and the main-day room. A combined pre-day room
+            goes under each physical room it spans. The tablet shows, counts down to and collects for whichever
+            ticked room has a session at that date and time.
+        </p>
+        @if (Model.MapWarnings.Count > 0)
+        {
+            <div style="margin:10px 0;">
+                @foreach (var w in Model.MapWarnings)
+                {
+                    <div class="pr-warn">⚠ @w.Text</div>
+                }
+            </div>
+        }
+        @if (Model.PhysicalRooms.Count > 0)
+        {
+            <div style="overflow-x:auto;">
+            <table class="grid pr-grid">
+                <thead><tr><th>Physical room</th><th>Schedule rooms held here</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var pr in Model.PhysicalRooms)
+                {
+                    var mapped = pr.Placements.Select(p => p.EvaluationRoomId).ToHashSet();
+                    var tablets = Model.Devices.Count(d => d.IsActive && d.PhysicalRoomId == pr.Id);
+                    <tr>
+                        <td>
+                            <form method="post" asp-page-handler="SavePhysicalRoom" id="pr-@pr.Id">
+                                <input type="hidden" name="id" value="@pr.Id" />
+                                <input class="pr-name" name="name" value="@pr.Name" maxlength="200" aria-label="Name of @pr.Name" />
+                            </form>
+                            <div class="dev-sub">@tablets tablet(s)</div>
+                            @* §1354 — the QR policy for every session held here. *@
+                            <form method="post" asp-page-handler="SetRoomQrPolicy" style="margin-top:6px;">
+                                <input type="hidden" name="id" value="@pr.Id" />
+                                <label class="dev-sub" style="display:block;">QR asks</label>
+                                <select name="policy" onchange="this.form.submit()" aria-label="QR policy for @pr.Name" style="width:100%;max-width:360px;">
+                                    <option value="">Default — @FeedbackCapturePolicies.Label(Model.DefaultQrPolicy)</option>
+                                    @foreach (var pol in FeedbackCapturePolicies.QrChoices)
+                                    {
+                                        <option value="@((int)pol)" selected="@(pr.QrCapturePolicy == pol)">@FeedbackCapturePolicies.Label(pol)</option>
+                                    }
+                                </select>
+                            </form>
+                            @* §1355 — the QR page's symbols for sessions held here. *@
+                            <form method="post" asp-page-handler="SetRoomQrSymbols" style="margin-top:6px;">
+                                <input type="hidden" name="id" value="@pr.Id" />
+                                <label class="dev-sub" style="display:block;">QR shows</label>
+                                <select name="symbols" onchange="this.form.submit()" aria-label="QR symbols for @pr.Name" style="width:100%;max-width:360px;">
+                                    <option value="">Default — @RatingSymbolChoices.Label(Model.DefaultQrSymbols)</option>
+                                    @foreach (var s in RatingSymbolChoices.All)
+                                    {
+                                        <option value="@((int)s)" selected="@(pr.QrRatingSymbols == s)">@RatingSymbolChoices.Label(s)</option>
+                                    }
+                                </select>
+                            </form>
+                        </td>
+                        <td>
+                            <div class="pr-rooms">
+                                @foreach (var room in Model.Rooms)
+                                {
+                                    <label>
+                                        <input type="checkbox" form="pr-@pr.Id" name="roomIds" value="@room.Id" checked="@mapped.Contains(room.Id)" />
+                                        <span>@room.Name</span>
+                                    </label>
+                                }
+                            </div>
+                        </td>
+                        <td>
+                            <button type="submit" form="pr-@pr.Id" class="btn btn-primary">Save</button>
+                            @if (tablets == 0)
+                            {
+                                <form method="post" asp-page-handler="DeletePhysicalRoom" style="margin-top:6px;"
+                                      onsubmit="return confirm('Delete physical room @pr.Name?');">
+                                    <input type="hidden" name="id" value="@pr.Id" />
+                                    <button type="submit" class="btn">Delete</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+        <form method="post" asp-page-handler="AddPhysicalRoom" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+            <input name="name" placeholder="New physical room, e.g. Room 16" maxlength="200" style="flex:1;min-width:0;max-width:280px;" />
+            <button type="submit" class="btn">Add physical room</button>
+        </form>
+    </div>
+}
 
 @* ================================================================================
    §784.7(A) — ONBOARDING, merged in from the retired /Organizer/EvaluationOnboarding.
@@ -257,7 +668,7 @@
             <table class="ob-table">
                 <thead>
                     <tr>
-                        <th>Printed serial</th>
+                        <th>Name / serial</th>
                         <th>Firmware</th>
                         <th>Asking since</th>
                         <th></th>
@@ -269,7 +680,20 @@
                     <tr>
                         @* 🔑 Serial FIRST and largest: the organizer doing this is holding the box,
                            and the printed number is the only one they can read off it. *@
-                        <td data-label="Serial"><span class="ob-serial">@r.SerialNumber</span></td>
+                        @* §1266 — the name typed at enrollment, shown BEFORE approval: it is how an
+                           organizer tells which iPad is asking (operator 2026-09-21, reported twice:
+                           §1261 carried it onto the approved device but the queue never showed it). *@
+                        <td data-label="Device">
+                            @if (!string.IsNullOrWhiteSpace(r.Note))
+                            {
+                                <span class="ob-serial">@r.Note</span><br />
+                                <code style="font-size:12px;color:#64748b;">@r.SerialNumber</code>
+                            }
+                            else
+                            {
+                                <span class="ob-serial">@r.SerialNumber</span>
+                            }
+                        </td>
                         <td data-label="Firmware" class="ob-muted">@(r.FirmwareVersion ?? "—")</td>
                         <td data-label="Asking since" class="ob-muted">
                             @Model.Local(r.RequestedAt)<br>
@@ -390,7 +814,13 @@
                 @foreach (var row in Model.TelemetryRows)
                 {
                     <tr>
-                        <td data-label="Serial"><span class="ob-serial">@row.Device.SerialNumber</span></td>
+                        <td data-label="Serial">
+                            <span class="ob-serial">@CommunityHub.Pages.Organizer.EvaluationDevicesModel.DisplayName(row.Device)</span>
+                            @if (CommunityHub.Pages.Organizer.EvaluationDevicesModel.HasCustomName(row.Device))
+                            {
+                                <br /><code style="font-size:12px;color:#64748b;">@row.Device.SerialNumber</code>
+                            }
+                        </td>
                         <td data-label="Telemetry">
                             <span class="ob-pill @(row.EffectivelyOn ? "ob-on" : "ob-off")">
                                 @(row.EffectivelyOn ? "sending" : "silent")

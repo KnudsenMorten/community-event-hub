@@ -37,12 +37,16 @@ public sealed class AllocationScenarioServiceTests
     private static VolunteerStructureService.ActorContext Volunteer() =>
         new(99, "vol@example.test", ParticipantRole.Volunteer, EventId);
 
-    private static AllocationScenarioService NewSvc(CommunityHubDbContext db) => new(db, new FixedClock());
+    private static AllocationScenarioService NewSvc(CommunityHubDbContext db) =>
+        new(db, new FixedClock(), CommunityHub.Core.Volunteers.VolunteerAssignmentGate.For(db));
 
     private static void SeedEvent(CommunityHubDbContext db)
     {
         db.Events.Add(new Event { Id = EventId, CommunityName = "C", DisplayName = "C27", Code = "C27", IsActive = true });
         db.SaveChanges();
+        // §1295 — these tests assert COMMIT behaviour, so the edition must have released volunteer
+        // task assignment; the held state is covered by VolunteerAssignmentGateTests.
+        CommunityHub.Core.Tests.VolunteerAssignmentRelease.ToBroad(db, EventId);
     }
 
     private static int AddPerson(CommunityHubDbContext db, string name, ParticipantRole role = ParticipantRole.Volunteer)

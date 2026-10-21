@@ -229,6 +229,8 @@
             font-size: 14px; font-weight: 500; white-space: nowrap;
         }
         .nav-section-items a:hover { background: var(--el-grey); }
+        /* §1305 — a thin line between groups of items in one dropdown (e.g. above "Previous Orders"). */
+        .nav-section-items .nav-sep { border:0; border-top:1px solid #d1d5db; margin:6px 10px; }
         .nav-section-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
         /* §297: a NESTED sub-fold-out inside a nav section (e.g. Event Info -> Policies -> CoC + Privacy). */
         details.nav-subsection { display: block; margin-top: 2px; }
@@ -397,6 +399,9 @@
         .set-tag { display:inline-block; font-size:10.5px; line-height:1; padding:2px 6px;
             border-radius:999px; margin-left:6px; vertical-align:middle; }
         .set-tag.ring { background:#fef9c3; color:#854d0e; border:1px solid #fde047; font-weight:600; }
+        /* §1312 — a mandatory Get Started step is unfinished: red "!" on the menu item. */
+        .nav-missing { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-left:6px;
+            border-radius:999px; background:#dc2626; color:#fff; font-size:12px; font-weight:800; vertical-align:middle; }
         .info { color: #1f2937; }  /* neutral dark slate — operator 2026-06-24: "don't use green, make it easier to read" (was #15803d green) */
         .error { color: #c0392b; }
         button, input[type=submit] {

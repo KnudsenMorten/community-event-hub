@@ -63,9 +63,8 @@ public sealed class SponsorCompanyContentAndDigestTests
 
     private static SponsorWizardService NewWizard(CommunityHubDbContext db)
     {
-        var cmOptions = new CompanyManagerOptions();
         return new SponsorWizardService(
-            db, new CompanyManagerClient(new HttpClient(), cmOptions), cmOptions,
+            db,
             new EconomicContactAdminService(new NoEconomicClient()),
             NullLogger<SponsorWizardService>.Instance);
     }

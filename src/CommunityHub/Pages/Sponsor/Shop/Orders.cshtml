@@ -1,0 +1,90 @@
+@page
+@model CommunityHub.Pages.Sponsor.Shop.OrdersModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Orders";
+}
+
+<div class="card">
+    <h1>Orders</h1>
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        @* One list of the company's orders, wherever they were placed (operator 2026-09-26: "dont mention old webshop and
+           new webshop here, it just confuses"). Amounts are excl. VAT for every row, so they compare. *@
+        var rows = Model.ShopOrders.Select(x => new
+            {
+                Ref = x.Order.Number ?? "Cart",
+                Date = x.Order.SignedAt ?? x.Order.ReservedAt ?? x.Order.UpdatedAt ?? x.Order.CreatedAt,
+                Status = x.Order.Status switch { ShopOrderStatus.Cart => "In cart", ShopOrderStatus.Reserved => "Reserved", ShopOrderStatus.AwaitingSignature => "Waiting for signature", ShopOrderStatus.Signed => "Signed", _ => "Cancelled" },
+                Items = x.Totals.Lines.Select(l => l.Quantity > 1 ? $"{l.Name} × {l.Quantity}" : l.Name).ToList(),
+                Amount = (decimal?)x.Totals.NetEur,
+                Order = (ShopOrder?)x.Order,
+            })
+            .Concat(Model.WebshopOrders.Select(w => new
+            {
+                Ref = "#" + w.OrderId,
+                Date = w.CreatedAt ?? DateTimeOffset.MinValue,
+                Status = "Completed",
+                Items = w.LineItems.Select(l => l.Quantity > 1 ? $"{l.ProductName} × {l.Quantity}" : l.ProductName).ToList(),
+                Amount = (decimal?)w.LineItems.Sum(l => l.LineTotal),
+                Order = (ShopOrder?)null,
+            }))
+            .OrderByDescending(r => r.Date).ToList();
+
+        <h2>Your orders</h2>
+        @if (Model.WebshopError is not null) { <p class="info">Some earlier orders could not be read just now — try again in a minute.</p> }
+        @if (rows.Count == 0)
+        {
+            <p>No orders yet. <a asp-page="/Sponsor/Shop/Index">Browse the shop</a></p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table class="shop-orders">
+                <thead><tr><th>Order</th><th>Date</th><th>Status</th><th>Items</th><th class="num">Amount excl. VAT</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var r in rows)
+                {
+                    <tr>
+                        <td>@r.Ref</td>
+                        <td style="white-space:nowrap;">@(r.Date == DateTimeOffset.MinValue ? "" : r.Date.ToString("yyyy-MM-dd"))</td>
+                        <td>@r.Status
+                            @if (r.Order?.SignedAt is not null) { <div style="font-size:12px;">@r.Order.SignedByName</div> }</td>
+                        <td><ul class="shop-order-items">@foreach (var it in r.Items) { <li>@it</li> }</ul></td>
+                        <td class="num">@(r.Amount is decimal a ? ShopPageModel.Eur(a) : "")</td>
+                        <td>
+                            @if (r.Order is { } o)
+                            {
+                                if (o.Status == ShopOrderStatus.Cart) { <a asp-page="/Sponsor/Shop/Cart">Open cart</a> }
+                                else if (o.Status != ShopOrderStatus.Cancelled) { <a asp-page="/Sponsor/Shop/Contract" asp-route-id="@o.Id">Contract</a> }
+                                @if (o.Status is ShopOrderStatus.Reserved or ShopOrderStatus.AwaitingSignature)
+                                {
+                                    <form method="post" asp-page="/Sponsor/Shop/Contract" asp-page-handler="Cancel" asp-route-id="@o.Id" style="display:inline;"
+                                          onsubmit="return confirm('Cancel this order? The items are released and become available to others again.');">
+                                        <button type="submit">Cancel</button>
+                                    </form>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+</div>
+<style>
+    /* Wide and airy (operator 2026-09-26: "this view is too cramped - make wider - show all items in order"). */
+    .shop-orders { width:100%; border-collapse:collapse; }
+    .shop-orders th, .shop-orders td { padding:12px 14px; text-align:left; vertical-align:top; border-bottom:1px solid #e5e7eb; }
+    .shop-orders th { background:#f8fafc; font-size:14px; }
+    .shop-orders .num { text-align:right; white-space:nowrap; }
+    .shop-orders td:first-child, .shop-orders td:nth-child(2) { white-space:nowrap; }
+    .shop-order-items { margin:0; padding-left:18px; }
+    .shop-order-items li { margin:2px 0; }
+    @@media (max-width:640px) { .shop-orders th, .shop-orders td { padding:8px 6px; font-size:14px; } }
+</style>

@@ -1,0 +1,336 @@
+@page "{id:int}"
+@model CommunityHub.Pages.Sponsor.Shop.ContractModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Event Sponsor Contract";
+}
+
+<div class="card">
+    <partial name="_ShopNotices" model="Model" />
+
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info @(Model.MessageIsError ? "shop-msg-error" : "")" role="status">@Model.Message</p>
+        }
+        @if (Model.Order is null || Model.Data is null)
+        {
+            <p>That order was not found for your company.</p>
+        }
+        else
+        {
+            var o = Model.Order;
+            var d = Model.Data;
+            var status = o.Status switch
+            {
+                ShopOrderStatus.Signed => $"Signed {o.SignedAt:yyyy-MM-dd HH:mm} UTC by {o.SignedByName}",
+                ShopOrderStatus.Cancelled => "Cancelled",
+                ShopOrderStatus.AwaitingSignature => "Waiting for signature",
+                ShopOrderStatus.Reserved => "Reserved — waiting for signature",
+                _ => "Not ordered yet — nothing is ordered until you sign",
+            };
+            <div class="contract-bar">
+                <span><strong>@status</strong> · order @(o.Number ?? "draft")</span>
+                @* A button, not a text link (operator 2026-09-26: "can it be a button"). *@
+                <a class="contract-pdf" asp-page="/Sponsor/Shop/Contract" asp-page-handler="Pdf" asp-route-id="@o.Id">&#11015; Download as PDF</a>
+                @* Operator 2026-09-26: "in the top there should be a quick link to go to signing in the button". *@
+                @if (Model.MaySign) { <a href="#sign-panel" class="contract-jump">&darr; Go to signing</a> }
+            </div>
+
+            @* §1305 item 7 — the WHOLE contract, in the same order as the PDF, so it can be read in full before it is
+               signed at the end. Operator: "you need to show the whole contract, so i can read all pages and then at
+               the end sign it". *@
+            <article class="contract" aria-label="Event Sponsor Contract">
+                <header class="contract-cover">
+                    <h1>Event Sponsor Contract</h1>
+                    <p class="contract-event">@d.Config.Event.Name</p>
+                    <p class="contract-sponsor">@d.SponsorLegalName</p>
+                    @if (d.EventLogo is { Length: > 0 })
+                    {
+                        <img class="contract-logo" alt="@d.Config.Event.Name" src="data:image/png;base64,@Convert.ToBase64String(d.EventLogo)" />
+                    }
+                </header>
+
+                <h2>Event Information</h2>
+                <dl class="contract-fields">
+                    <dt>Event Name (Event Short Name)</dt><dd>@d.Config.Event.Name</dd>
+                    <dt>Event Website</dt><dd>@d.Config.Event.Website</dd>
+                    <dt>Event Dates</dt><dd>@foreach (var line in d.Config.Event.DatesText) { @line<br /> }</dd>
+                    <dt>Event Venue</dt><dd>@foreach (var line in d.Config.Event.Venue) { @line<br /> }</dd>
+                </dl>
+
+                <h2>Event Organizer Information</h2>
+                <dl class="contract-fields">
+                    <dt>Event Organizer (Address, Company CVR, Mail)</dt>
+                    <dd>@d.Config.Organizer.Name<br />@foreach (var line in d.Config.Organizer.Address) { @line<br /> }<br />@d.Config.Organizer.Cvr<br />@d.Config.Organizer.Email</dd>
+                    <dt>@d.Config.Organizer.Name Contract Owner</dt>
+                    <dd>@d.Config.Organizer.ContractOwner.Name<br />@d.Config.Organizer.ContractOwner.Email<br />@d.Config.Organizer.ContractOwner.Phone</dd>
+                </dl>
+
+                <h2>Sponsor Company Information</h2>
+                <dl class="contract-fields">
+                    <dt>Company CVR/Reg/TAX Number</dt><dd>@d.SponsorCvr</dd>
+                    <dt>Company Name (legal name)</dt><dd>@d.SponsorLegalName</dd>
+                    <dt>Company Address, Zip Code, City, Country</dt><dd>@foreach (var line in d.SponsorAddress) { @line<br /> }</dd>
+                </dl>
+
+                <h2>Sponsor Contract Contact Details</h2>
+                <dl class="contract-fields">
+                    <dt>Full Name / E-Mail / Phone (Signer)</dt><dd>@d.Signer.Name<br />@d.Signer.Email<br />@d.Signer.Phone</dd>
+                </dl>
+                <h2>Sponsor Event Coordination Contact Details</h2>
+                <dl class="contract-fields">
+                    <dt>Full Name / E-Mail / Phone (Event Coordinator)</dt><dd>@d.Coordinator.Name<br />@d.Coordinator.Email<br />@d.Coordinator.Phone</dd>
+                </dl>
+                <h2>Sponsor Invoice Information</h2>
+                <dl class="contract-fields">
+                    <dt>Sponsor Invoice Mail Address</dt><dd>@d.InvoiceEmail</dd>
+                    <dt>Sponsor PO / Reference Number / Name (Invoice)</dt><dd>@d.PurchaseOrderRef</dd>
+                    <dt>Invoice Currency</dt><dd>@d.InvoiceCurrency</dd>
+                </dl>
+                <h2>Sponsor Web &amp; Social Media Information</h2>
+                <dl class="contract-fields">
+                    <dt>Company Name that should be used in announcement</dt><dd>@(d.SponsorPublicName ?? d.SponsorLegalName)</dd>
+                    <dt>Web Address URL</dt><dd>@d.Website</dd>
+                    <dt>LinkedIn Name / URL</dt><dd>@d.LinkedIn</dd>
+                    <dt>X/Twitter Name</dt><dd>@d.Twitter</dd>
+                </dl>
+
+                <h2>Event Sponsor Packages, Add-on, Options</h2>
+                <div style="overflow-x:auto;">
+                <table class="contract-table">
+                    <thead><tr><th>Product</th><th style="text-align:right;">Price (EUR)</th></tr></thead>
+                    <tbody>
+                    @foreach (var l in d.Lines)
+                    {
+                        <tr><td><strong>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "")</strong>
+                            @if (l.SurchargePercent > 0) { <div class="contract-note">incl. +@l.SurchargePercent.ToString("0")% late-order surcharge</div> }
+                            @if (!string.IsNullOrWhiteSpace(l.Description)) { <div class="contract-note contract-desc">@l.Description</div> }</td>
+                            <td style="text-align:right;white-space:nowrap;">@ShopPageModel.Eur(l.LineEur)</td></tr>
+                    }
+                    <tr class="total"><td>Subtotal</td><td style="text-align:right;">@ShopPageModel.Eur(d.Totals.SubtotalEur)</td></tr>
+                    @if (d.Totals.IncludedFurnitureEur > 0) { <tr class="total"><td>@d.Totals.IncludedFurnitureLabel</td><td style="text-align:right;">- @ShopPageModel.Eur(d.Totals.IncludedFurnitureEur)</td></tr> }
+                    @if (d.Totals.SwagCreditEur > 0) { <tr class="total"><td>Swag credit</td><td style="text-align:right;">- @ShopPageModel.Eur(d.Totals.SwagCreditEur)</td></tr> }
+                    <tr class="total"><td>Tax@(d.Totals.VatRatePercent > 0 ? $" ({d.Totals.VatRatePercent:0}% Danish VAT)" : "")</td><td style="text-align:right;">@ShopPageModel.Eur(d.Totals.VatEur)</td></tr>
+                    <tr class="total"><td>Total</td><td style="text-align:right;">@ShopPageModel.Eur(d.Totals.TotalEur)</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="contract-note"><em>NOTE: @d.Config.Payment.CurrencyNote</em></p>
+
+                @* Only when the organizer agreed something special — conditions and/or billing terms. *@
+                @if (d.AgreedTerms is { } agreed)
+                {
+                    <h2>Agreed Terms (Contract)</h2>
+                    <div class="contract-box contract-agreed" style="white-space:pre-wrap;">@agreed</div>
+                }
+
+                <h2>Event Sponsorship Payment Details</h2>
+                <div class="contract-box">Details for Payment of Contract using Bank Transfer<br /><br />
+                    @foreach (var line in d.Config.Payment.Lines()) { @line<br /> }</div>
+
+                <h2 class="contract-center">Event Sponsorship Terms and Conditions</h2>
+                @foreach (var a in d.Config.ContractTerms)
+                {
+                    <h3>@a.Heading</h3>
+                    @foreach (var p in a.Paragraphs)
+                    {
+                        if (p == "{{paymentBlock}}")
+                        {
+                            <p>@foreach (var line in d.Config.Payment.Lines()) { @line<br /> }</p>
+                            <p>@d.Config.Organizer.Name<br />@string.Join(", ", d.Config.Organizer.Address)<br />@d.Config.Organizer.Cvr</p>
+                        }
+                        else
+                        {
+                            <p>@p.Replace("{{sponsorLegalName}}", d.SponsorLegalName)</p>
+                        }
+                    }
+                }
+
+                <h2 id="sign">Agreement</h2>
+                <p>@d.Config.AgreementText</p>
+
+                <div class="contract-signatures">
+                    <div>
+                        <div class="sig-name">@(o.SignedByName ?? d.Signer.Name)</div>
+                        <div class="sig-date">@(o.SignedAt?.ToString("dd/MM/yyyy") ?? "")</div>
+                        @if (o.SignatureImage is { Length: > 0 })
+                        {
+                            <img class="sig-img" alt="Signature of @o.SignedByName" src="data:image/png;base64,@Convert.ToBase64String(o.SignatureImage)" />
+                            <div class="sig-by">Signed By @o.SignedByName · @o.SignedAt?.ToString("dd/MM/yyyy HH:mm 'UTC'")</div>
+                        }
+                        else { <div class="sig-by">For the sponsor — not signed yet</div> }
+                    </div>
+                    <div>
+                        <div class="sig-name">@d.Config.Organizer.ContractOwner.Name</div>
+                        @* The organizer signs every contract by default (operator 2026-09-26). *@
+                        <div class="sig-date">@((o.SignedAt ?? d.GeneratedAt).ToString("dd/MM/yyyy"))</div>
+                        @if (d.OrganizerSignature is { Length: > 0 })
+                        {
+                            <img class="sig-img" alt="Signature of @d.Config.Organizer.ContractOwner.Name" src="data:image/png;base64,@Convert.ToBase64String(d.OrganizerSignature)" />
+                        }
+                        else
+                        {
+                            <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Allura&display=swap" />
+                            <div class="sig-hand" aria-label="Signature of @d.Config.Organizer.ContractOwner.Name">@d.Config.Organizer.ContractOwner.Name</div>
+                        }
+                        <div class="sig-by">Signed By @d.Config.Organizer.ContractOwner.Name [@d.Config.Organizer.Name]</div>
+                    </div>
+                </div>
+            </article>
+
+            @if (Model.MaySign)
+            {
+                <section class="sign-panel" id="sign-panel" aria-label="Sign the contract">
+                    <h2>Sign the contract</h2>
+                    <div class="sig-tabs" role="tablist">
+                        <button type="button" data-kind="typed" class="active">Type my name</button>
+                        <button type="button" data-kind="drawn">Draw</button>
+                        <button type="button" data-kind="uploaded">Upload a picture</button>
+                    </div>
+                    <div id="sig-typed" class="sig-pane">
+                        <label>Your full name <input id="sig-name" value="@Model.SignerName" autocomplete="name" /></label>
+                    </div>
+                    <div id="sig-uploaded" class="sig-pane" hidden>
+                        <input id="sig-file" type="file" accept="image/png,image/jpeg" />
+                    </div>
+                    <canvas id="sig-canvas" width="900" height="260" aria-label="Signature"></canvas>
+                    <p class="sig-hint" id="sig-hint">Your typed name is turned into a signature above.</p>
+                    <form method="post" asp-page-handler="Sign" asp-route-id="@o.Id" id="sig-form">
+                        <input type="hidden" name="kind" id="sig-kind" value="typed" />
+                        <input type="hidden" name="signatureData" id="sig-data" />
+                        <label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0;">
+                            <input type="checkbox" name="agree" value="true" />
+                            <span>I have read the whole contract, agree to the Event Sponsorship Terms and Conditions, and I am authorised to sign on behalf of @d.SponsorLegalName.</span>
+                        </label>
+                        <button type="submit" class="primary">Sign the contract</button>
+                        <button type="button" id="sig-clear">Clear</button>
+                    </form>
+                </section>
+            }
+            else if (Model.WhyNotSign is not null)
+            {
+                <p class="info" role="status">@Model.WhyNotSign</p>
+            }
+
+            @* §1312 — a cart has nothing to cancel or release (it is not ordered); only a sent or reserved order does. *@
+            @if (o.Status is ShopOrderStatus.Reserved or ShopOrderStatus.AwaitingSignature)
+            {
+                <form method="post" asp-page-handler="Cancel" asp-route-id="@o.Id" style="margin-top:16px;"
+                      onsubmit="return confirm('Cancel this order? The items are released and become available to others again.');">
+                    <button type="submit">Cancel this order and release the items</button>
+                </form>
+            }
+            else if (o.Status == ShopOrderStatus.Signed)
+            {
+                <p class="contract-note">A signed contract can be cancelled in writing to the organizers (Article 6).</p>
+            }
+        }
+    }
+</div>
+
+<style>
+    .contract-bar { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; padding:10px 12px; background:#f1f5f9; border-radius:8px; margin-bottom:14px; position:sticky; top:0; z-index:2; }
+    .contract-pdf { background:#fff; color:#1565c0 !important; border:2px solid #1565c0; font-weight:700; text-decoration:none; padding:6px 14px; border-radius:999px; white-space:nowrap; }
+    .contract-pdf:hover { background:#e8f0fb; }
+    .contract-jump { margin-left:auto; background:#1565c0; color:#fff !important; font-weight:700; text-decoration:none; padding:8px 16px; border-radius:999px; white-space:nowrap; }
+    .sign-panel { scroll-margin-top:70px; }
+    .contract { max-width:820px; margin:0 auto; font-size:15px; line-height:1.55; }
+    .contract-cover { text-align:left; padding:28px 0 18px; border-bottom:2px solid #1a1a2e; margin-bottom:18px; }
+    .contract-cover h1 { font-size:34px; margin:0 0 8px; }
+    .contract-event { font-size:22px; margin:0; }
+    .contract-sponsor { font-size:22px; font-weight:700; margin:6px 0 0; }
+    .contract h2 { font-size:17px; margin:26px 0 8px; }
+    .contract h3 { font-size:14px; margin:18px 0 6px; text-transform:uppercase; }
+    .contract-center { text-align:center; }
+    .contract-fields { display:grid; grid-template-columns:1fr; border:1px solid #9ca3af; border-radius:4px; margin:0; }
+    .contract-fields dt { font-size:12px; color:#374151; padding:6px 10px 0; border-top:1px solid #d1d5db; }
+    .contract-fields dt:first-child { border-top:none; }
+    .contract-fields dd { margin:0; padding:2px 10px 8px; min-height:1.2em; }
+    .contract-table { width:100%; border-collapse:collapse; }
+    .contract-table td, .contract-table th { border:1px solid #d1d5db; padding:8px; vertical-align:top; }
+    .contract-table tr.total td { font-weight:700; background:#f9fafb; }
+    .contract-note { font-size:13px; color:#4b5563; }
+    .contract-box { border:1px solid #9ca3af; border-radius:4px; padding:10px; min-height:2em; }
+    .contract-agreed { border:2px solid #b45309; background:#fffbeb; }
+    .contract-desc { white-space:pre-line; margin-top:4px; }
+    .contract-logo { display:block; max-width:260px; width:60%; height:auto; margin:16px 0 0; }
+    .contract-signatures { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:18px 0 8px; }
+    .contract-signatures > div { border-top:1px solid #d1d5db; padding-top:8px; }
+    .sig-name { font-weight:600; }
+    .sig-img { max-width:100%; height:80px; object-fit:contain; display:block; margin:8px 0; }
+    .sig-by, .sig-date { font-size:13px; color:#4b5563; }
+    .sig-hand { font-family:Allura, cursive; font-size:40px; line-height:80px; height:80px; color:#1a1a2e; margin:8px 0; white-space:nowrap; overflow:hidden; }
+    .sign-panel { max-width:820px; margin:20px auto 0; border:2px solid #1565c0; border-radius:10px; padding:14px 16px; }
+    .sig-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
+    .sig-tabs button.active { background:#1565c0; color:#fff; }
+    #sig-canvas { width:100%; max-width:600px; height:auto; aspect-ratio:900/260; border:1px dashed #9ca3af; border-radius:8px; background:#fff; touch-action:none; display:block; }
+    .sig-hint { font-size:13px; color:#4b5563; }
+    button.primary { background:#1565c0; color:#fff; }
+    @@media (max-width:560px) { .contract-signatures { grid-template-columns:1fr; } .contract-cover h1 { font-size:26px; } }
+    @@media print { .contract-bar, .sign-panel, nav, header.site, footer { display:none !important; } }
+</style>
+
+@if (Model.MaySign)
+{
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap" />
+    <script>
+    (function () {
+        const canvas = document.getElementById('sig-canvas');
+        const ctx = canvas.getContext('2d');
+        const kindInput = document.getElementById('sig-kind');
+        const dataInput = document.getElementById('sig-data');
+        const nameInput = document.getElementById('sig-name');
+        const hint = document.getElementById('sig-hint');
+        let kind = 'typed', drawing = false, drawn = false;
+
+        function clear() { ctx.clearRect(0, 0, canvas.width, canvas.height); drawn = false; }
+        async function renderTyped() {
+            clear();
+            const name = (nameInput.value || '').trim();
+            if (!name) return;
+            try { await document.fonts.load('600 110px Caveat'); } catch (e) { }
+            ctx.fillStyle = '#1a1a2e';
+            let size = 120;
+            ctx.font = `600 ${size}px Caveat, cursive`;
+            while (ctx.measureText(name).width > canvas.width - 60 && size > 40) { size -= 6; ctx.font = `600 ${size}px Caveat, cursive`; }
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, 30, canvas.height / 2);
+            drawn = true;
+        }
+        function setKind(k) {
+            kind = k; kindInput.value = k;
+            document.querySelectorAll('.sig-tabs button').forEach(b => b.classList.toggle('active', b.dataset.kind === k));
+            document.getElementById('sig-typed').hidden = k !== 'typed';
+            document.getElementById('sig-uploaded').hidden = k !== 'uploaded';
+            hint.textContent = k === 'typed' ? 'Your typed name is turned into a signature above.'
+                : k === 'drawn' ? 'Draw your signature in the box with your mouse, finger or pen.'
+                : 'Choose a PNG or JPG picture of your signature.';
+            clear();
+            if (k === 'typed') renderTyped();
+        }
+        document.querySelectorAll('.sig-tabs button').forEach(b => b.addEventListener('click', () => setKind(b.dataset.kind)));
+        nameInput.addEventListener('input', renderTyped);
+
+        function pos(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * canvas.width / r.width, y: (e.clientY - r.top) * canvas.height / r.height }; }
+        canvas.addEventListener('pointerdown', e => { if (kind !== 'drawn') return; drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); canvas.setPointerCapture(e.pointerId); });
+        canvas.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a1a2e'; ctx.lineTo(p.x, p.y); ctx.stroke(); drawn = true; });
+        canvas.addEventListener('pointerup', () => drawing = false);
+
+        document.getElementById('sig-file').addEventListener('change', e => {
+            const f = e.target.files[0]; if (!f) return;
+            const img = new Image();
+            img.onload = () => { clear(); const s = Math.min(canvas.width / img.width, canvas.height / img.height); ctx.drawImage(img, 0, 0, img.width * s, img.height * s); drawn = true; URL.revokeObjectURL(img.src); };
+            img.src = URL.createObjectURL(f);
+        });
+        document.getElementById('sig-clear').addEventListener('click', () => { clear(); if (kind === 'typed') nameInput.value = ''; });
+        document.getElementById('sig-form').addEventListener('submit', e => {
+            if (!drawn) { e.preventDefault(); alert('Please add your signature first.'); return; }
+            dataInput.value = canvas.toDataURL('image/png');
+        });
+        renderTyped();
+    })();
+    </script>
+}

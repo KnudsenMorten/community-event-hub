@@ -119,4 +119,34 @@ public class EconomicContactAdminServiceTests
         Assert.True(new EconomicContactAdminService(new FakeClient { CanWrite = true }).CanWrite);
         Assert.False(new EconomicContactAdminService(new FakeClient { CanWrite = false }).CanWrite);
     }
+
+    [Fact]
+    public async Task Registering_the_same_email_again_reuses_that_customers_contact_and_keeps_its_roles()
+    {
+        // §1309 — as the retired registration webhook did: de-duplicated by e-mail WITHIN the customer (the same person in
+        // another company is another customer's contact). An existing role is never removed.
+        var client = new FakeClient();
+        var svc = new EconomicContactAdminService(client);
+        var first = await svc.CreateAsync(1, "Jane Doe", "jane@acme.test", null, signer: true, eventCoordinator: false);
+
+        var again = await svc.CreateOrUpdateByEmailAsync(1, "Jane Doe", "Jane@Acme.test", "+45 1", signer: false, eventCoordinator: true);
+
+        Assert.Equal(first, again);                                   // reused, not duplicated
+        Assert.Single(client.Contacts);
+        var row = (await svc.ListContactsAsync(1)).Single();
+        Assert.True(row.IsSigner);                                    // kept
+        Assert.True(row.IsEventCoordinator);                          // added
+    }
+
+    [Fact]
+    public async Task A_new_email_creates_a_new_contact()
+    {
+        var client = new FakeClient();
+        var svc = new EconomicContactAdminService(client);
+        await svc.CreateAsync(1, "Jane Doe", "jane@acme.test", null, signer: true, eventCoordinator: false);
+
+        await svc.CreateOrUpdateByEmailAsync(1, "Carl Co", "carl@acme.test", null, signer: false, eventCoordinator: true);
+
+        Assert.Equal(2, client.Contacts.Count);
+    }
 }

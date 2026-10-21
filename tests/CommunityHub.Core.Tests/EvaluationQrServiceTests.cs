@@ -172,6 +172,21 @@ public sealed class EvaluationQrServiceTests
     /// `Source` recording the path for diagnostics only, and no device fields.
     /// </summary>
     [Fact]
+    public async Task A_QR_submission_carries_its_follow_up_answers_and_drops_unknown_codes()
+    {
+        // §1278 — the two follow-ups travel with the rating; a code outside the catalog is dropped
+        // (it could not be counted), and the rating stands regardless.
+        var db = await SeedAsync();
+
+        await Svc(db, DuringSession).SubmitAsync(Token, 4, null, "great-demos", "not-a-real-code");
+
+        var row = await db.EvaluationResponses.SingleAsync();
+        Assert.Equal(4, row.Rating);
+        Assert.Equal("great-demos", row.PositivePoint);
+        Assert.Null(row.ImprovementPoint);
+    }
+
+    [Fact]
     public async Task Submission_writes_an_ordinary_response_marked_qr()
     {
         var db = await SeedAsync();

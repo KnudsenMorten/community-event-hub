@@ -130,7 +130,8 @@ public sealed class FormEntitlementGateTests
     private static HotelModel NewHotel(CommunityHubDbContext db, DefaultHttpContext http) =>
         new(new HotelFormService(db, new FixedClock(),
                 new OrganizerActionItemService(db, new FixedClock()),
-                Loc(), NullLogger<HotelFormService>.Instance),
+                Loc(), NullLogger<HotelFormService>.Instance,
+                new CommunityHub.Core.Entitlements.HotelCoverageService(db, new FixedClock())),
             Accessor(http));
 
     private static TravelModel NewTravel(CommunityHubDbContext db, DefaultHttpContext http) =>

@@ -87,6 +87,29 @@ public sealed class SoMeOverduePushTests
     private static async Task<SoMePost> ReloadAsync(CommunityHubDbContext db, int id) =>
         await db.SoMePosts.AsNoTracking().FirstAsync(p => p.Id == id);
 
+    /// <summary>
+    /// 🔴 §1312 — operator 2026-09-30: "i got this mail [speaker post publishes in ~5 min], but dont see any post went out.
+    /// why?" Post 297114 was due 09:00:00Z; the planner ran at 09:00:04 — before the dispatcher on the same tick — counted it
+    /// as overdue and pushed it two hours. A post that is merely DUE belongs to the dispatcher; only one OverdueGrace late
+    /// is missed.
+    /// </summary>
+    [Fact]
+    public async Task A_post_that_is_only_just_due_is_left_for_the_dispatcher()
+    {
+        using var db = NewDb();
+        await SeedEditionAsync(db);
+
+        var dueNow = Post("sponsor:co-due-now", Now.AddSeconds(-4));
+        var missed = Post("sponsor:co-missed", Now - SoMeScheduleService.OverdueGrace - TimeSpan.FromMinutes(10));
+        db.SoMePosts.AddRange(dueNow, missed);
+        await db.SaveChangesAsync();
+
+        await Svc(db).RunAsync(EventId);
+
+        Assert.Equal(Now.AddSeconds(-4), (await ReloadAsync(db, dueNow.Id)).ScheduledAtUtc);   // publishes on this tick
+        Assert.True((await ReloadAsync(db, missed.Id)).ScheduledAtUtc >= Now);                  // really missed ⇒ moved
+    }
+
     [Fact]
     public async Task An_OVERDUE_proposed_post_is_moved_into_the_future()
     {

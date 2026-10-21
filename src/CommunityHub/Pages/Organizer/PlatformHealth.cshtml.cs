@@ -85,7 +85,7 @@ public class PlatformHealthModel : PageModel
         // acting-as. This is platform-wide operational data, not anything scoped to the person
         // being impersonated, so showing it through an act-as session would be a leak with no
         // legitimate use.
-        if (me.Role != ParticipantRole.Organizer || me.IsActingAs)
+        if (!me.Role.HasOrganizerAccess() || me.IsActingAs)
         {
             AccessDenied = true;
             return Page();

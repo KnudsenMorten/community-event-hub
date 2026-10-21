@@ -141,10 +141,20 @@ public sealed class CapturingEmailSender : IEmailSender
     public Task SendWithAttachmentsAsync(
         string toEmail, string subject, string htmlBody,
         IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken ct = default) => SendWithAttachmentsAsync(toEmail, subject, htmlBody, attachments, cc: null, ct);
+
+    /// <summary>§1312 — the CC of every SendWithAttachmentsAsync call, by recipient + subject.</summary>
+    public List<(string To, string Subject, IReadOnlyCollection<string> Cc)> AttachmentCc { get; } = new();
+
+    public Task SendWithAttachmentsAsync(
+        string toEmail, string subject, string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        IReadOnlyCollection<string>? cc,
         CancellationToken ct = default)
     {
         Sent.Add((toEmail, subject));
         AttachmentMessages.Add((toEmail, subject, htmlBody, attachments ?? Array.Empty<EmailAttachment>()));
+        AttachmentCc.Add((toEmail, subject, cc ?? Array.Empty<string>()));
         return Task.CompletedTask;
     }
 }

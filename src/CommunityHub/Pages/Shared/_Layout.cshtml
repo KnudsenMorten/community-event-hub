@@ -4,6 +4,7 @@
 @inject CommunityHub.Core.Config.EventEditionConfigLoader EventConfigLoader
 @inject CommunityHub.Core.Config.EventConfigOptions EventConfigOptions
 @inject CommunityHub.Core.Domain.VolunteerStructureService VolunteerStructure
+@inject CommunityHub.Core.Volunteers.VolunteerAssignmentGate VolunteerAssignments
 @inject CommunityHub.Core.Settings.FeatureSettingsService FeatureSettings
 @inject CommunityHub.Core.Settings.RingResolver RingResolver
 @inject CommunityHub.Core.Data.CommunityHubDbContext Db
@@ -346,9 +347,15 @@
         // Show the volunteer "Supervisor" dashboard item only to real supervisors
         // (a cheap indexed check, run for volunteers only).
         var isVolunteerSupervisor = false;
+        // §1295 — "My Schedule" appears only when the volunteer-my-assignments feature is released
+        // to this volunteer. Resolved for volunteers only, in the same cheap pass as the supervisor
+        // check, so an onboarding volunteer's menu carries no item the page would 404 on.
+        var volunteerAssignmentsVisible = false;
         if (role == CommunityHub.Core.Domain.ParticipantRole.Volunteer && me is not null)
         {
             isVolunteerSupervisor = await VolunteerStructure.IsSupervisorAsync(me.EventId, me.ParticipantId);
+            volunteerAssignmentsVisible =
+                await VolunteerAssignments.MaySeeOwnAssignmentsAsync(me.EventId, me.ParticipantId);
         }
         // Show the exhibitor booth/leads nav blocks only to sponsors who actually have a
         // physical booth (SponsorInfo.HasBooth, i.e. SponsorPackage >= Gold). A
@@ -416,7 +423,21 @@
         // edition flag; a broken/missing config must never 500 the nav, so default false.
         var attendeeGamesEnabled = false;
         try { attendeeGamesEnabled = EventConfigLoader.Load(EventConfigOptions.EventConfigPath).AttendeeGamesEnabled; } catch { }
-        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory);
+        // §1255: does this participant hold a SPEAKER PROFILE despite a different role? (an
+        // organizer / volunteer / attendee who also speaks — the import never overwrites Role).
+        // One indexed AnyAsync, and only for a non-speaker role; best-effort so a lookup hiccup
+        // can never 500 the nav.
+        var hasSpeakerCapability = false;
+        if (me is not null && role != CommunityHub.Core.Domain.ParticipantRole.Speaker)
+        {
+            try
+            {
+                hasSpeakerCapability = await CommunityHub.Core.Domain.ParticipantCapabilities
+                    .HasSpeakerHubAccessAsync(Db, me.EventId, me.ParticipantId, role!.Value);
+            }
+            catch { /* nav is best-effort; a missing section is better than a 500 */ }
+        }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 
@@ -466,7 +487,102 @@
             && fs.Descriptor.IsRingScoped
             && (!fs.Enabled
                 || !CommunityHub.Core.Settings.Rings.IsActiveForRing(userRing, fs.ReleasedToRing));
+        // §1305 — an item that steps aside while a feature is ON for this viewer (the old webshop link once the CEH shop
+        // is open). Same "on for me" test the ring gate uses, so the two links never both show or both vanish.
+        // 🔒 §1312 — the EXACT mirror of ringHidden: a feature that is NOT ring-scoped (sponsor-webshop is plain on/off) is on
+        // for everyone once enabled. Testing the ring alone kept the old webshop link and the old "Previous Orders" on PROD,
+        // where the sponsor group's ring is below a sponsor's own ring — while the new items (which skip the ring for
+        // non-ring features) showed too: both links at once (operator 2026-09-27: "previous orders is shown twice" · "this
+        // links to the old webshop … why is that not in the prod").
+        Func<CommunityHub.Core.Navigation.NavItem, bool> replacedByFeature = it =>
+            it.HiddenWhenFeatureKey is not null
+            && featureMap.TryGetValue(it.HiddenWhenFeatureKey, out var fs)
+            && fs.Enabled
+            && (!fs.Descriptor.IsRingScoped || CommunityHub.Core.Settings.Rings.IsActiveForRing(userRing, fs.ReleasedToRing));
         // Badge the feature's ring while enabled + not yet Broad/GA.
+        // §1312 — a SPONSOR whose Get Started still has an unfinished step sees a red "!" on that menu item (operator
+        // 2026-09-27: "make it red or show something is missing here as people dont see they are missing something").
+        // Cached briefly per person: the plan is a heavy read, and the menu renders on every page. Best-effort.
+        var getStartedMissing = false;
+        // §1312 (later the same day) — every role, not only sponsors: "can we implement that for the other roles". The
+        // personal wizards mark optional steps done themselves, so any open mandatory step counts (GetStartedSteps).
+        if (me is not null && role is { } gsRole)
+        {
+            try
+            {
+                var sp = Context.RequestServices;
+                var gsCache = sp.GetService(typeof(Microsoft.Extensions.Caching.Memory.IMemoryCache)) as Microsoft.Extensions.Caching.Memory.IMemoryCache;
+                if (gsCache is not null)
+                    getStartedMissing = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(gsCache,
+                        $"gs-missing:{me.EventId}:{me.ParticipantId}", async e =>
+                        {
+                            e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                            if (gsRole == CommunityHub.Core.Domain.ParticipantRole.Sponsor)
+                            {
+                                var sv = sp.GetService(typeof(CommunityHub.Forms.SponsorWizardService)) is CommunityHub.Forms.SponsorWizardService sw
+                                    ? await sw.BuildAsync(me.EventId, me.ParticipantId, default) : null;
+                                return sv is not null && sv.Steps.Any(s => s.Done == false);
+                            }
+                            if (gsRole == CommunityHub.Core.Domain.ParticipantRole.Speaker
+                                && sp.GetService(typeof(CommunityHub.Forms.SpeakerWizardService)) is CommunityHub.Forms.SpeakerWizardService spw)
+                                return CommunityHub.Forms.GetStartedSteps.AnyMandatoryOpen(
+                                    (await spw.BuildAsync(me.EventId, me.ParticipantId, default)).Steps.Select(s => (s.Key, s.Done)));
+                            if (CommunityHub.Forms.RoleWizardService.Handles(gsRole)
+                                && sp.GetService(typeof(CommunityHub.Forms.RoleWizardService)) is CommunityHub.Forms.RoleWizardService rw)
+                                return CommunityHub.Forms.GetStartedSteps.AnyMandatoryOpen(
+                                    (await rw.BuildAsync(me.EventId, me.ParticipantId, default)).Steps.Select(s => (s.Key, s.Done)));
+                            if (gsRole == CommunityHub.Core.Domain.ParticipantRole.Attendee
+                                && sp.GetService(typeof(CommunityHub.Forms.AttendeeWizardService)) is CommunityHub.Forms.AttendeeWizardService aw)
+                                return CommunityHub.Forms.GetStartedSteps.AnyMandatoryOpen(
+                                    (await aw.BuildAsync(me.EventId, me.ParticipantId, default)).Steps.Select(s => (s.Key, s.Done)));
+                            return false;
+                        });
+            }
+            catch { /* best-effort: never 500 the nav */ }
+        }
+        // §1312 — the same red "!" on the task menu items when a MANDATORY task is overdue (operator 2026-09-27: "can we do
+        // that as well for mandatory tasks that is overdue for all roles"): "My tasks" = the person's own tasks, "Sponsor
+        // tasks" = the acting company's. Same 2-minute cache, same best-effort rule.
+        var tasksOverdue = false;
+        var sponsorTasksOverdue = false;
+        if (me is not null)
+        {
+            try
+            {
+                var sp = Context.RequestServices;
+                var odCache = sp.GetService(typeof(Microsoft.Extensions.Caching.Memory.IMemoryCache)) as Microsoft.Extensions.Caching.Memory.IMemoryCache;
+                var odDb = sp.GetService(typeof(CommunityHub.Core.Data.CommunityHubDbContext)) as CommunityHub.Core.Data.CommunityHubDbContext;
+                if (odCache is not null && odDb is not null)
+                {
+                    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                    tasksOverdue = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(odCache,
+                        $"tasks-overdue:{me.EventId}:{me.ParticipantId}", async e =>
+                        {
+                            e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                            return await CommunityHub.Core.Tasks.OverdueTasks.AnyForPersonAsync(odDb, me.EventId, me.ParticipantId, today);
+                        });
+                    if (role == CommunityHub.Core.Domain.ParticipantRole.Sponsor
+                        && sp.GetService(typeof(CommunityHub.Sponsors.SponsorActingCompanyService)) is CommunityHub.Sponsors.SponsorActingCompanyService acting)
+                    {
+                        var companyId = await acting.CurrentAsync(me.ParticipantId, me.EventId, default);
+                        if (companyId is not null)
+                            sponsorTasksOverdue = await Microsoft.Extensions.Caching.Memory.CacheExtensions.GetOrCreateAsync(odCache,
+                                $"sponsor-tasks-overdue:{me.EventId}:{companyId}", async e =>
+                                {
+                                    e.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                                    return await CommunityHub.Core.Tasks.OverdueTasks.AnyForSponsorCompanyAsync(odDb, me.EventId, companyId, today);
+                                });
+                    }
+                }
+            }
+            catch { /* best-effort: never 500 the nav */ }
+        }
+        Func<CommunityHub.Core.Navigation.NavItem, bool> missingMark = it =>
+            (getStartedMissing && it.Href == "/Forms/Wizard")
+            || (tasksOverdue && it.Href == "/Tasks")
+            || (sponsorTasksOverdue && it.Href == "/Sponsor/Tasks");
+        Func<CommunityHub.Core.Navigation.NavItem, string> missingTitle = it =>
+            it.Href == "/Forms/Wizard" ? "Something is missing — open Get Started" : "A mandatory task is overdue — open it";
         Func<CommunityHub.Core.Navigation.NavItem, CommunityHub.Core.Settings.Ring?> ringBadgeOf = it =>
             it.FeatureKey is not null
             && featureMap.TryGetValue(it.FeatureKey, out var fs)
@@ -533,7 +649,7 @@
         };
         // Combined nav-item hide: ring scope OR (Feature B) form entitlement.
         Func<CommunityHub.Core.Navigation.NavItem, bool> navHidden = it =>
-            ringHidden(it) || formEntitlementHidden(it);
+            ringHidden(it) || formEntitlementHidden(it) || replacedByFeature(it);
         // §175/§176: links that leave the hub for a third-party system needing its own
         // login carry a localized "you'll be redirected, here's how to log in" message,
         // emitted as data-confirm="…"; the shared nav-confirm.js handler shows a confirm()
@@ -573,7 +689,7 @@
                            presence selector ended up matching every nav link. *@
                         var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
                         var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
-                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (missingMark(item)) {<span class="nav-missing" title="@missingTitle(item)">!</span>}@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                     }
                 }
                 else
@@ -595,13 +711,14 @@
                                e.g. Event Info → Policies → (Code of Conduct + Privacy Policy). *@
                             @foreach (var item in visible.Where(i => i.SubSectionKey is null))
                             {
+                                if (item.SeparatorBefore) { <hr class="nav-sep" aria-hidden="true" /> }
                                 var rb = ringBadgeOf(item);
                         @* §486: an IMPLICIT @@expr is what Razor omits when null — an explicit
                            @@(cond ? "1" : null) writes an EMPTY attribute instead, which is how a
                            presence selector ended up matching every nav link. *@
                         var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
                         var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
-                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (missingMark(item)) {<span class="nav-missing" title="@missingTitle(item)">!</span>}@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                             }
                             @foreach (var sub in visible.Where(i => i.SubSectionKey is not null).GroupBy(i => i.SubSectionKey!))
                             {
@@ -623,7 +740,7 @@
                            presence selector ended up matching every nav link. *@
                         var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
                         var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
-                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (missingMark(item)) {<span class="nav-missing" title="@missingTitle(item)">!</span>}@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                                         }
                                     </div>
                                 </details>
@@ -751,6 +868,40 @@
             }
         </div>
     }
+    @if (CommunityHub.Auth.EventPartnerReadOnlyFilter.IsReadOnlyViewer(me)
+         && Context.Request.Path.StartsWithSegments("/Organizer"))
+    {
+        @* §1316 — event partners see the organizer area read-only; EventPartnerReadOnlyFilter refuses the change on the
+           server, this only makes it visible. Exports and downloads stay usable (GET forms, and POST handlers named
+           Export… / Pdf…). *@
+        var partnerBlocked = Context.Request.Query.ContainsKey(CommunityHub.Auth.EventPartnerReadOnlyFilter.BlockedQueryKey);
+        <div role="status" class="partner-readonly-banner"
+             style="background:#e0f2fe;color:#0c4a6e;border-bottom:2px solid #0369a1;padding:10px 16px;font-weight:600;">
+            @if (partnerBlocked)
+            {
+                <text>That change was not saved — event partners have read-only access to the organizer pages. </text>
+            }
+            <text>Read-only access: you can view everything here and download every export, but not change anything.</text>
+        </div>
+        <script defer>
+            document.addEventListener('DOMContentLoaded', function () {
+                var reading = /[?&]handler=(export|pdf)/i;
+                document.querySelectorAll('#main form').forEach(function (form) {
+                    if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') {
+                        // A GET form can still carry a button that posts (formmethod="post").
+                        form.querySelectorAll('[formmethod="post" i]').forEach(function (b) { b.disabled = true; });
+                        return;
+                    }
+                    if (reading.test(form.getAttribute('action') || '')) return;
+                    form.querySelectorAll('button, input, select, textarea').forEach(function (el) {
+                        if (el.type === 'hidden') return;
+                        if (el.matches('button, [type=submit], [type=button]') && reading.test(el.getAttribute('formaction') || '')) return;
+                        el.disabled = true;
+                    });
+                });
+            });
+        </script>
+    }
     @{
         // §1236 — resolved HERE rather than in the nav block above, whose variables are scoped to its
         // own @if. Sponsors only; everyone else pays one null check.
@@ -786,6 +937,15 @@
                 <button type="submit" class="secondary">Switch</button>
             </form>
         </div>
+    }
+    @* §1305 — the "Still available" teaser bar under the menu on EVERY sponsor page, not only in the shop (operator
+       2026-09-26: "i want the bar to be show for sponsors in the menu, not only in the webshop … goal is to sell more").
+       The component renders nothing unless the viewer is a sponsor and the shop is on; not on the contract page, where
+       the sponsor is reading what they sign. *@
+    @if (switcherMe is not null && switcherMe.Role == CommunityHub.Core.Domain.ParticipantRole.Sponsor
+         && !Context.Request.Path.StartsWithSegments("/Sponsor/Shop/Contract"))
+    {
+        @await Component.InvokeAsync("ShopPromotions", new { kind = "teaser" })
     }
     <main id="main" tabindex="-1">
         @* Organizer back-office breadcrumb trail (REQUIREMENTS §21). The partial

@@ -125,19 +125,19 @@
                                 <option value="@c" selected="@(c == s.Category)">@c</option>
                             }
                         </select>
-                        <label for="nights-@s.ParticipantId" style="font-size:13px;">Guest hotel nights</label>
-                        <input id="nights-@s.ParticipantId" name="guestFundedNights" type="number"
-                               inputmode="numeric" min="0" max="14" style="width:70px;"
-                               value="@(s.GuestFundedNights?.ToString() ?? "")"
-                               placeholder="—" title="ELDK-funded hotel nights — Guest category only (individual agreement)" />
+                        @* 🗑 §1296 — the "Guest hotel nights" box that sat here is GONE. Guest is a
+                           standard now (Settings → Hotel nights we cover), and anything individual
+                           is the ONE extra-nights field on the person's own page. Two controls for
+                           the same person's nights is what cutting the absolute override avoided. *@
                         <button type="submit">Save category</button>
                         @if (s.Category is null)
                         {
                             <span style="color:#92400e;font-size:12px;">Uncategorized — excluded from all counts and cannot be activated.</span>
                         }
-                        else if (s.Category != SpeakerCategory.Guest)
+                        else
                         {
-                            <span style="color:#6b7280;font-size:12px;">Nights apply to Guest only.</span>
+                            <a asp-page="/Organizer/EditParticipant" asp-route-id="@s.ParticipantId"
+                               style="font-size:12px;">hotel nights &rarr;</a>
                         }
                     </form>
 

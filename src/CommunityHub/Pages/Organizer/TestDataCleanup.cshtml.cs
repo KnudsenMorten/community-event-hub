@@ -39,7 +39,7 @@ public class TestDataCleanupModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Preview = await _cleanup.PreviewAsync(me.EventId, ct);
         return Page();

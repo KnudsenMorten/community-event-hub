@@ -1011,7 +1011,7 @@ public sealed class GraphicsService
     /// <summary>§326z: the community's LinkedIn company page, tagged in the closing line
     /// (operator 2026-07-25). A plain-text intent cannot carry a real @-mention (that needs
     /// the API), so the page URL is appended — LinkedIn renders it as a link to the page.</summary>
-    private const string CompanyPageUrl = "https://www.linkedin.com/company/expertslivedk";
+    private const string CompanyPageUrl = EventLinkedInPage.Url;
 
     /// <summary>The ticket/agenda site as a clickable absolute URL (config often stores the
     /// bare host, e.g. "eldk27.expertslive.dk").</summary>

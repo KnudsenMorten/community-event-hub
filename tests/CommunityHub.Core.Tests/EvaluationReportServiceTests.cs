@@ -199,11 +199,11 @@ public sealed class EvaluationReportServiceTests
         var noQr = TextOf(new EvaluationReportService().Render(
             Data(new(9, 8, 2, 1), qrResponses: 0, deviceResponses: 20)));
         Assert.Contains("QR code: 0 (0%)", noQr);
-        Assert.Contains("feedback devices: 20 (100%)", noQr);
+        Assert.Contains("kiosk: 20 (100%)", noQr);
 
         var noDevices = TextOf(new EvaluationReportService().Render(
             Data(new(9, 8, 2, 1), qrResponses: 20, deviceResponses: 0)));
-        Assert.Contains("feedback devices: 0 (0%)", noDevices);
+        Assert.Contains("kiosk: 0 (0%)", noDevices);
         Assert.Contains("QR code: 20 (100%)", noDevices);
     }
 

@@ -137,10 +137,8 @@ public sealed class ZohoDeadLinkStrikesTests
             Enabled = true, ApiDomain = "https://stub.local", TokenEndpoint = "https://stub.local/oauth/v2/token",
             BackstagePortalId = "p1", BackstageEventId = "e1", ClientId = "c", ClientSecret = "s", RefreshToken = "r",
         };
-        var cm = new CompanyManagerOptions { Enabled = false };
         return new SponsorZohoSyncService(
             new ZohoClient(new HttpClient(zoho), o, NullLogger<ZohoClient>.Instance), db, o,
-            new CompanyManagerClient(new HttpClient(zoho), cm), cm,
             NullLogger<SponsorZohoSyncService>.Instance, clock: clock);
     }
 

@@ -50,15 +50,30 @@ public sealed class SponsorCompanyNameService
         // "(name not synced — CM id 30)" for a company CM knows as "System Center Dudes".
         // It is kept as a fallback so every name captured before this change keeps working with no
         // backfill; SponsorInfo wins wherever both exist.
+        // 🔒 §1360 — the PUBLIC name is ONE field: the company page's "Public name (SoMe, Zoho, website, app)" FIRST
+        // (operator 2026-10-19: "dont forget the public name" · "that is the name we use for SoMe, zoho, etc"). The sponsor
+        // record's CompanyName is a copy the sponsor-order pull rewrites from it, so it only fills in where the page has none.
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var shopNames = await _db.ShopCompanies
+            .Where(c => c.EventId == eventId)
+            .Select(c => new { c.SponsorCompanyId, c.PublicName, c.LegalName })
+            .ToListAsync(ct);
+        foreach (var s in shopNames.Where(s => !string.IsNullOrWhiteSpace(s.SponsorCompanyId) && !string.IsNullOrWhiteSpace(s.PublicName)))
+            map.TryAdd(s.SponsorCompanyId, s.PublicName!.Trim());
+
         var infoNames = await _db.SponsorInfos
             .Where(i => i.EventId == eventId && i.CompanyName != null && i.CompanyName != "")
             .Select(i => new { i.SponsorCompanyId, i.CompanyName })
             .ToListAsync(ct);
+        foreach (var r in infoNames.Where(r => !string.IsNullOrWhiteSpace(r.SponsorCompanyId)))
+            map.TryAdd(r.SponsorCompanyId, r.CompanyName!);
 
-        var map = infoNames
-            .Where(r => !string.IsNullOrWhiteSpace(r.SponsorCompanyId))
-            .GroupBy(r => r.SponsorCompanyId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().CompanyName!, StringComparer.Ordinal);
+        // §1312 — without a public name anywhere: the legal name WITHOUT its legal form (§1158), never as such.
+        foreach (var s in shopNames.Where(s => !string.IsNullOrWhiteSpace(s.SponsorCompanyId)))
+        {
+            var stripped = CompanyLegalForm.Strip(s.LegalName);
+            if (!string.IsNullOrWhiteSpace(stripped)) map.TryAdd(s.SponsorCompanyId, stripped);
+        }
 
         var rows = await _db.SponsorUploadLocations
             .Where(l => l.EventId == eventId
@@ -98,7 +113,8 @@ public sealed class SponsorCompanyNameService
                                  && !string.IsNullOrWhiteSpace(r.CompanyName))
                      .GroupBy(r => r.SponsorCompanyId, StringComparer.Ordinal))
         {
-            if (!map.ContainsKey(g.Key)) map[g.Key] = g.First().CompanyName!;
+            // §1312 — the ERP name is the LEGAL name; as a public name it loses its legal form.
+            if (!map.ContainsKey(g.Key)) map[g.Key] = CompanyLegalForm.Strip(g.First().CompanyName);
         }
 
         return map;
@@ -138,4 +154,29 @@ public sealed class SponsorCompanyNameService
         CommunityHubDbContext db, int eventId, IEnumerable<string> companyIds,
         CancellationToken ct = default) =>
         new SponsorCompanyNameService(db).ResolveAllAsync(eventId, companyIds, ct);
+
+    /// <summary>
+    /// 🔴 §1312 — the name CEH itself holds for a company, or null: the sponsor record's name, else the shop company's
+    /// public / legal name. For the sponsor-page resolvers whose only source was Company Manager — a company that
+    /// registered through the CEH shop (<c>ceh-…</c>) is not in Company Manager, so its uploads were named
+    /// <c>company-ceh-14ca083d-logo-web-1.png</c> and mailed as "Company ceh-14ca083d" (operator 2026-09-29).
+    /// </summary>
+    public static async Task<string?> LocalNameAsync(CommunityHubDbContext db, string companyId, CancellationToken ct = default)
+    {
+        // 🔒 §1360 — the PUBLIC name is ONE field, on the company page ("Public name (SoMe, Zoho, website, app)"; operator
+        // 2026-10-19: "dont forget the public name" · "that is the name we use for SoMe, zoho, etc"). The sponsor record's
+        // CompanyName is a copy the sponsor-order pull rewrites from it, so it is read only when there is no page name.
+        var shop = await db.ShopCompanies.AsNoTracking()
+            .Where(c => c.SponsorCompanyId == companyId)
+            .OrderByDescending(c => c.EventId).Select(c => new { c.PublicName, c.LegalName }).FirstOrDefaultAsync(ct);
+        if (!string.IsNullOrWhiteSpace(shop?.PublicName)) return shop.PublicName.Trim();
+        var info = await db.SponsorInfos.IgnoreQueryFilters().AsNoTracking()
+            .Where(i => i.SponsorCompanyId == companyId && i.CompanyName != null && i.CompanyName != "")
+            .OrderByDescending(i => i.EventId).Select(i => i.CompanyName).FirstOrDefaultAsync(ct);
+        if (!string.IsNullOrWhiteSpace(info)) return info.Trim();
+        if (shop is null) return null;
+        // Never the legal name as such — without a public name, the legal name loses its legal form (§1158).
+        var name = CompanyLegalForm.Strip(shop.LegalName);
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
 }

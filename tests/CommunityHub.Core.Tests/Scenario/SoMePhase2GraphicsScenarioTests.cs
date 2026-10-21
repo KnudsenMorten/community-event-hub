@@ -490,6 +490,123 @@ public sealed class SoMePhase2GraphicsScenarioTests
             g => g.Id == row.Id);
     }
 
+    // ---- §1304: the face gate ----------------------------------------------------------
+
+    /// <summary>
+    /// 🔴 §1304 — operator 2026-09-25: <i>"we just released a some post with one face missing"</i>.
+    /// A session with one speaker photo out of two used to render a GIF with a BLANK ring for the
+    /// other; it is now held until every speaker has a photo.
+    /// </summary>
+    [Fact]
+    public async Task One_missing_face_holds_the_session_graphic_instead_of_rendering_a_blank_ring()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var session = await AddSessionAsync(
+            db, seed.EventId, "Azure Master Class", seed.SpeakerOneId, seed.SpeakerTwoId);
+
+        var store = StoreWithPhotos((seed.SpeakerOneId, "Session Speaker One"));   // speaker two: none
+        var (bundles, _, _) = NewSweep(db, store, SpOptions());
+
+        var result = await bundles.BuildAsync(seed.EventId);
+
+        Assert.Equal(0, result.SessionGraphics);
+        Assert.Equal(1, result.SessionsSkippedNoPhoto);
+        Assert.False(await db.GraphicAssets.AnyAsync(g => g.SessionId == session.Id));
+        Assert.DoesNotContain(store.Writes, w => w.Path.StartsWith(SessionsFolder));
+    }
+
+    /// <summary>
+    /// 🔴 §1304 — a LIVE graphic whose line-up gains a speaker without a photo is un-released, so its
+    /// queued posts are held by the "graphic missing" gate; when the photo arrives it is rebuilt with
+    /// every face and released again, with nobody touching it.
+    /// </summary>
+    [Fact]
+    public async Task A_live_graphic_that_loses_a_face_is_un_released_and_comes_back_complete()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var session = await AddSessionAsync(db, seed.EventId, "Growing Master Class", seed.SpeakerOneId);
+
+        var store = StoreWithPhotos((seed.SpeakerOneId, "Session Speaker One"));
+        var (bundles, _, _) = NewSweep(db, store, SpOptions());
+        await bundles.BuildAsync(seed.EventId);
+        Assert.Equal(GraphicAssetStatus.Released,
+            (await db.GraphicAssets.SingleAsync(g => g.SessionId == session.Id)).Status);
+
+        // A second speaker joins — no photo yet.
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = seed.SpeakerTwoId });
+        await db.SaveChangesAsync();
+        await bundles.BuildAsync(seed.EventId);
+
+        var held = await db.GraphicAssets.AsNoTracking().SingleAsync(g => g.SessionId == session.Id);
+        Assert.Equal(GraphicAssetStatus.Generated, held.Status);
+        Assert.Equal(SoMeBundleBuildService.FaceGateRetiredHash, held.InputHash);
+
+        // The photo arrives.
+        store.Put(PhotoFolder, SpeakerPhotoFileName.Build(seed.SpeakerTwoId, ".jpg"), Image(400, 400));
+        var result = await bundles.BuildAsync(seed.EventId);
+
+        Assert.Equal(1, result.SessionGraphics);
+        var back = await db.GraphicAssets.AsNoTracking().SingleAsync(g => g.SessionId == session.Id);
+        Assert.Equal(GraphicAssetStatus.Released, back.Status);
+        Assert.EndsWith(".gif", back.FileName);
+        Assert.NotEqual(SoMeBundleBuildService.FaceGateRetiredHash, back.InputHash);
+    }
+
+    /// <summary>
+    /// 🔒 §1304 — the gate only re-releases what IT retired. A graphic an organizer un-released by
+    /// hand stays un-released through a missing face and a complete rebuild alike.
+    /// </summary>
+    [Fact]
+    public async Task An_organizer_un_release_is_never_undone_by_the_face_gate()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var session = await AddSessionAsync(db, seed.EventId, "Held By Hand", seed.SpeakerOneId);
+
+        var store = StoreWithPhotos((seed.SpeakerOneId, "Session Speaker One"));
+        var (bundles, _, _) = NewSweep(db, store, SpOptions());
+        await bundles.BuildAsync(seed.EventId);
+
+        var row = await db.GraphicAssets.SingleAsync(g => g.SessionId == session.Id);
+        row.Status = GraphicAssetStatus.Generated;       // the organizer's decision
+        await db.SaveChangesAsync();
+
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = seed.SpeakerTwoId });
+        await db.SaveChangesAsync();
+        await bundles.BuildAsync(seed.EventId);
+        Assert.NotEqual(SoMeBundleBuildService.FaceGateRetiredHash,
+            (await db.GraphicAssets.AsNoTracking().SingleAsync(g => g.SessionId == session.Id)).InputHash);
+
+        store.Put(PhotoFolder, SpeakerPhotoFileName.Build(seed.SpeakerTwoId, ".jpg"), Image(400, 400));
+        await bundles.BuildAsync(seed.EventId);
+
+        Assert.Equal(GraphicAssetStatus.Generated,
+            (await db.GraphicAssets.AsNoTracking().SingleAsync(g => g.SessionId == session.Id)).Status);
+    }
+
+    /// <summary>§1304 — the track GIF follows the same rule: one missing face, no GIF.</summary>
+    [Fact]
+    public async Task One_missing_face_holds_the_track_gif_too()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var session = await AddSessionAsync(
+            db, seed.EventId, "Tracked Session", seed.SpeakerOneId, seed.SpeakerTwoId);
+        (await db.Sessions.SingleAsync(s => s.Id == session.Id)).Track = "Azure";
+        await db.SaveChangesAsync();
+
+        var store = StoreWithPhotos((seed.SpeakerOneId, "Session Speaker One"));
+        var (bundles, _, _) = NewSweep(db, store, SpOptions());
+
+        var result = await bundles.BuildAsync(seed.EventId);
+
+        Assert.Equal(0, result.TrackBundles);
+        Assert.Equal(1, result.TracksSkippedNoPhoto);
+        Assert.False(await db.GraphicAssets.AnyAsync(g => g.Type == GraphicAssetType.TrackBundle));
+    }
+
     // ---- fakes -------------------------------------------------------------------------
 
     /// <summary>A SharePoint store that both READS folders and records writes.</summary>

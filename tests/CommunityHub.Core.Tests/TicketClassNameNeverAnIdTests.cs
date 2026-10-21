@@ -102,7 +102,73 @@ public sealed class TicketClassNameNeverAnIdTests
         var desc = CouponInvoiceLineComposer.ComposePrepaidDescription(
             "2-day (Pre-day  + Main Event)", "ELDK27-Arrow-Finland-pool1", 20, conversionNote: null);
 
-        Assert.Contains("2-day (Pre-day  + Main Event)", desc);
+        // §1301 — Backstage's double space is collapsed; and the operator's layout: count, class,
+        // BLANK line, coupon.
+        Assert.Equal(
+            "Prepaid tickets: 20\nTicket Class: 2-day (Pre-day + Main Event)\n\nCoupon: ELDK27-Arrow-Finland-pool1",
+            desc.Replace("\r\n", "\n"));
         Assert.DoesNotContain("14880000003485482", desc);
+    }
+
+    /// <summary>Answers the token endpoint with a token and everything else with the class list.</summary>
+    private sealed class RoutingHandler : HttpMessageHandler
+    {
+        public int ClassCalls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            var isToken = r.RequestUri!.AbsolutePath.Contains("/oauth/v2/token");
+            if (!isToken) ClassCalls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    isToken ? """{"access_token":"tok","expires_in":3600}""" : LiveJson,
+                    System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    private static CouponPrepaidInvoiceService NewPrepaidService(ZohoClient? zoho) =>
+        new(null!, null!, new EconomicErpOptions(), new InvoicingOptions(), TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CouponPrepaidInvoiceService>.Instance, zoho);
+
+    /// <summary>
+    /// 🔴 §1301 — the operator's invoice 189: a NEW pool's first invoice carried only the id, so the
+    /// class line vanished. The service now looks the id up in Backstage before composing.
+    /// </summary>
+    [Fact]
+    public async Task The_prepaid_invoice_service_turns_a_class_id_into_its_name()
+    {
+        var handler = new RoutingHandler();
+        var zoho = new ZohoClient(new HttpClient(handler),
+            new ZohoOptions { BackstagePortalId = "P", BackstageEventId = "E", RefreshToken = "r", ClientId = "c", ClientSecret = "s" });
+
+        var name = await NewPrepaidService(zoho).ResolveTicketClassNameAsync("14880000003485482", default);
+
+        Assert.Equal("2-day (Pre-day  + Main Event)", name);
+        Assert.Equal(1, handler.ClassCalls);
+    }
+
+    /// <summary>A real name is used as-is — no Zoho call; and without Zoho the id comes back unchanged.</summary>
+    [Fact]
+    public async Task A_real_name_passes_through_and_no_zoho_means_no_change()
+    {
+        var handler = new RoutingHandler();
+        var zoho = new ZohoClient(new HttpClient(handler),
+            new ZohoOptions { BackstagePortalId = "P", BackstageEventId = "E", RefreshToken = "r", ClientId = "c", ClientSecret = "s" });
+
+        Assert.Equal("1-day", await NewPrepaidService(zoho).ResolveTicketClassNameAsync("1-day", default));
+        Assert.Equal(0, handler.ClassCalls);
+        Assert.Equal("14880000003485482",
+            await NewPrepaidService(null).ResolveTicketClassNameAsync("14880000003485482", default));
+    }
+
+    /// <summary>§1116 still holds: an unresolved id is DROPPED — the blank line and coupon remain.</summary>
+    [Fact]
+    public void An_unresolved_id_is_still_left_out_of_the_prepaid_line()
+    {
+        var desc = CouponInvoiceLineComposer.ComposePrepaidDescription(
+            "14880000003485482", "ELDK27-KbhKommune", 6, conversionNote: null);
+
+        Assert.Equal("Prepaid tickets: 6\n\nCoupon: ELDK27-KbhKommune", desc.Replace("\r\n", "\n"));
     }
 }

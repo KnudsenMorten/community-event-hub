@@ -1,0 +1,1147 @@
+@page "/eval"
+@model CommunityHub.Pages.Eval.IndexModel
+@{
+    // §1259 — STANDALONE. No hub chrome, no nav, no footer: this document is the whole screen of a
+    // kiosk in a corridor, and every pixel of hub furniture is something an attendee can tap by
+    // mistake or a passer-by can use to wander into the hub.
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    @* 🔒 No zoom, no scroll-bounce, notch-safe. An attendee's fat-finger double-tap must not leave
+       the screen zoomed at 150% for the rest of the day with nobody to fix it. *@
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Session feedback</title>
+    <style>
+        /* §1259b — the colours of the BUILT BOX, so the two instruments read identically to an
+           attendee who has seen one in another corridor (operator 2026-09-20, with the photo:
+           "i would like to have these 4 buttons with faces + colors"). Dark green, light green,
+           amber, red — and the faces drawn in near-black, exactly as they are moulded on the box. */
+        :root {
+            --verygood: #2e9e3f;   /* rating 4 — broad smile */
+            --good:     #8dc63f;   /* rating 3 — smile */
+            --poor:     #f5b21d;   /* rating 2 — straight mouth (as on the box), but a NEGATIVE answer */
+            --verypoor: #e0402f;   /* rating 1 — frown */
+            --facing:   #17181a;   /* the face lines */
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            background: #0d1526; color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+            overscroll-behavior: none;
+        }
+        /* 100vh first: an iPad on an older Safari ignores dvh and would otherwise get no height. */
+        #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+        /* The prompt is deliberately small: the faces are the interface. */
+        header { flex: 0 0 auto; text-align: center; padding: 1.6vh 2vw 0.8vh; }
+        /* §1269 — the SESSION TITLE is the headline (operator 2026-09-21: "make the session title
+           larger with bold"); the question above it steps down, the speakers and countdown under it. */
+        header .prompt { font-size: clamp(13px, 2.4vh, 24px); font-weight: 600; opacity: .75; letter-spacing: .01em; }
+        header .title { font-size: clamp(20px, 5vh, 52px); font-weight: 800; line-height: 1.15; margin-top: .4vh;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        header .title.idle { font-weight: 600; opacity: .7; font-size: clamp(16px, 3.4vh, 34px); }
+        header .session { font-size: clamp(12px, 2.2vh, 22px); opacity: .78; margin-top: .3vh;
+                          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* §1270 — NO SESSION RUNNING: no question, no faces — only what is next (operator
+           2026-09-21: "when there is no capture option (no session running), it should only show
+           next session info and not the header how was this session ?"). Set only when the SERVER
+           says so; an iPad that has not heard from it yet keeps its faces, so a real session is
+           never hidden by a guess. */
+        body.idle main, body.idle header .prompt { display: none; }
+        /* §1303 — min-height:0 + overflow:hidden: the idle header may NOT grow past the space above
+           the status bar (a long next-session title pushed the bottom line off screen). */
+        body.idle header { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center;
+                           min-height: 0; overflow: hidden; }
+        body.idle header .title { white-space: normal; }
+        body.idle header .session { font-size: clamp(14px, 3vh, 30px); white-space: normal; }
+
+        /* §1269 — the troubleshooting line at the BOTTOM (operator: "add the room at the bottom with
+           device name + serial + connection status with small font for troubleshooting purpose so we
+           can see it is connected GREEN"). Small enough that an attendee reads past it. */
+        /* §1303 — operator: "i dont see the last line when the next view is up". The follow-up pages
+           and the thank-you are full-screen layers; the status bar now sits ABOVE them (z-index 9,
+           below only the setup dialog at 10), pinned to the bottom, on every view. */
+        footer#statusBar { flex: 0 0 auto; display: flex; flex-wrap: wrap; justify-content: center;
+                           gap: .2em 1em; padding: .5vh 2vw .9vh; font-size: clamp(10px, 1.5vh, 14px);
+                           opacity: .8; white-space: nowrap; position: relative; z-index: 9; }
+        footer#statusBar .conn { font-weight: 700; }
+        footer#statusBar .conn.ok { color: #4ade80; }
+        footer#statusBar .conn.busy { color: #fbbf24; }
+        footer#statusBar .conn.bad { color: #f87171; }
+
+        /* 🔑 LANDSCAPE-FIRST (operator: "preferable in landscape mode on the stand and layout").
+           2x2 on a landscape iPad puts every face within a thumb's reach of a standing attendee and
+           keeps each target enormous. Portrait keeps 2x2 rather than a 1x4 column, because four
+           stacked strips make the top tile a stretch and the bottom one a stoop. */
+        /* 🔴 §1272 — min-height:0 and minmax(0,1fr) let the grid SHRINK to the space left between
+           the header and the status bar. Without them the faces kept their natural size and, in
+           landscape, pushed the bottom row and the status bar off the screen (operator 2026-09-21:
+           "i dont see the bottom of the boxes nor the troubleshooting line"). */
+        main { flex: 1 1 auto; min-height: 0; display: grid; gap: 1.2vmin; padding: 1.2vmin;
+               grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+
+        button.face {
+            border: 0; border-radius: 2.2vmin; color: #fff; cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 1vmin; padding: 1vmin; font: inherit;
+            transition: transform .06s ease-out, filter .06s ease-out;
+        }
+        button.face:active { transform: scale(.975); filter: brightness(1.12); }
+        button.face { min-height: 0; overflow: hidden; }
+        /* §1272 — sized by the TILE's height (what is actually left), not the screen's width. */
+        button.face svg { height: 58%; width: auto; max-width: 70%; display: block; flex: 0 1 auto; min-height: 0; }
+        button.face .label { font-size: clamp(14px, 2.6vh, 28px); font-weight: 700; color: var(--facing); }
+        /* §1355 — the symbols on the buttons: faces (default), stars, points — one or two at once, set
+           by the server (operator: "faces, stars (1-4), points (1-4). People can select max 2. you must
+           adjust the layout"). Hidden until the server says otherwise, so an unknown state shows faces. */
+        button.face .sym { display: none; color: var(--facing); line-height: 1; flex: 0 0 auto; }
+        button.face .sym-stars { font-size: clamp(26px, 9vh, 96px); letter-spacing: .04em; }
+        button.face .sym-points { font-size: clamp(44px, 20vh, 200px); font-weight: 900; }
+        body.s-stars button.face .sym-stars, body.s-points button.face .sym-points { display: block; }
+        body.s-nofaces button.face svg { display: none; }
+        /* Two symbols: each gets roughly half the room, so the word stays on the tile. */
+        body.s-two button.face svg { height: 36%; }
+        body.s-two button.face .sym-stars { font-size: clamp(20px, 6vh, 64px); }
+        body.s-two button.face .sym-points { font-size: clamp(30px, 11vh, 110px); }
+        body.s-two button.face { gap: .6vmin; }
+        .r4 { background: var(--verygood); } .r3 { background: var(--good); }
+        .r2 { background: var(--poor); } .r1 { background: var(--verypoor); }
+
+        /* Acknowledgement: visible, brief, and NEVER blocking — there is no cooldown, so the next
+           attendee can tap straight through this (operator: "drop the cool down as many people use
+           it every second"). */
+        #thanks {
+            position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            gap: 2vmin; background: rgba(8,14,26,.80); font-size: clamp(22px, 7vh, 72px);
+            font-weight: 800; opacity: 0; pointer-events: none; transition: opacity .1s ease-out;
+        }
+        #thanks.on { opacity: 1; }
+
+        /* §1278 — the follow-up questions: full screen, BIG buttons ("it must be buttons easy to
+           press"), one tap moves on, Skip always there. */
+        /* §1281 — each page has its own colour (green = what was good, warm amber-red = what could be
+           better), says "Question n of 3", and its buttons FILL the page. A bar across the top empties
+           over the 10 seconds and refills on every new page, so the timer can be seen, not guessed. */
+        #followup { position: fixed; inset: 0; z-index: 8; display: none;
+                    padding: 2vh 2.4vw 5.5vh; flex-direction: column; }   /* bottom: room for the status bar */
+        #followup.on { display: flex; }
+        #followup.pos { background: #0f3b22; }
+        #followup.imp { background: #4a1f0c; }
+        #followup .fu-step { display: flex; flex-direction: column; gap: 1.6vh; flex: 1 1 auto; min-height: 0; }
+        #followup .fu-step[hidden] { display: none; }
+        #followup .fu-num { font-size: .42em; font-weight: 600; opacity: .75; vertical-align: middle; }
+        #followup .fu-q { text-align: center; font-size: clamp(22px, 5.5vh, 56px); font-weight: 800; }
+        #followup .fu-hint { text-align: center; font-size: clamp(13px, 2.4vh, 24px); opacity: .8; margin-top: -1vh; }
+        #followup .fu-grid { flex: 1 1 auto; min-height: 0; display: grid; gap: 1.4vmin;
+                    grid-template-columns: repeat(auto-fit, minmax(min(28vw, 300px), 1fr)); grid-auto-rows: 1fr; }
+        #followup .fu-grid button { min-height: 0; height: 100%; border: 0; border-radius: 1.6vmin; padding: 1vh 1.2vw;
+                    color: #fff; font: inherit; font-weight: 700; font-size: clamp(16px, 3.4vh, 36px); cursor: pointer; }
+        /* §1283 — WHITE buttons with coloured text (operator: "change the box background to white and
+           green/red text. it is hard to see as page background is same color as boxes"). */
+        #followup .fu-grid button { background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+        #followup.pos .fu-grid button { color: #166534; }
+        #followup.imp .fu-grid button { color: #b91c1c; }
+        #followup .fu-grid button:active { filter: brightness(.9); transform: scale(.98); }
+        #followup .fu-skip { align-self: center; min-width: 30vw; min-height: 7vh; border: 2px solid rgba(255,255,255,.45);
+                    border-radius: 1.6vmin; background: transparent; color: #fff; font: inherit;
+                    font-size: clamp(14px, 2.6vh, 26px); cursor: pointer; }
+        #followup .fu-timer { height: .8vh; min-height: 4px; background: rgba(255,255,255,.15); border-radius: 99px;
+                    overflow: hidden; margin-bottom: 1.2vh; }
+        #followup .fu-timer i { display: block; height: 100%; width: 100%; background: rgba(255,255,255,.85);
+                    transform-origin: left; }
+        #followup .fu-timer i.run { animation: fu-drain linear forwards; }
+        @@keyframes fu-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+        header .qnum { font-size: .7em; font-weight: 500; opacity: .75; }
+        body.idle header .qnum { display: none; }
+        #thanks span { color: #fff; letter-spacing: .04em; }
+
+        /* §1259e — the face they actually pressed lights up, so the answer is attributed to a
+           BUTTON and not merely acknowledged in the middle of the screen. Someone who is not sure
+           their tap landed presses again; this is what stops that. */
+        button.face.tapped { outline: 1.2vmin solid #fff; outline-offset: -1.6vmin; }
+        button.face.tapped::after {
+            content: "\2713"; position: absolute; top: 1.4vmin; right: 2vmin;
+            font-size: clamp(20px, 5vh, 52px); font-weight: 900; color: #fff;
+            text-shadow: 0 1px 6px rgba(0,0,0,.45);
+        }
+        button.face { position: relative; }
+
+        /* Five taps in the top-left corner open setup. Invisible on purpose: a visible settings
+           button on a public kiosk is an invitation. */
+        #corner { position: fixed; top: 0; left: 0; width: 13vmin; height: 13vmin; z-index: 5; }
+
+        #setup { position: fixed; inset: 0; background: #0d1526; padding: 4vmin; display: none;
+                 overflow: auto; z-index: 10; }
+        #setup.on { display: block; }
+        #setup h1 { font-size: clamp(18px, 3.4vh, 30px); margin: 0 0 2vh; }
+        #setup label { display: block; font-size: 15px; opacity: .8; margin: 2vh 0 .6vh; }
+        #setup input { font-size: 30px; padding: 12px 14px; width: min(420px, 90%); border-radius: 10px;
+                       border: 1px solid #3a4a68; background: #16233c; color: #fff;
+                       text-transform: uppercase; letter-spacing: .08em; }
+        #setup button { font-size: 18px; padding: 12px 20px; border-radius: 10px; border: 0;
+                        background: #2b6cb0; color: #fff; margin-top: 2vh; margin-right: 10px; }
+        #setup .muted { opacity: .7; font-size: 14px; line-height: 1.5; }
+        #setup .stat { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;
+                       background: #16233c; border-radius: 8px; padding: 10px 12px; margin-top: 2vh; }
+        .err { color: #ff9c92; }
+        .ok { color: #8fe3a4; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header>
+        @* §1284 — the number sits on the question's own line, small, instead of taking a line. *@
+        <div class="prompt">How was this session? <span class="qnum">(1 of 3)</span></div>
+        <div class="title" id="sessionLine">&nbsp;</div>
+        <div class="session" id="speakerLine" hidden></div>
+        <div class="session" id="closeLine" hidden></div>
+        <div class="session" id="nextLine" hidden></div>
+    </header>
+    <main>
+        @* rating 4 = best … 1 = worst, matching SatisfactionScore.WeightOf (4 → 100, 1 → 0).
+           The faces are drawn, not emoji: an emoji is a font, and a font renders differently on a
+           device somebody swapped in at the last minute. *@
+        @* §1259b — the SAME four faces as the built box: broad smile, smile, NEUTRAL (a straight
+           mouth, not a frown), frown — drawn in near-black on the moulded colours. An attendee who
+           tapped a box in another corridor must read this screen without thinking.
+           🔒 The WORDS are EvaluationRatingLabels, not our own: the scale has no neutral midpoint
+           (DESIGN, Session Evaluation), so rating 2 reads "Somewhat unhappy" whatever its mouth
+           looks like. A kiosk saying "Neutral" counted a neutral answer as negative. *@
+        <button class="face r4" data-rating="4" aria-label="@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(4)">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="34" cy="38" r="7" fill="var(--facing)"/><circle cx="66" cy="38" r="7" fill="var(--facing)"/><path d="M24 56c8 20 44 20 52 0" fill="none" stroke="var(--facing)" stroke-width="9" stroke-linecap="round"/></svg>
+            <span class="sym sym-stars" aria-hidden="true">@CommunityHub.Core.Evaluation.RatingSymbolChoices.Stars(4)</span>
+            <span class="sym sym-points" aria-hidden="true">4</span>
+            <span class="label">@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(4)</span>
+        </button>
+        <button class="face r3" data-rating="3" aria-label="@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(3)">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="34" cy="38" r="7" fill="var(--facing)"/><circle cx="66" cy="38" r="7" fill="var(--facing)"/><path d="M29 60c7 11 35 11 42 0" fill="none" stroke="var(--facing)" stroke-width="9" stroke-linecap="round"/></svg>
+            <span class="sym sym-stars" aria-hidden="true">@CommunityHub.Core.Evaluation.RatingSymbolChoices.Stars(3)</span>
+            <span class="sym sym-points" aria-hidden="true">3</span>
+            <span class="label">@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(3)</span>
+        </button>
+        <button class="face r2" data-rating="2" aria-label="@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(2)">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="34" cy="38" r="7" fill="var(--facing)"/><circle cx="66" cy="38" r="7" fill="var(--facing)"/><path d="M31 63h38" fill="none" stroke="var(--facing)" stroke-width="9" stroke-linecap="round"/></svg>
+            <span class="sym sym-stars" aria-hidden="true">@CommunityHub.Core.Evaluation.RatingSymbolChoices.Stars(2)</span>
+            <span class="sym sym-points" aria-hidden="true">2</span>
+            <span class="label">@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(2)</span>
+        </button>
+        <button class="face r1" data-rating="1" aria-label="@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(1)">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="34" cy="38" r="7" fill="var(--facing)"/><circle cx="66" cy="38" r="7" fill="var(--facing)"/><path d="M27 70c8-18 44-18 52 0" fill="none" stroke="var(--facing)" stroke-width="9" stroke-linecap="round"/></svg>
+            <span class="sym sym-stars" aria-hidden="true">@CommunityHub.Core.Evaluation.RatingSymbolChoices.Stars(1)</span>
+            <span class="sym sym-points" aria-hidden="true">1</span>
+            <span class="label">@CommunityHub.Core.Evaluation.EvaluationRatingLabels.Label(1)</span>
+        </button>
+    </main>
+    <footer id="statusBar" aria-live="polite">
+        <span id="stRoom"></span>
+        <span id="stDevice"></span>
+        <span id="stIntune" hidden>Managed by Intune</span>
+        <span id="stConn" class="conn"></span>
+        <span id="stBattery" class="conn" hidden></span>
+    </footer>
+</div>
+
+@* §1259e — the confirmation an attendee needs in order NOT to press again: a tick, and the word
+   that says it is stored. Deliberately short-lived and pointer-transparent, because at a stand the
+   next tap is the next person and must land immediately (there is no cooldown). *@
+@* §1269 — just the words (operator 2026-09-21: "it is confusing that the Thanks - Recorded message
+   is green in all 4 types of results" · "just type THANK YOU !"). A green tick over a red "Unhappy"
+   read as if the answer had been turned into a positive one. *@
+<div id="thanks"><span>THANK YOU !</span></div>
+@* §1278 — the two follow-up questions. Buttons are rendered from EvaluationFollowUps, the same list
+   the server validates against, so a button can never send a code that would be dropped. *@
+<div id="followup" role="dialog" aria-live="polite">
+    <div class="fu-timer" aria-hidden="true"><i id="fuBar"></i></div>
+    <div id="fuPos" class="fu-step">
+        <div class="fu-q">@CommunityHub.Core.Evaluation.EvaluationFollowUps.PositiveQuestion <span class="fu-num">(2 of 3)</span></div>
+        <div class="fu-hint">@CommunityHub.Core.Evaluation.EvaluationFollowUps.PickOneHint</div>
+        <div class="fu-grid">
+            @foreach (var c in CommunityHub.Core.Evaluation.EvaluationFollowUps.Positive)
+            {
+                <button type="button" data-kind="pos" data-code="@c.Code">@c.Label</button>
+            }
+        </div>
+        <button type="button" class="fu-skip" data-kind="pos" data-code="">Skip</button>
+    </div>
+    <div id="fuImp" class="fu-step" hidden>
+        <div class="fu-q">@CommunityHub.Core.Evaluation.EvaluationFollowUps.ImprovementQuestion <span class="fu-num">(3 of 3)</span></div>
+        <div class="fu-hint">@CommunityHub.Core.Evaluation.EvaluationFollowUps.PickOneHint</div>
+        <div class="fu-grid">
+            @foreach (var c in CommunityHub.Core.Evaluation.EvaluationFollowUps.Improvement)
+            {
+                <button type="button" data-kind="imp" data-code="@c.Code">@c.Label</button>
+            }
+        </div>
+        <button type="button" class="fu-skip" data-kind="imp" data-code="">Skip</button>
+    </div>
+</div>
+<div id="corner" aria-hidden="true"></div>
+
+<div id="setup" role="dialog" aria-label="Kiosk setup">
+    <h1>Kiosk setup</h1>
+    @* §1303 — the organizer PIN guards setup (operator: "none must be able to modify except
+       organizers with pin code"). The server checks it; nothing here knows the PIN. *@
+    <div id="lock">
+        <label for="pin">Organizer PIN</label>
+        <input id="pin" type="password" inputmode="numeric" autocomplete="off" />
+        <div>
+            <button id="unlockBtn">Unlock</button>
+            <button id="lockCloseBtn" style="background:#3a4a68;">Close</button>
+        </div>
+        <div id="lockMsg" class="muted" style="margin-top:1.2vh;">&nbsp;</div>
+    </div>
+    <div id="setupBody" hidden>
+    @* §1303 — one tap: the tablets Intune knows, enrolled and approved on the spot. *@
+    <div id="managed" hidden>
+        <label>Tap this tablet&rsquo;s name (from Intune) &mdash; it is enrolled and approved at once</label>
+        <div id="managedList"></div>
+        <div id="managedMsg" class="muted" style="margin-top:1.2vh;">&nbsp;</div>
+    </div>
+    <div class="muted">
+        Ask an organiser for a pairing code from <strong>Organizer &rarr; Evaluation devices</strong>.
+        One code pairs this tablet to one room. Nothing is stored on this device except its key.
+    </div>
+    @* §1259d — the way in the operator asked for: open the short URL (or scan its QR), name the
+       stand, tap ENROLL. It lands in the SAME approval queue the built units use, and starts
+       working by itself the moment an organiser approves it. No code to carry, no mail. *@
+    <label for="devName">1 &mdash; Enroll this device</label>
+    <input id="devName" autocomplete="off" placeholder="Name it, e.g. Room 17 stand" style="text-transform:none;letter-spacing:normal;" />
+    <div>
+        <button id="joinBtn">Enroll this device</button>
+    </div>
+    <div id="joinMsg" class="muted" style="margin-top:1.2vh;">&nbsp;</div>
+
+    <label for="code">2 &mdash; or use a pairing code from an organiser</label>
+    <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" />
+    <div>
+        <button id="pairBtn">Pair with code</button>
+        <button id="closeBtn" style="background:#3a4a68;">Close</button>
+        <button id="flushBtn" style="background:#3a4a68;">Send queued now</button>
+    </div>
+    <div id="setupMsg" class="muted" style="margin-top:2vh;">&nbsp;</div>
+    <div class="stat" id="stat"></div>
+    </div>
+    <div class="muted" style="margin-top:2vh;">
+        Run this page full screen and lock the kiosk device to it (Intune kiosk mode, or the
+        device's own app-pinning feature).
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    // -- storage ---------------------------------------------------------------------------
+    // 🔑 The queue is written BEFORE the network is touched, every time. That ordering is the
+    // whole offline story: a vote survives a dead Wi-Fi, a reload, a crash and a flat battery,
+    // because it was durable before anything could fail.
+    var K_DEV = "ceh.eval.device", K_Q = "ceh.eval.queue";
+    function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
+    function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+
+    var device = load(K_DEV, null);          // { serialNumber, deviceKey, room, label }
+    var queue = load(K_Q, []);               // [{ id, rating, ts, hold?, pos?, imp? }]
+    var sending = false;
+
+    // -- vote ------------------------------------------------------------------------------
+    // 🔒 NO COOLDOWN (operator: "drop the cool down as many people use it every second"). A queue
+    // is a genuine line of people, not one person mashing: rate limiting here would silently drop
+    // real votes at exactly the busiest moment, which is the moment the data matters most.
+    //
+    // §1278 — then TWO optional follow-ups (what was good, what could be better), one tap each.
+    // 🔒 The vote is QUEUED on the first tap — durable before anything else happens — but HELD
+    // while the follow-ups are asked, because a response row is written once and never edited:
+    // the reasons have to travel WITH it. The hold is a time, not a flag, so a reload or a walked-
+    // away attendee can never strand a vote: once it passes, the vote is sent as it is.
+    var HOLD_MS = 60 * 1000, FOLLOWUP_STEP_MS = 10 * 1000;
+    // §1353/§1354 — the capture policy (operator: "turn off the wider context capture if people queue
+    // up"; "link different capture feedback-policy per device so we can test what works"). Comes with
+    // every session answer (render), the stored one included; follow-ups on until the server says
+    // otherwise. Each vote carries the policy it was asked under, so a switch never mislabels a queued one.
+    var followUpsOn = true, capturePolicy = null, ratingSymbols = null;
+    // §1355 — which symbols the buttons show (flags: 1 faces, 2 stars, 4 points). Body classes only; the
+    // buttons and the stored rating never change.
+    function applySymbols(s) {
+        ratingSymbols = s;
+        var cl = document.body.classList;
+        cl.toggle("s-nofaces", !(s & 1));
+        cl.toggle("s-stars", !!(s & 2));
+        cl.toggle("s-points", !!(s & 4));
+        cl.toggle("s-two", ((s & 1) + ((s >> 1) & 1) + ((s >> 2) & 1)) >= 2);
+    }
+    function vote(rating, el) {
+        var v = { id: newId(), rating: rating, ts: new Date().toISOString() };
+        if (capturePolicy !== null) { v.policy = capturePolicy; }
+        if (ratingSymbols !== null) { v.symbols = ratingSymbols; }
+        if (followUpsOn) { v.hold = Date.now() + HOLD_MS; }
+        queue.push(v);
+        save(K_Q, queue);
+        if (!followUpsOn) { flash(el); flush(); return; }   // rating only: recorded and sent at once
+        askFollowUps(v, el);
+    }
+
+    // -- §1278 follow-ups ------------------------------------------------------------------
+    var fu = document.getElementById("followup"), fuTimer = null, fuVote = null, fuStep = 0;
+    function askFollowUps(v, el) {
+        if (fuVote) { finishFollowUps(); }          // a previous one still open: close it first
+        fuVote = v;
+        if (el) { el.classList.add("tapped"); setTimeout(function () { el.classList.remove("tapped"); }, 400); }
+        showStep(1);
+    }
+    function showStep(step) {
+        fuStep = step;
+        document.getElementById("fuPos").hidden = step !== 1;
+        document.getElementById("fuImp").hidden = step !== 2;
+        fu.classList.toggle("pos", step === 1);
+        fu.classList.toggle("imp", step === 2);
+        fu.classList.add("on");
+        clearTimeout(fuTimer);
+        // Untouched for a while ⇒ they have walked away: keep what we have and free the stand.
+        // 🔑 A FRESH 10 s per page, and the bar shows it (§1281): restarted here, on every page.
+        fuTimer = setTimeout(finishFollowUps, FOLLOWUP_STEP_MS);
+        var bar = document.getElementById("fuBar");
+        bar.classList.remove("run");
+        void bar.offsetWidth;                       // restart the CSS animation from full
+        bar.style.animationDuration = (FOLLOWUP_STEP_MS / 1000) + "s";
+        bar.classList.add("run");
+    }
+    function pick(kind, code) {
+        if (!fuVote) { return; }
+        if (kind === "pos" && code) { fuVote.pos = code; }
+        if (kind === "imp" && code) { fuVote.imp = code; }
+        save(K_Q, queue);                           // the choice is durable at once, too
+        if (fuStep === 1) { showStep(2); } else { finishFollowUps(); }
+    }
+    function finishFollowUps() {
+        clearTimeout(fuTimer);
+        fu.classList.remove("on");
+        if (fuVote) { delete fuVote.hold; save(K_Q, queue); fuVote = null; }
+        flash(null);
+        flush();
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("#followup button[data-kind]"), function (b) {
+        b.addEventListener("click", function () { pick(b.getAttribute("data-kind"), b.getAttribute("data-code")); });
+    });
+
+    function newId() {
+        // A device-generated idempotency key: the ingest API de-duplicates on it, so a retried
+        // batch can never double-count a press.
+        if (window.crypto && crypto.randomUUID) { return crypto.randomUUID(); }
+        return "v-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+    }
+
+    var thanks = document.getElementById("thanks"), thanksTimer = null, tappedEl = null;
+    function flash(el) {
+        // §1259e — TWO signals, because one is not enough at a busy stand: the tile they touched
+        // gets a tick, and the screen says the vote is recorded. Long enough to be read while
+        // walking away (900 ms), short enough that the stand is visibly ready for the next person.
+        // 🔒 Never blocking: the overlay is pointer-transparent and a new tap simply restarts it,
+        // so three people in three seconds all register.
+        thanks.classList.add("on");
+        if (tappedEl) { tappedEl.classList.remove("tapped"); }
+        tappedEl = el || null;
+        if (tappedEl) { tappedEl.classList.add("tapped"); }
+        clearTimeout(thanksTimer);
+        thanksTimer = setTimeout(function () {
+            thanks.classList.remove("on");
+            if (tappedEl) { tappedEl.classList.remove("tapped"); tappedEl = null; }
+        }, 900);
+    }
+
+    // -- flush -----------------------------------------------------------------------------
+    // Posts to the SAME endpoint the built units use, with the same headers and record shape.
+    function flush() {
+        if (sending || !device || queue.length === 0 || !navigator.onLine) { paint(); return; }
+        // §1278 — a vote whose follow-ups are still being asked waits (until its hold time passes).
+        var now = Date.now();
+        var ready = queue.filter(function (v) { return !v.hold || v.hold <= now; });
+        if (ready.length === 0) { paint(); setTimeout(flush, 5000); return; }
+        sending = true;
+        var batch = ready.slice(0, 200);
+
+        fetch("/evaluation/v1/ingest/responses", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Device-Serial-Number": device.serialNumber,
+                "X-Device-Key": device.deviceKey
+            },
+            body: JSON.stringify({
+                serialNumber: device.serialNumber,
+                firmwareVersion: "web-kiosk/1",
+                clockSyncedAt: new Date().toISOString(),
+                records: batch.map(function (v) {
+                    return { deviceRecordId: v.id, rating: v.rating, collectionTimestamp: v.ts,
+                             positivePoint: v.pos || null, improvementPoint: v.imp || null,
+                             policy: (typeof v.policy === "number") ? v.policy : null,
+                             symbols: (typeof v.symbols === "number") ? v.symbols : null };
+                })
+            })
+        }).then(function (res) {
+            if (res.status === 401 || res.status === 403) {
+                // §1259c — the key was rotated or lost. Heal from the enrolment link first; only
+                // an iPad with no link at all needs a human, and the votes stay queued either way.
+                recover();
+                setMsg("Re-connecting this tablet…", "muted");
+                throw new Error("unauthenticated");
+            }
+            if (!res.ok) { throw new Error("http " + res.status); }
+            return res.json();
+        }).then(function (body) {
+            // accepted / duplicate / rejected are ALL terminal — the API says so explicitly, so
+            // anything it answered for leaves the queue. Retrying a rejected record forever is how
+            // a queue stops draining and the whole thing quietly stops working.
+            var done = {};
+            (body.results || []).forEach(function (r) { done[r.deviceRecordId] = true; });
+            queue = queue.filter(function (v) { return !done[v.id]; });
+            save(K_Q, queue);
+            sending = false;
+            lastDrain = Date.now();   // §1259c — the watchdog's "it is still working" signal
+            paint();
+            if (queue.length > 0) { setTimeout(flush, 400); }   // more waiting (or held): keep draining
+        }).catch(function () {
+            sending = false;
+            paint();   // stay queued; the timer and the online event will try again
+        });
+    }
+
+    // -- current session -------------------------------------------------------------------
+    var sessionLine = document.getElementById("sessionLine");
+    var speakerLine = document.getElementById("speakerLine");
+    // §1269 — the last time the SERVER answered this device, and whether it accepted the key. The
+    // status bar is green only on a real, recent, authorised answer — navigator.onLine alone says
+    // the Wi-Fi is up, not that votes can land.
+    var lastServerOk = 0, authRefused = false, closeTimer = null, lastCallFailed = false;
+
+    // 🔴 §1276 — the last answer is KEPT, and drawn at startup. Operator 2026-09-21: *"when i
+    // switched to offline mode (no wifi on device) it lost the session title + speaker info +
+    // troubleshooting line where it should show disconnected"*. The title came only from the
+    // server, so a page reloaded without Wi-Fi (iOS reloads a Home Screen app freely) came up
+    // blank. The schedule does not change because the Wi-Fi dropped; the stored answer is still
+    // right, and its own times say when it stops being right.
+    var K_LAST = "ceh.eval.lastsession";
+    function refreshSession() {
+        if (!device) {
+            sessionLine.textContent = "Not paired — tap the top-left corner five times";
+            sessionLine.className = "title idle";
+            paintStatus();
+            return;
+        }
+        fetch("/evaluation/v1/kiosk/session", {
+            headers: {
+                "X-Device-Serial-Number": device.serialNumber,
+                "X-Device-Key": device.deviceKey
+            }
+        }).then(function (r) {
+            lastCallFailed = false;
+            // §1303 — 410: an organizer DELETED (or revoked) this device. Forget it and open setup,
+            // so it can be re-onboarded on the spot. Queued votes stay queued and go out under the
+            // new identity once it is enrolled again.
+            if (r.status === 410) { forgetDevice(); return null; }
+            authRefused = (r.status === 401 || r.status === 403);
+            if (r.ok) { lastServerOk = Date.now(); }
+            return r.ok ? r.json() : null;
+        }).then(function (b) {
+            paintStatus();
+            if (!b) { return; }
+            save(K_LAST, b);
+            render(b);
+        }).catch(function () {
+            // No answer at all (no Wi-Fi, or no route): keep what is on screen — the schedule has
+            // not changed — and say so in the status line straight away.
+            lastCallFailed = true;
+            paintStatus();
+        });
+    }
+
+    // Draw a session answer — a fresh one, or the stored one at startup. A stored session whose
+    // window has since closed is drawn as "nothing running" with its stored next, so an offline
+    // screen still moves on at the right time.
+    function render(b) {
+        if (!b) { return; }
+        if (typeof b.followUps === "boolean") { followUpsOn = b.followUps; }   // §1353 — before b is rebuilt below
+        if (typeof b.policy === "number") { capturePolicy = b.policy; }        // §1354
+        if (typeof b.symbols === "number") { applySymbols(b.symbols); }        // §1355
+        var now = Date.now();
+        if (b.session && b.session.closesAt && new Date(b.session.closesAt).getTime() <= now) {
+            b = { room: b.room, device: b.device, session: null, next: b.next };
+        }
+        // The stored NEXT has opened while we could not ask: it is the running session now. Its
+        // speakers are unknown offline, but its title and close are — and the faces must be back.
+        if (!b.session && b.next && new Date(b.next.opensAt).getTime() <= now) {
+            b = (new Date(b.next.closesAt).getTime() > now)
+                ? { room: b.room, device: b.device, next: null,
+                    session: { title: b.next.title, closesAt: b.next.closesAt } }
+                : { room: b.room, device: b.device, session: null, next: null };
+        }
+        {
+            // The server's room and name are the truth — an organiser may have linked, moved or
+            // renamed this device since it was approved.
+            if (b.room !== device.room) { device.room = b.room || null; save(K_DEV, device); }
+            if (b.device && b.device.name && b.device.name !== device.label) { device.label = b.device.name; save(K_DEV, device); }
+            var closeLine = document.getElementById("closeLine");
+            if (b.session && b.session.title) {
+                // §1269 — the title alone, large and bold; the room moved to the status bar.
+                document.body.classList.remove("idle");
+                sessionLine.textContent = b.session.title;
+                sessionLine.className = "title";
+                speakerLine.textContent = b.session.speakers || "";
+                speakerLine.hidden = !b.session.speakers;
+                // §1270 — say when feedback closes (scheduled end + 30 min), so the close is
+                // never a surprise to the people in the room.
+                if (b.session.closesAt) {
+                    var closes = new Date(b.session.closesAt);
+                    closeLine.textContent = "Feedback open until " + clock(closes);
+                    closeLine.hidden = false;
+                    // Switch to the "next" screen AT the close, not up to a minute after it.
+                    clearTimeout(closeTimer);
+                    var ms = closes.getTime() - Date.now() + 1000;
+                    // §1276 — redraw from the stored answer first, so an OFFLINE screen still
+                    // closes on time; then ask the server.
+                    if (ms > 0 && ms < 24 * 60 * 60 * 1000) {
+                        closeTimer = setTimeout(function () { render(load(K_LAST, null)); refreshSession(); }, ms);
+                    }
+                } else { closeLine.hidden = true; }
+            } else {
+                // §1270 — nothing to capture: no question, no faces, only what is next.
+                document.body.classList.add("idle");
+                speakerLine.hidden = true;
+                closeLine.hidden = true;
+                if (!b.room) {
+                    // §1303 — operator: "change the message if no room is linked so operator knows
+                    // that is the problem". Without a room there can never be a session here; say
+                    // what to fix instead of "no more sessions", which reads like a schedule fact.
+                    sessionLine.textContent = "No room linked — link this tablet to a room under Organizer → Evaluation devices";
+                    sessionLine.className = "title idle";
+                } else if (b.next && b.next.title) {
+                    sessionLine.textContent = "Next: " + b.next.title;
+                    sessionLine.className = "title";
+                } else {
+                    // §1275 — nothing running AND nothing later in this room: say that, rather
+                    // than a bare "no session" that reads like a fault.
+                    sessionLine.textContent = "No more sessions scheduled in this room";
+                    sessionLine.className = "title idle";
+                }
+            }
+            nextSession = (!b.session && b.next) ? b.next : null;
+            paintNext();
+            paintStatus();
+        }
+    }
+
+    // -- §1269: the troubleshooting line -----------------------------------------------------
+    // room · device name · connection (§1303: the internal KIOSK-… id is no longer shown). GREEN = the server answered this device within the
+    // last 3 minutes (the session refresh runs every 60 s) and nothing is waiting to be sent.
+    function paintStatus() {
+        var room = device && device.room ? device.room : "No room linked";
+        var name = device && device.label ? device.label : "";
+        document.getElementById("stRoom").textContent = room;
+        document.getElementById("stDevice").textContent = name;
+        document.getElementById("stDevice").hidden = !name;
+        // §1303 — operator: "add a Managed by Intune at the bottom". A page cannot ask Intune, so the
+        // cue is the Intune naming template (eldk-<serial>), which is also the name the tablet enrols
+        // under here.
+        document.getElementById("stIntune").hidden = !/^eldk-/i.test(name);
+        var conn = document.getElementById("stConn"), text, cls;
+        if (!device) { text = "● not paired"; cls = "bad"; }
+        else if (authRefused) { text = "● not accepted — reconnecting"; cls = "bad"; }
+        // §1276 — DISCONNECTED the moment a call fails or the Wi-Fi is off, not 3 minutes later.
+        else if (!navigator.onLine || lastCallFailed) { text = "● disconnected — " + queue.length + " vote(s) saved on this tablet"; cls = "bad"; }
+        else if (!lastServerOk) { text = "● connecting…"; cls = "busy"; }   // before the first answer
+        else if (Date.now() - lastServerOk > 3 * 60 * 1000) { text = "● disconnected — no answer from server"; cls = "bad"; }
+        else if (queue.length > 0) { text = "● connected — sending " + queue.length; cls = "busy"; }
+        else { text = "● connected"; cls = "ok"; }
+        conn.textContent = text;
+        conn.className = "conn " + cls;
+    }
+    setInterval(paintStatus, 5000);
+
+    // -- §1262: idle screen counts down to the next session's feedback window ---------------
+    // The server says WHEN; the tick is local, so the countdown moves every second without a
+    // request, and the moment the window opens the session line is asked for again.
+    var nextLine = document.getElementById("nextLine"), nextSession = null;
+    function two(n) { return (n < 10 ? "0" : "") + n; }
+    function clock(d) {
+        var sameDay = d.toDateString() === new Date().toDateString();
+        return (sameDay ? "" : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + " ")
+            + two(d.getHours()) + ":" + two(d.getMinutes());
+    }
+    function until(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000));
+        var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+        if (d > 0) { return d + " d " + h + " h"; }
+        if (h > 0) { return h + " h " + two(m) + " min"; }
+        return m + ":" + two(s % 60);
+    }
+    function paintNext() {
+        if (!nextSession) { nextLine.hidden = true; return; }
+        var opens = new Date(nextSession.opensAt), closes = new Date(nextSession.closesAt);
+        var left = opens.getTime() - Date.now();
+        // §1276 — at the opening, redraw from the stored answer first (faces back even offline).
+        if (left <= 0) { nextSession = null; nextLine.hidden = true; render(load(K_LAST, null)); refreshSession(); return; }
+        // §1270 — the title is the headline above; this line is only WHEN.
+        nextLine.textContent = "Feedback opens " + clock(opens) + " (in " + until(left) + ")"
+            + " · closes " + clock(closes);
+        nextLine.hidden = false;
+    }
+    setInterval(paintNext, 1000);
+
+    // -- setup -----------------------------------------------------------------------------
+    var setup = document.getElementById("setup"), taps = 0, tapTimer = null;
+    document.getElementById("corner").addEventListener("click", function () {
+        taps++;
+        clearTimeout(tapTimer);
+        tapTimer = setTimeout(function () { taps = 0; }, 2500);
+        if (taps >= 5) { taps = 0; openSetup(); }
+    });
+
+    // -- §1303: organizer PIN + one-tap enrolment of Intune tablets ---------------------------
+    // The PIN is held only in this variable while setup is open, and forgotten on close.
+    var orgPin = null;
+    function lockUi(locked) {
+        document.getElementById("lock").hidden = !locked;
+        document.getElementById("setupBody").hidden = locked;
+        if (locked) {
+            document.getElementById("pin").value = "";
+            setTimeout(function () { document.getElementById("pin").focus(); }, 50);
+        }
+    }
+    function openSetup() {
+        setup.classList.add("on");
+        lockUi(orgPin === null);
+        paint();
+    }
+    function closeSetup() {
+        setup.classList.remove("on");
+        orgPin = null;
+    }
+    function lockMsg(text, cls) {
+        var el = document.getElementById("lockMsg");
+        el.textContent = text; el.className = cls ? cls : "muted";
+    }
+    function unlock() {
+        var pin = document.getElementById("pin").value.trim();
+        if (!pin) { lockMsg("Enter the organizer PIN.", "err"); return; }
+        lockMsg("Checking…");
+        fetch("/evaluation/v1/kiosk/unlock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin: pin })
+        }).then(function (r) {
+            if (r.status === 403) { lockMsg("Wrong PIN.", "err"); return null; }
+            if (r.status === 429) { lockMsg("Too many wrong PINs — try again in 15 minutes.", "err"); return null; }
+            if (!r.ok) { lockMsg("Could not check the PIN (" + r.status + ").", "err"); return null; }
+            return r.json();
+        }).then(function (b) {
+            if (!b) { return; }
+            orgPin = pin;
+            lockMsg(" ");
+            lockUi(false);
+            renderManaged(b);
+        }).catch(function () { lockMsg("No network. Check Wi-Fi and try again.", "err"); });
+    }
+    function renderManaged(b) {
+        var box = document.getElementById("managed"), list = document.getElementById("managedList");
+        list.textContent = "";
+        if (!b || !b.managed || !b.devices || b.devices.length === 0) { box.hidden = true; return; }
+        b.devices.forEach(function (d) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.style.margin = "0 .6vw .8vh 0";
+            btn.textContent = d.name + (d.enrolled ? " — enrolled" + (d.room ? " (" + d.room + ")" : "") : "");
+            if (d.enrolled) { btn.style.background = "#3a4a68"; }
+            btn.addEventListener("click", function () { managedEnrol(d.name); });
+            list.appendChild(btn);
+        });
+        box.hidden = false;
+    }
+    function managedEnrol(name) {
+        var msg = document.getElementById("managedMsg");
+        msg.textContent = "Enrolling " + name + "…"; msg.className = "muted";
+        fetch("/evaluation/v1/kiosk/managed-enrol", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin: orgPin, name: name })
+        }).then(function (r) {
+            if (r.status === 403 || r.status === 429) { orgPin = null; lockUi(true); lockMsg("PIN no longer accepted — enter it again.", "err"); return null; }
+            if (r.status === 404) { msg.textContent = name + " is not an Intune device any more."; msg.className = "err"; return null; }
+            if (!r.ok) { msg.textContent = "Enrolment failed (" + r.status + "). Try again."; msg.className = "err"; return null; }
+            return r.json();
+        }).then(function (b) {
+            if (!b) { return; }
+            device = { serialNumber: b.serialNumber, deviceKey: b.deviceKey, room: b.room, label: b.label };
+            save(K_DEV, device);
+            if (joinTimer) { clearInterval(joinTimer); joinTimer = null; }
+            msg.textContent = "Enrolled as " + name + (b.room ? " — " + b.room : " — link it to a room on the Devices page") + ".";
+            msg.className = "ok";
+            closeSetup();
+            paint(); refreshSession(); flush();
+        }).catch(function () { msg.textContent = "No network. Check Wi-Fi and try again."; msg.className = "err"; });
+    }
+    document.getElementById("unlockBtn").addEventListener("click", unlock);
+    document.getElementById("pin").addEventListener("keydown", function (e) { if (e.key === "Enter") { unlock(); } });
+    document.getElementById("lockCloseBtn").addEventListener("click", closeSetup);
+    document.getElementById("closeBtn").addEventListener("click", closeSetup);
+    document.getElementById("flushBtn").addEventListener("click", function () { flush(); });
+
+    function setMsg(text, cls) {
+        var el = document.getElementById("setupMsg");
+        el.textContent = text;
+        el.className = cls ? cls : "muted";
+    }
+
+    document.getElementById("pairBtn").addEventListener("click", function () {
+        var code = document.getElementById("code").value.trim();
+        if (!code) { setMsg("Enter the code first.", "err"); return; }
+        setMsg("Pairing…");
+        fetch("/evaluation/v1/kiosk/pair", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: code })
+        }).then(function (r) {
+            if (r.status === 404) { setMsg("That code is not valid, has expired, or was already used.", "err"); return null; }
+            if (!r.ok) { setMsg("Pairing failed (" + r.status + "). Try again.", "err"); return null; }
+            return r.json();
+        }).then(function (b) {
+            if (!b) { return; }
+            device = { serialNumber: b.serialNumber, deviceKey: b.deviceKey, room: b.room, label: b.label };
+            save(K_DEV, device);
+            setMsg("Paired" + (b.room ? " to " + b.room : "") + ". You can close this.", "ok");
+            document.getElementById("code").value = "";
+            refreshSession();
+            flush();
+            paint();
+        }).catch(function () { setMsg("Pairing failed — no network.", "err"); });
+    });
+
+    function paint() {
+        // §1269 — the old corner badge is now the status bar's connection field.
+        paintStatus();
+        document.getElementById("stat").textContent =
+            (device ? "device: " + device.serialNumber + "\nroom:   " + (device.room || "(not linked)") : "device: NOT PAIRED")
+            + "\nqueued: " + queue.length
+            + "\nonline: " + navigator.onLine;
+    }
+
+    // -- wiring ----------------------------------------------------------------------------
+    Array.prototype.forEach.call(document.querySelectorAll("button.face"), function (b) {
+        // 'click' rather than a touch handler: it fires for touch, mouse and assistive input, and
+        // it cannot double-fire the way a touchend+click pair does.
+        b.addEventListener("click", function () { vote(parseInt(b.getAttribute("data-rating"), 10), b); });
+    });
+
+    window.addEventListener("online", function () { paint(); flush(); });
+    window.addEventListener("offline", paint);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) { flush(); refreshSession(); } });
+    // Belt and braces for a screen nobody is watching: drain the queue every 20 seconds and
+    // refresh the session line every minute.
+    setInterval(flush, 20000);
+    setInterval(refreshSession, 60000);
+
+    // Keep the screen awake; re-acquire after the iPad sleeps or the app is backgrounded.
+    function wake() {
+        if (!("wakeLock" in navigator)) { return; }
+        navigator.wakeLock.request("screen").catch(function () { /* denied while hidden */ });
+    }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) { wake(); } });
+
+    // Two taps in quick succession are a zoom gesture in Safari; on a kiosk they are just two votes.
+    document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+
+    // -- §1259d: self-enrolment — join the queue, then poll until approved ------------------
+    // 🔑 The identifier is generated HERE and kept for the life of this iPad, exactly as a built
+    // unit's serial is stamped at manufacture. It is what the approval queue shows an organiser
+    // and what the device is known by afterwards, so it must survive a reload — it is stored
+    // before the first request is ever sent.
+    var K_SERIAL = "ceh.eval.serial", K_JOINNAME = "ceh.eval.joinname";
+    function mySerial() {
+        var s = load(K_SERIAL, null);
+        if (!s) {
+            var rand = (window.crypto && crypto.randomUUID)
+                ? crypto.randomUUID().replace(/-/g, "").slice(0, 10)
+                : Math.random().toString(36).slice(2, 12);
+            s = "KIOSK-" + rand.toUpperCase();
+            save(K_SERIAL, s);
+        }
+        return s;
+    }
+
+    var joinTimer = null;
+    function join(announce) {
+        var name = document.getElementById("devName").value.trim() || load(K_JOINNAME, "") || "";
+        if (name) { save(K_JOINNAME, name); }
+        var msg = document.getElementById("joinMsg");
+
+        fetch("/evaluation/v1/kiosk/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ serialNumber: mySerial(), name: name })
+        }).then(function (r) {
+            if (r.status === 429) { msg.textContent = "Too many devices are waiting for approval. Ask an organiser."; msg.className = "err"; return null; }
+            return r.ok ? r.json() : null;
+        }).then(function (b) {
+            if (!b) { return; }
+            if (b.status === "approved") {
+                device = { serialNumber: b.serialNumber, deviceKey: b.deviceKey, room: b.room, label: name };
+                save(K_DEV, device);
+                clearInterval(joinTimer); joinTimer = null;
+                // §1275 — keep the reconnect link, and in a Safari TAB put it in the address bar so
+                // "Add to Home Screen" saves it: the Home Screen app has its own storage and would
+                // otherwise enrol as a second device.
+                if (b.enrolToken) {
+                    enrolToken = b.enrolToken;
+                    save("ceh.eval.enrol", enrolToken);
+                    if (!isStandalone()) {
+                        try { history.replaceState(null, "", location.pathname + "?k=" + encodeURIComponent(enrolToken)); } catch (e) { /* ignore */ }
+                        msg.textContent = "Approved" + (b.room ? " — " + b.room : "") + ". Now tap Share → "
+                            + "Add to Home Screen, and use the Home Screen icon from now on: it opens as this same device.";
+                        msg.className = "ok";
+                        paint(); refreshSession(); flush();
+                        return;   // setup stays open so the instruction is read
+                    }
+                }
+                msg.textContent = "Approved" + (b.room ? " — " + b.room : "") + ". This tablet is live.";
+                msg.className = "ok";
+                closeSetup();
+                paint(); refreshSession(); flush();
+                return;
+            }
+            if (b.status === "rejected") {
+                clearInterval(joinTimer); joinTimer = null;
+                msg.textContent = "This device was rejected by an organiser."; msg.className = "err";
+                return;
+            }
+            if (b.status === "already_provisioned") {
+                clearInterval(joinTimer); joinTimer = null;
+                // Its key was handed over once and cannot be shown again — only a human can help.
+                msg.textContent = "Already approved earlier, but this browser has lost its key. "
+                    + "Ask an organiser for a pairing code or a new enrollment link.";
+                msg.className = "err";
+                return;
+            }
+            // Pending: keep the operator informed and keep asking. The organiser sees this device
+            // in Organizer → Evaluation devices → pending approvals.
+            // §1303 — the name the organiser typed, not the internal KIOSK-… identifier (operator:
+            // "i dont see a need to also have a kiosk-<id> … remove that").
+            msg.textContent = "Waiting for approval" + (name ? " — " + name : "")
+                + ". An organiser approves it under Evaluation devices; this screen picks it up by itself.";
+            msg.className = "muted";
+            if (announce && !joinTimer) { joinTimer = setInterval(function () { join(false); }, 8000); }
+        }).catch(function () {
+            msg.textContent = "No network. Check Wi-Fi and try again."; msg.className = "err";
+        });
+    }
+    document.getElementById("joinBtn").addEventListener("click", function () { join(true); });
+
+    // -- §1259c: enrol from the link, and heal when the browser forgets ---------------------
+    // The bookmarked URL carries this device's enrolment token. Exchanging it is idempotent, so
+    // the SAME bookmark re-pairs the iPad after a storage eviction, a wipe or a replacement —
+    // which is what removes any notion of a "daily login" on 20 tablets.
+    function tokenFromUrl() {
+        try { return new URLSearchParams(location.search).get("k"); } catch (e) { return null; }
+    }
+    function stripToken() {
+        // 🔒 Out of the address bar and out of the back stack the moment it is used.
+        try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
+    }
+    // §1275 — running as a Home Screen app (standalone) rather than in a Safari tab.
+    function isStandalone() {
+        try {
+            return window.navigator.standalone === true
+                || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+        } catch (e) { return false; }
+    }
+    // A link in the address wins over a stored one: it is the newest the organiser issued.
+    var enrolToken = tokenFromUrl() || load("ceh.eval.enrol", null);
+    if (tokenFromUrl()) {
+        save("ceh.eval.enrol", enrolToken);
+        // 🔒 §1275 — stripped only in the Home Screen app, whose saved start address already
+        // carries it. In a Safari tab it must STAY, or "Add to Home Screen" saves a bare /eval and
+        // the app enrols as a second device.
+        if (isStandalone()) { stripToken(); }
+    }
+
+    var enrolling = false;
+    function enrol(then) {
+        if (enrolling || !enrolToken) { if (then) { then(false); } return; }
+        enrolling = true;
+        fetch("/evaluation/v1/kiosk/enrol", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: enrolToken })
+        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (b) {
+            enrolling = false;
+            if (!b) { if (then) { then(false); } return; }
+            device = { serialNumber: b.serialNumber, deviceKey: b.deviceKey, room: b.room, label: b.label };
+            save(K_DEV, device);
+            closeSetup();
+            paint(); refreshSession();
+            if (then) { then(true); }
+        }).catch(function () { enrolling = false; if (then) { then(false); } });
+    }
+
+    // §1303 — the device no longer exists on the server: drop its identity (and a reconnect link
+    // that would only point at the deleted row) and show the enrolment screen.
+    function forgetDevice() {
+        device = null;
+        try { localStorage.removeItem(K_DEV); localStorage.removeItem("ceh.eval.enrol"); } catch (e) { }
+        enrolToken = null;
+        authRefused = false;
+        sessionLine.textContent = "Not paired — tap the top-left corner five times";
+        sessionLine.className = "title idle";
+        paint();
+        openSetup();
+    }
+
+    // Called when the API says this device is not who it thinks it is: heal silently rather than
+    // put a pairing screen in front of attendees.
+    function recover() { enrol(function (ok) { if (ok) { flush(); } }); }
+
+    // -- watchdogs -------------------------------------------------------------------------
+    // 🔑 A kiosk runs unattended for two days. Everything below assumes nobody is looking at it.
+    var lastDrain = Date.now();
+    setInterval(function () {
+        // 1. The queue must drain. If it has not for 5 minutes while we believe we are online,
+        //    something is wedged — try again, and re-enrol in case the key is the problem.
+        if (queue.length > 0 && navigator.onLine && Date.now() - lastDrain > 5 * 60 * 1000) {
+            lastDrain = Date.now();
+            flush();
+            recover();
+        }
+        // 2. Tell the hub we are alive, with the queue depth — the one number that reveals a kiosk
+        //    that looks fine and is quietly collecting nothing. Reuses the devices' own heartbeat.
+        heartbeat();
+    }, 5 * 60 * 1000);
+
+    // 3. A fresh start once a night: new code, clean memory, no month-old JS heap. Only when the
+    //    queue is empty and nobody has touched it for a while, so a reload can never lose a vote
+    //    or interrupt somebody mid-tap.
+    var lastTouch = Date.now();
+    document.addEventListener("click", function () { lastTouch = Date.now(); }, true);
+    setInterval(function () {
+        var h = new Date().getHours();
+        if (h >= 3 && h < 5 && queue.length === 0 && Date.now() - lastTouch > 30 * 60 * 1000) {
+            location.reload();
+        }
+    }, 10 * 60 * 1000);
+
+    // 3b. §1265 — pick up a deploy the same day, not at 03:00. The page knows the build it was
+    //     rendered with; the API says which build is running. On a difference, fetch a fresh copy
+    //     PAST the offline cache (the worker lets ?refresh through), check it really is the new
+    //     build (a slot swap in progress can still answer with the old one), store it as the shell
+    //     and reload. Same guards as the nightly reload: never with unsent votes, never mid-use.
+    //     One attempt per build per hour, so a mismatch a reload cannot cure never becomes a loop.
+    var BUILD = "@CommunityHub.Api.EvaluationKioskController.BuildId";
+    function checkForUpdate() {
+        if (!navigator.onLine) { return; }
+        fetch("/evaluation/v1/kiosk/build", { cache: "no-store" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (b) {
+                if (!b || !b.build || b.build === BUILD) { return; }
+                if (queue.length !== 0 || Date.now() - lastTouch < 2 * 60 * 1000) { return; }
+                var tried = load("ceh.eval.update", null);
+                if (tried && tried.build === b.build && Date.now() - tried.at < 60 * 60 * 1000) { return; }
+                save("ceh.eval.update", { build: b.build, at: Date.now() });
+                return fetch("/eval?refresh=" + Date.now(), { cache: "no-store" })
+                    .then(function (res) { return res.ok ? res.text() : null; })
+                    .then(function (html) {
+                        if (!html || html.indexOf(b.build) < 0) { return; }
+                        var store = ("caches" in window)
+                            ? caches.open("ceh-eval-shell-v1").then(function (c) {
+                                return c.put("/eval", new Response(html,
+                                    { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+                            })
+                            : Promise.resolve();
+                        return store.then(function () { location.reload(); });
+                    });
+            })
+            .catch(function () { /* next check will try again */ });
+    }
+    setInterval(checkForUpdate, 5 * 60 * 1000);
+
+    // §1358 — the tablet's battery, on the bottom line and in the heartbeat (operator: "i cannot see the
+    // battery status of the device"). Chrome on Android has the Battery Status API; where a browser has
+    // not, nothing is shown and nothing is sent — never a guessed number.
+    var batteryPct = null, batteryCharging = false;
+    function paintBattery() {
+        var el = document.getElementById("stBattery");
+        if (!el) { return; }
+        if (batteryPct === null) { el.hidden = true; return; }
+        el.hidden = false;
+        el.textContent = "🔋 " + batteryPct + "%" + (batteryCharging ? " ⚡" : "");
+        el.className = "conn " + (batteryPct <= 20 && !batteryCharging ? "bad" : batteryPct <= 40 && !batteryCharging ? "busy" : "ok");
+    }
+    if (navigator.getBattery) {
+        navigator.getBattery().then(function (b) {
+            function read() { batteryPct = Math.round(b.level * 100); batteryCharging = !!b.charging; paintBattery(); }
+            read();
+            b.addEventListener("levelchange", read);
+            b.addEventListener("chargingchange", read);
+        }).catch(function () { /* not available: show nothing */ });
+    }
+
+    function heartbeat() {
+        if (!device || !navigator.onLine) { return; }
+        fetch("/evaluation/v1/ingest/heartbeat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Device-Serial-Number": device.serialNumber,
+                "X-Device-Key": device.deviceKey
+            },
+            body: JSON.stringify({
+                serialNumber: device.serialNumber,
+                firmwareVersion: "web-kiosk/1",
+                cachedRecordCount: queue.length,
+                batteryPercent: batteryPct,          // §1358 — null where the browser cannot tell
+                clockSyncedAt: new Date().toISOString()
+            })
+        }).catch(function () { /* the faces keep working */ });
+    }
+
+    // 4. An unhandled script error on an unattended screen is unrecoverable by itself. One reload
+    //    is cheap; a dead stand for two days is not.
+    window.addEventListener("error", function () {
+        if (queue.length === 0) { setTimeout(function () { location.reload(); }, 5000); }
+    });
+
+    // 5. The offline shell, so a reload during a Wi-Fi outage still opens the kiosk instead of
+    //    Safari's error page.
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/eval-sw.js").catch(function () { /* http, private mode */ });
+    }
+
+    // §1276 — draw what we last knew BEFORE asking, so a start without Wi-Fi is not blank.
+    paintStatus();
+    if (device) { render(load(K_LAST, null)); }
+    refreshSession();
+    flush();
+    paint();
+    wake();
+    heartbeat();
+    if (!device) {
+        // An iPad with a link heals itself. One without opens setup — and if it has already asked
+        // to join, it resumes polling, so an approval given while the stand was unattended lands
+        // on its own.
+        enrol(function (ok) {
+            if (ok) { return; }
+            openSetup();
+            if (load(K_SERIAL, null)) {
+                document.getElementById("devName").value = load(K_JOINNAME, "") || "";
+                join(true);
+            }
+        });
+    }
+})();
+</script>
+</body>
+</html>

@@ -45,6 +45,14 @@ public sealed class AuthorizationFallbackTests
         // the token is the only authorisation, and the brief forbids collecting identity here.
         // A login redirect would make every printed code in the venue useless.
         "CommunityHub.Pages.FeedbackModel",                    // /f/{token}
+        // §1305 — /sponsor-registration: a company that is not in CEH yet registers here, so it cannot
+        // have a cookie. Protected by captcha + an e-mailed one-time code, and GATED by `sponsor-webshop`
+        // (off ⇒ only a signed-in organizer sees it), so a PROD deploy does not open it.
+        "CommunityHub.Pages.SponsorRegistrationModel",         // /sponsor-registration
+        // §1305 — /sponsor-catalog: the replacement of the sponsor PowerPoint, for PROSPECTS ("He should
+        // not be presented with login"). Published pages + published products only, never company names;
+        // gated by `sponsor-webshop` like the registration page.
+        "CommunityHub.Pages.SponsorCatalogModel",              // /sponsor-catalog/{slug?}
         // 🔴 §1040 — /monitor/{token}, the Volume Package list a company follows. Anonymous BY
         // DESIGN and reviewed as such: the recipient is OUTSIDE the hub and has no account, so a
         // login redirect would make the feature impossible rather than safer.
@@ -115,6 +123,19 @@ public sealed class AuthorizationFallbackTests
         // reaching it grants NOTHING — a caller gets a row in a queue and a human decides the rest.
         // 🔒 It fails CLOSED when the secret is unconfigured (503), never open.
         "CommunityHub.Api.EvaluationProvisionController",      // /evaluation/v1/provision
+        // §1259 — the WEB KIOSK option (an iPad instead of a built box). Two endpoints a browser
+        // needs and a box does not; votes still go through the unchanged ingest contract above.
+        // 🔒 Anonymous for the same reason as the units: an iPad in a corridor cannot complete a
+        // PIN login, and the fail-closed fallback would put that login page in front of attendees.
+        // `pair` authenticates with a one-time, short-lived code and hands over the device key;
+        // `session` authenticates with the same device-key headers as every other device call, and
+        // is READ-ONLY — it returns the title of whatever is running in that device's own room.
+        "CommunityHub.Api.EvaluationKioskController",          // /evaluation/v1/kiosk/*
+        // §1259 — the kiosk page itself. 🔒 Anonymous BY NECESSITY: it is the screen an attendee
+        // taps, on a device nobody signs in to. It holds no server state and reads nothing — its
+        // identity lives in the browser after pairing, and every action it takes is one of the two
+        // API calls above.
+        "CommunityHub.Pages.Eval.IndexModel",                  // /eval — the iPad kiosk screen
         // ---- Found by No_endpoint_is_anonymous_unless_it_is_on_the_declared_list, 2026-08-01 ----
         // 🔑 These five were ALREADY anonymous and already deliberate — each says so in its own
         // source — but none had ever been declared here, so the list was not the public surface it

@@ -102,13 +102,24 @@ public sealed class PublicSponsorsService
                 s.SponsorCompanyId,
                 s.Tier,
                 s.LogoRasterPath,
-                s.WebsiteUrl,
+                s.CompanyName,
             })
             .ToListAsync(ct);
+        // §1315 — the names the hub already holds when the upload folder has none yet (operator 2026-09-28: the public page
+        // showed "(name not synced — CM id 102)" for six Gold sponsors whose name was on the sponsor row and the shop company).
+        var shop = await _db.ShopCompanies
+            .Where(c => c.EventId == eventId)
+            .Select(c => new { c.SponsorCompanyId, c.PublicName, c.LegalName })
+            .ToListAsync(ct);
+        var shopByCompany = shop.GroupBy(c => c.SponsorCompanyId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         // The hub has no company entity; the display name is captured per company on
         // SponsorUploadLocation. Pull the per-company names once and resolve through
         // the shared fallback chain so the name matches every other sponsor surface.
+        // §1360 — the website is ONE field, on the company page (not the sponsor record's copy).
+        var links = await Integrations.Webshop.CompanyLinks.AllAsync(_db, eventId, ct);
+
         var names = await _db.SponsorUploadLocations
             .Where(l => l.EventId == eventId)
             .Select(l => new { l.SponsorCompanyId, l.CompanyName })
@@ -122,16 +133,22 @@ public sealed class PublicSponsorsService
             .Select(s =>
             {
                 nameByCompany.TryGetValue(s.SponsorCompanyId, out var publicName);
+                shopByCompany.TryGetValue(s.SponsorCompanyId, out var shopCompany);
+                // 🔴 §1312 — the sponsor record and the CEH shop's public name before the legacy upload-folder capture (a
+                // stale folder name must not win), and never the LEGAL name on the public page: without a public name it loses
+                // its legal form (operator 2026-09-29: "public name is for SoMe, Zoho, etc everything public").
                 var name = SponsorCompanyName.Resolve(
-                    publicName, legalName: null, billingName: null, companyId: s.SponsorCompanyId);
+                    FirstName(s.CompanyName, shopCompany?.PublicName, publicName),
+                    legalName: shopCompany?.LegalName is { } legal ? CompanyLegalForm.Strip(legal) : null,
+                    billingName: null, companyId: s.SponsorCompanyId);
                 return new
                 {
                     s.Tier,
                     Row = new PublicSponsorRow(
                         s.SponsorCompanyId,
                         name,
-                        NormalizeLogoPath(s.LogoRasterPath),
-                        SafeUrl(s.WebsiteUrl)),
+                        PublicLogoPath(s.SponsorCompanyId, s.LogoRasterPath),
+                        SafeUrl(Integrations.Webshop.CompanyLinks.Of(links, s.SponsorCompanyId).Website)),
                 };
             })
             .ToList();
@@ -169,6 +186,37 @@ public sealed class PublicSponsorsService
             return p;
         }
         return "/" + p;
+    }
+
+    private static string? FirstName(params string?[] names) => names.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+
+    /// <summary>
+    /// §1315 — a logo stored in SharePoint is served THROUGH the hub (<c>/sponsor-logo/{company}</c>): the SharePoint address
+    /// answers 403 to anyone not signed in to the tenant, so the public page showed a broken image for every logo.
+    /// </summary>
+    public static string? PublicLogoPath(string companyId, string? logoRasterPath)
+    {
+        var path = NormalizeLogoPath(logoRasterPath);
+        if (path is null || !path.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return path;
+        // Raster only: an uploaded SVG can carry script, and the hub would serve it from its own origin — monogram instead.
+        return Path.GetExtension(path.Split('?')[0]).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp"
+            ? $"/sponsor-logo/{Uri.EscapeDataString(companyId)}"
+            : null;
+    }
+
+    /// <summary>
+    /// The drive-relative folder and file name of a SharePoint document URL (".../Shared%20Documents/General/…/x.png" →
+    /// ("General/…", "x.png")), or null when it is not one.
+    /// </summary>
+    public static (string Folder, string FileName)? SharePointLocation(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u)) return null;
+        var path = Uri.UnescapeDataString(u.AbsolutePath);
+        var i = path.IndexOf("/Shared Documents/", StringComparison.OrdinalIgnoreCase);
+        if (i < 0) return null;
+        var rel = path[(i + "/Shared Documents/".Length)..].Trim('/');
+        var slash = rel.LastIndexOf('/');
+        return slash <= 0 ? null : (rel[..slash], rel[(slash + 1)..]);
     }
 
     /// <summary>Only ever surface an absolute http(s) link; anything else is dropped.</summary>

@@ -232,8 +232,16 @@ public sealed class SpeakerDetailsFormService : IWizardFormService
         Track(ZohoFieldMap.Speaker.Biography.GuiLabel, profile.Biography, N(model.Biography));
         Track(ZohoFieldMap.Speaker.LinkedIn.GuiLabel, profile.LinkedIn, N(model.LinkedIn));
         Track(ZohoFieldMap.Speaker.Twitter.GuiLabel, profile.Twitter, N(model.Twitter));
-        ApplyBio(profile, SpeakerProfile.BioFields.Tagline,   profile.Tagline,   N(model.Tagline),   v => profile.Tagline = v,   now);
-        ApplyBio(profile, SpeakerProfile.BioFields.Biography, profile.Biography, N(model.Biography), v => profile.Biography = v, now);
+        // §1256c — markup never survives a save either. An imported bio that still carried
+        // <p>…</p> came back through this form unchanged and was re-saved WITH the tags, stamped
+        // as speaker-edited — which then put them beyond the importer's reach. Normalising here
+        // closes that door: the hub renders the bio encoded, so a tag is never wanted.
+        ApplyBio(profile, SpeakerProfile.BioFields.Tagline,   profile.Tagline,
+                 CommunityHub.Core.Integrations.HtmlTextNormalizer.ToPlainText(N(model.Tagline)),
+                 v => profile.Tagline = v,   now);
+        ApplyBio(profile, SpeakerProfile.BioFields.Biography, profile.Biography,
+                 CommunityHub.Core.Integrations.HtmlTextNormalizer.ToPlainText(N(model.Biography)),
+                 v => profile.Biography = v, now);
         ApplyBio(profile, SpeakerProfile.BioFields.Blog,      profile.Blog,      N(model.Blog),      v => profile.Blog = v,      now);
         ApplyBio(profile, SpeakerProfile.BioFields.LinkedIn,  profile.LinkedIn,  N(model.LinkedIn),  v => profile.LinkedIn = v,  now);
         ApplyBio(profile, SpeakerProfile.BioFields.Twitter,   profile.Twitter,   N(model.Twitter),   v => profile.Twitter = v,   now);

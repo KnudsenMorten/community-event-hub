@@ -19,23 +19,19 @@ public class SponsorsModel : PageModel
     private readonly TimeProvider _clock;
     private readonly SponsorInfoDeletionService _infoDeletion;
     private readonly ParticipantDeactivationService _cascade;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorsModel> _logger;
 
     public SponsorsModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
         SponsorInfoDeletionService infoDeletion,
         ParticipantDeactivationService cascade,
-        CompanyManagerClient cm, CompanyManagerOptions cmOptions, ILogger<SponsorsModel> logger)
+        ILogger<SponsorsModel> logger)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _infoDeletion = infoDeletion;
         _cascade = cascade;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _logger = logger;
     }
 
@@ -75,6 +71,31 @@ public class SponsorsModel : PageModel
     [BindProperty(SupportsGet = true)] public bool Desc { get; set; }
     [BindProperty(SupportsGet = true)] public int PageNo { get; set; } = 1;
 
+    /// <summary>
+    /// §1359 — include test, withdrawn and inactive companies. Off by default (operator 2026-10-19: *"it should
+    /// exclude test data/inactive/data by default, with option to include"*).
+    /// </summary>
+    [BindProperty(SupportsGet = true)] public bool ShowAll { get; set; }
+
+    /// <summary>§1359 — how many companies the default view hides (shown on the toggle).</summary>
+    public int HiddenCount { get; private set; }
+
+    /// <summary>§1359 — tier, categories and products per company (operator: *"my event partner sabine needs it"*).</summary>
+    public IReadOnlyDictionary<string, CommunityHub.Core.Sponsors.SponsorPurchaseOverview.Summary> Purchases { get; private set; }
+        = new Dictionary<string, CommunityHub.Core.Sponsors.SponsorPurchaseOverview.Summary>();
+
+    public CommunityHub.Core.Sponsors.SponsorPurchaseOverview.Summary PurchasesOf(string companyId) =>
+        Purchases.TryGetValue(companyId, out var s) ? s : CommunityHub.Core.Sponsors.SponsorPurchaseOverview.Summary.Empty;
+
+    /// <summary>
+    /// §1359 — a company is INACTIVE when it has contacts and every one is deactivated. One with no contacts at
+    /// all stays visible: that is a sponsor mid-onboarding, not an inactive one (§1034b).
+    /// </summary>
+    public static bool IsInactive(CompanyRow r) => r.Contacts.Count > 0 && r.Contacts.All(c => !c.IsActive);
+
+    /// <summary>§1359 — what the default view leaves out.</summary>
+    public static bool HiddenByDefault(CompanyRow r) => r.IsTestData || r.IsWithdrawn || IsInactive(r);
+
     public GridPage Paging { get; private set; }
 
     public bool NextDescFor(string col) => Sort == col && !Desc;
@@ -97,7 +118,7 @@ public class SponsorsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
         await LoadAsync(me.EventId, ct);
         return Page();
     }
@@ -139,7 +160,12 @@ public class SponsorsModel : PageModel
             // §1237 — report the NAME back, not the id the organizer never uses.
             Message = $"Company {companyLabel} withdrawn: {result.ContactsDeactivated} contact(s) "
                       + $"deactivated, {result.GroupRsvpsCancelled} lingering party reservation(s) "
-                      + "cancelled. Zoho/ERP records were not touched.";
+                      + "cancelled"
+                      // §1362b — a company with no sponsor record is withdrawn by closing its tasks; say so.
+                      + (result.CompanyTasksClosed > 0
+                          ? $", {result.CompanyTasksClosed} open task(s) closed (it has no sponsor record)"
+                          : string.Empty)
+                      + ". Zoho/ERP records were not touched.";
         }
         else
         {
@@ -317,7 +343,10 @@ public class SponsorsModel : PageModel
 
         // --- Sheet 1: Company roster ---------------------------------------
         var companies = wb.Worksheets.Add("Companies");
-        var hdr = new[] { "Company id", "Contacts", "Open", "In progress", "Done", "Overdue", "Total tasks", "Next due" };
+        // §1359 — tier, categories and products for each company, same source as the page.
+        var purchases = await CommunityHub.Core.Sponsors.SponsorPurchaseOverview.BuildAsync(_db, me.EventId, ct);
+        var hdr = new[] { "Company id", "Contacts", "Open", "In progress", "Done", "Overdue", "Total tasks", "Next due",
+                          "Tier", "Categories", "Products" };
         for (int i = 0; i < hdr.Length; i++) companies.Cell(1, i + 1).Value = hdr[i];
         companies.Range(1, 1, 1, hdr.Length).Style.Font.Bold = true;
 
@@ -342,6 +371,12 @@ public class SponsorsModel : PageModel
             companies.Cell(row, 6).Value = ovr;
             companies.Cell(row, 7).Value = grp.Count();
             companies.Cell(row, 8).Value = nxt?.ToString("dd/MM/yyyy") ?? "";
+            if (purchases.TryGetValue(grp.Key, out var bought))
+            {
+                companies.Cell(row, 9).Value = bought.Tier ?? "";
+                companies.Cell(row, 10).Value = string.Join("; ", bought.Categories);
+                companies.Cell(row, 11).Value = string.Join("; ", bought.Products);
+            }
             row++;
         }
         companies.Columns().AdjustToContents();
@@ -408,7 +443,7 @@ public class SponsorsModel : PageModel
             .Where(t => t.EventId == eventId
                         && (t.SponsorCompanyId != null
                             || (t.SourceKey != null && t.SourceKey.StartsWith("sponsor:"))))
-            .Select(t => new { t.SponsorCompanyId, t.DueDate, t.State })
+            .Select(t => new { t.SponsorCompanyId, t.DueDate, t.State, t.ClosedReason })
             .ToListAsync(ct);
 
         TotalTasks   = tasks.Count;
@@ -452,8 +487,12 @@ public class SponsorsModel : PageModel
                 .ToListAsync(ct),
             StringComparer.OrdinalIgnoreCase);
 
+        // §1362b — a task the hub CLOSED (withdrawal, retirement) is not something left to manage; counting it kept a
+        // record-less company on the page after it was withdrawn.
         var companyIdsWithTasks = new HashSet<string>(
-            tasks.Where(t => !string.IsNullOrWhiteSpace(t.SponsorCompanyId)).Select(t => t.SponsorCompanyId!),
+            tasks.Where(t => !string.IsNullOrWhiteSpace(t.SponsorCompanyId)
+                             && !(t.State == TaskState.Done && t.ClosedReason != null))
+                 .Select(t => t.SponsorCompanyId!),
             StringComparer.OrdinalIgnoreCase);
         var companyIdsWithAnActiveContact = new HashSet<string>(
             contacts.Where(c => c.IsActive && !string.IsNullOrWhiteSpace(c.SponsorCompanyId))
@@ -523,6 +562,13 @@ public class SponsorsModel : PageModel
                 testCompanyIds.Contains(cid));
         }).ToList();
 
+        Purchases = await CommunityHub.Core.Sponsors.SponsorPurchaseOverview.BuildAsync(_db, eventId, ct);
+
+        // §1359 — test, withdrawn and inactive companies only when asked for.
+        HiddenCount = allCompanies.Count(HiddenByDefault);
+        if (!ShowAll)
+            allCompanies = allCompanies.Where(r => !HiddenByDefault(r)).ToList();
+
         // Free-text search over the company name + id + any contact name/email.
         if (!string.IsNullOrWhiteSpace(Search))
         {
@@ -540,6 +586,7 @@ public class SponsorsModel : PageModel
         {
             "contacts" => r => r.Contacts.Count,
             "open"     => r => r.Open,
+            "inprogress" => r => r.InProgress,
             "done"     => r => r.Done,
             "overdue"  => r => r.Overdue,
             "total"    => r => r.Total,

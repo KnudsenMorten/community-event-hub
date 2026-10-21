@@ -7,7 +7,11 @@
 <style>
     /* Mobile-first: cards stack, controls go full-width and wrap at ~360px. */
     .vs-cat { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; overflow:hidden; }
-    .vs-cat-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; }
+    .vs-cat-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; cursor:pointer; list-style:none; }
+    .vs-cat-head::-webkit-details-marker { display:none; }
+    .vs-cat-head h3::before { content:"▸ "; }
+    details.vs-cat[open] > .vs-cat-head h3::before { content:"▾ "; }
+    .vs-pill.vs-queued { background:#fff7ed; color:#9a3412; border:1px dashed #fb923c; }
     .vs-cat-head h3 { margin:0; font-size:17px; }
     .vs-cat-head .owners { font-size:12.5px; opacity:.92; margin-top:4px; line-height:1.5; }
     .vs-body { padding:12px 14px; }
@@ -43,10 +47,10 @@
 
 <div class="card">
     <h1>Volunteer work structure</h1>
-    <p>Build the work tree (Category &rarr; Subcategory &rarr; Task), name each
+    <p>Build the work tree (Category &rarr; optional Subcategory &rarr; Task), name each
        category&rsquo;s <strong>lead</strong> (an organizer, for oversight) and
        appoint its <strong>supervisor</strong> (a volunteer who runs it), then
-       assign volunteers to tasks.</p>
+       assign volunteers to tasks. Assigning <strong>queues</strong> the volunteer — they see nothing until the queue is published (Allocation), and publishing only reaches the released ring.</p>
 
     @if (Model.AccessDenied)
     {
@@ -154,23 +158,93 @@
         </div>
     }
 
+    @if (Model.Tree.Count > 0)
+    {
+        @* §1299 — collapse / expand EVERY category at once (operator 2026-09-23: "it must be
+           possible to collapse/expand the whole category"). *@
+        <div class="vs-form" style="margin:0 0 10px;">
+            <button type="button" id="vsExpandAll" class="ghost" style="background:#eef2f7;color:#1D3380;border:1px solid #c4c8d4;">Expand all categories</button>
+            <button type="button" id="vsCollapseAll" class="ghost" style="background:#eef2f7;color:#1D3380;border:1px solid #c4c8d4;">Collapse all categories</button>
+        </div>
+    }
+
+        // §1299 — one task row, used both for tasks directly under a category and for tasks
+        // inside a subcategory. Published assignees and QUEUED (not yet published) people are
+        // shown apart, so "who got what" is visible here before any volunteer can see it.
+        async Task RenderTask(CommunityHub.Core.Domain.VolunteerTask t)
+        {
+            var queued = Model.Queued.TryGetValue(t.Id, out var q) ? q : Array.Empty<int>();
+            <div class="vs-task">
+                @*
+                    §942 — the filter matches TITLE + DESCRIPTION, carried here as
+                    data rather than read off the rendered row: the description is
+                    not displayed in the tree, and "all tasks related to check-in"
+                    is often only decidable from it.
+                *@
+                <input class="vstaskChk" type="checkbox" value="@t.Id"
+                       data-vs-text="@(((t.Title ?? "") + " " + (t.Description ?? "")).ToLowerInvariant())"
+                       aria-label="Select task @t.Title" style="margin-right:6px;vertical-align:middle;" />
+                <strong>@t.Title</strong>
+                <span class="meta">
+                    &middot; @t.Status
+                    @if (t.DueDate is not null) { <text>&middot; due @t.DueDate.Value.ToString("dd-MM-yyyy")</text> }
+                    @if (!string.IsNullOrWhiteSpace(t.Shift)) { <text>&middot; @t.Shift</text> }
+                    @if (t.ResourcesNeeded > 0) { <text>&middot; @(t.Assignments.Count + queued.Count)/@t.ResourcesNeeded people</text> }
+                </span>
+                <div class="assignees">
+                    @foreach (var a in t.Assignments)
+                    {
+                        <span class="vs-pill" title="Published — the volunteer can see this task">@Model.NameOf(a.ParticipantId)</span>
+                    }
+                    @foreach (var pid in queued)
+                    {
+                        <span class="vs-pill vs-queued" title="Queued — not published; the volunteer cannot see this yet">@Model.NameOf(pid) &middot; not published</span>
+                    }
+                </div>
+                <form method="post" asp-page-handler="Assign" class="vs-form">
+                    <input type="hidden" name="taskId" value="@t.Id" />
+                    <select name="volunteerParticipantId" required>
+                        <option value="">— queue a volunteer —</option>
+                        @foreach (var v in Model.VolunteerOptions)
+                        { <option value="@v.Value">@v.Text</option> }
+                    </select>
+                    <button type="submit">Assign (queue)</button>
+                    <button type="submit" asp-page-handler="DeleteTask" name="taskId" value="@t.Id" formmethod="post" class="danger">Delete task</button>
+                </form>
+            </div>
+        }
+
     @foreach (var cat in Model.Tree)
     {
         var leadName = cat.LeadParticipant is null ? "(none)" :
             (string.IsNullOrWhiteSpace(cat.LeadParticipant.FullName) ? cat.LeadParticipant.Email : cat.LeadParticipant.FullName);
         var supName = cat.SupervisorParticipant is null ? "(none)" :
             (string.IsNullOrWhiteSpace(cat.SupervisorParticipant.FullName) ? cat.SupervisorParticipant.Email : cat.SupervisorParticipant.FullName);
-        var taskCount = cat.Subcategories.Sum(s => s.Tasks.Count);
+        // §1299 — cat.Tasks is EVERY task in the category, with or without a subcategory.
+        var taskCount = cat.Tasks.Count;
+        var directTasks = cat.Tasks.Where(t => t.SubcategoryId is null).OrderBy(t => t.Title).ToList();
 
-        <div class="vs-cat">
-            <div class="vs-cat-head">
+        @*
+            §1299 — the WHOLE category folds, settings included (operator 2026-09-23: "it must be
+            possible to collapse/expand the whole category"). This supersedes §942's choice to keep
+            the settings always visible: with every category foldable, a long one no longer pushes
+            another's settings off-screen — you close it.
+            🔑 Open by default until the list is big enough to be the problem (same threshold as
+            §942). <details> works with no JS and is keyboard-accessible.
+            ⚠️ `open` is a BOOLEAN attribute — Razor OMITS it entirely when the single bool
+            expression is false; that is why it is written as one expression.
+        *@
+        var vsCollapsed = taskCount > 20;
+        <details class="vs-cat vs-catfold" open="@(!vsCollapsed)">
+            <summary class="vs-cat-head">
                 <h3>@cat.Name</h3>
                 <div class="owners">
                     Lead (organizer): <strong>@leadName</strong> &middot;
                     Supervisor (volunteer): <strong>@supName</strong><br />
                     @cat.Subcategories.Count subcategor@(cat.Subcategories.Count == 1 ? "y" : "ies"), @taskCount task@(taskCount == 1 ? "" : "s")
+                    <span class="vs-fold-hint"></span>
                 </div>
-            </div>
+            </summary>
             <div class="vs-body">
 
                 <form method="post" asp-page-handler="SetLead" class="vs-form">
@@ -202,35 +276,67 @@
                 </form>
 
                 @*
-                    §942 — EXPAND / COLLAPSE per category. Operator 2026-08-07: *"we need
-                    expand/collapse in the view as well"*. His concrete complaint was that Check-in's
-                    own settings were pushed off-screen by the 127-task import bucket sitting below
-                    it — so the CATEGORY SETTINGS above stay visible always, and only the
-                    subcategory/task list folds. Folding the settings too would have moved the
-                    problem rather than fixed it.
+                    §1297 — PREFERRED VOLUNTEERS for this bucket (Leth: "preferred volunteers per
+                    category are ranked higher").
+                    🔑 A preference, NOT a reservation. It moves somebody to the front of the
+                    auto-planner's candidate order for this bucket's tasks; it never overrides what
+                    they said they are available for, and never double-books them. Said on the page
+                    because "preferred" reads like "will get it", and a planner that honoured that
+                    reading would produce assignments nobody can actually work.
+                *@
+                @{
+                    var preferred = Model.Preferred.TryGetValue(cat.Id, out var pv)
+                        ? pv
+                        : (IReadOnlyList<(int ParticipantId, string Name, int Rank)>)Array.Empty<(int, string, int)>();
+                }
+                <div class="vs-form" style="flex-wrap:wrap;">
+                    <span style="flex:1 1 100%;font-size:12px;color:#6e7681;">
+                        Preferred volunteers — ranked first by the auto-planner for this bucket,
+                        within what they are actually available for.
+                    </span>
+                    @if (preferred.Count > 0)
+                    {
+                        <ul style="flex:1 1 100%;margin:4px 0 6px;padding-left:18px;font-size:13px;">
+                            @foreach (var p in preferred)
+                            {
+                                <li style="margin-bottom:4px;">
+                                    @p.Name @(p.Rank == 0 ? "" : $"(rank {p.Rank})")
+                                    <form method="post" asp-page-handler="RemovePreferred" style="display:inline;">
+                                        <input type="hidden" name="categoryId" value="@cat.Id" />
+                                        <input type="hidden" name="participantId" value="@p.ParticipantId" />
+                                        <button type="submit" style="font-size:11px;padding:2px 6px;">remove</button>
+                                    </form>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    <form method="post" asp-page-handler="AddPreferred" style="display:flex;gap:6px;flex-wrap:wrap;flex:1 1 100%;">
+                        <input type="hidden" name="categoryId" value="@cat.Id" />
+                        <select name="participantId">
+                            <option value="">— prefer a volunteer —</option>
+                            @foreach (var v in Model.VolunteerOptions)
+                            {
+                                <option value="@v.Value">@v.Text</option>
+                            }
+                        </select>
+                        <input type="number" name="rank" value="0" min="0" max="99" style="width:70px;"
+                               aria-label="Rank (lowest first)" title="Rank — lowest first; equal ranks fall through to the ordinary fairness order." />
+                        <button type="submit">Add preference</button>
+                    </form>
+                </div>
 
-                    🔑 Open by default UNTIL the list is big enough to be the problem. A category
-                    with a handful of tasks is scannable and closing it just adds a click; the
-                    bucket with 127 is exactly what he could not see past. Threshold, not a fixed
-                    choice, so the page behaves the same way as the structure changes.
-                    <details> works with no JS and is keyboard-accessible.
-                *@
-                @*
-                    ⚠️ `open` is a BOOLEAN html attribute — presence is what counts, so a literal
-                    open="False" would render the element OPEN. This relies on Razor's conditional
-                    attribute rendering: an attribute whose value is a single bool expression is
-                    OMITTED ENTIRELY when false. That is the documented behaviour and the reason
-                    this is written as one expression rather than string concatenation.
-                    (An @if/else around the start tag is not an option — Razor requires balanced
-                    tags, so each branch would be an unclosed element.)
-                *@
-                @{ var vsCollapsed = taskCount > 20; }
-                <details class="vs-catfold" open="@(!vsCollapsed)">
-                    <summary style="cursor:pointer;font-size:13.5px;color:var(--el-darkblue,#1D3380);font-weight:600;padding:6px 0;">
-                        @cat.Subcategories.Count subcategor@(cat.Subcategories.Count == 1 ? "y" : "ies"),
-                        @taskCount task@(taskCount == 1 ? "" : "s")
-                        @if (vsCollapsed) { <text>— click to expand</text> }
-                    </summary>
+                @* §1299 — tasks DIRECTLY under the category (no subcategory). *@
+                <div class="vs-sub vs-direct">
+                    <h4>Tasks in @cat.Name <span class="meta" style="font-weight:400;">(no subcategory)</span></h4>
+                    @foreach (var t in directTasks) { await RenderTask(t); }
+                    <form method="post" asp-page-handler="CreateTask" class="vs-form">
+                        <input type="hidden" name="categoryId" value="@cat.Id" />
+                        <input type="text" name="title" placeholder="New task title" maxlength="300" required />
+                        <input type="date" name="due" />
+                        <input type="text" name="shift" placeholder="Shift (optional)" maxlength="200" />
+                        <button type="submit">Add task</button>
+                    </form>
+                </div>
 
                 @foreach (var sub in cat.Subcategories.OrderBy(s => s.Name))
                 {
@@ -238,46 +344,12 @@
                         <h4>@sub.Name
                             <form method="post" asp-page-handler="DeleteSubcategory" style="display:inline">
                                 <input type="hidden" name="subcategoryId" value="@sub.Id" />
-                                <button type="submit" class="danger" style="padding:2px 8px;font-size:11px;border:0;border-radius:5px;background:#c0392b;color:#fff;cursor:pointer;">remove</button>
+                                <button type="submit" class="danger" title="Removes the subcategory; its tasks move up to @cat.Name and keep their volunteers."
+                                        style="padding:2px 8px;font-size:11px;border:0;border-radius:5px;background:#c0392b;color:#fff;cursor:pointer;">remove</button>
                             </form>
                         </h4>
 
-                        @foreach (var t in sub.Tasks.OrderBy(t => t.Title))
-                        {
-                            <div class="vs-task">
-                                @*
-                                    §942 — the filter matches TITLE + DESCRIPTION, carried here as
-                                    data rather than read off the rendered row: the description is
-                                    not displayed in the tree, and "all tasks related to check-in"
-                                    is often only decidable from it.
-                                *@
-                                <input class="vstaskChk" type="checkbox" value="@t.Id"
-                                       data-vs-text="@(((t.Title ?? "") + " " + (t.Description ?? "")).ToLowerInvariant())"
-                                       aria-label="Select task @t.Title" style="margin-right:6px;vertical-align:middle;" />
-                                <strong>@t.Title</strong>
-                                <span class="meta">
-                                    &middot; @t.Status
-                                    @if (t.DueDate is not null) { <text>&middot; due @t.DueDate.Value.ToString("dd-MM-yyyy")</text> }
-                                    @if (!string.IsNullOrWhiteSpace(t.Shift)) { <text>&middot; @t.Shift</text> }
-                                </span>
-                                <div class="assignees">
-                                    @foreach (var a in t.Assignments)
-                                    {
-                                        <span class="vs-pill">vol #@a.ParticipantId</span>
-                                    }
-                                </div>
-                                <form method="post" asp-page-handler="Assign" class="vs-form">
-                                    <input type="hidden" name="taskId" value="@t.Id" />
-                                    <select name="volunteerParticipantId" required>
-                                        <option value="">— assign volunteer —</option>
-                                        @foreach (var v in Model.VolunteerOptions)
-                                        { <option value="@v.Value">@v.Text</option> }
-                                    </select>
-                                    <button type="submit">Assign</button>
-                                    <button type="submit" asp-page-handler="DeleteTask" name="taskId" value="@t.Id" formmethod="post" class="danger">Delete task</button>
-                                </form>
-                            </div>
-                        }
+                        @foreach (var t in sub.Tasks.OrderBy(t => t.Title)) { await RenderTask(t); }
 
                         <form method="post" asp-page-handler="CreateTask" class="vs-form">
                             <input type="hidden" name="subcategoryId" value="@sub.Id" />
@@ -288,11 +360,11 @@
                         </form>
                     </div>
                 }
-                </details>@* §942 — end of the per-category fold *@
 
+                @* §1299 — subcategories are free-named groupings (e.g. Monday / Tuesday / Wednesday). *@
                 <form method="post" asp-page-handler="CreateSubcategory" class="vs-form">
                     <input type="hidden" name="categoryId" value="@cat.Id" />
-                    <input type="text" name="name" placeholder="New subcategory name" maxlength="200" required />
+                    <input type="text" name="name" placeholder="New subcategory (optional — e.g. Monday)" maxlength="200" required />
                     <button type="submit">Add subcategory</button>
                 </form>
 
@@ -310,7 +382,7 @@
                     </form>
                 </details>
             </div>
-        </div>
+        </details>
     }
 
     @* §199: a clear, READ-ONLY review of ALL defined volunteer tasks with their full
@@ -335,7 +407,7 @@
                 <div class="vat-task">
                     <div class="vat-head">
                         <strong>@t.Title</strong>
-                        <span class="vat-path">@t.Subcategory.Category.Name &rsaquo; @t.Subcategory.Name</span>
+                        <span class="vat-path">@t.Category.Name@if (t.Subcategory is not null) {<text> &rsaquo; @t.Subcategory.Name</text>}</span>
                     </div>
                     <div class="vat-meta">
                         <span class="vs-pill">@t.Status</span>
@@ -469,6 +541,14 @@
 
             // §942 — FILTER + SELECT-ALL-MATCHING. Picking the right rows out of 127 is the actual
             // work; a move button without this just relocates the tedium.
+            // §1299 — expand / collapse every category at once.
+            [['vsExpandAll', true], ['vsCollapseAll', false]].forEach(function (p) {
+                var b = document.getElementById(p[0]);
+                if (b) b.addEventListener('click', function () {
+                    document.querySelectorAll('details.vs-catfold').forEach(function (d) { d.open = p[1]; });
+                });
+            });
+
             var filterEl = document.getElementById('vsFilter');
             var matchEl = document.getElementById('vsMatchCount');
             var selMatchBtn = document.getElementById('vsSelectMatchBtn');

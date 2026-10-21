@@ -145,7 +145,13 @@ public sealed class EvaluationProvisioningService
             {
                 EventId = eventId,
                 SerialNumber = row.SerialNumber,
-                Label = $"Serial {row.SerialNumber}",
+                // The name the requester gave (an iPad's "Room 17 stand") beats the generic
+                // fallback — it is the only human-meaningful thing an organiser has to go on.
+                // ⚠️ Note allows 400 characters, Label 200 — trimmed, or a long name fails the mint.
+                // §1266 — no name ⇒ NO label (was "Serial <id>", which only repeated the serial the
+                // device list prints anyway); the page falls back to the serial for display.
+                Label = string.IsNullOrWhiteSpace(row.Note) ? null
+                    : row.Note.Length > 200 ? row.Note[..200] : row.Note,
                 FirmwareVersion = row.FirmwareVersion,
                 IsActive = true,
                 HealthTelemetryEnabled = true,
@@ -179,6 +185,27 @@ public sealed class EvaluationProvisioningService
     /// at approval would mean generating a credential into an empty room and hoping the unit asks
     /// before anyone reads the screen.
     /// </remarks>
+    /// <summary>
+    /// §1303 — delete a device (the caller has checked it never collected feedback) TOGETHER with the
+    /// rows that point at it. Both FKs are NoAction, so removing the device alone failed with HTTP 500
+    /// for every tablet that had joined through the approval queue (operator 2026-09-25, deleting a
+    /// test <c>KIOSK-…</c> row). The request row is deleted, not unlinked: an approved request with no
+    /// device would MINT a new one on the tablet's next poll and bring the device straight back.
+    /// </summary>
+    public async Task DeleteDeviceAsync(EvaluationDevice device, CancellationToken ct = default)
+    {
+        var requests = await _db.EvaluationDeviceProvisionRequests
+            .Where(r => r.EvaluationDeviceId == device.Id).ToListAsync(ct);
+        _db.EvaluationDeviceProvisionRequests.RemoveRange(requests);
+
+        var windows = await _db.EvaluationTelemetryWindows
+            .Where(w => w.EvaluationDeviceId == device.Id).ToListAsync(ct);
+        _db.EvaluationTelemetryWindows.RemoveRange(windows);
+
+        _db.EvaluationDevices.Remove(device);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<bool> ApproveAsync(int requestId, string byEmail, CancellationToken ct = default)
     {
         var row = await _db.EvaluationDeviceProvisionRequests

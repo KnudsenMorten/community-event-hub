@@ -115,19 +115,80 @@
             @* Four buttons, highest first — the same order and colours as the physical unit in the
                room, so the two channels do not feel like different questions. Each SUBMITS on tap:
                one action, no "choose then send", because the attendee is already standing up. *@
+            @* §1355 — the symbols on the buttons (faces / stars / points, one or two), left of the word; the
+               button stays one tap and its colour and word never change. *@
+            @{
+                var ratingSymbols = Model.Resolution?.Symbols ?? RatingSymbolChoices.Default;
+            }
+            <style>
+                .fb-rate { display:flex; align-items:center; gap:12px; width:100%; padding:12px 14px; border:0;
+                           border-radius:10px; color:#fff; font-size:1.05rem; font-weight:600; cursor:pointer;
+                           min-height:56px; text-align:left; }
+                .fb-rate .fb-sym { display:flex; align-items:center; gap:8px; flex:0 0 auto; color:#17181a; }
+                .fb-rate .fb-face { width:36px; height:36px; display:block; }
+                .fb-rate .fb-stars { font-size:1.25rem; letter-spacing:.04em; line-height:1; }
+                .fb-rate .fb-points { font-size:1.6rem; font-weight:900; line-height:1; min-width:1.1em; text-align:center; }
+                .fb-rate .fb-word { flex:1 1 auto; }
+                @@media (max-width: 380px) { .fb-rate .fb-stars { font-size:1.05rem; } .fb-rate { gap:8px; } }
+            </style>
             <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0;">
                 @foreach (var rating in Model.RatingOrder)
                 {
-                    <button type="submit" name="Rating" value="@rating"
-                            style="display:block;width:100%;padding:16px 14px;border:0;border-radius:10px;
-                                   background:@FeedbackModel.ColourFor(rating);color:#fff;
-                                   font-size:1.05rem;font-weight:600;cursor:pointer;
-                                   min-height:56px;text-align:left;">
-                        @FeedbackModel.LabelFor(rating)
+                    <button type="submit" name="Rating" value="@rating" class="fb-rate"
+                            style="background:@FeedbackModel.ColourFor(rating);">
+                        <span class="fb-sym" aria-hidden="true">
+                            @if (ratingSymbols.HasFlag(RatingSymbols.Faces)) { @FeedbackModel.FaceSvg(rating) }
+                            @if (ratingSymbols.HasFlag(RatingSymbols.Stars)) { <span class="fb-stars">@RatingSymbolChoices.Stars(rating)</span> }
+                            @if (ratingSymbols.HasFlag(RatingSymbols.Points)) { <span class="fb-points">@rating</span> }
+                        </span>
+                        <span class="fb-word">@FeedbackModel.LabelFor(rating)</span>
                     </button>
                 }
             </div>
 
+            @* §1354 — the capture policy decides which parts appear (one form, sections shown/hidden —
+               operator 2026-10-19). The service drops anything the policy does not ask, too. *@
+            @{
+                var capturePolicy = Model.Resolution?.Policy ?? FeedbackCapturePolicies.DefaultQr;
+                var askFollowUps = FeedbackCapturePolicies.HasFollowUps(capturePolicy);
+                var askFreeText = FeedbackCapturePolicies.HasFreeText(capturePolicy);
+            }
+            @if (askFollowUps)
+            {
+            @* §1278 — the two follow-up questions, one tap each, sent WITH the rating like the
+               comment below (no extra step: the attendee is already leaving). Radio buttons dressed
+               as big buttons: one choice per question, and nothing chosen is a valid answer. *@
+            <style>
+                .fu-group { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
+                .fu-group input { position: absolute; opacity: 0; pointer-events: none; }
+                .fu-group label { display: inline-block; padding: 12px 14px; min-height: 44px;
+                                  border: 2px solid #cbd5e1; border-radius: 10px; background: #fff;
+                                  font-size: 1rem; cursor: pointer; }
+                .fu-group input:checked + label { border-color: #1d3380; background: #1d3380; color: #fff; }
+                .fu-group input:focus-visible + label { outline: 3px solid #93c5fd; }
+            </style>
+            <p style="margin-bottom:.2rem;"><strong>@EvaluationFollowUps.PositiveQuestion</strong> (optional)<br />
+                <span class="set-deps">@EvaluationFollowUps.PickOneHint</span></p>
+            <div class="fu-group" role="radiogroup" aria-label="@EvaluationFollowUps.PositiveQuestion">
+                @foreach (var c in EvaluationFollowUps.Positive)
+                {
+                    <input type="radio" id="pos-@c.Code" name="PositivePoint" value="@c.Code" />
+                    <label for="pos-@c.Code">@c.Label</label>
+                }
+            </div>
+            <p style="margin-bottom:.2rem;"><strong>@EvaluationFollowUps.ImprovementQuestion</strong> (optional)<br />
+                <span class="set-deps">@EvaluationFollowUps.PickOneHint</span></p>
+            <div class="fu-group" role="radiogroup" aria-label="@EvaluationFollowUps.ImprovementQuestion">
+                @foreach (var c in EvaluationFollowUps.Improvement)
+                {
+                    <input type="radio" id="imp-@c.Code" name="ImprovementPoint" value="@c.Code" />
+                    <label for="imp-@c.Code">@c.Label</label>
+                }
+            </div>
+            }
+
+            @if (askFreeText)
+            {
             <p style="margin-bottom:.35rem;">
                 <label for="Comment">Anything you&rsquo;d like to tell the speaker? (optional)</label>
             </p>
@@ -138,10 +199,26 @@
                       data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                       style="width:100%;box-sizing:border-box;"
                       placeholder="Your comment goes to the speaker and the organizers."></textarea>
+            }
 
             <p class="set-deps" style="margin-top:.5rem;">
-                Anonymous &mdash; we don&rsquo;t record who you are. Tap one of the four buttons
-                above to send; your comment goes with it.
+                Anonymous &mdash; we don&rsquo;t record who you are.
+                @if (askFollowUps && askFreeText)
+                {
+                    <text>Pick what was good and what could be better if you like, then tap one of the four buttons above to send; your choices and comment go with it.</text>
+                }
+                else if (askFollowUps)
+                {
+                    <text>Pick what was good and what could be better if you like, then tap one of the four buttons above to send; your choices go with it.</text>
+                }
+                else if (askFreeText)
+                {
+                    <text>Write a comment if you like, then tap one of the four buttons above to send; your comment goes with it.</text>
+                }
+                else
+                {
+                    <text>Tap one of the four buttons above to send.</text>
+                }
             </p>
         </form>
     }

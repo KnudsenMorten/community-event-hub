@@ -23,10 +23,7 @@ public class IndexModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
-    private readonly WooCommerceClient _woo;
-    private readonly WooCommerceOptions _wooOptions;
+    private readonly CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource _oldOrders;
     private readonly IMemoryCache _cache;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
@@ -36,10 +33,7 @@ public class IndexModel : PageModel
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
-        WooCommerceClient woo,
-        WooCommerceOptions wooOptions,
+        CommunityHub.Core.Integrations.Webshop.IWebshopOrderSource oldOrders,
         IMemoryCache cache,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
@@ -48,10 +42,7 @@ public class IndexModel : PageModel
     {
         _db = db;
         _participant = participant;
-        _cm = cm;
-        _cmOptions = cmOptions;
-        _woo = woo;
-        _wooOptions = wooOptions;
+        _oldOrders = oldOrders;
         _cache = cache;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
@@ -62,7 +53,8 @@ public class IndexModel : PageModel
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
     public bool AccessDenied { get; private set; }
     public bool NoCompanyLink { get; private set; }
-    public CompanyManagerCompany? CompanyDetails { get; private set; }
+    /// <summary>§1312 — CEH's own company record (Company Manager is retired): its names match group-photo registrations.</summary>
+    public CommunityHub.Core.Domain.ShopCompany? CompanyDetails { get; private set; }
 
     // --- Self-service company profile (SponsorInfo, written by the Tasks
     // "Upload Company information" form) shown on the landing card. -----------
@@ -74,7 +66,7 @@ public class IndexModel : PageModel
     /// Root-relative raster-logo URL for an &lt;img&gt;, or null when no
     /// browser-renderable logo is on file. Source: SponsorInfo.LogoRasterPath
     /// (vector EPS/AI/PDF are intentionally dropped — not browser-renderable),
-    /// normalised with the same rules as SponsorPortalService.NormalizeLogoPath.
+    /// via <c>PublicSponsorsService.PublicLogoPath</c> (a SharePoint logo is served through <c>/sponsor-logo/{company}</c>).
     /// </summary>
     public string? LogoPath { get; private set; }
 
@@ -146,20 +138,13 @@ public class IndexModel : PageModel
         {
             CompanyDescriptionShort = info.CompanyDescriptionShort;
             CompanyDescription      = info.CompanyDescription;
-            LogoPath                = NormalizeLogoPath(info.LogoRasterPath);
+            // §1315 — a SharePoint logo through the hub: a sponsor is not in the tenant, so the stored address is a 403 for them too.
+            LogoPath                = CommunityHub.Core.Reminders.PublicSponsorsService.PublicLogoPath(companyId, info.LogoRasterPath);
         }
 
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var companyIdInt))
-        {
-            try
-            {
-                CompanyDetails = await _cm.GetCompanyAsync(companyIdInt, ct);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Sponsor/Index: Company Manager lookup failed for company {Co}.", companyIdInt);
-            }
-        }
+
+        CompanyDetails = await _db.ShopCompanies.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.EventId == me.EventId && c.SponsorCompanyId == companyId, ct);
 
         // §234 UX: surface the company's app-game + group-photo state read-only on the
         // portal (both were previously visible only via the emails / calendar invites the
@@ -181,7 +166,11 @@ public class IndexModel : PageModel
                 .ToHashSet();
             var companyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrWhiteSpace(CompanyDetails?.PublicName)) companyNames.Add(CompanyDetails!.PublicName.Trim());
-            if (!string.IsNullOrWhiteSpace(CompanyDetails?.Name)) companyNames.Add(CompanyDetails!.Name.Trim());
+            if (!string.IsNullOrWhiteSpace(CompanyDetails?.LegalName)) companyNames.Add(CompanyDetails!.LegalName.Trim());
+            // §1312 — CEH's own names too: a company registered in the CEH shop has no Company Manager record.
+            if (await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) is { } localName) companyNames.Add(localName);
+            if (await _db.ShopCompanies.AsNoTracking().Where(c => c.SponsorCompanyId == companyId)
+                    .Select(c => c.LegalName).FirstOrDefaultAsync(ct) is { Length: > 0 } legal) companyNames.Add(legal.Trim());
 
             var photoRegs = await _db.GroupPhotoRegistrations
                 .AsNoTracking()
@@ -196,7 +185,7 @@ public class IndexModel : PageModel
             _log.LogWarning(ex, "Sponsor/Index: app-game / group-photo status lookup failed for company {Co}.", companyId);
         }
 
-        if (_wooOptions.Enabled)
+        // §1312 — the old webshop's orders from CEH's own store (always available; the webshop is closed).
         {
             try
             {
@@ -205,7 +194,7 @@ public class IndexModel : PageModel
                     async entry =>
                     {
                         entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                        return await _woo.GetOrdersAsync("completed", ct);
+                        return await _oldOrders.GetOrdersAsync("completed", ct);   // §1312 — CEH's store of the old webshop's orders
                     }) ?? new List<WooOrder>();
 
                 SponsorOrders = allOrders
@@ -242,25 +231,5 @@ public class IndexModel : PageModel
         }
 
         return Page();
-    }
-
-    /// <summary>
-    /// Logo paths are stored relative to wwwroot; normalise to a root-relative
-    /// URL. Non-browser-renderable vector formats fall back to null (card shows
-    /// no image). Same rules as SponsorPortalService.NormalizeLogoPath.
-    /// </summary>
-    private static string? NormalizeLogoPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var p = path.Trim().Replace('\\', '/');
-        var ext = System.IO.Path.GetExtension(p).ToLowerInvariant();
-        if (ext is ".eps" or ".ai" or ".pdf") return null;
-        if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith('/'))
-        {
-            return p;
-        }
-        return "/" + p;
     }
 }

@@ -113,29 +113,4 @@ public sealed class TransientFaultRetryHandlerTests
             () => client.GetAsync("https://cm.test/companies/1/users", cts.Token));
         Assert.Equal(1, inner.Calls); // a real cancel is not transient
     }
-
-    [Fact]
-    public async Task Drives_CompanyManagerClient_GetCompanyUsers_through_a_503()
-    {
-        // End-to-end through the REAL client + the incident call path: a 503 then a 200
-        // array must yield the parsed user list rather than throwing EnsureSuccessStatusCode.
-        var inner = new ScriptedHandler(
-            () => Resp(HttpStatusCode.ServiceUnavailable),
-            () => Resp(HttpStatusCode.OK,
-                "[{\"user_id\":\"68\",\"user_email\":\"a@x.test\",\"full_name\":\"A\",\"display_name\":\"A\"}]"));
-        var http = new HttpClient(NewHandler(inner));
-        var cm = new CompanyManagerClient(http, new CompanyManagerOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://cm.test/wp-json/company-manager/v1",
-            Username = "u",
-            Password = "p",
-        });
-
-        var users = await cm.GetCompanyUsersAsync(42);
-
-        Assert.Single(users);
-        Assert.Equal("a@x.test", users[0].Email);
-        Assert.Equal(2, inner.Calls);
-    }
 }

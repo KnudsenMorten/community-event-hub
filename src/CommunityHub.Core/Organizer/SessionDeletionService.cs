@@ -165,7 +165,8 @@ public sealed class SessionDeletionService
         // SessionEvaluations, and once nothing could write that table the guard silently stopped
         // blocking anything — a session carrying real attendee feedback would have deleted clean.
         // Repointing it is why the retirement had to touch this file rather than just drop the query.
-        var evaluations = await _db.EvaluationResponses.CountAsync(e => e.SessionId == sessionId, ct);
+        // §1357 — inactive responses still exist and still block: set aside is not deleted.
+        var evaluations = await _db.EvaluationResponses.IgnoreQueryFilters().CountAsync(e => e.SessionId == sessionId, ct);
         if (evaluations > 0)
             blockers.Add($"{evaluations} attendee evaluation(s)");
 

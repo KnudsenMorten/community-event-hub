@@ -110,7 +110,7 @@ public sealed class BoothFurniturePurchasesTaskDataProvider : CategoryPurchasesT
     protected override string Category => "Booth Furniture";
 
     protected override string CannotCheckMessage =>
-        "We could not check your webshop orders right now, so we cannot show which booth furniture "
+        "We could not check your orders right now, so we cannot show which booth furniture "
         + "you have already ordered. Please check your order confirmation, or come back shortly.";
 
     /// <remarks>
@@ -122,14 +122,14 @@ public sealed class BoothFurniturePurchasesTaskDataProvider : CategoryPurchasesT
     /// </remarks>
     protected override string NothingBoughtMarkup =>
         ":::callout warning\n"
-        + "**No furniture order detected** — we found nothing in your webshop orders under "
+        + "**No furniture order detected** — we found nothing in your orders under "
         + "**Booth Furniture**.\n\n"
         + "🔒 The order is what RESERVES your furniture — **including the items already included in "
         + "your package**. This task completes on its own once your order is placed.\n"
         + ":::";
 
     protected override string BoughtLeadIn =>
-        "We checked your webshop orders — you have already ordered this booth furniture:";
+        "We checked your orders — you have already ordered this booth furniture:";
 }
 
 /// <summary>
@@ -157,7 +157,7 @@ public sealed class AttendeeBagPackagingTaskDataProvider : CategoryPurchasesTask
     protected override string Category => "Attendee Bag Packaging";
 
     protected override string CannotCheckMessage =>
-        "We could not check your webshop orders right now, so we cannot confirm whether the bag "
+        "We could not check your orders right now, so we cannot confirm whether the bag "
         + "packaging service is booked. Please check your order confirmation, or come back shortly.";
 
     protected override string NothingBoughtMarkup =>
@@ -168,7 +168,7 @@ public sealed class AttendeeBagPackagingTaskDataProvider : CategoryPurchasesTask
         + ":::";
 
     protected override string BoughtLeadIn =>
-        "We checked your webshop orders — the bag packaging service is **booked**:";
+        "We checked your orders — the bag packaging service is **booked**:";
 }
 
 /// <summary>
@@ -191,7 +191,7 @@ public sealed class ExtraStaffTicketsTaskDataProvider : CategoryPurchasesTaskDat
     protected override string Category => "Extra Staff Tickets";
 
     protected override string CannotCheckMessage =>
-        "We could not check your webshop orders right now, so we cannot show how many extra staff "
+        "We could not check your orders right now, so we cannot show how many extra staff "
         + "tickets you have bought. Please check your order confirmation, or come back shortly.";
 
     protected override string NothingBoughtMarkup =>
@@ -202,5 +202,5 @@ public sealed class ExtraStaffTicketsTaskDataProvider : CategoryPurchasesTaskDat
         + ":::";
 
     protected override string BoughtLeadIn =>
-        "We checked your webshop orders — you have already bought these extra staff tickets:";
+        "We checked your orders — you have already bought these extra staff tickets:";
 }

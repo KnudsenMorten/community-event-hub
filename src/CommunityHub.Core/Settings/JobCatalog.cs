@@ -237,13 +237,17 @@ public static class JobCatalog
         // job … there is a different job that handles the customer + contact sync from erp".
         // §642 — HOP 2 of the ERP→CEH chain, which the old title ("Webshop order pull") hid: this
         // is what actually creates the sponsor CONTACTS in CEH, and it also provisions them in Zoho.
-        new JobDescriptor("WooCommercePullJob", "Webshop → CEH: orders, sponsor contacts + folders", "Every 15 minutes", "0 */5 * * * *",
-            "Webshop (WooCommerce) → CEH: pulls completed sponsor orders and expands them into "
-            + "tasks; creates/updates each company's CONTACTS in CEH from Company Manager so they "
-            + "can sign in; creates the sponsor + exhibitor records in Zoho; captures the company's "
+        new JobDescriptor("WooCommercePullJob", "Sponsor orders → CEH: tasks, Zoho + folders", "Every 10 minutes", "0 */5 * * * *",
+            "Sponsor orders → CEH: the old webshop's orders (stored in CEH — the webshop is closed) and the signed CEH shop "
+            + "orders are expanded into "
+            + "tasks (the company's contacts come from e-conomic, not from here); "
+            + "creates the sponsor + exhibitor records in Zoho; captures the company's "
             + "public name; and provisions the SharePoint upload folders.",
             // §869.3 — converted. It polls the webshop; no hop downstream is anchored to a clock.
             FeatureKey: "sponsor-order-pull", DefaultIntervalMinutes: 10, System: JobSystem.WebshopAndErp),
+
+        // 🗑 §1312 — ShopCatalogSyncJob (WooCommerce → CEH products, prices, pictures, stock) is GONE: the old webshop is
+        // closed and CEH owns the catalogue and the stock count (operator 2026-10-01: "ceh ows the webshop functionality 100%").
 
 
         // §545 — NOT FeatureKey-gated and deliberately so: this is the watchdog that notices when
@@ -349,37 +353,17 @@ public static class JobCatalog
             + "and reverts the task when a file has been deleted.",
             DefaultIntervalMinutes: 10, System: JobSystem.SharePoint),
 
-        // §510 PILOT — the cron is only a 5-minute BASE TICK; DefaultIntervalMinutes is the REAL
-        // cadence and the operator can change it on /Organizer/Jobs with no deploy.
-        // §595 (operator 2026-07-28: "it must run every 10 min") — 30 → 10. This is the ERP →
-        // Company Manager / webshop CONTACT + CUSTOMER sync he was looking for on the Jobs page.
-        // 🔒 §595 — RENAMED from "ErpWebshopReconcileJob" (operator 2026-07-28: *"i hate the word
-        // for that job - why now ErpSyncCustomerContact"*). "Reconcile" said nothing about what it
-        // moves; he could not find it on the Jobs page when looking for the ERP customer/contact
-        // sync, which is exactly what it does.
-        //
-        // ⚠️ The FeatureKey and HealthKey are DELIBERATELY UNCHANGED. They are live DB keys —
-        // `FeatureSettings.FeatureKey` gates whether this job runs at all, and
-        // `JobHealthMarkers.JobKey` carries its history. Renaming those would silently DISABLE the
-        // job and orphan its health record; renaming the function name alone is cosmetic and safe.
-        // §642 — the title says where the CREATE/UPDATE hop stops. It was "ERP sync: customers +
-        // contacts", which read as if that hop reaches CEH; it does not.
-        //
-        // 🔒 §707.17 — BUT "it stops at Company Manager" WAS WRONG AS A WHOLE-JOB STATEMENT, and the
-        // sentence contradicted itself two clauses later. Operator 2026-07-30: *"i thought that the
-        // erp sync of customers + contacts goes to BOTH CM and CEH — ceh is not mentioned"*. He is
-        // right, and the code agrees: `ErpWebshopContactSyncService` looks up the CEH Participant by
-        // email and calls `ParticipantDeactivationService.DeactivateAsync` (§502/§253). So the job
-        // WRITES TO CEH — just not in the direction the title describes. Say both hops plainly
-        // instead of a "stops at" that is only half true.
-        new JobDescriptor("ErpSyncCustomerContactJob", "ERP → Company Manager (+ CEH offboarding)", "Every 10 minutes", "0 */5 * * * *",
-            "e-conomic (ERP) → Company Manager / webshop: syncs CUSTOMERS + CONTACTS so invoicing "
-            + "and the webshop agree on who the company is. ADDING people stops at Company Manager — "
-            + "the webshop order pull is what carries them on into CEH as sign-ins. REMOVING reaches "
-            + "CEH directly: a hub participant who is no longer a contact in e-conomic is "
-            + "DEACTIVATED here (never deleted, and reversible by re-activating them in the hub).",
-            FeatureKey: "erp-webshop-reconcile", HealthKey: "erp-webshop-reconcile",
-            DefaultIntervalMinutes: 10, System: JobSystem.WebshopAndErp),
+        // §1312 — copies for people (operator 2026-10-01: "we dont understand just the company id" · "i dont mind they exist 2
+        // times on sharepoint"). Copies only; the originals and their readers are untouched.
+        new JobDescriptor("SponsorFileMirrorJob", "Sponsor files: named copies + walls by level", "Every 10 minutes", "0 */5 * * * *",
+            "SharePoint → SharePoint: copies each SoMe sponsor graphic (sponsor-<id>.png) into 'By name' with the public "
+            + "name in the file name, and each exhibitor wall into Platinum / Diamond / Gold / Feature (Other without a booth) "
+            + "by the booth the company bought. The originals keep their names; nothing is deleted.",
+            DefaultIntervalMinutes: 10, System: JobSystem.SharePoint),
+
+        // 🗑 §1312 — ErpSyncCustomerContactJob (e-conomic → Company Manager, + CEH offboarding) is GONE: Company Manager is
+        // retired (operator 2026-09-30). People and roles come from e-conomic via ShopErpRoleSyncJob; nobody is deactivated
+        // automatically any more — a mismatch is WARNED on the company page instead.
 
         // §825 — HOURLY (operator 2026-08-04). This job drains the CEH→Zoho hand-entry queue AND
         // sends the pending-speaker notice; at 10 minutes it produced five near-identical notices in
@@ -398,8 +382,8 @@ public static class JobCatalog
         // (Sync-Webshop-Orders-Create-ERP-Invoice.ps1). Ships with its feature OFF: turning it on IS
         // the cutover, and the script must be switched off FIRST (§786.2). At :40 so a pass reads
         // orders the 15-minute webshop pull has finished landing.
-        new JobDescriptor("WebshopInvoiceJob", "Webshop → e-conomic: draft invoices", "Hourly", "0 */5 * * * *",
-            "Webshop (WooCommerce) → e-conomic: turns each completed sponsor order into a DRAFT "
+        new JobDescriptor("WebshopInvoiceJob", "Old webshop orders → e-conomic: draft invoices", "Hourly", "0 */5 * * * *",
+            "The old webshop's orders (stored in CEH) → e-conomic: turns each completed one not yet invoiced into a DRAFT "
             + "invoice — never a booked one, so nothing reaches a customer until a human books it. "
             + "An order is invoiced ONCE: every draft carries the web order number as its reference, "
             + "and an order already on any draft or booked invoice is skipped. Att person and Your "
@@ -549,6 +533,13 @@ public static class JobCatalog
             // the dial means exactly that bound, which is a fair thing to hand over.
             FeatureKey: "session-eval-email", DefaultIntervalMinutes: 10, System: JobSystem.Platform),
 
+        // §1268 (operator 2026-09-21: "i propose we have a service that syncs every 10 min as we will
+        // forget this"). The same SyncAsync as the "Sync sessions from CEH" button, on a timer, so a
+        // room or time change reaches the kiosks and the attribution without a human remembering.
+        new JobDescriptor("EvaluationSessionSyncJob", "Session evaluation sync", "Every 10 minutes", "0 */5 * * * *",
+            "CEH (internal): copies the CEH session schedule (times, rooms, speakers) into Session Evaluation, and attributes feedback that arrived before its session existed.",
+            DefaultIntervalMinutes: 10, System: JobSystem.Platform),
+
         // ⚰️ §879 — "PendingApprovalsDigestJob" WAS HERE, and is now these TWO jobs (operator
         // 2026-08-05: *"speaker held in the queue. i need that to run every 10 min and be notified
         // after 10 min. volunteers awaiting review should go out weekly. we need to split these as
@@ -616,6 +607,33 @@ public static class JobCatalog
         // §1165b — the sweep that makes a swag-catalogue reservation's expiry real. It is listed
         // here for the reason the guard test exists: an hourly job that quietly puts items back on
         // sale is exactly the kind an organizer must be able to see running.
+        // §1305 — the CEH sponsor shop's reminders: DAILY for an unsigned order with items (item 7c), WEEKLY for
+        // unreserved items from the previous edition while the reservation window is open (item 10).
+        // 🗑 §1312 — ShopCompanyDirectoryRefreshJob (the old webshop's Company Manager → CEH directory) is GONE; the known
+        // people and roles come from e-conomic via ShopErpRoleSyncJob.
+        new JobDescriptor("ShopRemindersJob", "Sponsor shop: pending-order + reservation reminders", "Hourly", "0 */5 * * * *",
+            "CEH sponsor shop → sponsors: once a day, the default signer + default event coordinator of a company "
+            + "with an unsigned order that still has items (stops when it is emptied, cancelled or signed); once "
+            + "a week while the reservation window is open, the same people about last edition's items not yet "
+            + "reserved. Each mail goes at most once per day / week per person.",
+            FeatureKey: "sponsor-webshop", DefaultIntervalMinutes: 60, System: JobSystem.WebshopAndErp),
+
+        // §1305 — signed CEH shop orders → e-conomic draft invoices, honouring "do not invoice before" and agreed
+        // payment days. PROD-only writes; DryRun reports what it would create.
+        new JobDescriptor("ShopInvoiceJob", "Sponsor shop: signed orders → e-conomic draft invoices", "Hourly", "0 */5 * * * *",
+            "CEH sponsor shop → e-conomic: a draft invoice for every signed order that has none yet, once its "
+            + "'do not invoice before' date has passed. Lines are billed net of included furniture and swag credit; "
+            + "foreign-currency customers are converted like webshop invoices. Never twice (reference CehShopOrder-…).",
+            FeatureKey: "sponsor-webshop", DefaultIntervalMinutes: 60, System: JobSystem.WebshopAndErp),
+
+        // §1305 item 8 — CEH-registered companies' signer / coordinator follow e-conomic (master of people).
+        new JobDescriptor("ShopErpRoleSyncJob", "Companies: people + roles from e-conomic", "Every 10 minutes", "0 */5 * * * *",
+            "e-conomic → CEH, for every company with an e-conomic customer number (§1312 — Company Manager is retired): "
+            + "billing identity, the known people with their Signer / Event Coordinator roles, and the roles of linked "
+            + "contacts. A signed sponsor's e-conomic contacts become linked contacts; a potential sponsor's are only "
+            + "offered in the dropdowns. A role is never removed — a mismatch is warned on the company page and mailed once.",
+            FeatureKey: "sponsor-webshop", DefaultIntervalMinutes: 10, System: JobSystem.WebshopAndErp),
+
         new JobDescriptor("SwagHoldExpiryJob", "Swag catalogue: expiring reservations", "Hourly", "0 */5 * * * *",
             "Warns three days before a swag-catalogue reservation lapses, then releases it when it "
             + "does so the item goes back on sale. A hold is only a promise — nothing in the webshop "
@@ -624,7 +642,7 @@ public static class JobCatalog
 
         new JobDescriptor("SponsorZohoReconcileJob", "Zoho sync: sponsors + exhibitors", "Hourly", "0 */5 * * * *",
             "CEH → Zoho Backstage: sends changed sponsor + exhibitor details (description, website, "
-            + "social links), sets the event coordinator from Company Manager, and clears a dead "
+            + "social links) and the event coordinator CEH holds, and clears a dead "
             + "link so the record is created again if it was deleted in Zoho.",
             FeatureKey: "backstage-sync", DefaultIntervalMinutes: 10, System: JobSystem.Zoho),
 
@@ -680,7 +698,7 @@ public static class JobCatalog
     public static string SystemLabel(JobSystem system) => system switch
     {
         JobSystem.Zoho          => "Zoho Backstage",
-        JobSystem.WebshopAndErp => "Webshop, Company Manager & e-conomic",
+        JobSystem.WebshopAndErp => "Webshop & e-conomic",
         JobSystem.Sessionize    => "Sessionize",
         JobSystem.SharePoint    => "SharePoint",
         JobSystem.Email         => "E-mail",
@@ -694,7 +712,7 @@ public static class JobCatalog
     public static string SystemBlurb(JobSystem system) => system switch
     {
         JobSystem.Zoho          => "Sessions, speakers, sponsors and exhibitors going out to Backstage — and attendees and orders coming back.",
-        JobSystem.WebshopAndErp => "The company-and-money chain: e-conomic to Company Manager, and the webshop into the hub.",
+        JobSystem.WebshopAndErp => "The company-and-money chain: e-conomic and the sponsor shop into the hub, and invoices back to e-conomic.",
         JobSystem.Sessionize    => "Bringing submitted sessions and speakers into the hub.",
         JobSystem.SharePoint    => "Sponsor uploads and speaker graphics, and checking the files are still there.",
         JobSystem.Email         => "Welcomes, reminders and digests that go out to people.",

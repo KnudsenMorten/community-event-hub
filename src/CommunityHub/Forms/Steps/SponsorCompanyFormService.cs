@@ -14,6 +14,8 @@ namespace CommunityHub.Forms.Steps;
 /// </summary>
 public sealed class SponsorCompanyModel
 {
+    /// <summary>§1344 — the PUBLIC company name (site, app, SoMe, Zoho); never the legal/billing name.</summary>
+    public string? PublicName { get; set; }
     public string? WebsiteUrl { get; set; }
     public string? LinkedInUrl { get; set; }
     public string? TwitterUrl { get; set; }
@@ -45,20 +47,15 @@ public sealed class SponsorCompanyFormService : IWizardFormService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly SponsorZohoSyncService _zohoSync;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorCompanyFormService> _log;
 
     public SponsorCompanyFormService(
         CommunityHubDbContext db, TimeProvider clock, SponsorZohoSyncService zohoSync,
-        CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         ILogger<SponsorCompanyFormService> log)
     {
         _db = db;
         _clock = clock;
         _zohoSync = zohoSync;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _log = log;
     }
 
@@ -71,11 +68,14 @@ public sealed class SponsorCompanyFormService : IWizardFormService
         var companyId = await CompanyIdAsync(participantId, ct);
         var info = companyId is null ? null : await _db.SponsorInfos.AsNoTracking()
             .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
+        // §1360 — the links are ONE field, on the company page; the save below writes both (MirrorToShopAsync).
+        var links = await Core.Integrations.Webshop.CompanyLinks.ForAsync(_db, eventId, companyId, ct);
         return new SponsorCompanyModel
         {
-            WebsiteUrl              = info?.WebsiteUrl,
-            LinkedInUrl             = info?.LinkedInUrl,
-            TwitterUrl              = info?.TwitterUrl,
+            PublicName              = companyId is null ? null : await Core.Integrations.Webshop.ShopCompanyLinks.PublicNameAsync(_db, eventId, companyId, ct),
+            WebsiteUrl              = links.Website,
+            LinkedInUrl             = links.LinkedIn,
+            TwitterUrl              = links.Twitter,
             CompanyOverview         = info?.CompanyDescription,
             SocialMediaBrandingText = info?.SocialMediaIntro,
             CompanyShortDescription = info?.CompanyDescriptionShort,
@@ -90,7 +90,8 @@ public sealed class SponsorCompanyFormService : IWizardFormService
         var companyId = await CompanyIdAsync(participantId, ct);
         if (companyId is null) return WizardStepOutcome.NotRelevant;
 
-        var error = ValidateUrl("Website URL", model.WebsiteUrl)
+        var error = ValidateLen("Public company name", model.PublicName, Core.Integrations.Webshop.ShopCompanyLinks.PublicNameMax)
+                    ?? ValidateUrl("Website URL", model.WebsiteUrl)
                     ?? ValidateUrl("LinkedIn URL", model.LinkedInUrl)
                     ?? ValidateUrl("Twitter URL", model.TwitterUrl)
                     ?? ValidateLen("Company Overview", model.CompanyOverview, MaxOverview)
@@ -103,11 +104,15 @@ public sealed class SponsorCompanyFormService : IWizardFormService
         }
 
         var info = await GetOrCreateInfoAsync(eventId, companyId, ct);
-        // 🔒 §1081/§1126 — WebsiteUrl, LinkedInUrl and TwitterUrl are NOT written here. The WEBSHOP
-        // is authoritative for all three and the reconcile OVERWRITES CEH from it
-        // (WebshopOwnedFields.ApplyAll). All three render read-only with a "Change on the webshop"
-        // hand-off; dropping the writes is what makes that real rather than cosmetic, since a
-        // readonly input still POSTs its value. See the matching note in CompanyDetails.cshtml.cs.
+        // 🔴 §1312 — the sponsor EDITS the website, LinkedIn and X here: CEH owns them (operator 2026-09-30: "ceh owns the
+        // field … sponsor must be able to change this here and it should show the ceh data with edit / save feature
+        // integrated"). This SUPERSEDES §1081/§1126 (read-only, "Change it in the Sponsor Shop"). The same field the
+        // organizer edits: saved to the sponsor record AND the shop company, so both screens show one value.
+        info.WebsiteUrl = Core.Integrations.HttpsUrl.Normalize(model.WebsiteUrl);
+        info.LinkedInUrl = Core.Integrations.HttpsUrl.Normalize(model.LinkedInUrl);
+        info.TwitterUrl = Core.Integrations.HttpsUrl.Normalize(model.TwitterUrl);
+        await Core.Integrations.Webshop.ShopCompanyLinks.MirrorToShopAsync(_db, eventId, companyId, info, ct);
+        await Core.Integrations.Webshop.ShopCompanyLinks.ApplyPublicNameAsync(_db, eventId, companyId, info, model.PublicName, ct);
         info.CompanyDescription = NormaliseOrNull(model.CompanyOverview);
         info.SocialMediaIntro   = NormaliseOrNull(model.SocialMediaBrandingText);
         if (info.HasBooth)   // the short description is exhibitor-only (mirrors the page)
@@ -172,22 +177,8 @@ public sealed class SponsorCompanyFormService : IWizardFormService
 
     private async Task<string?> ResolveSponsorNameAsync(string companyId, CancellationToken ct)
     {
-        if (_cmOptions.Enabled && int.TryParse(companyId, out var cid))
-        {
-            try
-            {
-                var company = await _cm.GetCompanyAsync(cid, ct);
-                if (company is not null)
-                {
-                    var name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-                    if (!string.IsNullOrWhiteSpace(name)) return name;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Sponsor company inline step: Company Manager lookup failed for {Co}.", cid);
-            }
-        }
-        return $"Company {companyId}";
+        // §1312 — CEH's own public name (Company Manager is retired).
+        if (await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) is { } local) return local;
+        return await Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct) ?? $"Company {companyId}";
     }
 }

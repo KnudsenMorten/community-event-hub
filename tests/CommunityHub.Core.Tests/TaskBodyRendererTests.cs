@@ -279,4 +279,31 @@ public class TaskBodyRendererTests
         Assert.Contains("https://shop.example/sponsor", html);
         Assert.Empty(context.MissingPlaceholders);
     }
+
+    /// <summary>
+    /// §1305 — with the CEH shop on, {{configuratorUrl}} is /Sponsor/Shop: the button stays in the hub (same tab) and
+    /// never shows the external webshop's "log in with your webshop password" dialog, even though the task file
+    /// declares it; its label follows {{shopName}}. Operator 2026-09-26: "verify that tasks refers only to new webshop".
+    /// </summary>
+    [Fact]
+    public void A_button_that_resolves_into_the_hub_drops_the_external_webshop_dialog_and_new_tab()
+    {
+        const string Body = ":::button\nlabel: Open the {{shopName}}\nhref: {{configuratorUrl}}\ninterstitial: webshop\n:::";
+
+        var inHub = Render(Html, Body, new TaskRenderContext(new Dictionary<string, string>
+        {
+            ["configuratorUrl"] = "/Sponsor/Shop", ["shopName"] = "Sponsor Shop",
+        }));
+        Assert.Contains("href=\"/Sponsor/Shop\"", inHub);
+        Assert.Contains("Open the Sponsor Shop", inHub);
+        Assert.DoesNotContain("data-webshop-interstitial", inHub);
+        Assert.DoesNotContain("target=\"_blank\"", inHub);
+
+        var external = Render(Html, Body, new TaskRenderContext(new Dictionary<string, string>
+        {
+            ["configuratorUrl"] = "https://shop.example/sponsor", ["shopName"] = "Sponsor Webshop",
+        }));
+        Assert.Contains("data-webshop-interstitial=\"1\"", external);
+        Assert.Contains("Open the Sponsor Webshop", external);
+    }
 }

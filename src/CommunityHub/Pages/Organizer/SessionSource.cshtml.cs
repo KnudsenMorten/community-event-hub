@@ -112,12 +112,13 @@ public class SessionSourceModel : PageModel
         // grants the speaker READ scope", which was never true: the credentials have always had it.
         // This was the operator-facing face of that false claim — a warning on the page telling him
         // the stage he was choosing could not work. Nothing blocks it.
+        // 🔴 §1364 — RETIRED. The text above claimed this stage "never auto-applies"; it auto-applied 223 Zoho values
+        // into CEH. Operator 2026-10-20: "we have NO chg from zoho to hub. hub is master !!!". The engine is off in code
+        // (SpeakerChangeDetectionService.DisabledInCode), so the stage is no longer offered as implemented.
         new DirectionOption(SessionSyncDirection.ZohoToCeh, 3, "Zoho Backstage → CEH",
-            "Pull Zoho Backstage speaker changes back into CEH and raise them for approval — the hourly "
-            + "change-detection engine diffs each linked speaker's name, tagline, bio, country and social "
-            + "links against CEH and queues anything that differs. It never auto-applies and never deletes; "
-            + "you approve or reject each change in the Sync Approval Queue.",
-            Implemented: true),
+            "Retired: CEH is the master, and nothing from Zoho Backstage is ever written into CEH. Where Backstage "
+            + "differs from CEH, the speaker gap mail lists the field and the CEH value to set in Backstage by hand.",
+            Implemented: false),
     };
 
     /// <summary>§326bm — is this stage backed by real behaviour? Only an implemented
@@ -164,7 +165,7 @@ public class SessionSourceModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Message = msg;
         EventId = me.EventId;
@@ -193,7 +194,7 @@ public class SessionSourceModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var raw = (NoticeFrom ?? string.Empty).Trim();
         DateOnly? parsed = null;

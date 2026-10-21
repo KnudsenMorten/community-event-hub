@@ -24,8 +24,6 @@ public sealed class SponsorZohoProvisionService
     private readonly ZohoClient _zoho;
     private readonly CommunityHubDbContext _db;
     private readonly ZohoOptions _options;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly IBackstageExhibitorApi _exhibitorApi;
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
@@ -39,7 +37,6 @@ public sealed class SponsorZohoProvisionService
 
     public SponsorZohoProvisionService(
         ZohoClient zoho, CommunityHubDbContext db, ZohoOptions options,
-        CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         IBackstageExhibitorApi exhibitorApi,
         EventEditionConfigLoader cfg, EventConfigOptions cfgOptions,
         SponsorZohoSyncService sync,
@@ -49,8 +46,6 @@ public sealed class SponsorZohoProvisionService
         _zoho = zoho;
         _db = db;
         _options = options;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _exhibitorApi = exhibitorApi;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
@@ -186,59 +181,27 @@ public sealed class SponsorZohoProvisionService
             string name = localNames.TryGetValue(info.SponsorCompanyId, out var localName)
                 ? localName
                 : SponsorCompanyName.UnresolvedName(info.SponsorCompanyId);
-            if (_cmOptions.Enabled && int.TryParse(info.SponsorCompanyId, out var cid))
+
+            // 🔴 §1312 — a company that registered through the CEH shop (`ceh-…` id) has no Company Manager record, so the
+            // never existed, the coordinator stayed blank, and the exhibitor create went to Zoho with NO contact
+            // and Zoho answered a bare HTTP 400 "unexpected error" (operator 2026-09-29, Master Packager SIA — every one of the
+            // 20 exhibitors in Zoho has a contact; this was the only create without one). The shop knows the people: its
+            // company contacts — the event coordinator, else the signer. Fill-blank only.
+            if (CoordinatorEmpty(info))
             {
-                CompanyManagerCompany? company = null;
-                try { company = await _cm.GetCompanyAsync(cid, ct); }
-                catch { /* fall back to id */ }
-                if (company is not null)
+                var shopContact = await _db.SponsorCompanyContacts.AsNoTracking()
+                    .Where(l => l.EventId == eventId && l.SponsorCompanyId == info.SponsorCompanyId
+                        && (l.IsEventCoordinator || l.IsSigner))
+                    .OrderByDescending(l => l.IsEventCoordinator).ThenBy(l => l.Id)
+                    .Select(l => l.Participant)
+                    .FirstOrDefaultAsync(ct);
+                if (shopContact is not null && !string.IsNullOrWhiteSpace(shopContact.Email))
                 {
-                    name = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
-
-                    // FILL-BLANK social/web reconcile (REQUIREMENTS §41b), before the Zoho create
-                    // uses info.WebsiteUrl etc. NEVER overwrites a non-blank value.
-                    // CEH ← webshop:
-                    //
-                    // 🔴 §1125 — the WEBSITE is the exception: it OVERWRITES, because the webshop
-                    // owns it (§1081). ⚠️ This path matters as much as the sync one — the Zoho
-                    // create below reads info.WebsiteUrl, so a stale value here is published to the
-                    // public event site, not merely shown in CEH.
-                    // §1126 — all THREE, via the shared rule, so this path cannot drift from the
-                    // sync path again (that drift IS §1125).
-                    WebshopOwnedFields.ApplyAll(
-                        info, company.WebsiteUrl, company.LinkedInUrl, company.TwitterUrl);
-
-                    // webshop ← CEH: push a CEH value to a blank webshop field (only filled keys).
-                    var push = new Dictionary<string, object?>();
-                    if (!string.IsNullOrWhiteSpace(info.WebsiteUrl) && string.IsNullOrWhiteSpace(company.WebsiteUrl))
-                        push["web_address"] = info.WebsiteUrl;
-                    if (!string.IsNullOrWhiteSpace(info.LinkedInUrl) && string.IsNullOrWhiteSpace(company.LinkedInUrl))
-                        push["linkedin_url"] = info.LinkedInUrl;
-                    if (!string.IsNullOrWhiteSpace(info.TwitterUrl) && string.IsNullOrWhiteSpace(company.TwitterUrl))
-                        push["twitter_url"] = info.TwitterUrl;
-                    if (push.Count > 0)
-                    {
-                        try { await _cm.UpdateCompanyAsync(cid, push, ct); }
-                        catch (Exception ex) { _log.LogWarning(ex, "Provision: webshop social push failed for {Co}.", info.SponsorCompanyId); }
-                    }
-                }
-
-                // Fill the coordinator from the webshop default ONLY where empty.
-                if (CoordinatorEmpty(info))
-                {
-                    try
-                    {
-                        var coord = await _cm.GetDefaultCoordinatorAsync(cid, ct);
-                        if (coord is not null)
-                        {
-                            info.EventCoordinatorFirstName ??= NullIf(coord.FirstName);
-                            info.EventCoordinatorLastName ??= NullIf(coord.LastName);
-                            info.EventCoordinatorEmail ??= NullIf(coord.Email);
-                            info.EventCoordinatorPhone ??= NullIf(coord.Phone);
-                            info.EventCoordinatorCompanyName ??= NullIf(coord.CompanyName);
-                        }
-                    }
-                    catch (Exception ex) { _log.LogWarning(ex, "Provision: coordinator fetch failed for {Co}.", info.SponsorCompanyId); }
+                    var (first, last) = SplitFullName(shopContact.FullName);
+                    info.EventCoordinatorFirstName = first;
+                    info.EventCoordinatorLastName = last;
+                    info.EventCoordinatorEmail = shopContact.Email.Trim();
+                    info.EventCoordinatorPhone ??= NullIf(shopContact.Phone);
                 }
             }
 
@@ -593,14 +556,29 @@ public sealed class SponsorZohoProvisionService
                     var targetBoothId = boothMap.TryGetValue(info.BoothLabel!.Trim(), out var tb) ? tb : null;
                     var liveEx = existingExhibitors.FirstOrDefault(
                         e => string.Equals(e.Id, info.ZohoExhibitorId, StringComparison.Ordinal));
+                    // 🔴 §1312 — an exhibitor created THIS run (absent from the start-of-run list) has NO booth: since §1163
+                    // the create deliberately does not send one. This used to read "created this run ⇒ booth carried on the
+                    // create ⇒ already set", so a new exhibitor always waited a full run for its booth.
                     var alreadySet = targetBoothId is not null
-                        && (liveEx is null   // created this run, booth carried on the create
-                            || string.Equals(liveEx.BoothId, targetBoothId, StringComparison.Ordinal));
-                    if (!alreadySet
-                        && await _zoho.AssignExhibitorBoothAsync(token!, info.ZohoExhibitorId!, info.BoothLabel!, ct, boothMap))
+                        && liveEx is not null
+                        && string.Equals(liveEx.BoothId, targetBoothId, StringComparison.Ordinal);
+                    string? boothError = null;
+                    if (!alreadySet)
                     {
-                        notes.Add($"{name}: booth {info.BoothLabel} assigned in Zoho.");
-                        zohoWrites.Add($"Assigned booth {info.BoothLabel} to exhibitor '{name}' (Zoho GUI field: Booth)");
+                        if (await _zoho.AssignExhibitorBoothAsync(token!, info.ZohoExhibitorId!, info.BoothLabel!, ct, boothMap,
+                                reportError: e => boothError = e))
+                        {
+                            notes.Add($"{name}: booth {info.BoothLabel} assigned in Zoho.");
+                            zohoWrites.Add($"Assigned booth {info.BoothLabel} to exhibitor '{name}' (Zoho GUI field: Booth)");
+                        }
+                        else if (boothError is not null)
+                        {
+                            // 🔴 §1312 — REPORTED, not only logged. 2026-09-29: Master Packager's booth E-21 was refused
+                            // ("The selected booth belongs to a different exhibitor category" — a PLATINUM booth sold as
+                            // Gold) and the only trace was a Function log line; the operator found it in the Backstage GUI.
+                            skipped++;
+                            notes.Add($"{name}: booth {info.BoothLabel} NOT assigned in Zoho — {boothError}");
+                        }
                     }
                 }
                 catch (Exception ex) { _log.LogWarning(ex, "Provision: assign booth failed for {Co}.", info.SponsorCompanyId); }
@@ -865,6 +843,18 @@ public sealed class SponsorZohoProvisionService
         && string.IsNullOrWhiteSpace(i.EventCoordinatorPhone);
 
     private static string? NullIf(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>"Edijs Perkums" → ("Edijs", "Perkums"); the last word is the surname, a single word is a first name.</summary>
+    private static (string? First, string? Last) SplitFullName(string? fullName)
+    {
+        var parts = (fullName ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length switch
+        {
+            0 => (null, null),
+            1 => (parts[0], null),
+            _ => (string.Join(' ', parts[..^1]), parts[^1]),
+        };
+    }
 
     private static bool NameEq(string a, string b) =>
         string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);

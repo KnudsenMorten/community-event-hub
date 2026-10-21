@@ -334,12 +334,9 @@ public sealed class EvaluationSessionSyncService
             .ToListAsync(ct);
         if (unattributed.Count == 0) return 0;
 
-        var deviceRooms = await _db.EvaluationDevices
-            .Where(d => d.EventId == eventId && d.RoomId != null)
-            .Select(d => new { d.SerialNumber, RoomId = d.RoomId!.Value })
-            .ToListAsync(ct);
-        if (deviceRooms.Count == 0) return 0;
-        var roomOf = deviceRooms.ToDictionary(x => x.SerialNumber, x => x.RoomId, StringComparer.Ordinal);
+        // §1350 — a unit collects for every schedule room of its physical room (or its §1349 links).
+        var roomsOf = await EvaluationRoomMap.RoomIdsBySerialAsync(_db, eventId, ct);
+        if (roomsOf.Count == 0) return 0;
 
         var sessions = await _db.EvaluationSessions
             .Where(s => s.EventId == eventId && s.RoomId != null)
@@ -350,8 +347,11 @@ public sealed class EvaluationSessionSyncService
         var n = 0;
         foreach (var r in unattributed)
         {
-            if (!roomOf.TryGetValue(r.SerialNumber!, out var roomId)) continue;
-            if (!byRoom.TryGetValue(roomId, out var candidates)) continue;
+            if (!roomsOf.TryGetValue(r.SerialNumber!, out var roomIds)) continue;
+            var candidates = roomIds
+                .SelectMany(id => byRoom.TryGetValue(id, out var list) ? list : Enumerable.Empty<Domain.Evaluation.EvaluationSession>())
+                .ToList();
+            if (candidates.Count == 0) continue;
 
             var match = EvaluationAttribution.Resolve(candidates, r.CollectionTimestamp);
             if (match is null) continue;   // genuinely outside every window — stays venue-and-date

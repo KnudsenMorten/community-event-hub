@@ -77,19 +77,21 @@ public sealed class SponsorPurchaseSummaryService : ISponsorPurchaseSummary
     /// <summary>Short: the organizer refreshes this page while chasing sponsors.</summary>
     private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(2);
 
-    private readonly WooCommerceClient _woo;
-    private readonly WooCommerceOptions _options;
+    private readonly Webshop.IWebshopOrderSource _orders;
     private readonly IMemoryCache _cache;
     private readonly ILogger<SponsorPurchaseSummaryService> _log;
+    private readonly Webshop.ShopOrderSource? _shopOrders;
 
     public SponsorPurchaseSummaryService(
-        WooCommerceClient woo,
-        WooCommerceOptions options,
+        Webshop.IWebshopOrderSource orders,
         IMemoryCache cache,
-        ILogger<SponsorPurchaseSummaryService> log)
+        ILogger<SponsorPurchaseSummaryService> log,
+        // §1305 — signed CEH shop orders count as purchases too, or a furniture / shipment / TV task
+        // bought in the new shop would never tick itself off. Optional so existing constructions work.
+        Webshop.ShopOrderSource? shopOrders = null)
     {
-        _woo = woo;
-        _options = options;
+        _shopOrders = shopOrders;
+        _orders = orders;
         _cache = cache;
         _log = log;
     }
@@ -120,11 +122,6 @@ public sealed class SponsorPurchaseSummaryService : ISponsorPurchaseSummary
     private async Task<SponsorPurchaseSummary> SummariseAsync(
         string cacheKey, Func<WooLineItem, bool> matches, CancellationToken ct)
     {
-        if (!_options.Enabled)
-        {
-            return SponsorPurchaseSummary.Unavailable("the webshop integration is disabled");
-        }
-
         if (_cache.TryGetValue<SponsorPurchaseSummary>($"purchases:{cacheKey}", out var hit)
             && hit is not null)
         {
@@ -137,7 +134,13 @@ public sealed class SponsorPurchaseSummaryService : ISponsorPurchaseSummary
             // enrichCategories: true — the ORDER payload carries no categories, so the category
             // lookup needs the products pass. It is batched and cached; the product-id lookup pays
             // for it too, which is cheaper than maintaining two order-fetch paths.
-            var orders = await _woo.GetOrdersAsync("completed", ct, enrichCategories: true);
+            // §1312 — the old webshop's orders from CEH's own store, with the category names captured when stored.
+            IReadOnlyList<WooOrder> orders = await _orders.GetOrdersAsync("completed", ct, enrichCategories: true);
+            if (_shopOrders is not null)
+            {
+                var signed = await _shopOrders.SignedOrdersForActiveEventAsync(ct);
+                if (signed.Count > 0) orders = orders.Concat(signed).ToList();
+            }
 
             var rows = orders
                 .Where(o => !string.IsNullOrWhiteSpace(o.CompanyId))

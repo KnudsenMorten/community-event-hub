@@ -902,7 +902,8 @@ public sealed class SoMeScheduleService
         // "…MainDay" were already queued for 18 Jan and 1 Feb 2027. They were held (IsActive=false),
         // so the approval gate was the only thing standing between a test fixture and the company
         // page — and a gate a human has to remember is not a control.
-        var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+        // 🔴 §1347 — and a WITHDRAWN sponsor is no more announceable than a test one: same set.
+        var testCompanies = await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(_db, eventId, ct);
 
         // 🔴 §1178 — ONE EXCLUSION RULE, ASKED IN ONE PLACE. Operator 2026-09-12: *"guard needed. no
         // test sessions or test sponsor or excluded can exist in some planner"*.
@@ -1637,6 +1638,12 @@ public sealed class SoMeScheduleService
     /// accepted one, and Type 5. Those had no mechanism at all before — the discard skips them by
     /// design and the push skipped them by accident.</para>
     /// </remarks>
+    /// <summary>
+    /// §1312 — how long past its slot a post must be before the planner treats it as MISSED: long enough for the dispatcher
+    /// (every 5 minutes, on the same tick as this planner) to have tried several times.
+    /// </summary>
+    internal static readonly TimeSpan OverdueGrace = TimeSpan.FromMinutes(30);
+
     private async Task<OverduePush> PushOverduePostsAsync(
         int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
         CancellationToken ct)
@@ -1653,10 +1660,16 @@ public sealed class SoMeScheduleService
         // Overdue = its moment came and went while it was still sitting in the queue.
         // 🔴 §1205 — NO `IsActive` CONDITION. Whether he has approved it yet is a different
         // question from whether its date is still true.
+        //
+        // 🔴 §1312 — BUT "DUE" IS NOT "MISSED". Operator 2026-09-30: "i got this mail [speaker post publishes in ~5 min], but
+        // dont see any post went out. why?" — post 297114 (approved) was due 09:00:00Z; this planner ran at 09:00:04, BEFORE
+        // the dispatcher (same 5-minute tick), counted it as overdue and pushed it to 11:00Z. It never had a chance to publish,
+        // and the race can repeat at every new slot. So a post is overdue only once it is OverdueGrace past its slot — the
+        // dispatcher (every 5 minutes) has then had six tries. A post that is merely DUE belongs to the dispatcher.
         var overdue = rows
             .Where(p => p.Status == SoMePostStatus.Queued
                         && p.PublishedAtUtc == null
-                        && p.ScheduledAtUtc < now)
+                        && p.ScheduledAtUtc < now - OverdueGrace)
             .ToList();
 
         if (overdue.Count == 0) return OverduePush.None;

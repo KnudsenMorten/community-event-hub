@@ -28,6 +28,16 @@ public static class TypedConfirmation
     public const string ConfirmPhrase = "CONFIRM";
 
     /// <summary>
+    /// §1256e — the word for a DEACTIVATION, which deletes nothing.
+    /// <para>The participant dialog used to be headed *"Delete participant?"* and ask for the word
+    /// DELETE while its own body said *"nothing is deleted"*. A confirmation that contradicts
+    /// itself either scares an operator off a safe action or teaches them that "DELETE" is
+    /// something you type when nothing gets deleted — and that lesson travels to the dialogs where
+    /// it IS real (a hotel, a company). The word must match the act.</para>
+    /// </summary>
+    public const string DeactivatePhrase = "DEACTIVATE";
+
+    /// <summary>
     /// True when <paramref name="typed"/> matches <paramref name="expected"/>. Case-insensitive
     /// and trim-tolerant on purpose: the guard exists to force a deliberate act, not to punish
     /// a trailing space or a caps-lock state. Null/blank never matches — a handler that forgets

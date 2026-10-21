@@ -35,6 +35,14 @@ public sealed class EmbeddedFontResolver : IFontResolver
     private const string RegularKey = "OpenSans#Regular";
     private const string BoldKey = "OpenSans#Bold";
 
+    /// <summary>
+    /// §1305 — a handwriting face for the organizer's signature on the sponsor contract (operator 2026-09-26:
+    /// "add a handwritten organizer signature on the pdf"). Allura, SIL OFL 1.1 (licence beside the file as
+    /// <c>OFL-Allura.txt</c>). Asked for by this family name; every other name still resolves to Open Sans.
+    /// </summary>
+    public const string SignatureFamilyName = "Allura";
+    private const string SignatureKey = "Allura#Regular";
+
     private static readonly Assembly Owner = typeof(EmbeddedFontResolver).Assembly;
 
     /// <inheritdoc />
@@ -70,7 +78,9 @@ public sealed class EmbeddedFontResolver : IFontResolver
     /// wrong face is enormously better than one that throws on the send path.
     /// </remarks>
     public FontResolverInfo? ResolveTypeface(string familyName, bool isBold, bool isItalic) =>
-        new(isBold ? BoldKey : RegularKey);
+        string.Equals(familyName, SignatureFamilyName, StringComparison.OrdinalIgnoreCase)
+            ? new(SignatureKey)
+            : new(isBold ? BoldKey : RegularKey);
 
     /// <summary>
     /// §750.8 — the Experts Live Denmark wordmark, embedded beside the fonts.
@@ -93,9 +103,12 @@ public sealed class EmbeddedFontResolver : IFontResolver
     /// <inheritdoc />
     public byte[]? GetFont(string faceName)
     {
-        var resource = faceName == BoldKey
-            ? "CommunityHub.Core.Evaluation.Fonts.OpenSans-Bold.ttf"
-            : "CommunityHub.Core.Evaluation.Fonts.OpenSans-Regular.ttf";
+        var resource = faceName switch
+        {
+            BoldKey => "CommunityHub.Core.Evaluation.Fonts.OpenSans-Bold.ttf",
+            SignatureKey => "CommunityHub.Core.Evaluation.Fonts.Allura-Regular.ttf",
+            _ => "CommunityHub.Core.Evaluation.Fonts.OpenSans-Regular.ttf",
+        };
 
         using var stream = Owner.GetManifestResourceStream(resource)
             ?? throw new InvalidOperationException(

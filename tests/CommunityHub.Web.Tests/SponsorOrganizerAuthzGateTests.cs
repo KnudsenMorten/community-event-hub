@@ -84,8 +84,7 @@ public sealed class SponsorOrganizerAuthzGateTests
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new CommunityHub.Pages.Sponsor.IndexModel(
             db, accessor,
-            cm: null!, cmOptions: new CommunityHub.Core.Integrations.CompanyManagerOptions(),
-            woo: null!, wooOptions: new CommunityHub.Core.Integrations.WooCommerceOptions(),
+            oldOrders: null!,
             cache: new MemoryCache(new MemoryCacheOptions()),
             eventConfigLoader: new EventEditionConfigLoader(),
             eventConfigOptions: new EventConfigOptions(),

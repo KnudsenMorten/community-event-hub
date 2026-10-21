@@ -36,7 +36,6 @@ public class ParticipantsModel : PageModel
     private readonly ParticipantDeactivationService _cascade;
     private readonly ParticipantSearchService _search;
     private readonly ImpersonationAuditService _audit;
-    private readonly CommunityHub.Core.Integrations.CompanyManagerClient _companyManager;
     private readonly ILogger<ParticipantsModel> _logger;
     private readonly TimeProvider _clock;
     private readonly CommunityHub.Core.Settings.FeatureGateService? _gate;
@@ -87,7 +86,6 @@ public class ParticipantsModel : PageModel
         ParticipantDeactivationService cascade,
         ParticipantSearchService search,
         ImpersonationAuditService audit,
-        CommunityHub.Core.Integrations.CompanyManagerClient companyManager,
         ILogger<ParticipantsModel> logger,
         TimeProvider clock,
         // §707.37 / §707.50 — optional so existing constructions and tests are unchanged; wired by DI.
@@ -105,7 +103,6 @@ public class ParticipantsModel : PageModel
         _cascade = cascade;
         _search = search;
         _audit = audit;
-        _companyManager = companyManager;
         _logger = logger;
         _clock = clock;
     }
@@ -402,6 +399,81 @@ public class ParticipantsModel : PageModel
     /// (deactivate) and tell the organizer why. Either outcome is audited so the
     /// removal is never silent.
     /// </summary>
+    /// <summary>
+    /// §1257b — LINK two rows as one human: <paramref name="participantId"/> becomes a duplicate
+    /// represented by <paramref name="primaryId"/>, which is then the row every logistics count
+    /// sees (<c>LogisticsAudience</c>).
+    ///
+    /// <para>🔑 <b>Here, not on SpeakerReview.</b> That picker can only ever make the SPEAKER row
+    /// the duplicate, and the live case needs the opposite: Ronni's speaker row holds the hotel,
+    /// swag, lunch and dinner, so it must be the PRIMARY. Direction is the whole decision, so it
+    /// belongs where both rows are visible side by side.</para>
+    ///
+    /// <para>🔒 Refuses rather than guesses (<see cref="DuplicateLinkGuard"/>): no self-link, no
+    /// chains, and never a link that would drop an entitlement the duplicate holds and the primary
+    /// does not. Reversible — "unlink" restores both rows to counting separately.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostLinkSamePersonAsync(
+        int participantId, int primaryId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!IsRealOrganizer(me)) return Forbid();
+
+        IActionResult Back(string msg) => RedirectToPage(new
+        {
+            ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo, Msg = msg,
+        });
+
+        if (participantId == primaryId)
+            return Back("A person cannot be a duplicate of themselves.");
+
+        var dup = await _db.Participants
+            .FirstOrDefaultAsync(p => p.Id == participantId && p.EventId == me.EventId, ct);
+        var primary = await _db.Participants
+            .FirstOrDefaultAsync(p => p.Id == primaryId && p.EventId == me.EventId, ct);
+        if (dup is null || primary is null)
+            return Back("One of those rows is not in this edition.");
+
+        // No chains — a duplicate must point at a row that represents itself.
+        if (primary.SamePersonAsId is not null)
+            return Back($"#{primaryId} is already a duplicate of #{primary.SamePersonAsId} — pick that row as the primary instead.");
+        if (await _db.Participants.AnyAsync(p => p.SamePersonAsId == participantId, ct))
+            return Back($"#{participantId} is already the primary for another row — link the other way round.");
+
+        var lost = await DuplicateLinkGuard.WouldLoseAsync(_db, me.EventId, participantId, primaryId, ct);
+        if (lost.Count > 0)
+            return Back(DuplicateLinkGuard.Refusal(
+                participantId, dup.FullName, primaryId, primary.FullName, lost));
+
+        dup.SamePersonAsId = primaryId;
+        await _db.SaveChangesAsync(ct);
+        return Back($"Linked: #{participantId} ({dup.FullName}) is now counted as one person with "
+                    + $"#{primaryId} ({primary.FullName}). Hotel, swag, lunch, dinner and party "
+                    + $"count #{primaryId} only; both can still sign in.");
+    }
+
+    /// <summary>§1257b — undo a link; both rows count separately again.</summary>
+    public async Task<IActionResult> OnPostUnlinkSamePersonAsync(int participantId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!IsRealOrganizer(me)) return Forbid();
+
+        var p = await _db.Participants
+            .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == me.EventId, ct);
+        if (p is null || p.SamePersonAsId is null)
+            return RedirectToPage(new { ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo, Msg = "Nothing to unlink." });
+
+        p.SamePersonAsId = null;
+        await _db.SaveChangesAsync(ct);
+        return RedirectToPage(new
+        {
+            ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo,
+            Msg = $"Unlinked #{participantId} — it counts on its own again.",
+        });
+    }
+
     public async Task<IActionResult> OnPostDeleteAsync(
         int participantId, string? confirmPhrase, CancellationToken ct)
     {
@@ -411,13 +483,17 @@ public class ParticipantsModel : PageModel
 
         // §334: SERVER-verified typed confirmation. The modal's confirm() only ever ran in the
         // browser — a POST with JavaScript off, or a replayed form, executed the delete outright.
-        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.DeletePhrase))
+        // §1256e — the word matches the ACT: this handler deactivates, it does not delete, so it
+        // asks for DEACTIVATE. DELETE is still accepted so a half-submitted form, a bookmark or an
+        // operator's muscle memory from the old dialog cannot fail on wording alone.
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.DeactivatePhrase)
+            && !TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.DeletePhrase))
         {
             return RedirectToPage(new
             {
                 ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo,
                 Msg = TypedConfirmation.Rejection(
-                    TypedConfirmation.DeletePhrase, "delete this participant"),
+                    TypedConfirmation.DeactivatePhrase, "deactivate this participant"),
             });
         }
 
@@ -562,6 +638,16 @@ public class ParticipantsModel : PageModel
         RunBulkAsync((me) => _bulk.SetRingAsync(me.EventId, SelectedIds, BulkRing, ct),
             verb: $"set to {CommunityHub.Core.Settings.Rings.Label(BulkRing)}", ct);
 
+    /// <summary>§1312 — "Link selected as one person": primary picked automatically (<see cref="Core.Organizer.SamePersonLinker"/>).</summary>
+    public async Task<IActionResult> OnPostBulkLinkSamePersonAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!IsRealOrganizer(me)) return Forbid();
+        var r = await Core.Organizer.SamePersonLinker.LinkAsync(_db, me.EventId, SelectedIds, ct);
+        return RedirectToPage(new { ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo, Msg = r.Message });
+    }
+
     private async Task<IActionResult> RunBulkAsync(
         Func<CurrentParticipant, Task<ParticipantBulkOperationService.BulkResult>> op,
         string verb, CancellationToken ct)
@@ -598,7 +684,7 @@ public class ParticipantsModel : PageModel
     /// able to drive the organizer grid or start a nested impersonation.
     /// </summary>
     private static bool IsRealOrganizer(CurrentParticipant me) =>
-        me.Role == ParticipantRole.Organizer && !me.IsActingAs;
+        me.Role.HasOrganizerAccess() && !me.IsActingAs;
 
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
@@ -628,6 +714,17 @@ public class ParticipantsModel : PageModel
             "signer"      => query.Where(p => p.IsSigner),
             "coordinator" => query.Where(p => p.IsEventCoordinator),
             "speaker"     => query.Where(p => p.Role == ParticipantRole.Speaker),
+            // §1257 — the two duplicate views, on the filter that already exists rather than on a
+            // new screen. "linked" is settled fact (this row is represented by another and is
+            // excluded from every logistics count); "samename" is a SUGGESTION — two ACTIVE rows
+            // sharing a name — which is how a two-row human is found before anyone links them.
+            // ⚠️ A name match is never proof: PROD holds two rows named "Finance" that are two
+            // different companies' invoice inboxes. It narrows the search; a person decides.
+            "linked"      => query.Where(p => p.SamePersonAsId != null),
+            "samename"    => query.Where(p => p.IsActive && p.FullName != null && p.FullName != ""
+                                              && _db.Participants.Any(o =>
+                                                     o.EventId == p.EventId && o.Id != p.Id && o.IsActive
+                                                     && o.FullName == p.FullName)),
             _             => query,
         };
 

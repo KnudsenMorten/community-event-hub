@@ -149,7 +149,7 @@ public sealed class SessionQuestionService
     public async Task<bool> CanAccessSessionAsync(
         ActorContext actor, int sessionId, CancellationToken ct = default)
     {
-        if (actor.Role == ParticipantRole.Organizer)
+        if (actor.Role.HasOrganizerAccess())
             return await _db.Sessions.AnyAsync(
                 s => s.Id == sessionId && s.EventId == actor.EventId, ct);
 
@@ -180,7 +180,7 @@ public sealed class SessionQuestionService
     public async Task<List<SessionQuestion>> LoadAllForEventAsync(
         ActorContext actor, CancellationToken ct = default)
     {
-        if (actor.Role != ParticipantRole.Organizer)
+        if (!actor.Role.HasOrganizerAccess())
             throw new SessionQuestionAccessDeniedException("Organizer role required.");
 
         return await _db.SessionQuestions

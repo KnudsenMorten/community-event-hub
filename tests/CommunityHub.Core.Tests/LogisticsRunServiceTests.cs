@@ -174,7 +174,7 @@ public sealed class LogisticsRunServiceTests
             new FoodLogisticsProducer(db),
             new LunchLogisticsProducer(db),
             new ExpoLogisticsProducer(new EmptyPurchases()),
-            new HotelLogisticsProducer(db),
+            new HotelLogisticsProducer(db, new CommunityHub.Core.Entitlements.HotelCoverageService(db, TimeProvider.System)),
             rec,
             mail,
             clock);

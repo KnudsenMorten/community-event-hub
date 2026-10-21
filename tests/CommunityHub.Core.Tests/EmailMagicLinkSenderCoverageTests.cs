@@ -369,7 +369,7 @@ public class EmailMagicLinkSenderCoverageTests
             context: null, templates: RealTemplatesWithMagic(sp));
 
         var delta = await svc.EnqueueSessionUpdateAsync(
-            ev.Id, session.Id, "Keynote", SessionSyncDirection.ZohoToCeh,
+            ev.Id, session.Id, "Keynote", SessionSyncDirection.SessionizeToCeh,
             SyncDeltaQueueService.BuildSessionChanges(
                 start, start.AddHours(1), "Room A",
                 start.AddHours(2), start.AddHours(3), "Room A"));
@@ -433,7 +433,7 @@ public class EmailMagicLinkSenderCoverageTests
             context: null, templates: RealTemplatesWithMagic(sp));
 
         var delta = await svc.EnqueueSessionUpdateAsync(
-            ev.Id, session.Id, session.Title, SessionSyncDirection.ZohoToCeh,
+            ev.Id, session.Id, session.Title, SessionSyncDirection.SessionizeToCeh,
             SyncDeltaQueueService.BuildSessionChanges(
                 oldStart, oldEnd, oldRoom, newStart, newEnd, newRoom));
         await svc.ApproveAsync(delta.Id, "olivia@example.com");

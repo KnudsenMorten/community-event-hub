@@ -85,7 +85,7 @@ public sealed class SoMePostComposer
             SoMeTemplateKind.Sponsor =>
                 ["{SponsorName}", "{SponsorTier}", "{SponsorLinkedInUrl}", "{SponsorWebsite}",
                  "{SponsorSocialMediaCompanyDescription}", "{SponsorHashtag}",
-                 "{SponsorSigner}", "{SponsorEventCoordinators}"],
+                 "{SponsorCompanyMention}", "{SponsorSigner}", "{SponsorEventCoordinators}"],
             _ => [],
         },
         .. EditionTokens,

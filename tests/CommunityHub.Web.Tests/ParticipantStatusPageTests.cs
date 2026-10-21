@@ -78,9 +78,8 @@ public sealed class ParticipantStatusPageTests
     /// </summary>
     private static ParticipantStatusBoardBuilder NewBuilder(CommunityHubDbContext db)
     {
-        var cmOptions = new CompanyManagerOptions();
         var sponsor = new SponsorWizardService(
-            db, new CompanyManagerClient(new System.Net.Http.HttpClient(), cmOptions), cmOptions,
+            db,
             new EconomicContactAdminService(new NoEconomicClient()),
             NullLogger<SponsorWizardService>.Instance);
         var reader = new WizardProgressReader(

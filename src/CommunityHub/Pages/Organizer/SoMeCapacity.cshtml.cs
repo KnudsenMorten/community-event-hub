@@ -79,7 +79,7 @@ public class SoMeCapacityModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         var today = DateOnly.FromDateTime(
             TimeZoneInfo.ConvertTime(_clock.GetUtcNow(), SoMeSchedulePlanner.DanishTime).DateTime);

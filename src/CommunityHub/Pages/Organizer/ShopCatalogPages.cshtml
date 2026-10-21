@@ -1,0 +1,128 @@
+@page
+@model CommunityHub.Pages.Organizer.ShopCatalogPagesModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Sponsor.Shop
+@{
+    ViewData["Title"] = "Sponsor catalogue pages";
+    var e = Model.Editing;
+}
+
+<div class="card">
+    <h1>Sponsor catalogue pages</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>The public catalogue at <a href="/sponsor-catalog">/sponsor-catalog</a> — no login, a contents list, and product
+           pages with live prices and availability. Text is Markdown. A page with a product group lists that group's products;
+           a page can also show the booth map.</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        @* §1312 — operator 2026-09-27: "import the powerpoint into the catalog including pictures". *@
+        <section class="deck-import">
+            <h2>Import from the sponsor PowerPoint</h2>
+            @if (Model.DeckConfigured)
+            {
+                <p>Reads <strong>@Model.DeckFileName</strong> from SharePoint. Each titled slide becomes a page, with its pictures;
+                   slides that name who bought what, and the deck's fixed prices, are left out. Imported pages arrive
+                   <strong>unpublished</strong>, and a new import replaces only the pages an earlier import made.</p>
+                @if (Model.ImportStatus is { Running: true } running)
+                {
+                    <meta http-equiv="refresh" content="10" />
+                    <p class="info" role="status">@(running.DryRun ? "Preview" : "Import") running since @running.StartedAt.ToString("HH:mm:ss") UTC — this page refreshes by itself.</p>
+                }
+                else
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        <form method="post" asp-page-handler="ImportDeck"><input type="hidden" name="dryRun" value="true" /><button type="submit" class="secondary">Preview the import</button></form>
+                        <form method="post" asp-page-handler="ImportDeck" onsubmit="return confirm('Import the deck? Pages from an earlier import are replaced; your own pages are not touched.');">
+                            <input type="hidden" name="dryRun" value="false" /><button type="submit">Import the deck</button></form>
+                        @if (Model.Pages.Any(p => p.Slug.StartsWith(CommunityHub.Core.Integrations.Webshop.ShopCatalogDeckImporter.SlugPrefix) && !p.IsPublished))
+                        {
+                            <form method="post" asp-page-handler="PublishImported" onsubmit="return confirm('Publish every imported page? Only do this after reviewing them.');">
+                                <button type="submit" class="secondary">Publish all imported pages</button></form>
+                        }
+                    </div>
+                }
+                @if (Model.ImportStatus is { Running: false, Result: { } done } last)
+                {
+                    <details open style="margin-top:8px;">
+                        <summary class="@(done.Ok ? "" : "error")">@(last.DryRun ? "Preview" : "Import") @last.FinishedAt?.ToString("HH:mm") UTC: @done.Message</summary>
+                        <ul style="font-size:13px;">@foreach (var l in done.Lines) { <li>@l</li> }</ul>
+                    </details>
+                }
+            }
+            else
+            {
+                <p>No deck is configured for this edition (shop config → <code>catalogDeck</code>).</p>
+            }
+        </section>
+
+        @if (Model.Pages.Count == 0)
+        {
+            <form method="post" asp-page-handler="Seed"><button type="submit">Create starter pages from the ELDK27 deck structure</button></form>
+        }
+
+        <div style="overflow-x:auto;">
+        <table>
+            <thead><tr><th>#</th><th>Chapter</th><th>Title</th><th>Shows</th><th>Published</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var p in Model.Pages)
+            {
+                <tr>
+                    <td>@p.SortOrder</td><td>@p.Chapter</td>
+                    <td><a href="/sponsor-catalog/@p.Slug">@p.Title</a></td>
+                    <td>@(p.ProductGroup is ShopGroup g ? ShopPageModel.GroupLabel(g) : "")@(p.ShowBoothMap ? " · booth map" : "")</td>
+                    <td>@(p.IsPublished ? "yes" : "draft")</td>
+                    <td><a asp-page="/Organizer/ShopCatalogPages" asp-route-Edit="@p.Id">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+
+        <h2>@(e is null ? "New page" : $"Edit '{e.Title}'")</h2>
+        <form method="post" asp-page-handler="Save" class="shop-form">
+            <input type="hidden" name="id" value="@e?.Id" />
+            <label>Title <input name="title" value="@e?.Title" required /></label>
+            <label>Address (slug, optional) <input name="slug" value="@e?.Slug" /></label>
+            <label>Chapter (contents heading) <input name="chapter" value="@e?.Chapter" /></label>
+            <label>Order <input type="number" name="sortOrder" value="@(e?.SortOrder ?? (Model.Pages.Count == 0 ? 10 : Model.Pages.Max(p => p.SortOrder) + 10))" /></label>
+            <label>Text (Markdown) <textarea name="bodyMarkdown" rows="10">@e?.BodyMarkdown</textarea></label>
+            <label>Picture or video link (https) <input name="mediaUrl" value="@e?.MediaUrl" /></label>
+            <label>List products of
+                <select name="productGroup">
+                    <option value="">— none —</option>
+                    @foreach (var g in ShopPageModel.SponsorGroups) { <option value="@g" selected="@(e?.ProductGroup == g)">@ShopPageModel.GroupLabel(g)</option> }
+                </select>
+            </label>
+            <label>Packages with live price &amp; availability — every word must be in the product name (e.g. "Gold Exhibitor")
+                <input name="productMatch" value="@e?.ProductMatch" maxlength="200" /></label>
+            <label>Live availability table of every package
+                <select name="availabilityView">
+                    <option value="None" selected="@(e is null || e.AvailabilityView == ShopCatalogAvailabilityView.None)">— none —</option>
+                    <option value="Summary" selected="@(e?.AvailabilityView == ShopCatalogAvailabilityView.Summary)">Summary (price, remaining, reserved &amp; confirmed with who)</option>
+                    <option value="Available" selected="@(e?.AvailabilityView == ShopCatalogAvailabilityView.Available)">Available (remaining of maximum)</option>
+                    <option value="Taken" selected="@(e?.AvailabilityView == ShopCatalogAvailabilityView.Taken)">Reserved &amp; confirmed</option>
+                </select>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="showBoothMap" value="true" @(e?.ShowBoothMap == true ? "checked" : "") /> Show the booth map</label>
+            <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="isPublished" value="true" @(e?.IsPublished == true ? "checked" : "") /> Published</label>
+            <button type="submit">Save page</button>
+        </form>
+        @if (e is not null)
+        {
+            <form method="post" asp-page-handler="Delete" onsubmit="return confirm('Delete this page?');" style="margin-top:10px;">
+                <input type="hidden" name="id" value="@e.Id" /><button type="submit">Delete page</button>
+            </form>
+        }
+    }
+</div>
+<style>
+    .shop-form { display:grid; gap:12px; max-width:760px; }
+    .shop-form input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]), .shop-form select, .shop-form textarea {
+        width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px; border:1px solid #9ca3af; border-radius:8px; background:#fff; }
+    .shop-form label { display:grid; gap:5px; font-size:15px; font-weight:600; }
+</style>

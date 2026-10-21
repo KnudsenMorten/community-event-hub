@@ -8,7 +8,7 @@ namespace CommunityHub.Core.Integrations.Erp;
 /// <summary>
 /// Orchestrates e-conomic ERP customer create/sync, CVR validation on create,
 /// and ERP contact/role create + webshop sync (REQUIREMENTS §7a). It maps a
-/// Company Manager company → an <see cref="ErpCustomer"/> (name always resolved
+/// company → an <see cref="ErpCustomer"/> (name always resolved
 /// through <see cref="SponsorCompanyName"/>), validates the CVR via
 /// <see cref="ICvrValidator"/>, then drives the <see cref="IEconomicErpClient"/>
 /// seam — recording the outcome + an idempotency link in <see cref="ErpCustomerLink"/>.
@@ -36,25 +36,6 @@ public sealed class EconomicCustomerSyncService
         _cvr = cvr;
         _clock = clock;
         _log = log;
-    }
-
-    /// <summary>
-    /// Map a Company Manager company into the ERP customer shape the hub can
-    /// resolve. Name ALWAYS resolves through the public→legal→billing→"Company"
-    /// chain. Pure mapping — no I/O.
-    /// </summary>
-    public static ErpCustomer MapCustomer(
-        string companyId, CompanyManagerCompany? cm, string? billingName, string? contactEmail)
-    {
-        var name = SponsorCompanyName.Resolve(cm?.PublicName, cm?.Name, billingName, companyId);
-        return new ErpCustomer(
-            CompanyId: companyId,
-            Name: name,
-            CorporateIdentificationNumber: NullIfBlank(cm?.CorporateIdentificationNumber),
-            Currency: NullIfBlank(cm?.Currency),
-            VatZone: NullIfBlank(cm?.VatZone),
-            Email: NullIfBlank(contactEmail),
-            ErpCustomerNumber: NullIfBlank(cm?.ErpCustomerNumber));
     }
 
     /// <summary>
@@ -174,20 +155,6 @@ public sealed class EconomicCustomerSyncService
             _log.LogError(ex, "ERP contact sync failed for {Email}.", contact.Email);
             return new ErpContactResult(contact, ErpSyncOutcome.Failed, ex.Message);
         }
-    }
-
-    /// <summary>Map a Company Manager user into an ERP contact, role derived from the company's signer/coordinator ids.</summary>
-    public static ErpContact MapContact(
-        string companyId, CompanyManagerUser user, CompanyManagerCompany? company)
-    {
-        var role = ErpContactRole.Contact;
-        if (company is not null)
-        {
-            if (user.UserId == company.DefaultSignerUserId) role = ErpContactRole.Signer;
-            else if (user.UserId == company.EventCoordinationDefaultContactUserId) role = ErpContactRole.EventCoordinator;
-        }
-        var name = !string.IsNullOrWhiteSpace(user.FullName) ? user.FullName : user.DisplayName;
-        return new ErpContact(companyId, user.Email, name, role);
     }
 
     private static string? NullIfBlank(string? s) =>

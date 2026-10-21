@@ -63,6 +63,8 @@ public sealed class Scenario253ResidualFixesTests
             IsActive = true, StartDate = new DateOnly(2027, 2, 9),
         });
         await db.SaveChangesAsync();
+        // §1295 — allocation commits here assume assignment is released for the edition.
+        VolunteerAssignmentRelease.ToBroad(db, EventId);
     }
 
     private static async Task<Participant> SeedPersonAsync(
@@ -250,56 +252,6 @@ public sealed class Scenario253ResidualFixesTests
             Allocation(db).AddDraftAsync(OrganizerActor(org.Id), shift.Id, vol.Id));
     }
 
-    // ----- G17: sponsor sync stores normalized email ---------------------------
-
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, string> _respond;
-        public StubHandler(Func<HttpRequestMessage, string> respond) => _respond = respond;
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(_respond(request), Encoding.UTF8, "application/json"),
-            });
-    }
-
-    [Fact]
-    public async Task Sponsor_sync_stores_the_email_lowercased_and_trimmed()
-    {
-        using var db = NewDb();
-        await SeedEventAsync(db);
-
-        // 🔒 §1034b — the mirror refuses a company that is not a known sponsor. This test is about
-        // e-mail NORMALIZATION for a real sponsor's contact, so the fixture states that it is one.
-        db.SponsorInfos.Add(new CommunityHub.Core.Domain.SponsorInfo
-        {
-            EventId = EventId, SponsorCompanyId = "42", CompanyName = "Corp ApS", IsSponsor = true,
-        });
-        await db.SaveChangesAsync();
-
-        var options = new CompanyManagerOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://example.test/wp-json/company-manager/v1",
-            Username = "u", Password = "p",
-        };
-        var cm = new CompanyManagerClient(new HttpClient(new StubHandler(req =>
-            req.RequestUri!.AbsolutePath.EndsWith("/users", StringComparison.Ordinal)
-                ? """[ { "user_id": "68", "user_email": "MiXeD@Corp.TEST", "full_name": "Mixed Case", "display_name": "Mixed" } ]"""
-                : """{ "id": 42, "name": "Corp ApS", "default_signer_id": 0, "event_coordination_default_contact_id": 0 }""")), options);
-        var sync = new SponsorContactSyncService(
-            db, cm, options, new FixedClock(),
-            NullLogger<SponsorContactSyncService>.Instance);
-
-        var result = await sync.SyncCompanyAsync(EventId, 42);
-
-        Assert.Equal(1, result.ParticipantsCreated);
-        var contact = await db.Participants.SingleAsync();
-        Assert.Equal("mixed@corp.test", contact.Email);   // normalized at write (§253 G17)
-    }
-
     // ----- G17: Sessionize import matches case-insensitively -------------------
 
     [Fact]
@@ -336,20 +288,14 @@ public sealed class Scenario253ResidualFixesTests
 
     // ----- G8d: refunded Woo orders surface to the action queue ----------------
 
-    private static SponsorOrderPullService NewPull(CommunityHubDbContext db, HttpMessageHandler wooHandler)
+    // §1312 — the pull reads the old webshop's STORED orders (an IWebshopOrderSource), not the webshop.
+    private static SponsorOrderPullService NewPull(CommunityHubDbContext db, string ordersJson)
     {
-        var wooOptions = new WooCommerceOptions
-        {
-            Enabled = true, BaseUrl = "https://shop.example.test",
-            ConsumerKey = "k", ConsumerSecret = "s",
-        };
-        var cmOptions = new CompanyManagerOptions { Enabled = false };
         var root = RepoPaths.RepoRoot();
         return new SponsorOrderPullService(
             db,
-            new WooCommerceClient(new HttpClient(wooHandler), wooOptions),
+            FakeWebshopOrderSource.FromWooJson(ordersJson),
             new Core.Config.SponsorConfigLoader(),
-            wooOptions,
             new Core.Config.SponsorConfigOptions
             {
                 SponsorConfigPath = Path.Combine(root, "config", "sponsor.eldk27.json"),
@@ -359,11 +305,6 @@ public sealed class Scenario253ResidualFixesTests
             {
                 EventConfigPath = Path.Combine(root, "config", "event.eldk27.json"),
             },
-            new SponsorContactSyncService(
-                db,
-                new CompanyManagerClient(new HttpClient(new StubHandler(_ => "[]")), cmOptions),
-                cmOptions, new FixedClock(),
-                NullLogger<SponsorContactSyncService>.Instance),
             new SharePointUploadClient(new HttpClient(), new SharePointUploadOptions { Enabled = false }),
             NullLogger<SponsorOrderPullService>.Instance);
     }
@@ -378,11 +319,51 @@ public sealed class Scenario253ResidualFixesTests
         } ]
         """;
 
-    private static HttpMessageHandler WooRouting() =>
-        new StubHandler(req =>
-            req.RequestUri!.Query.Contains("cancelled", StringComparison.OrdinalIgnoreCase)
-                ? RefundedOrderJson
-                : "[]");   // completed orders + products: empty
+    /// <summary>
+    /// 🔴 §1312 — operator 2026-09-29: "it is using the billing company name in the creation on master packager, that is
+    /// wrong. it must be the public name". A shop-registered company (no Company Manager record) got its sponsor-record
+    /// name from the order's BILLING company on every pull — the legal name, which then went to Zoho. The shop's public
+    /// name wins now.
+    /// </summary>
+    [Fact]
+    public async Task A_shop_registered_company_keeps_its_public_name_not_the_billing_name()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        db.ShopCompanies.Add(new Core.Domain.ShopCompany
+        {
+            EventId = EventId, SponsorCompanyId = "ceh-abc", Source = Core.Domain.ShopCompanySource.Registered,
+            LegalName = "Master Packager SIA", PublicName = "Master Packager",
+        });
+        await db.SaveChangesAsync();
+
+        const string order = """
+            [ {
+                "id": 9101, "status": "completed",
+                "billing": { "email": "buyer@mp.test", "company": "Master Packager SIA" },
+                "meta_data": [ { "key": "_cm_company_id", "value": "ceh-abc" } ],
+                "line_items": [ { "product_id": 7, "name": "Gold Exhibitor ELDK27 - Booth E-21" } ],
+                "date_created_gmt": "2026-09-29T10:00:00"
+            } ]
+            """;
+        var pull = NewPull(db, order);
+
+        Assert.True((await pull.RunAsync()).RanToCompletion);
+
+        var info = await db.SponsorInfos.IgnoreQueryFilters().SingleAsync(i => i.SponsorCompanyId == "ceh-abc");
+        Assert.Equal("Master Packager", info.CompanyName);
+
+        // 🔴 §1312 (operator 2026-09-29: "the public name must not be changed if already fill out") — with NO shop public name,
+        // the pull only FILLS an empty sponsor name; a name already there is never replaced by the billing name.
+        var shop = await db.ShopCompanies.SingleAsync(c => c.SponsorCompanyId == "ceh-abc");
+        shop.PublicName = null;
+        info.CompanyName = "Master Packager (set by hand)";
+        await db.SaveChangesAsync();
+        Assert.True((await pull.RunAsync()).RanToCompletion);
+        Assert.Equal("Master Packager (set by hand)",
+            (await db.SponsorInfos.IgnoreQueryFilters().AsNoTracking().SingleAsync(i => i.SponsorCompanyId == "ceh-abc")).CompanyName);
+    }
+
 
     /// <summary>
     /// 🗑 §757 — a refunded/cancelled order raises NOTHING. This inverts §253 G8d.
@@ -402,7 +383,7 @@ public sealed class Scenario253ResidualFixesTests
     {
         using var db = NewDb();
         await SeedEventAsync(db);
-        var pull = NewPull(db, WooRouting());
+        var pull = NewPull(db, RefundedOrderJson);   // the stored orders: one refunded, none completed
 
         var first = await pull.RunAsync();
         Assert.True(first.RanToCompletion);
@@ -433,18 +414,23 @@ public sealed class Scenario253ResidualFixesTests
         await db.SaveChangesAsync();
 
         // A pull that returns at least one COMPLETED order, so the sweep is allowed to run.
-        var pull = NewPull(db, new StubHandler(req =>
-            req.RequestUri!.Query.Contains("cancelled", StringComparison.OrdinalIgnoreCase)
-                ? RefundedOrderJson
-                : """
+        // (The stored orders: the refunded 9001 and a completed 9100.)
+        var pull = NewPull(db, """
                   [ {
                       "id": 9100, "status": "completed",
                       "billing": { "email": "buyer@corp.test", "company": "Corp ApS" },
                       "meta_data": [ { "key": "_cm_company_id", "value": "42" } ],
                       "line_items": [ { "product_id": 7, "name": "Booth E-01" } ],
                       "date_created_gmt": "2026-07-01T10:00:00"
+                  },
+                  {
+                      "id": 9001, "status": "refunded",
+                      "billing": { "email": "buyer@corp.test", "company": "Corp ApS" },
+                      "meta_data": [ { "key": "_cm_company_id", "value": "42" } ],
+                      "line_items": [ { "product_id": 7, "name": "Booth E-01" } ],
+                      "date_created_gmt": "2026-07-01T10:00:00"
                   } ]
-                  """));
+                  """);
 
         await pull.RunAsync();
 

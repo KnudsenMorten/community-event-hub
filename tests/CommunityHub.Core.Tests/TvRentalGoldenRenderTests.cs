@@ -24,15 +24,22 @@ public class TvRentalGoldenRenderTests
     private static readonly TaskBodyPlainTextRenderer Plain = new();
     private static readonly TaskBodyEmailHtmlRenderer Email = new();
 
+    // The order steps hold markup, so they are substituted BEFORE parsing — as TaskBodyService does (§688).
+    private const string OrderSteps =
+        "* Go to the shop and search for **'TV Screen Exhibitor Booth ELDK27'**, then add it to your cart.\n* Select **'Proceed to Checkout'**.";
+
     private static TaskBody Body =>
-        Bodies.Load(TaskDefinitionRegistry.Shipped.ByKey(Key)!.BodyRef);
+        CommunityHub.Core.Tasks.Parsing.TaskBodyParser.Parse(
+            Bodies.LoadRaw(TaskDefinitionRegistry.Shipped.ByKey(Key)!.BodyRef).Replace("{{tvOrderSteps}}", OrderSteps));
 
     private static TaskRenderContext Context(TaskDataResult tv) =>
         new(
             new Dictionary<string, string>
             {
                 ["tvRentalPriceEur"] = "450",
-                ["configuratorUrl"] = "https://shop.example/sponsor",
+                ["tvShopUrl"] = "https://shop.example/sponsor",
+                ["shopName"] = "Sponsor Webshop",
+                ["shopSignHint"] = "You can either save the contract as a PDF and sign it using your preferred method, or scroll down and digitally sign directly in the webshop.",
                 ["editionCode"] = "ELDK27",
             },
             new Dictionary<string, TaskDataResult> { ["tvPurchase"] = tv },
@@ -143,7 +150,7 @@ public class TvRentalGoldenRenderTests
         // The webshop link survives in all three — as a real button on the page and in mail, and as
         // "label: url" in the calendar entry, where there is nothing to click.
         Assert.Contains("https://shop.example/sponsor", html);
-        Assert.Contains("Open the Sponsor Webshop: https://shop.example/sponsor", plain);
+        Assert.Contains("Order a TV in the Sponsor Webshop: https://shop.example/sponsor", plain);
         Assert.Contains("https://shop.example/sponsor", email);
     }
 

@@ -1,4 +1,11 @@
 @page
+@inject CommunityHub.Core.Settings.FeatureGateService ShopGate
+@inject CommunityHub.Auth.ICurrentParticipantAccessor ShopParticipant
+@{
+    // §1305 — while the CEH shop is on, the profile lives on its "Cart & company" page; hints and links point there.
+    var cehShop = ShopParticipant.Current is { } shopMe && await ShopGate.IsFeatureEnabledAsync("sponsor-webshop", shopMe.EventId);
+    var where = cehShop ? "your company profile in the Sponsor Shop" : "the webshop";
+}
 @model CommunityHub.Pages.Sponsor.CompanyDetailsModel
 @{
     ViewData["Title"] = "Company Details";
@@ -31,49 +38,31 @@
         <p class="error">@Model.Error</p>
     }
 
-    <form method="post">
-        <!-- Read-only identity -->
-        <label>Public Name</label>
-        <input type="text" value="@Model.PublicName" readonly
-               title="Your public company name (from the webshop company profile). Contact the organizers to change it." />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">From your webshop company profile (public name, not the billing name).</p>
+    <form method="post" class="company-fields">
+        @* §1344 — EDITABLE (operator 2026-10-14). Saved by "Save" only — not in the auto-save id list below. *@
+        <label for="PublicName">Public company name</label>
+        <input type="text" id="PublicName" asp-for="PublicName"
+               maxlength="@CommunityHub.Core.Integrations.Webshop.ShopCompanyLinks.PublicNameMax" />
+        <p class="cf-hint">How your company is shown on the event website, in the app and in our social-media posts. Your legal name on the contract and invoice is not changed.</p>
 
         <label>Type</label>
         <input type="text" value="@Model.TypeLabel" readonly />
 
         <!-- Links -->
-        @* 🔒 §1081 — READ-ONLY: the webshop is authoritative and the §41b reconcile fills it in.
-           The link carries data-webshop-interstitial="1" so the §653 "different system, own
-           credentials" dialog shows first — the same hand-off the nav uses. *@
+        @* 🔴 §1312 — EDITABLE: CEH owns the website, LinkedIn and X (operator 2026-09-30: "ceh owns the field … sponsor must
+           be able to change this here" · "old webshop is not owner of this anymore"). Supersedes §1081/§1126 (read-only). The
+           same field the organizer edits on the company page; whoever saves last wins. *@
         <label for="WebsiteUrl">Website URL</label>
-        <input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               readonly style="background-color:#f3f4f6;color:#6b7280;" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your website address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-        <p style="margin:2px 0 12px;">
-            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-        </p>
+        <input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl" placeholder="https://www.example.com" />
+        <p class="cf-hint" style="margin:2px 0 12px;">Starts with https:// — shown on the event website and in the event app.</p>
 
-        @* §1126 — webshop-owned, exactly like the website above. Read-only is REQUIRED by the
-           overwrite: an editable field the sync silently reverts is worse than one you cannot
-           edit, because nothing tells the sponsor it happened. *@
         <label for="LinkedInUrl">LinkedIn URL</label>
-        <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               readonly style="background-color:#f3f4f6;color:#6b7280;" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your LinkedIn address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-        <p style="margin:2px 0 12px;">
-            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-        </p>
+        <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl" placeholder="https://www.linkedin.com/company/…" />
+        <p class="cf-hint" style="margin:2px 0 12px;">Your company page — we tag it when we announce you on LinkedIn.</p>
 
         <label for="TwitterUrl">Twitter / X URL</label>
-        <input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
-               readonly style="background-color:#f3f4f6;color:#6b7280;" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 4px;">Your Twitter / X address comes from the webshop, which is the authoritative source for it. Change it there and it syncs back here automatically.</p>
-        <p style="margin:2px 0 14px;">
-            <a href="https://expertslive.dk/sponsor" target="_blank" rel="noopener noreferrer"
-               data-webshop-interstitial="1" style="font-weight:600;">Change on the webshop &#8599;</a>
-        </p>
+        <input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl" placeholder="https://x.com/…" />
+        <p class="cf-hint" style="margin:2px 0 14px;">Optional.</p>
 
         <!-- Overview -->
         <label for="CompanyOverview">Company Overview</label>
@@ -93,8 +82,8 @@
                   maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxSocial"
                   oninput="document.getElementById('socialCount').textContent=this.value.length;"></textarea>
         <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-            Text is used by ELDK in social media promotion (max 600 chars). This is NOT sent to Event System (Zoho).
-            <span id="socialCount">@(Model.SocialMediaBrandingText?.Length ?? 0)</span> / 600
+            Text is used by ELDK in social media promotion (max @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxSocial chars). This is NOT sent to Event System (Zoho).
+            <span id="socialCount">@(Model.SocialMediaBrandingText?.Length ?? 0)</span> / @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxSocial
         </p>
 
         @if (Model.IsExhibitor)
@@ -223,7 +212,7 @@
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
             Add or remove people and set their role — <strong>Signer</strong> and/or
             <strong>Event Coordinator</strong> (a person can hold both).
-            Signers can log in and sign the contract (if needed). Event coordinators can order from our webshop and
+            Signers can log in and sign the contract (if needed). Event coordinators can order in the Sponsor Shop and
             manage tasks in the hub.
         </p>
 
@@ -765,3 +754,12 @@
     }
 })();
 </script>
+<style>
+    /* Roomy fields (operator 2026-09-26: "all boxes in the company details looks very cramped and small"). */
+    .company-fields label { display:block; margin:14px 0 5px; font-weight:600; font-size:15px; }
+    .company-fields input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .company-fields textarea, .company-fields select {
+        width:100%; box-sizing:border-box; padding:11px 12px; font-size:16px; line-height:1.4; border:1px solid #9ca3af; border-radius:8px; }
+    .company-fields textarea { min-height:6em; }
+    .company-fields input[readonly] { background:#f3f4f6; color:#4b5563; }
+    .company-fields .cf-hint { font-size:13px; color:#4b5563; margin:4px 0 4px; }
+</style>

@@ -29,8 +29,6 @@ public class DeliverablesModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SponsorDeliverablesService _deliverables;
     private readonly TimeProvider _clock;
-    private readonly CompanyManagerClient _cm;
-    private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<DeliverablesModel> _logger;
     private readonly SponsorActingCompanyService _acting;
 
@@ -39,8 +37,6 @@ public class DeliverablesModel : PageModel
         ICurrentParticipantAccessor participant,
         SponsorDeliverablesService deliverables,
         TimeProvider clock,
-        CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions,
         ILogger<DeliverablesModel> logger,
         SponsorActingCompanyService acting)
     {
@@ -48,8 +44,6 @@ public class DeliverablesModel : PageModel
         _participant = participant;
         _deliverables = deliverables;
         _clock = clock;
-        _cm = cm;
-        _cmOptions = cmOptions;
         _logger = logger;
         _acting = acting;
     }
@@ -92,20 +86,7 @@ public class DeliverablesModel : PageModel
         return Page();
     }
 
-    /// <summary>Public name from Company Manager (public → legal), or null when unavailable.</summary>
-    private async Task<string?> ResolveCompanyNameAsync(string companyId, CancellationToken ct)
-    {
-        if (!_cmOptions.Enabled || !int.TryParse(companyId, out var cid)) return null;
-        try
-        {
-            var c = await _cm.GetCompanyAsync(cid, ct);
-            if (c is null) return null;
-            return SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: companyId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Sponsor deliverables: company-name lookup failed for {CompanyId}.", companyId);
-            return null;
-        }
-    }
+    /// <summary>§1312 — the public name from CEH's own records (Company Manager is retired), or null when unknown.</summary>
+    private Task<string?> ResolveCompanyNameAsync(string companyId, CancellationToken ct) =>
+        CommunityHub.Core.Integrations.SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct);
 }

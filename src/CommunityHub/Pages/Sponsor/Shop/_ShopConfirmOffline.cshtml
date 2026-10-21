@@ -1,0 +1,14 @@
+@model int
+@* §1312 — organizers only (the page decides): "organizer manually complete the order if the sponsor make a manual pdf signing …
+   i need a Manuel Confirm Order button". Confirming = what a digital signature does: the items are ordered (stock taken), the
+   company becomes a sponsor and the signed mails go out. The sponsor's signed PDF is optional and archived as the contract. *@
+<form method="post" asp-page-handler="ConfirmOffline" enctype="multipart/form-data" class="shop-confirm-offline"
+      onsubmit="return confirm('Confirm this order as signed by the sponsor (offline)? The items are ordered and the sponsor gets the order confirmation.');">
+    <input type="hidden" name="orderId" value="@Model" />
+    <label>Signed contract (PDF, optional) <input type="file" name="signedPdf" accept="application/pdf" /></label>
+    <button type="submit">Confirm order (signed offline)</button>
+</form>
+<style>
+    .shop-confirm-offline { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:8px 10px; border:1px dashed #b45309; border-radius:8px; background:#fffbeb; }
+    .shop-confirm-offline label { font-size:13px; margin:0; }
+</style>

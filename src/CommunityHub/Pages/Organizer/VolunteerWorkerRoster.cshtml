@@ -1,0 +1,130 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteerWorkerRosterModel
+@{
+    ViewData["Title"] = "Worker roster";
+}
+
+<div class="card">
+    <h1>Worker roster</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>
+            The volunteers the <strong>auto-planner</strong> draws from: the ones who are here to
+            work rather than to attend, and can be scheduled all day without splitting their time
+            around sessions they want to be at. Everyone else is placed by hand from the allocation
+            queue.
+        </p>
+        <p style="font-size:13px;color:#4b5563;">
+            Being on this list is the whole switch — there is nothing else to set. It does
+            <strong>not</strong> change what someone answered on the availability form; the planner
+            still reads their stated hours.
+        </p>
+        <p><a asp-page="/Organizer/Volunteers">&larr; Back to Volunteers</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @if (Model.Message is not null)
+    {
+        <div class="card vol-ok" role="status">@Model.Message</div>
+    }
+
+    <div class="card">
+        <p style="margin:0 0 12px;">
+            <strong>@Model.InScope</strong> of @Model.Total active volunteers are in scope.
+            @if (Model.InScope == 0)
+            {
+                <span style="color:#7a5b00;">
+                    While the roster is empty the planner falls back to <strong>every</strong> active
+                    volunteer, so a run still produces a plan — it just is not scoped yet.
+                </span>
+            }
+        </p>
+
+        @* Mobile-first: the table scrolls sideways rather than squashing the availability column,
+           which is the column somebody actually reads before deciding. *@
+        <style>
+            .roster-grid td, .roster-grid th { padding: 10px 14px; vertical-align: top; }
+            .roster-grid th { white-space: nowrap; }
+            .roster-days { display: block; font-size: 12px; color: #4b5563; margin-top: 2px; }
+            .roster-off { color: #b91c1c; }
+            .roster-in { background: #f0fdf4; }
+            @@media (max-width: 480px) {
+                .roster-grid td, .roster-grid th { padding: 8px 10px; }
+            }
+        </style>
+
+        <div style="overflow-x:auto;">
+            <table class="grid roster-grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Volunteer</th>
+                        <th scope="col">What they answered</th>
+                        <th scope="col">Assigned</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr class="@(r.InRoster ? "roster-in" : null)">
+                        <td>
+                            <strong>@r.Name</strong>
+                            <span class="roster-days">@r.Email</span>
+                            @if (r.InRoster && !string.IsNullOrWhiteSpace(r.Note))
+                            {
+                                <span class="roster-days">@r.Note</span>
+                            }
+                        </td>
+                        <td>
+                            @if (r.Availability.Count == 0)
+                            {
+                                @* ⚠️ Worth stating rather than leaving blank: somebody with no
+                                   answer can never be auto-assigned, roster or not. *@
+                                <span class="roster-off">No availability submitted — cannot be auto-assigned.</span>
+                            }
+                            else
+                            {
+                                foreach (var d in r.Availability)
+                                {
+                                    <span class="roster-days @(d.Working ? null : "roster-off")">
+                                        @d.Day.ToString("ddd dd MMM"): @d.Label
+                                    </span>
+                                }
+                            }
+                        </td>
+                        <td>@(r.AssignedTasks == 0 ? "—" : r.AssignedTasks.ToString())</td>
+                        <td>
+                            @if (r.InRoster)
+                            {
+                                <form method="post" asp-page-handler="Remove">
+                                    <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                    <button type="submit">Remove from scope</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <form method="post" asp-page-handler="Add">
+                                    <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                    <button type="submit">Add to scope</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Model.Total == 0)
+        {
+            <p>No active volunteers in this edition yet.</p>
+        }
+    </div>
+}

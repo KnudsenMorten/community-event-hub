@@ -13,7 +13,16 @@ public sealed record ErpCustomer(
     string? Currency,
     string? VatZone,
     string? Email,
-    string? ErpCustomerNumber);            // existing e-conomic customer number, if known
+    string? ErpCustomerNumber,             // existing e-conomic customer number, if known
+    // §1305 — the address block, sent on CREATE only (the CEH shop's registration replaces the
+    // registration webhook, which sent these). Optional + defaulted so every existing construction is
+    // unchanged; e-conomic stays the master of an existing customer's address.
+    string? Address = null,
+    string? Zip = null,
+    string? City = null,
+    string? Country = null,
+    string? Phone = null,
+    string? Website = null);
 
 /// <summary>One ERP contact (person) to attach to an ERP customer, with a role.</summary>
 public sealed record ErpContact(
@@ -120,8 +129,22 @@ public interface IEconomicErpClient
     /// </summary>
     Task<string?> FindCustomerNumberAsync(ErpCustomer customer, CancellationToken ct);
 
+    /// <summary>
+    /// §1309 — the e-conomic customer with this CVR / VAT number, or null. CVR ONLY — never the name: when CEH creates the
+    /// customer at registration it must never adopt another legal entity that merely has the same name (operator
+    /// 2026-09-27: "it is very important that the contract, reservation, registration, billing goes to the correct legal
+    /// entity"). A country prefix on both sides must agree (DK12345678 is not SE12345678).
+    /// </summary>
+    Task<string?> FindCustomerNumberByCvrAsync(string? cvr, CancellationToken ct) => Task.FromResult<string?>(null);
+
     /// <summary>Create the customer in e-conomic; returns the new customer number.</summary>
     Task<string> CreateCustomerAsync(ErpCustomer customer, CancellationToken ct);
+
+    /// <summary>
+    /// §1312 — READ one customer's billing identity (name, CVR, address, e-mail, currency, VAT zone) by number, so a change
+    /// made in e-conomic reaches CEH. Null when unknown or not configured. The default returns null (test doubles).
+    /// </summary>
+    Task<ErpCustomer?> GetCustomerAsync(string customerNumber, CancellationToken ct) => Task.FromResult<ErpCustomer?>(null);
 
     /// <summary>Update an existing e-conomic customer (by its customer number).</summary>
     Task UpdateCustomerAsync(string erpCustomerNumber, ErpCustomer customer, CancellationToken ct);

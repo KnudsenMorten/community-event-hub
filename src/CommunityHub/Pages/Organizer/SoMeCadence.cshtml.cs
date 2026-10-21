@@ -47,7 +47,7 @@ public class SoMeCadenceModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
         Rows = await _cadence.GetAllAsync(me.EventId, ct);
         return Page();

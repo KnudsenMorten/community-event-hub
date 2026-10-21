@@ -1,0 +1,17 @@
+@page
+@model CommunityHub.Pages.Sponsor.Shop.BoothMapModel
+@{
+    ViewData["Title"] = "Booth map";
+}
+
+<div class="card">
+    <h1>Booth map</h1>
+    <partial name="_ShopNotices" model="Model" />
+    @if (!Model.NotAvailableYet && !Model.NoCompany)
+    {
+        <p>Click a green booth to see it and add it to your cart. Availability is live. A booth is optional — you can
+           also sponsor without one (<a asp-page="/Sponsor/Shop/Index" asp-route-Group="Branding">branding</a>,
+           <a asp-page="/Sponsor/Shop/Index" asp-route-Group="Packages">packages</a>).</p>
+        @if (Model.MapView is not null) { <partial name="_ShopBoothMap" model="Model.MapView" /> }
+    }
+</div>

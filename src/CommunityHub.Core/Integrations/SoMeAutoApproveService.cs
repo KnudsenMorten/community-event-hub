@@ -115,8 +115,12 @@ public sealed class SoMeAutoApproveService
         // 🔴 §1170 — so the notice can show the post AS IT WILL READ. Optional like the rest, but a
         // null composer means the mail falls back to the raw template, which is what he called
         // useless — so it is registered in both hosts.
-        SoMePostComposer? composer = null)
+        SoMePostComposer? composer = null,
+        // §1313 — the picture that will go out, attached (operator: "include the graphics that go out as well so we
+        // can validate the picture").
+        SoMeMailPreview? preview = null)
     {
+        _preview = preview;
         _composer = composer;
         _db = db;
         _gate = gate;
@@ -329,6 +333,8 @@ public sealed class SoMeAutoApproveService
     /// happened, nor stop the remaining posts being notified — the approval is the fact, the notice
     /// is a report of it.</para>
     /// </remarks>
+    private readonly SoMeMailPreview? _preview;
+
     private async Task NotifyAsync(SoMePost post, int eventId, string? subjectLabel, CancellationToken ct)
     {
         if (_email is null) return;
@@ -405,6 +411,15 @@ public sealed class SoMeAutoApproveService
                 + $"<p><a href=\"{System.Net.WebUtility.HtmlEncode(absoluteEditUrl)}\">"
                 + "Change the date or hold this post &rarr;</a></p>";
 
+            // §1313 — the picture that will publish, attached, so it can be checked from the mail.
+            SoMeMailPreview.Preview? media = null;
+            if (_preview is not null)
+            {
+                media = await _preview.BuildAsync(post, ct);
+                if (!string.IsNullOrWhiteSpace(media.MediaNote))
+                    body += $"<p><strong>Media:</strong> {System.Net.WebUtility.HtmlEncode(media.MediaNote)}</p>";
+            }
+
             // 🔴 RING-EXEMPT, AND THIS LINE IS THE WHOLE FEATURE.
             //
             // ⚠️ MEASURED IN PROD 2026-08-11, minutes after this shipped without it: all 19 notices
@@ -428,7 +443,10 @@ public sealed class SoMeAutoApproveService
             // for. This is not that: it is the same audience every other speaker/session pending-task
             // mail now uses, and NoticeEmail remains the fallback when no options are wired.
             var to = _emailOptions?.SpeakerSessionRecipients() ?? new[] { NoticeEmail };
-            await _email.SendToManyAsync(to, subject, body, ct);
+            if (media?.Picture is not null)
+                await _email.SendWithAttachmentsAsync(to.First(), subject, body, new[] { media.Picture }, to.Skip(1).ToList(), ct);
+            else
+                await _email.SendToManyAsync(to, subject, body, ct);
         }
         catch (Exception ex)
         {
