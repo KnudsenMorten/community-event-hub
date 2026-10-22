@@ -207,8 +207,8 @@ public class SessionsModel : PageModel
     /// §1025 — every speaker in the edition, for the pickers. Ordered by name because that is how
     /// he looks for a person; the id is shown too, since two people can share a display name.
     /// </summary>
-    public IReadOnlyList<(int Id, string Name, string Email)> SpeakerPickList { get; private set; } =
-        Array.Empty<(int, string, string)>();
+    public IReadOnlyList<SessionManagementService.LinkablePerson> SpeakerPickList { get; private set; } =
+        Array.Empty<SessionManagementService.LinkablePerson>();
 
     /// <summary>
     /// §1023 — show TEST sessions in the grid. Off by default: a test session reaches no attendee
@@ -297,10 +297,15 @@ public class SessionsModel : PageModel
         /// could be silently absent from the whole campaign, with nothing on any page saying why and
         /// no way to undo it.
         /// </remarks>
-        bool IsTestData = false)
+        bool IsTestData = false,
+        /// <summary>§1366 — the linked people WITH names, so an inactive one (not in the picker) stays listed.</summary>
+        IReadOnlyList<(int Id, string Name)>? SpeakerLinkList = null)
     {
         /// <summary>§1025 — never null, so the view can just call Contains.</summary>
         public IReadOnlyList<int> SpeakerIds => SpeakerIdList ?? Array.Empty<int>();
+
+        /// <summary>§1366 — never null.</summary>
+        public IReadOnlyList<(int Id, string Name)> SpeakerLinks => SpeakerLinkList ?? Array.Empty<(int, string)>();
 
         /// <summary>
         /// True when this session can be deleted with no attendee data loss
@@ -1097,19 +1102,12 @@ public class SessionsModel : PageModel
             // §1025 — the ids behind the names, for the picker's pre-ticking.
             SpeakerIdList: r.SpeakerKeys.Select(k => k.ParticipantId).ToList(),
             ExcludeFromSoMeAnnouncements: r.ExcludeFromSoMeAnnouncements,
-            IsTestData: r.IsTestData)).ToList();
+            IsTestData: r.IsTestData,
+            SpeakerLinkList: r.SpeakerKeys.Select(k => (k.ParticipantId, k.Name ?? "")).ToList())).ToList();
 
-        // §1025 — the speaker picker's options: everyone in the edition who IS a speaker. Read from
-        // SpeakerProfiles rather than from Role, so a person who also holds another role (an
-        // organizer who speaks) is still offered.
-        SpeakerPickList = (await _db.SpeakerProfiles.AsNoTracking()
-                .Where(sp => sp.EventId == eventId)
-                .Join(_db.Participants, sp => sp.ParticipantId, p => p.Id,
-                    (sp, p) => new { p.Id, p.FullName, p.Email })
-                .ToListAsync(ct))
-            .Select(x => (x.Id, Name: string.IsNullOrWhiteSpace(x.FullName) ? x.Email : x.FullName, x.Email))
-            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+        // §1366 — the picker's options: every speaker, organizer and volunteer, plus anyone with a speaker profile.
+        // §1025 read SpeakerProfiles only, which missed hand-added speakers and every organizer and volunteer.
+        SpeakerPickList = await SessionManagementService.GetLinkablePeopleAsync(_db, eventId, ct);
 
         // §1005.3 — the tracks this edition actually uses, for the Track dropdown. There is no
         // configured track list (they arrive with the import), so the sessions ARE the list.

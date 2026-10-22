@@ -538,7 +538,17 @@
                                                               padding:2px 0;cursor:pointer;">
                                                     <input type="checkbox" name="EditSpeakerIds" value="@sp.Id"
                                                            checked="@r.SpeakerIds.Contains(sp.Id)" />
-                                                    <span>@sp.Name <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
+                                                    <span>@sp.Name @if (sp.Role != ParticipantRole.Speaker) {<span class="muted" style="font-size:11.5px;">(@sp.Role)</span>} <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
+                                                </label>
+                                            }
+                                            @* §1366 — an inactive person already on this session stays listed (ticked), or the
+                                               save would silently unlink them; untick to remove. *@
+                                            @foreach (var gone in r.SpeakerLinks.Where(k => !Model.SpeakerPickList.Any(sp => sp.Id == k.Id)))
+                                            {
+                                                <label style="display:flex;align-items:center;gap:6px;font-size:13px;
+                                                              padding:2px 0;cursor:pointer;">
+                                                    <input type="checkbox" name="EditSpeakerIds" value="@gone.Id" checked />
+                                                    <span>@gone.Name <span class="muted" style="font-size:11.5px;">(inactive)</span></span>
                                                 </label>
                                             }
                                         </div>
@@ -694,7 +704,7 @@
                     {
                         <label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer;">
                             <input type="checkbox" name="NewSpeakerIds" value="@sp.Id" />
-                            <span>@sp.Name <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
+                            <span>@sp.Name @if (sp.Role != ParticipantRole.Speaker) {<span class="muted" style="font-size:11.5px;">(@sp.Role)</span>} <span class="muted" style="font-size:11.5px;">@sp.Email</span></span>
                         </label>
                     }
                 </div>

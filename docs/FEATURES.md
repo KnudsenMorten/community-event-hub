@@ -4234,6 +4234,11 @@ the hub. *On a session that came from the call-for-speakers system, that system 
 list and will replace your change at the next import — the panel says so, in place, rather than
 letting you discover it.*
 
+*(✅ 2026-10-22)* The speaker list offers **every active speaker, organizer and volunteer**, not only speakers who had
+already filled in their speaker form — so a speaker you added by hand, or an organizer or volunteer who presents, can
+be linked. A person's role is shown beside the name when they are not a speaker. Inactive people are not offered; one
+who is already on a session stays listed there, ticked and marked inactive, so saving never drops them by accident.
+
 **The end time is calculated** from the start plus the length, and updates as you change either. It
 cannot disagree with the length any more, which matters because the duration published to the event
 site is derived from it.

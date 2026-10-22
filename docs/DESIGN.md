@@ -1683,6 +1683,13 @@ view filters and per-room lookup. Enums are stored as int (`HasConversion<int>()
   **synthetic `hub-<guid>` `SessionizeId`** that the Sessionize upsert (matched by Sessionize id) never
   hits, so a re-import never touches or deletes hub-added sessions. `UpdateSessionAsync` edits
   type/length/room + the QR-eval form URL.
+- **Who a session can be linked to (§1366).** The Sessions page's speaker picker comes from
+  `SessionManagementService.GetLinkablePeopleAsync`: every **active** (`ParticipantActivation`) Speaker, Organizer
+  and Volunteer of the edition, plus anyone with a speaker profile (a sponsor who speaks); a non-Speaker shows its
+  role beside the name. Before, the list came from SpeakerProfiles only — which exist once the speaker form is
+  filled — so hand-added speakers, organizers and volunteers were missing. Saving accepts any participant of the
+  edition. Because the edit form posts only ticked boxes, an **inactive person already linked** stays in that
+  session's picker, ticked and marked "(inactive)" — leaving them out would unlink them on the next save.
 - **Per-room QR (SharePoint seam).** Same clean-seam pattern as the Backstage/exhibitor APIs:
   `IRoomQrProvider` with a no-op default (`NullRoomQrProvider`, `CanProvision=false`, **no faked call**).
   `ProvisionRoomQrAsync` calls the provider to generate the QR (encoding the room deep-link) and store

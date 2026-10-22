@@ -59,17 +59,17 @@ Every signed-in person also gets the **AI Community Helper**, which answers ques
 
 ## By the numbers
 
-Measured on this repository on 2026-10-21.
+Measured on this repository on 2026-10-22.
 
 | | |
 |---|---|
 | Delivered features in the catalog | **250** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
-| Application code (C#, excluding migrations) | **232,747** lines in 1,162 files |
-| Razor views | **49,570** lines in 292 files (227 pages) |
+| Application code (C#, excluding migrations) | **232,780** lines in 1,162 files |
+| Razor views | **49,580** lines in 292 files (227 pages) |
 | Scheduled background jobs | **47** timer-triggered functions, plus an order webhook |
 | Database migrations | **292** EF Core migrations |
 | Branded e-mail templates | **50** |
-| Automated tests | **7,620** xUnit tests (159,123 lines of test code), plus Pester and Playwright suites |
+| Automated tests | **7,622** xUnit tests (159,188 lines of test code), plus Pester and Playwright suites |
 | Infrastructure as code | **7** Bicep files (1,087 lines) |
 
 ---
@@ -257,7 +257,7 @@ A summary of what is delivered today. Each area has much more detail — and the
 
 - **Hourly Sessionize import** of accepted speakers and sessions, with a dry-run preview and safe endpoint switching.
 - **Public `/Sessions`, `/Speakers`, `/Agenda`, `/MasterClasses` and `/Contributors`** pages with filters for track, level, length and time slot; only published speakers appear.
-- **The hub owns the schedule**: edit any session, mark keynotes and all-tracks sessions, and get told when your public event site disagrees.
+- **The hub owns the schedule**: edit any session and choose who is on it (any active speaker, organizer or volunteer), mark keynotes and all-tracks sessions, and get told when your public event site disagrees.
 - **The hub is the master for speaker details**: a mail tells you, field by field, where your event platform differs and which side to update.
 - **Session feedback by QR code or on room tablets**, turned into per-session reports delivered to the speakers. Tablets are enrolled and locked by device management, follow the room's schedule, show faces, stars or points, report their battery, and have a maintenance mode; you choose what attendees are asked and can set test votes aside before the event.
 - A master-class Q&A board and ready-to-share promotion material for speakers.

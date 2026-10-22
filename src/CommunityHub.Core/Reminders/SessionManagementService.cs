@@ -203,6 +203,41 @@ public sealed class SessionManagementService
         return session;
     }
 
+    /// <summary>One person the session pickers offer (§1366).</summary>
+    public sealed record LinkablePerson(int Id, string Name, string Email, ParticipantRole Role);
+
+    /// <summary>
+    /// 🔴 §1366 — everyone a session may be linked to: every Speaker, Organizer and Volunteer of the edition, plus anyone
+    /// with a speaker profile (a sponsor who speaks).
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-10-22: *"i cannot link speakers or volunteers or organizers to a session that has been created
+    /// manually. speakers that i created manually dont show in the list"*. §1025 read the list from SpeakerProfiles only,
+    /// and a profile is created when the speaker fills the speaker form — so a speaker added by hand, and every organizer
+    /// and volunteer, was missing. Saving always accepted any participant of the edition; only the list was too narrow.
+    /// <para>Active people only (operator: *"list must also only show active not inactive"*), by the shared
+    /// <see cref="ParticipantActivation"/> rule. ⚠️ The edit form posts only ticked boxes, so an inactive person ALREADY
+    /// linked would be silently unlinked on the next save — the page therefore keeps each session's own linked inactive
+    /// people in that session's picker, ticked and marked inactive.</para>
+    /// </remarks>
+    /// <remarks>Static over the context: the Sessions page's read path is built without this service in its tests.</remarks>
+    public static async Task<IReadOnlyList<LinkablePerson>> GetLinkablePeopleAsync(
+        CommunityHubDbContext db, int eventId, CancellationToken ct = default)
+    {
+        var withProfile = db.SpeakerProfiles.Where(sp => sp.EventId == eventId).Select(sp => sp.ParticipantId);
+        var rows = await db.Participants.AsNoTracking()
+            .Where(ParticipantActivation.IsActiveExpr)
+            .Where(p => p.EventId == eventId
+                        && (p.Role == ParticipantRole.Speaker || p.Role == ParticipantRole.Organizer
+                            || p.Role == ParticipantRole.Volunteer || withProfile.Contains(p.Id)))
+            .Select(p => new { p.Id, p.FullName, p.Email, p.Role })
+            .ToListAsync(ct);
+        return rows
+            .Select(x => new LinkablePerson(x.Id, string.IsNullOrWhiteSpace(x.FullName) ? x.Email : x.FullName, x.Email, x.Role))
+            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>
     /// Update the editable session fields (§299.8/b7). The LENGTH is the
     /// source-of-truth integer minutes (positive, ≤ the configured max; the legacy

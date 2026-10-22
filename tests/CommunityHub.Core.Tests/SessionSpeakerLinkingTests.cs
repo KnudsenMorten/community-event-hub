@@ -149,6 +149,71 @@ public sealed class SessionSpeakerLinkingTests
         Assert.Equal(1, await LinkCount(db, s.Id));
     }
 
+    /// <summary>
+    /// 🔴 §1366 — the picker offers hand-added speakers, organizers and volunteers, not only people with a speaker
+    /// profile. Operator 2026-10-22: "speakers that i created manually dont show in the list".
+    /// </summary>
+    [Fact]
+    public async Task The_picker_offers_speakers_without_a_profile_organizers_and_volunteers()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedSessionAsync(db);
+        var handAdded = await SeedSpeakerAsync(db, "hand@x.dk");     // no SpeakerProfile
+        var organizer = await SeedRoleAsync(db, "org@x.dk", ParticipantRole.Organizer);
+        var volunteer = await SeedRoleAsync(db, "vol@x.dk", ParticipantRole.Volunteer);
+        var sponsorWhoSpeaks = await SeedRoleAsync(db, "sp@x.dk", ParticipantRole.Sponsor);
+        db.SpeakerProfiles.Add(new SpeakerProfile { EventId = EventId, ParticipantId = sponsorWhoSpeaks });
+        await db.SaveChangesAsync();
+
+        var ids = (await SessionManagementService.GetLinkablePeopleAsync(db, EventId)).Select(p => p.Id).ToList();
+
+        Assert.Contains(handAdded, ids);
+        Assert.Contains(organizer, ids);
+        Assert.Contains(volunteer, ids);
+        Assert.Contains(sponsorWhoSpeaks, ids);
+    }
+
+    [Fact]
+    public async Task The_picker_leaves_out_attendees_plain_sponsors_inactive_people_and_other_editions()
+    {
+        using var db = ScenarioFixture.NewDb();
+        await SeedSessionAsync(db);
+        var attendee = await SeedRoleAsync(db, "att@x.dk", ParticipantRole.Attendee);
+        var sponsor = await SeedRoleAsync(db, "spo@x.dk", ParticipantRole.Sponsor);
+        // Operator 2026-10-22: "list must also only show active not inactive" — both halves of the activation rule.
+        var deactivated = await SeedRoleAsync(db, "off@x.dk", ParticipantRole.Speaker);
+        var preselected = await SeedRoleAsync(db, "pre@x.dk", ParticipantRole.Organizer);
+        (await db.Participants.FindAsync(deactivated))!.IsActive = false;
+        (await db.Participants.FindAsync(preselected))!.LifecycleState = ParticipantLifecycleState.Preselected;
+        var elsewhere = new Participant
+        {
+            EventId = 99, Email = "else@x.dk", FullName = "Else", Role = ParticipantRole.Speaker,
+            IsActive = true, LifecycleState = ParticipantLifecycleState.Active,
+        };
+        db.Participants.Add(elsewhere);
+        await db.SaveChangesAsync();
+
+        var ids = (await SessionManagementService.GetLinkablePeopleAsync(db, EventId)).Select(p => p.Id).ToList();
+
+        Assert.DoesNotContain(attendee, ids);
+        Assert.DoesNotContain(sponsor, ids);
+        Assert.DoesNotContain(deactivated, ids);
+        Assert.DoesNotContain(preselected, ids);
+        Assert.DoesNotContain(elsewhere.Id, ids);
+    }
+
+    private static async Task<int> SeedRoleAsync(CommunityHubDbContext db, string email, ParticipantRole role)
+    {
+        var p = new Participant
+        {
+            EventId = EventId, Email = email, FullName = "P " + email, Role = role, IsActive = true,
+            LifecycleState = ParticipantLifecycleState.Active,
+        };
+        db.Participants.Add(p);
+        await db.SaveChangesAsync();
+        return p.Id;
+    }
+
     [Fact]
     public async Task A_new_hub_session_can_be_created_WITH_its_speakers()
     {
