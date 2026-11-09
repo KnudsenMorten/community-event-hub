@@ -335,7 +335,8 @@ A summary of what is delivered today. Each area has much more detail — and the
           (managed identity, no passwords)
 
    Optional integrations: Sessionize · Zoho Backstage · finance/ERP ·
-   SharePoint document library · LinkedIn company page · SMTP relay · AI provider
+   SharePoint document library · LinkedIn company page · SMTP relay · AI provider ·
+   website (WordPress posts kept current)
 ```
 
 - **Two apps, one core.** The web app serves every hub and the organizer area; the Functions app runs the scheduled work (reminders, imports, reconciliation, social-media dispatch, report publishing). Both use `CommunityHub.Core`, so a rule is written once.

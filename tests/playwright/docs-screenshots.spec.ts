@@ -106,6 +106,17 @@ const FAKE_EMAIL = (i: number) => `person${i + 1}@example.org`;
 const FAKE_PHONE = '+45 00 00 00 00';
 
 /**
+ * Images the intro serves that a capture may legitimately NOT refresh, each with its reason. The earlier image is
+ * kept and the run says so — it must be a real page, never a refusal (checked by eye when an entry is added).
+ * Remove an entry as soon as the page can be captured again.
+ */
+const KNOWN_UNCAPTURABLE: Record<string, string> = {
+    // 2026-11-09: /volunteer/myschedule answers 404 until the organizers release volunteer assignments
+    // (VolunteerAssignmentGate). The kept 2026-08-10 image is the real (empty) schedule page.
+    'volunteer-schedule': 'volunteer schedule not released to volunteers yet (404 by design)',
+};
+
+/**
  * 🔒 Words that are PRODUCT VOCABULARY and must never be treated as somebody's name, however they
  * appear in a fixture account. The roles are here because the test participants are named after
  * them; the rest are the nouns this UI is built out of.
@@ -240,6 +251,30 @@ async function redactContacts(page: Page, map: AnonMap) {
                 const n = swap(el.value); if (n !== el.value) el.value = n;
             }
         }
+
+        // 🔴 2026-11-09 — A PHONE NUMBER WITHOUT "+" IS STILL A PHONE NUMBER. The pattern above needs a
+        // leading "+", so a Danish "60519651" on the organizer dashboard survived into a PNG (caught on
+        // review before publishing). A bare 8-digit run cannot be told apart from an order number by
+        // shape, so phone data is found by PLACE: every cell under a Phone/Mobile/Telefon column header,
+        // every tel: link, and every tel / phone input.
+        const phoneHeader = /^(phone|mobile|telefon|tlf\.?|mobil|phone number)\b/i;
+        for (const table of Array.from(document.querySelectorAll('table'))) {
+            const headers = Array.from(table.querySelectorAll('thead th, tr:first-child th'));
+            headers.forEach((th, i) => {
+                if (!phoneHeader.test((th.textContent ?? '').trim())) return;
+                for (const row of Array.from(table.querySelectorAll('tbody tr'))) {
+                    const cell = (row as HTMLTableRowElement).cells[i];
+                    if (cell && (cell.textContent ?? '').trim() !== '') cell.textContent = '+45 00 00 00 00';
+                }
+            });
+        }
+        for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="tel:"]'))) {
+            a.setAttribute('href', 'tel:+4500000000');
+            if (/\d{4}/.test(a.textContent ?? '')) a.textContent = '+45 00 00 00 00';
+        }
+        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>('input[type="tel"], input[name*="phone" i], input[id*="phone" i]'))) {
+            if (inp.value.trim() !== '') { inp.value = '+45 00 00 00 00'; inp.setAttribute('value', '+45 00 00 00 00'); }
+        }
     }, map);
 }
 
@@ -334,6 +369,37 @@ async function assertNoContactData(page: Page, map: AnonMap, where: string) {
     });
     const hay = text.toLowerCase();
 
+    // 2026-11-09 — the places phone numbers live must hold only the placeholder (or nothing): a bare
+    // "60519651" has no "+" for the pattern below to see.
+    const phonePlaces = await page.evaluate((fake: string) => {
+        const bad: string[] = [];
+        const phoneHeader = /^(phone|mobile|telefon|tlf\.?|mobil|phone number)\b/i;
+        for (const table of Array.from(document.querySelectorAll('table'))) {
+            const headers = Array.from(table.querySelectorAll('thead th, tr:first-child th'));
+            headers.forEach((th, i) => {
+                if (!phoneHeader.test((th.textContent ?? '').trim())) return;
+                for (const row of Array.from(table.querySelectorAll('tbody tr'))) {
+                    const v = ((row as HTMLTableRowElement).cells[i]?.textContent ?? '').trim();
+                    if (v !== '' && v !== fake && /\d{4}/.test(v)) bad.push(v);
+                }
+            });
+        }
+        for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="tel:"]'))) {
+            if (a.getAttribute('href') !== 'tel:+4500000000') bad.push(a.getAttribute('href') ?? '');
+        }
+        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>('input[type="tel"], input[name*="phone" i], input[id*="phone" i]'))) {
+            const v = inp.value.trim();
+            if (v !== '' && v !== fake) bad.push(v);
+        }
+        return bad;
+    }, FAKE_PHONE);
+    expect(phonePlaces, `a phone number survived in a phone column, tel: link or phone field on ${where}: ${phonePlaces.join(', ')}`).toEqual([]);
+
+    // Belt-and-braces for a bare Danish number anywhere in the text: 8 digits, optionally in pairs.
+    const bareDk = (text.match(/(?<![\d+/.-])\d{2} ?\d{2} ?\d{2} ?\d{2}(?![\d/.-])/g) ?? [])
+        .filter(n => /\s/.test(n) || /^[2-9]/.test(n));
+    if (bareDk.length > 0) console.warn(`⚠️ ${where}: 8-digit numbers visible (check they are not phone numbers): ${bareDk.slice(0, 5).join(', ')}`);
+
     const leaked = map.realEmails.filter(s => s.length >= 4 && hay.includes(s.toLowerCase()));
     expect(leaked, `a real e-mail address survived redaction on ${where}: ${leaked.join(', ')}`).toEqual([]);
 
@@ -342,7 +408,10 @@ async function assertNoContactData(page: Page, map: AnonMap, where: string) {
         .filter(a => !/@example\.org$/i.test(a));
     expect(stray, `an unredacted e-mail address is visible on ${where}: ${stray.join(', ')}`).toEqual([]);
 
-    const phones = (text.match(/\+\d[\d\s().-]{7,}\d/g) ?? [])
+    // Spaces (incl. no-break) inside a number, but never a TAB or line break: innerText joins table cells
+    // with a tab, so "\s" read the redacted "+45 00 00 00 00" plus the NEXT cell's "73" as one phone number
+    // (organizer-dashboard, 2026-11-09). A real number never spans two cells.
+    const phones = (text.match(/\+\d[\d  ().-]{7,}\d/g) ?? [])
         .map(p => p.trim())
         .filter(p => p !== FAKE_PHONE);
     expect(phones, `an unredacted phone number is visible on ${where}: ${phones.join(', ')}`).toEqual([]);
@@ -657,7 +726,11 @@ test.describe('documentation screenshots', () => {
                 .filter(f => f.toLowerCase().endsWith('.png'))
                 .map(f => f.replace(/\.png$/i, ''))
                 .filter(slug => !mirrored.includes(slug))
+                .filter(slug => !(slug in KNOWN_UNCAPTURABLE))
             : [];
+        for (const [slug, why] of Object.entries(KNOWN_UNCAPTURABLE)) {
+            if (!mirrored.includes(slug)) console.warn(`⚠️ ${slug} kept from an earlier capture: ${why}`);
+        }
         expect(staleInApp,
             'images the CEH intro serves that this capture did not refresh — they are older than the '
             + 'rest of the set, and a stale one is what published a refusal as the feature:\n'
