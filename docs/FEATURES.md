@@ -23,7 +23,7 @@ Hosting & Reliability.
 
 The complete delivered set — **251 entries** (chapters 1–12 summarise an area; every later entry is
 one dated delivery), in the order they shipped. Nothing here is planned or partial; the few
-capabilities retired since they shipped are marked *(retired)*, here and where they appear.
+capabilities retired since they shipped are marked *(retired)*, here and where they appear. The same entries, grouped by area: [Features by area](#features-by-area).
 
 | # | Feature | Shipped |
 | --- | --- | --- |
@@ -278,6 +278,310 @@ capabilities retired since they shipped are marked *(retired)*, here and where t
 | 245 | ["Something is missing" — marked for every role](#245-something-is-missing--marked-for-every-role--2026-09-27) | 2026-09-27 |
 | 249 | [Lower monitoring cost — quiet by default, full detail on demand](#249-lower-monitoring-cost--quiet-by-default-full-detail-on-demand--2026-10-05) | 2026-10-05 |
 | 250 | [A visa form for speakers and volunteers who need one](#250-a-visa-form-for-speakers-and-volunteers-who-need-one--2026-10-28) | 2026-10-28 |
+
+
+---
+
+## Features by area
+
+The same entries as the index above, grouped by what they are about. Chapters 1–12 are the area
+summaries; each later entry is one dated delivery and is listed under the area it belongs to.
+
+### Platform, configuration & the AI helper
+
+- [1. Platform — built for every edition](#1-platform--built-for-every-edition)
+- [13. Accessibility — usable by keyboard and screen reader](#13-accessibility--usable-by-keyboard-and-screen-reader--2026-06-15)
+- [14. Bilingual UI — English and Danish *(retired)*](#14-bilingual-ui--english-and-danish--2026-06-15-retired-2026-07-07)
+- [16. Feature settings — turn capabilities on when you're ready](#16-feature-settings--turn-capabilities-on-when-youre-ready--2026-06-17)
+- [22. AI Community Helper — ask anything, grounded and privacy-gated](#22-ai-community-helper--ask-anything-grounded-and-privacy-gated--2026-06-27)
+- [52. Sync direction, order-driven sponsor tasks and funded counts — now documented](#52-sync-direction-order-driven-sponsor-tasks-and-funded-counts--now-documented--2026-07-23)
+- [55. Rooms, lengths and levels — configured, validated, flexible](#55-rooms-lengths-and-levels--configured-validated-flexible--2026-07-23)
+- [57. The introduction page only lists features this event actually has](#57-the-introduction-page-only-lists-features-this-event-actually-has--2026-07-26)
+- [60. Controls that say exactly what they do](#60-controls-that-say-exactly-what-they-do--2026-07-29)
+- [71. Set how often the background jobs run — yourself](#71-set-how-often-the-background-jobs-run--yourself--2026-08-05)
+- [80. A test account is marked as one, whatever you call it](#80-a-test-account-is-marked-as-one-whatever-you-call-it--2026-08-07)
+- [81. Your test accounts stop ordering lunch](#81-your-test-accounts-stop-ordering-lunch--2026-08-07)
+- [89. The header counts down to the ticket sale](#89-the-header-counts-down-to-the-ticket-sale--2026-08-09)
+- [131. Skipped on purpose is not a failure](#131-skipped-on-purpose-is-not-a-failure--2026-08-21)
+- [135. Names where a person reads, numbers where a machine matches](#135-names-where-a-person-reads-numbers-where-a-machine-matches--2026-08-21)
+- [176. Web addresses work without typing "https://"](#176-web-addresses-work-without-typing-https--2026-08-28)
+- [221. The public edition builds, and its setup guide matches what it ships](#221-the-public-edition-builds-and-its-setup-guide-matches-what-it-ships--2026-09-14)
+- [222. A fresh install comes with default content](#222-a-fresh-install-comes-with-default-content--2026-09-14)
+- [223. Installing your own copy, step by step, without surprises](#223-installing-your-own-copy-step-by-step-without-surprises--2026-09-15)
+- [245. "Something is missing" — marked for every role](#245-something-is-missing--marked-for-every-role--2026-09-27)
+
+### Sign-in & embedding
+
+- [2. Sign-in & embedding — frictionless, no new passwords](#2-sign-in--embedding--frictionless-no-new-passwords)
+- [25. One-tap sign-in from email, and stay signed in](#25-one-tap-sign-in-from-email-and-stay-signed-in--2026-06-29)
+- [40. A heads-up before you leave the hub](#40-a-heads-up-before-you-leave-the-hub--2026-06-30)
+- [46. One-tap sign-in that genuinely signs you in](#46-one-tap-sign-in-that-genuinely-signs-you-in--2026-06-30)
+
+### People, roles & onboarding
+
+- [3. Crew profiles & roles — the right hub for each person](#3-crew-profiles--roles--the-right-hub-for-each-person)
+- [18. Get-started wizards for every role](#18-get-started-wizards-for-every-role--2026-06-25)
+- [26. Get-started, your way — edit any step, any time](#26-get-started-your-way--edit-any-step-any-time--2026-06-29)
+- [32. Get-started and your task list, finally in step](#32-get-started-and-your-task-list-finally-in-step--2026-06-30)
+- [51. Lifecycle truth — drop-outs stop costing money](#51-lifecycle-truth--drop-outs-stop-costing-money--2026-07-0708)
+- [54. Speaker categories — Community, Sponsor, Guest](#54-speaker-categories--community-sponsor-guest--2026-07-23)
+- [62. Get Started now opens with a welcome](#62-get-started-now-opens-with-a-welcome--2026-07-31)
+- [82. Add somebody the sync has not heard of yet](#82-add-somebody-the-sync-has-not-heard-of-yet--2026-08-07)
+- [83. A step that is not finished tells you what is missing](#83-a-step-that-is-not-finished-tells-you-what-is-missing--2026-08-07)
+- [109. Media Management: the picture and video libraries, in the hub](#109-media-management-the-picture-and-video-libraries-in-the-hub--2026-08-11)
+- [113. Get Started tells the whole team what is already done](#113-get-started-tells-the-whole-team-what-is-already-done--2026-08-13)
+- [117. One status board for every role, with filters](#117-one-status-board-for-every-role-with-filters--2026-08-13)
+- [153. Speaker and volunteer photos are also saved under the person's name](#153-speaker-and-volunteer-photos-are-also-saved-under-the-persons-name--2026-08-25)
+- [205. Who has not finished Get started](#205-who-has-not-finished-get-started--2026-09-12)
+- [206. Email export on the participant status board](#206-email-export-on-the-participant-status-board--2026-09-12)
+- [207. Filters that mean what they say, and test users out of the way](#207-filters-that-mean-what-they-say-and-test-users-out-of-the-way--2026-09-12)
+- [235. People who wear two hats reach both of them](#235-people-who-wear-two-hats-reach-both-of-them--2026-09-20)
+
+### Volunteers
+
+- [23. Task allocation pipeline & task management](#23-task-allocation-pipeline--task-management--2026-06-27)
+- [84. Move a batch of volunteer tasks into the right category](#84-move-a-batch-of-volunteer-tasks-into-the-right-category--2026-08-07)
+- [154. Volunteer availability shows when each day actually starts](#154-volunteer-availability-shows-when-each-day-actually-starts--2026-08-25)
+- [158. Clearer main-day option for volunteers who attend the conference](#158-clearer-main-day-option-for-volunteers-who-attend-the-conference--2026-08-26)
+- [166. Volunteer photos filed under both name and id](#166-volunteer-photos-filed-under-both-name-and-id--2026-08-28)
+- [167. Volunteer availability at a glance](#167-volunteer-availability-at-a-glance--2026-08-28)
+- [168. More of the sign-up visible where you choose people](#168-more-of-the-sign-up-visible-where-you-choose-people--2026-08-28)
+- [169. Undo a pre-selection without losing the sign-up](#169-undo-a-pre-selection-without-losing-the-sign-up--2026-08-28)
+- [170. A page for volunteer availability](#170-a-page-for-volunteer-availability--2026-08-28)
+- [171. Deactivate says what it does — and asks you to type it](#171-deactivate-says-what-it-does--and-asks-you-to-type-it--2026-08-28)
+- [173. A photo is required if you ask to be featured](#173-a-photo-is-required-if-you-ask-to-be-featured--2026-08-28)
+- [174. LinkedIn profiles on the pre-selection queue](#174-linkedin-profiles-on-the-pre-selection-queue--2026-08-28)
+- [175. Being featured needs a photo *and* a LinkedIn link](#175-being-featured-needs-a-photo-and-a-linkedin-link--2026-08-28)
+- [180. Availability grouped by where each volunteer stands](#180-availability-grouped-by-where-each-volunteer-stands--2026-08-31)
+
+### Forms & logistics (hotel, travel, food, party, visa)
+
+- [4. Self-service forms — crew fill in their own details](#4-self-service-forms--crew-fill-in-their-own-details)
+- [19. Forms, saving and timeliness polish](#19-forms-saving-and-timeliness-polish--2026-06-25)
+- [27. Party RSVP — a quick yes or no, and a head count](#27-party-rsvp--a-quick-yes-or-no-and-a-head-count--2026-06-29)
+- [33. A clearer party sign-up](#33-a-clearer-party-sign-up--2026-06-30)
+- [38. Calendar invites, straight to your inbox](#38-calendar-invites-straight-to-your-inbox--2026-06-30)
+- [41. A simpler lunch sign-up](#41-a-simpler-lunch-sign-up--2026-06-30)
+- [104. Travel reimbursement is not offered to people who cannot claim it](#104-travel-reimbursement-is-not-offered-to-people-who-cannot-claim-it--2026-08-10)
+- [112. Group photos: plan the day, publish the times, hand the partner a list](#112-group-photos-plan-the-day-publish-the-times-hand-the-partner-a-list--2026-08-11)
+- [118. Catering numbers you can order against](#118-catering-numbers-you-can-order-against--2026-08-14)
+- [119. A lunch list for both days, and diets asked once](#119-a-lunch-list-for-both-days-and-diets-asked-once--2026-08-14)
+- [155. The hotel form accepts every real arrival night](#155-the-hotel-form-accepts-every-real-arrival-night--2026-08-25)
+- [236. Catering numbers count each person once](#236-catering-numbers-count-each-person-once--2026-09-20)
+- [250. A visa form for speakers and volunteers who need one](#250-a-visa-form-for-speakers-and-volunteers-who-need-one--2026-10-28)
+
+### Tasks & reminders
+
+- [5. Tasks & reminders — nothing slips, no inbox spam](#5-tasks--reminders--nothing-slips-no-inbox-spam)
+- [47. Nothing waiting slips through](#47-nothing-waiting-slips-through--2026-06-30)
+- [59. Your tasks now do the work in the task](#59-your-tasks-now-do-the-work-in-the-task--2026-07-29)
+- [73. Set the reminder interval separately for each role](#73-set-the-reminder-interval-separately-for-each-role--2026-08-05)
+- [216. Every welcomed sponsor now gets the Get Started reminder](#216-every-welcomed-sponsor-now-gets-the-get-started-reminder--2026-09-14)
+- [224. The Get Started reminder speaks to the person it is sent to](#224-the-get-started-reminder-speaks-to-the-person-it-is-sent-to--2026-09-15)
+
+### Sessions, speakers & surveys
+
+- [6. Sessions & surveys — from call-for-speakers to the schedule](#6-sessions--surveys--from-call-for-speakers-to-the-schedule)
+- [21. Speaker area — session truth, reminders and sharing](#21-speaker-area--session-truth-reminders-and-sharing--2026-06-25)
+- [24. Richer session catalog — track, level, length and live filters](#24-richer-session-catalog--track-level-length-and-live-filters--2026-06-29)
+- [28. Final session evaluations, delivered to speakers *(retired)*](#28-final-session-evaluations-delivered-to-speakers--2026-06-29-retired)
+- [37. Session evaluations -- score and open feedback, delivered to speakers *(retired)*](#37-session-evaluations----score-and-open-feedback-delivered-to-speakers--2026-06-30-retired)
+- [42. Survey results you can actually read](#42-survey-results-you-can-actually-read--2026-06-30)
+- [56. Every hub-made change on the public event site is flagged for the operator](#56-every-hub-made-change-on-the-public-event-site-is-flagged-for-the-operator--2026-07-23)
+- [63. Session reports your other systems can collect for themselves](#63-session-reports-your-other-systems-can-collect-for-themselves--2026-07-31)
+- [64. Rate a session by scanning its QR code](#64-rate-a-session-by-scanning-its-qr-code--2026-07-31)
+- [67. Speaker readiness now includes the get-started steps](#67-speaker-readiness-now-includes-the-get-started-steps--2026-08-04)
+- [85. Told when a session description no longer matches the public site](#85-told-when-a-session-description-no-longer-matches-the-public-site--2026-08-09)
+- [88. Speaker photos show up, wherever they came from](#88-speaker-photos-show-up-wherever-they-came-from--2026-08-09)
+- [90. Told when the public agenda names the wrong speakers](#90-told-when-the-public-agenda-names-the-wrong-speakers--2026-08-09)
+- [91. Mark a session as common to every track](#91-mark-a-session-as-common-to-every-track--2026-08-09)
+- [92. Your keynotes arrive as keynotes](#92-your-keynotes-arrive-as-keynotes--2026-08-09)
+- [95. Edit any session properly, and see who is on it](#95-edit-any-session-properly-and-see-who-is-on-it--2026-08-09)
+- [98. The hub owns the schedule, and cannot be switched out of it](#98-the-hub-owns-the-schedule-and-cannot-be-switched-out-of-it--2026-08-09)
+- [129. The speaker page says which speakers must be marked as guests](#129-the-speaker-page-says-which-speakers-must-be-marked-as-guests--2026-08-21)
+- [141. Speaker and session to-dos reach the right organizers](#141-speaker-and-session-to-dos-reach-the-right-organizers--2026-08-25)
+- [144. Every speaker and session to-do reaches the same organizers](#144-every-speaker-and-session-to-do-reaches-the-same-organizers--2026-08-25)
+- [145. A speaker alert that was never arriving now arrives](#145-a-speaker-alert-that-was-never-arriving-now-arrives--2026-08-25)
+- [227. Editing a session keeps its type](#227-editing-a-session-keeps-its-type--2026-09-15)
+- [228. The "disappeared from Sessionize" alert stops once you have acted](#228-the-disappeared-from-sessionize-alert-stops-once-you-have-acted--2026-09-15)
+- [229. Who receives the speaker and session to-do mails is one setting](#229-who-receives-the-speaker-and-session-to-do-mails-is-one-setting--2026-09-15)
+- [238. Session feedback on ordinary tablets](#238-session-feedback-on-ordinary-tablets--2026-09-20)
+- [242. Evaluation tablets set up and locked by device management](#242-evaluation-tablets-set-up-and-locked-by-device-management--2026-09-25)
+- [247. Long speaker bios from Zoho are kept, and a job failure is reported as what it is](#247-long-speaker-bios-from-zoho-are-kept-and-a-job-failure-is-reported-as-what-it-is--2026-09-28)
+
+### Sponsors, exhibitors & the sponsor shop
+
+- [7. Sponsors — managed as companies, with the right tasks](#7-sponsors--managed-as-companies-with-the-right-tasks)
+- [17. Exhibitor & booth sync — sponsors who exhibit, kept in step](#17-exhibitor--booth-sync--sponsors-who-exhibit-kept-in-step--2026-06-25)
+- [39. Sponsor logistics that name your company](#39-sponsor-logistics-that-name-your-company--2026-06-30)
+- [49. One party reservation for your whole sponsor team](#49-one-party-reservation-for-your-whole-sponsor-team--2026-07-07)
+- [53. Safer sponsor orders, gated 1-day access and test sessions](#53-safer-sponsor-orders-gated-1-day-access-and-test-sessions--2026-07-23)
+- [114. Company details asks for everything the event actually needs](#114-company-details-asks-for-everything-the-event-actually-needs--2026-08-13)
+- [115. Your website address is managed in the webshop *(retired)*](#115-your-website-address-is-managed-in-the-webshop--2026-08-13-retired)
+- [116. Sponsor reminders reach the whole coordinator team, every time](#116-sponsor-reminders-reach-the-whole-coordinator-team-every-time--2026-08-13)
+- [130. Your company's social links reach the public exhibitor page](#130-your-companys-social-links-reach-the-public-exhibitor-page--2026-08-21)
+- [137. A customer that stops being a sponsor is withdrawn *(retired)*](#137-a-customer-that-stops-being-a-sponsor-is-withdrawn--2026-08-21-retired)
+- [139. The reconcile really does what its mail says *(retired)*](#139-the-reconcile-really-does-what-its-mail-says--2026-08-21-retired)
+- [140. The reconcile mail repeats only when the list changes *(retired)*](#140-the-reconcile-mail-repeats-only-when-the-list-changes--2026-08-21-retired)
+- [146. A website corrected in the webshop now reaches the hub *(retired)*](#146-a-website-corrected-in-the-webshop-now-reaches-the-hub--2026-08-25-retired)
+- [147. LinkedIn and X/Twitter now follow the webshop too *(retired)*](#147-linkedin-and-xtwitter-now-follow-the-webshop-too--2026-08-25-retired)
+- [148. A reminder when your webshop links are missing](#148-a-reminder-when-your-webshop-links-are-missing--2026-08-25)
+- [149. No more "update this contact by hand" when it is already correct](#149-no-more-update-this-contact-by-hand-when-it-is-already-correct--2026-08-25)
+- [159. Company billing details follow the finance system again](#159-company-billing-details-follow-the-finance-system-again--2026-08-26)
+- [160. VAT zone changes made in the finance system now reach the webshop *(retired)*](#160-vat-zone-changes-made-in-the-finance-system-now-reach-the-webshop--2026-08-26-retired)
+- [163. Sponsor artwork that stays in step with the files](#163-sponsor-artwork-that-stays-in-step-with-the-files--2026-08-28)
+- [164. Clearer logo guidance for sponsors](#164-clearer-logo-guidance-for-sponsors--2026-08-28)
+- [177. Company names on the public event site stay correct](#177-company-names-on-the-public-event-site-stay-correct--2026-08-29)
+- [179. Sponsor contacts and company defaults on the sponsor hub too](#179-sponsor-contacts-and-company-defaults-on-the-sponsor-hub-too--2026-08-31)
+- [213. Automatic public-name fixes no longer ask for your attention *(retired)*](#213-automatic-public-name-fixes-no-longer-ask-for-your-attention--2026-09-14-retired)
+- [214. No more repeated "Website pushed" mails for sponsors that are already correct](#214-no-more-repeated-website-pushed-mails-for-sponsors-that-are-already-correct--2026-09-14)
+- [215. Deleted event-platform sponsor entries are cleaned up safely](#215-deleted-event-platform-sponsor-entries-are-cleaned-up-safely--2026-09-14)
+- [217. The sponsor welcome overview names each company](#217-the-sponsor-welcome-overview-names-each-company--2026-09-14)
+- [220. Sponsor contacts with a shared mailbox name are added to the webshop *(retired)*](#220-sponsor-contacts-with-a-shared-mailbox-name-are-added-to-the-webshop--2026-09-14-retired)
+- [225. Sponsor upload alerts name the sponsor](#225-sponsor-upload-alerts-name-the-sponsor--2026-09-15)
+- [226. No "add by hand" line for booth brochures](#226-no-add-by-hand-line-for-booth-brochures--2026-09-15)
+- [231. One person can look after several sponsor companies](#231-one-person-can-look-after-several-sponsor-companies--2026-09-16)
+- [232. Switch between the sponsor companies you look after](#232-switch-between-the-sponsor-companies-you-look-after--2026-09-16)
+- [233. Sponsors are named, not numbered](#233-sponsors-are-named-not-numbered--2026-09-17)
+- [234. A sponsor added in the finance system appears in the webshop *(retired)*](#234-a-sponsor-added-in-the-finance-system-appears-in-the-webshop--2026-09-17-retired)
+- [241. Booth tasks give the right furniture coupon code](#241-booth-tasks-give-the-right-furniture-coupon-code--2026-09-24)
+- [244. The sponsor shop inside the hub — offer, reservation, contract, all self-service](#244-the-sponsor-shop-inside-the-hub--offer-reservation-contract-all-self-service--2026-09-27)
+- [248. The public Sponsors page shows every name and logo](#248-the-public-sponsors-page-shows-every-name-and-logo--2026-09-28)
+
+### Tickets, coupons & invoicing
+
+- [35. Tickets that keep themselves tidy](#35-tickets-that-keep-themselves-tidy--2026-06-30)
+- [50. Tickets, sync and email cadence — tightened](#50-tickets-sync-and-email-cadence--tightened--2026-07-07)
+- [68. Partner coupon pools: what is left, and whether anyone was billed](#68-partner-coupon-pools-what-is-left-and-whether-anyone-was-billed--2026-08-04)
+- [69. A prepaid pool warns you before it runs out](#69-a-prepaid-pool-warns-you-before-it-runs-out--2026-08-04)
+- [70. New coupon codes announce themselves, and a prepaid pool can grow](#70-new-coupon-codes-announce-themselves-and-a-prepaid-pool-can-grow--2026-08-04)
+- [86. Prepaid partner tickets: one click records, invoices and tells you what is left to do](#86-prepaid-partner-tickets-one-click-records-invoices-and-tells-you-what-is-left-to-do--2026-08-09)
+- [87. Extend a prepaid block without changing the coupon code](#87-extend-a-prepaid-block-without-changing-the-coupon-code--2026-08-09)
+- [93. Prepaid ticket invoices: the right number, the right ticket name](#93-prepaid-ticket-invoices-the-right-number-the-right-ticket-name--2026-08-09)
+- [94. Tell a partner their coupon is ready — in one click](#94-tell-a-partner-their-coupon-is-ready--in-one-click--2026-08-09)
+- [96. Webshop coupons appear on the invoice](#96-webshop-coupons-appear-on-the-invoice--2026-08-09)
+- [97. A ticket class is called by its name, everywhere](#97-a-ticket-class-is-called-by-its-name-everywhere--2026-08-09)
+- [101. See who has used the tickets your company bought](#101-see-who-has-used-the-tickets-your-company-bought--2026-08-10)
+- [106. A ticket is called "1-day" or "2-day", not "Other"](#106-a-ticket-is-called-1-day-or-2-day-not-other--2026-08-11)
+- [107. Volume package: see which companies have reached ten attendees](#107-volume-package-see-which-companies-have-reached-ten-attendees--2026-08-11)
+- [108. Volume package: the hub asks who approves, and you decide](#108-volume-package-the-hub-asks-who-approves-and-you-decide--2026-08-11)
+- [110. Volume package: the company sets up its own benefits](#110-volume-package-the-company-sets-up-its-own-benefits--2026-08-11)
+- [111. Volume package: the group photo, and a reminder that knows when to stop](#111-volume-package-the-group-photo-and-a-reminder-that-knows-when-to-stop--2026-08-11)
+- [120. Coupon invoicing is one click from anywhere](#120-coupon-invoicing-is-one-click-from-anywhere--2026-08-21)
+- [121. The agreed price, and the share you actually invoice](#121-the-agreed-price-and-the-share-you-actually-invoice--2026-08-21)
+- [122. Your customers can see their own usage, and export it](#122-your-customers-can-see-their-own-usage-and-export-it--2026-08-21)
+- [123. "Increase max" applies itself — and invoices the difference](#123-increase-max-applies-itself--and-invoices-the-difference--2026-08-21)
+- [124. One warning when a customer nears what was agreed](#124-one-warning-when-a-customer-nears-what-was-agreed--2026-08-21)
+- [125. The customer is told their code is live, without you remembering to](#125-the-customer-is-told-their-code-is-live-without-you-remembering-to--2026-08-21)
+- [126. You decide who hears from us, per coupon](#126-you-decide-who-hears-from-us-per-coupon--2026-08-21)
+- [127. The mails read like a letter, and state the agreement they open](#127-the-mails-read-like-a-letter-and-state-the-agreement-they-open--2026-08-21)
+- [128. Your team is copied on every mail a customer receives](#128-your-team-is-copied-on-every-mail-a-customer-receives--2026-08-21)
+- [132. The badge says whether anybody is actually invoiced](#132-the-badge-says-whether-anybody-is-actually-invoiced--2026-08-21)
+- [133. Two panels, two buttons — nothing is lost when you save](#133-two-panels-two-buttons--nothing-is-lost-when-you-save--2026-08-21)
+- [134. The coupon page in plain words](#134-the-coupon-page-in-plain-words--2026-08-21)
+- [136. The claim link is a real address](#136-the-claim-link-is-a-real-address--2026-08-21)
+- [138. A dropped connection is a retry, not a permanent error naming an order](#138-a-dropped-connection-is-a-retry-not-a-permanent-error-naming-an-order--2026-08-21)
+- [240. Prepaid ticket invoices name the ticket type](#240-prepaid-ticket-invoices-name-the-ticket-type--2026-09-24)
+
+### Sponsor leads
+
+- [8. Sponsor leads — capture, screen and route booth leads](#8-sponsor-leads--capture-screen-and-route-booth-leads)
+
+### Attendees & master classes
+
+- [9. Attendees & masterclass reconciliation — one clear picture](#9-attendees--masterclass-reconciliation--one-clear-picture)
+- [20. Attendee telemetry, for organizers and sponsors too](#20-attendee-telemetry-for-organizers-and-sponsors-too--2026-06-25)
+- [30. Fun, timed learning games with a leaderboard](#30-fun-timed-learning-games-with-a-leaderboard--2026-06-29)
+- [34. A warm welcome for every attendee](#34-a-warm-welcome-for-every-attendee--2026-06-30)
+- [36. A calmer master-class morning](#36-a-calmer-master-class-morning--2026-06-30)
+- [45. Every master-class seat counted exactly once](#45-every-master-class-seat-counted-exactly-once--2026-06-30)
+- [105. Who is coming, at a glance and without naming anyone](#105-who-is-coming-at-a-glance-and-without-naming-anyone--2026-08-10)
+- [172. Free-ticket attendees now show a country](#172-free-ticket-attendees-now-show-a-country--2026-08-28)
+- [211. Attendee telemetry: the three question cards carry the right headings](#211-attendee-telemetry-the-three-question-cards-carry-the-right-headings--2026-09-12)
+
+### E-mail & notifications
+
+- [10. Email & notifications — on-brand, controllable, safe](#10-email--notifications--on-brand-controllable-safe)
+- [44. Every event email, consistently tagged and gently paced](#44-every-event-email-consistently-tagged-and-gently-paced--2026-06-30)
+- [48. Welcome emails that point at your first step](#48-welcome-emails-that-point-at-your-first-step--2026-07-07)
+- [61. Find every e-mail under every role it reaches](#61-find-every-e-mail-under-every-role-it-reaches--2026-07-30)
+- [66. Comms: see the actual e-mails, and clear the ones you have dealt with](#66-comms-see-the-actual-e-mails-and-clear-the-ones-you-have-dealt-with--2026-08-04)
+- [72. Two separate mails: a held speaker, and volunteers waiting](#72-two-separate-mails-a-held-speaker-and-volunteers-waiting--2026-08-05)
+- [143. A "do this by hand" mail no longer blames the wrong system](#143-a-do-this-by-hand-mail-no-longer-blames-the-wrong-system--2026-08-25)
+- [178. Fewer "add by hand" e-mails that aren't yours to fix](#178-fewer-add-by-hand-e-mails-that-arent-yours-to-fix--2026-08-31)
+- [181. The same "we updated the event platform" e-mail, only once](#181-the-same-we-updated-the-event-platform-e-mail-only-once--2026-09-03)
+- [219. No "add by hand" mail for event-platform fields the hub can write](#219-no-add-by-hand-mail-for-event-platform-fields-the-hub-can-write--2026-09-14)
+- [237. Fewer, better organizer emails](#237-fewer-better-organizer-emails--2026-09-20)
+
+### Social media & graphics
+
+- [15a. Social-media post editor: one field, live variables, first publish](#15a-social-media-post-editor-one-field-live-variables-first-publish--2026-08-05)
+- [15. Social-media graphics & shared file store](#15-social-media-graphics--shared-file-store--2026-06-15)
+- [29. A tidy graphics hand-off for your designer](#29-a-tidy-graphics-hand-off-for-your-designer--2026-06-29)
+- [31. Share a single session -- with its graphic in the post](#31-share-a-single-session----with-its-graphic-in-the-post--2026-06-30)
+- [58. Session graphics: told the moment they're ready, shared as a real picture](#58-session-graphics-told-the-moment-theyre-ready-shared-as-a-real-picture--2026-07-27)
+- [65. Your promo graphics are yours the moment they exist](#65-your-promo-graphics-are-yours-the-moment-they-exist--2026-08-04)
+- [74. The post editor tells you when an edit is unsaved](#74-the-post-editor-tells-you-when-an-edit-is-unsaved--2026-08-05)
+- [75. Tag your speakers in the event's social posts](#75-tag-your-speakers-in-the-events-social-posts--2026-08-06)
+- [76. Tag the sponsor's own people in their announcement](#76-tag-the-sponsors-own-people-in-their-announcement--2026-08-06)
+- [77. Every mentionable person is remembered, once](#77-every-mentionable-person-is-remembered-once--2026-08-06)
+- [78. Announce your master classes together, in the week you choose](#78-announce-your-master-classes-together-in-the-week-you-choose--2026-08-06)
+- [79. Track announcements wait for the line-up, not for a date](#79-track-announcements-wait-for-the-line-up-not-for-a-date--2026-08-07)
+- [99. Your announcement preview shows the actual picture](#99-your-announcement-preview-shows-the-actual-picture--2026-08-10)
+- [100. Posts are approved as they come due, not months ahead](#100-posts-are-approved-as-they-come-due-not-months-ahead--2026-08-10)
+- [102. Write a new post without hunting for the button](#102-write-a-new-post-without-hunting-for-the-button--2026-08-10)
+- [103. The picture is chosen from a list, not typed from memory](#103-the-picture-is-chosen-from-a-list-not-typed-from-memory--2026-08-10)
+- [142. The social-media approval notice shows the post](#142-the-social-media-approval-notice-shows-the-post--2026-08-25)
+- [165. Announcements that slipped are re-scheduled](#165-announcements-that-slipped-are-re-scheduled--2026-08-28)
+- [182. Sponsor promotion graphics actually reach the sponsor's post](#182-sponsor-promotion-graphics-actually-reach-the-sponsors-post--2026-09-12)
+- [183. One answer to "will this post have a picture?"](#183-one-answer-to-will-this-post-have-a-picture--2026-09-12)
+- [184. Test and non-announced sessions stay out of the campaign — and out of the graphics](#184-test-and-non-announced-sessions-stay-out-of-the-campaign--and-out-of-the-graphics--2026-09-12)
+- [185. Nothing that must not be announced can sit in the post planner](#185-nothing-that-must-not-be-announced-can-sit-in-the-post-planner--2026-09-12)
+- [186. Nothing is posted over Christmas and New Year](#186-nothing-is-posted-over-christmas-and-new-year--2026-09-12)
+- [187. A start date for sponsor announcements](#187-a-start-date-for-sponsor-announcements--2026-09-12)
+- [188. The post editor survives a duplicated post](#188-the-post-editor-survives-a-duplicated-post--2026-09-12)
+- [189. Announcement dates, arranged by post type](#189-announcement-dates-arranged-by-post-type--2026-09-12)
+- [190. Sponsor tier posts run as two named rounds](#190-sponsor-tier-posts-run-as-two-named-rounds--2026-09-12)
+- [191. Changing a date moves the posts that are already there](#191-changing-a-date-moves-the-posts-that-are-already-there--2026-09-12)
+- [192. See what else is on a day before you reschedule](#192-see-what-else-is-on-a-day-before-you-reschedule--2026-09-12)
+- [193. Every round of every post type has its own start date](#193-every-round-of-every-post-type-has-its-own-start-date--2026-09-12)
+- [194. Master classes and other sessions start on their own dates](#194-master-classes-and-other-sessions-start-on-their-own-dates--2026-09-12)
+- [195. Announcement rules you can change, per category](#195-announcement-rules-you-can-change-per-category--2026-09-12)
+- [196. Posting capacity — will the campaign actually fit?](#196-posting-capacity--will-the-campaign-actually-fit--2026-09-12)
+- [197. Event posts stop churning](#197-event-posts-stop-churning--2026-09-12)
+- [198. One announcement per subject per round](#198-one-announcement-per-subject-per-round--2026-09-12)
+- [199. What the held-back announcements are waiting for](#199-what-the-held-back-announcements-are-waiting-for--2026-09-12)
+- [200. Held-back announcements stay in the plan, and keep moving](#200-held-back-announcements-stay-in-the-plan-and-keep-moving--2026-09-12)
+- [201. "Not ready" says what is missing, on the plan itself](#201-not-ready-says-what-is-missing-on-the-plan-itself--2026-09-12)
+- [202. A round you have dated is a round that gets planned](#202-a-round-you-have-dated-is-a-round-that-gets-planned--2026-09-12)
+- [203. The post list names the exact category](#203-the-post-list-names-the-exact-category--2026-09-12)
+- [204. A hidden flag could keep a session out of the campaign](#204-a-hidden-flag-could-keep-a-session-out-of-the-campaign--2026-09-12)
+- [208. Track artwork retires with its track](#208-track-artwork-retires-with-its-track--2026-09-12)
+- [209. Your own artwork is never overwritten — but you are told when it ages](#209-your-own-artwork-is-never-overwritten--but-you-are-told-when-it-ages--2026-09-12)
+- [212. A master class with one speaker can be announced](#212-a-master-class-with-one-speaker-can-be-announced--2026-09-13)
+- [218. Session announcements tag the speakers](#218-session-announcements-tag-the-speakers--2026-09-14)
+- [230. Tagged people always publish as real mentions](#230-tagged-people-always-publish-as-real-mentions--2026-09-16)
+- [239. Sponsor announcements tag the company first, found automatically](#239-sponsor-announcements-tag-the-company-first-found-automatically--2026-09-23)
+- [243. Social-media posts never go out with a missing speaker photo](#243-social-media-posts-never-go-out-with-a-missing-speaker-photo--2026-09-25)
+- [246. Social-media reminders show the post as it will go out — text and picture](#246-social-media-reminders-show-the-post-as-it-will-go-out--text-and-picture--2026-09-28)
+
+### Organizer back office
+
+- [11. Organizer hub — run the whole event from one place](#11-organizer-hub--run-the-whole-event-from-one-place)
+- [43. A cleaner people list for organizers](#43-a-cleaner-people-list-for-organizers--2026-06-30)
+- [150. The organizer filter rows line up](#150-the-organizer-filter-rows-line-up--2026-08-25)
+- [151. Readable text and a tidier toolbar on the organizer lists](#151-readable-text-and-a-tidier-toolbar-on-the-organizer-lists--2026-08-25)
+- [152. The participants export is a button](#152-the-participants-export-is-a-button--2026-08-25)
+- [156. Audit times in local time](#156-audit-times-in-local-time--2026-08-25)
+- [157. Audit exports include local time](#157-audit-exports-include-local-time--2026-08-25)
+- [210. Every published LinkedIn post is in the audit log](#210-every-published-linkedin-post-is-in-the-audit-log--2026-09-12)
+
+### Hosting, reliability & monitoring
+
+- [12. Hosting & reliability — production-grade by design](#12-hosting--reliability--production-grade-by-design)
+- [161. Fewer false alarms from the signage screens](#161-fewer-false-alarms-from-the-signage-screens--2026-08-27)
+- [162. A steadier connection to the event platform](#162-a-steadier-connection-to-the-event-platform--2026-08-27)
+- [249. Lower monitoring cost — quiet by default, full detail on demand](#249-lower-monitoring-cost--quiet-by-default-full-detail-on-demand--2026-10-05)
 
 ---
 
@@ -1042,6 +1346,7 @@ follow-up automatically.
   governs the e-mailed calendar invites for the whole edition — the "Add reminder" /
   "Email me a calendar invite" actions on tasks, sessions and shifts. When it is off,
   those actions send nothing. *(✅ 2026-06-15)*
+- **Automatic calendar invites have their own switch.** *(✅ 2026-07-10)* The calendar invites that the dinner RSVP, a hotel booking and a confirmed master-class seat send by themselves are governed by a separate switch on the calendar settings page, off by default. While it is off, those confirmation mails carry one-tap "Add to calendar" links for Outlook and Google instead, and the "Email me a calendar invite" buttons people press themselves keep working.
 - **Preview your own calendar feed before you share it.** Right on the calendar
   settings page, an organizer now sees a read-only preview of exactly what their
   personal calendar feed contains — each item with its date and where it happens —
@@ -1497,6 +1802,11 @@ follow-up automatically.
 - **Link any crew member to a session.** *(✅ 2026-10-22)* The speaker picker lists every active speaker, organizer
   and volunteer, including speakers added by hand, each non-speaker with their role. Someone already linked who has
   since become inactive stays ticked and marked "(inactive)", so saving cannot silently remove them.
+
+
+### Agenda and feedback on the venue screens *(✅ 2026-08-01)*
+
+The hallway screens at the venue show what is happening now and what is next — breaks, registration, lunch and the party included, not only talks — in portrait or landscape, rotating on their own, with the event-wide session feedback score as a third view. Organizers get the screen links from one page, can switch each view on or off and set a daily schedule, and a screen never shows an error: if anything is wrong it shows the event name and the next item on the programme, and it keeps the last agenda it loaded during an outage.
 
 ## 7. Sponsors — managed as companies, with the right tasks
 
@@ -6351,6 +6661,9 @@ codes previously carried the edition number and did not match the shop. Since th
 the included furniture is taken off automatically in the cart, up to the tier's allowance, and the contract
 and invoice name it by that same code.
 
+
+- **The furniture task lists the furniture you can order.** *(✅ 2026-09-27)* While the shop is on, the booth-furniture task lists every available furniture product with its price, states how much furniture the booth tier includes (taken off the cart automatically) and links straight to the shop's furniture tab. Furniture and booth options are kept in separate groups, so the included allowance only ever applies to furniture.
+
 ## 242. Evaluation tablets set up and locked by device management *(✅ 2026-09-25)*
 
 The session-feedback kiosk now runs on ordinary Android tablets managed by the organisation's device
@@ -6714,6 +7027,13 @@ earlier import made.
 **Feature booths in the Booths tab too.** A branding package that includes a booth — such as the lounge sponsorship with
 booth E-27 — is now listed under **Booths** as well as under **Branding**, in the shop and in the public catalogue, so
 every available booth is in one place.
+
+### More in the sponsor shop *(✅ 2026-09-27)*
+
+- **Order tools for organizers.** *(✅ 2026-09-27)* The organizers' orders page shows how many orders are still unconfirmed (carts with items, reservations, contracts waiting for signature) and what they are worth, with a filter. From there an organizer can put products straight into any company's cart without acting as anyone, choose the signer, event coordinator and purchase-order reference, send the contract for signature, and invoice a signed order right away instead of waiting for the hourly run.
+- **Swag is bought as a share of the attendee bag.** *(✅ 2026-09-27)* Swag goes into the cart through the swag configurator, which sets how many bags it is for. The sponsor sees one amount — their share of the cost for every attendee bag, with the event covering the rest — and never the per-piece price. Buying swag also lists the company as a swag sponsor on the event platform, and the free-swag sponsorship can only be added by an organizer.
+- **A full contract, signed by both sides.** *(✅ 2026-09-27)* Before signing, the contract page shows the whole contract in the same order as the PDF, including every product's full description and any agreed terms (left out when nothing special was agreed). Every contract, whether draft, offer or signed, carries the organizer's signature, and every page after the cover is numbered "Page N of M". Organizers can also print an unsigned contract as a PDF for a sponsor who signs on paper.
+- **Sale prices and an easier shop page.** *(✅ 2026-09-27)* An organizer can give a product a sale price. Every shop page then shows the normal price crossed out beside the new one, and the contract states the discount. While a sponsor shops, a cart bar stays at the top of the page with the item count and subtotal and flashes when something is added. Sold-out products are hidden unless the sponsor ticks "Show sold-out items".
 
 ## 245. "Something is missing" — marked for every role *(✅ 2026-09-27)*
 

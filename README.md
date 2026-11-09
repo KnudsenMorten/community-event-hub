@@ -116,6 +116,7 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | [Agenda](docs/img/public-agenda.png) | The schedule, day by day |
 | [Contributors](docs/img/public-contributors.png) | Everyone who helped build the event |
 | [About](docs/img/public-about.png) | The in-hub product introduction |
+| [Coupon sign-up](docs/img/public-coupon-signup.png) | A company signs up for its own ticket coupon, with a captcha |
 
 </details>
 
@@ -131,12 +132,18 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | [Speaker readiness](docs/img/speaker-readiness.png) | "Am I done?" answered, rather than guessed |
 | [Speaker graphics](docs/img/speaker-graphics.png) | Ready-made promotion artwork to download and share |
 | [Speaker announcements](docs/img/speaker-announcements.png) | The posts the hub has planned about their session |
+| [Speaker details](docs/img/speaker-details.png) | Bio, photo, links and session details — the hub is the master copy |
+| [Travel claim](docs/img/speaker-travel.png) | Upload the documents, type what you paid, see where the claim stands |
 | [Sponsor home](docs/img/sponsor-portal.png) | The sponsor's own area of the hub |
 | [Sponsor booth](docs/img/sponsor-our-booth.png) | Stand information, venue photos and what is still owed |
 | [Sponsor deliverables](docs/img/sponsor-deliverables.png) | Every contracted item, tracked with a deadline |
 | [Sponsor announcements](docs/img/sponsor-announcements.png) | Their own posts, and what each is waiting for |
+| [Sponsor tasks](docs/img/sponsor-tasks.png) | Everything the company owes, shared by the whole sponsor team |
+| [Sponsor shop](docs/img/sponsor-shop.png) | The shop inside the hub: products, sale prices, cart, reservations |
+| [Booth map](docs/img/sponsor-shop-booth-map.png) | Which stands are free, reserved or sold |
 | [Volunteer sign-up](docs/img/volunteer-signup.png) | Availability in the volunteer's own words |
 | [Volunteer assignments](docs/img/volunteer-schedule.png) | The work that availability turned into |
+| [Volunteer availability](docs/img/volunteer-availability.png) | Each event day, half by half, in the volunteer's own words |
 | [Attendee home](docs/img/attendee-my-event.png) | Master class and party booking |
 | [Profile](docs/img/profile.png) | The details every role maintains themselves |
 
@@ -165,6 +172,21 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | [Evaluation results](docs/img/organizer-evaluation-results.png) | Session scores and written feedback |
 | [Coupon invoicing](docs/img/organizer-coupon-invoicing.png) | Partner coupon pools and what has been billed |
 | [Group photos](docs/img/organizer-group-photos.png) | Company photo registrations |
+| [Participant status](docs/img/organizer-participant-status.png) | One status board for every role: who still owes what |
+| [Volunteer pre-selection](docs/img/organizer-preselection-queue.png) | Applicants to preselect, onboard, undo or deactivate |
+| [Volunteer availability](docs/img/organizer-volunteer-availability.png) | Who can help when, at a glance |
+| [Volunteer schedule](docs/img/organizer-volunteer-schedule.png) | The planner: shifts by the clock, and what it could not fill |
+| [Hotel overview](docs/img/organizer-hotel-overview.png) | Rooms per night, readiness, forecast, problems and change log |
+| [Travel reimbursements](docs/img/organizer-travel-reimbursements.png) | AI-checked claims, decided line by line, mail previewed before it goes |
+| [Lunch](docs/img/organizer-lunch.png) | Head counts you can order against, both days |
+| [Swag](docs/img/organizer-swag.png) | Order files for the swag suppliers |
+| [Mail campaigns](docs/img/organizer-mail-campaigns.png) | Mail to target audiences, released in steps with a stop button |
+| [Settings](docs/img/organizer-settings.png) | Feature switches and the release ring of every mail |
+| [Platform health](docs/img/organizer-platform-health.png) | Traffic, response times, slow pages and failures |
+| [Evaluation devices](docs/img/organizer-evaluation-devices.png) | The feedback tablets in each room |
+| [Shop booth map](docs/img/organizer-shop-booth-map.png) | Stands and their state, for organizers |
+| [Shop promotions](docs/img/organizer-shop-promotions.png) | The commercial corner: up to three promoted products |
+| [Shop catalog](docs/img/organizer-shop-catalog.png) | Products, prices, pictures and stock kept in the hub |
 
 </details>
 
@@ -178,6 +200,8 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 | [Event posts](docs/img/some-event-posts.png) | Your own dated posts alongside the generated ones |
 | [Campaign settings](docs/img/some-settings.png) | Cadence, auto-approval, exclusions and the announcement windows |
 | [Post templates](docs/img/some-templates.png) | The wordings each post type draws from |
+| [Post editor](docs/img/some-post-editor.png) | One post: text with live variables, picture (pick or upload), date |
+| [Posting capacity](docs/img/some-capacity.png) | Will the campaign fit before the event? |
 
 </details>
 
@@ -210,7 +234,7 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 
 ## Key features by area
 
-A summary of what is delivered today. Each area has much more detail — and the date every piece shipped — in **[`docs/FEATURES.md`](docs/FEATURES.md)**.
+A summary of what is delivered today. Each area has much more detail — and the date every piece shipped — in **[`docs/FEATURES.md`](docs/FEATURES.md)**, where every entry is also listed **[by area](docs/FEATURES.md#features-by-area)**.
 
 ### Platform & configuration
 

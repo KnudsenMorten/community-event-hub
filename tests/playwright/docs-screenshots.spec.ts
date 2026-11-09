@@ -262,7 +262,7 @@ async function redactContacts(page: Page, map: AnonMap) {
             const headers = Array.from(table.querySelectorAll('thead th, tr:first-child th'));
             headers.forEach((th, i) => {
                 if (!phoneHeader.test((th.textContent ?? '').trim())) return;
-                for (const row of Array.from(table.querySelectorAll('tbody tr'))) {
+                for (const row of Array.from(table.querySelectorAll('tbody tr')).filter(r => !r.querySelector('th'))) {  // a header row in tbody is a header, not data
                     const cell = (row as HTMLTableRowElement).cells[i];
                     if (cell && (cell.textContent ?? '').trim() !== '') cell.textContent = '+45 00 00 00 00';
                 }
@@ -378,7 +378,7 @@ async function assertNoContactData(page: Page, map: AnonMap, where: string) {
             const headers = Array.from(table.querySelectorAll('thead th, tr:first-child th'));
             headers.forEach((th, i) => {
                 if (!phoneHeader.test((th.textContent ?? '').trim())) return;
-                for (const row of Array.from(table.querySelectorAll('tbody tr'))) {
+                for (const row of Array.from(table.querySelectorAll('tbody tr')).filter(r => !r.querySelector('th'))) {  // a header row in tbody is a header, not data
                     const v = ((row as HTMLTableRowElement).cells[i]?.textContent ?? '').trim();
                     if (v !== '' && v !== fake && /\d{4}/.test(v)) bad.push(v);
                 }
@@ -528,6 +528,35 @@ const TARGETS: { slug: string; url: string; auth: boolean; role?: string }[] = [
     { slug: 'some-event-posts', url: '/Organizer/EventPosts', auth: true, role: 'organizer' },
     { slug: 'some-settings', url: '/Organizer/SoMeSettings', auth: true, role: 'organizer' },
     { slug: 'some-templates', url: '/Organizer/SoMeTemplates', auth: true, role: 'organizer' },
+
+    // --- 2026-11-09: the features delivered since the set was last extended (operator: "did you include fx
+    //     webshop photos … verify that you included all features"). One page per feature area that had none.
+    // 🔒 Deliberately NOT captured: Organizer/VisaApplications (passport numbers, birth dates; the applicant's own form 404s for an account
+    //    that needs no visa) and the shop's orders/reservations lists (what each sponsor pays).
+    { slug: 'public-coupon-signup', url: '/coupon-signup', auth: false },
+    { slug: 'speaker-details', url: '/Speaker/Details', auth: true, role: 'speaker' },
+    { slug: 'speaker-travel', url: '/Forms/Travel', auth: true, role: 'speaker' },
+    { slug: 'sponsor-shop', url: '/Sponsor/Shop', auth: true, role: 'sponsor' },
+    { slug: 'sponsor-shop-booth-map', url: '/Sponsor/Shop/BoothMap', auth: true, role: 'sponsor' },
+    { slug: 'sponsor-tasks', url: '/Sponsor/Tasks', auth: true, role: 'sponsor' },
+    { slug: 'volunteer-availability', url: '/Volunteer/Availability', auth: true, role: 'volunteer' },
+    { slug: 'organizer-participant-status', url: '/Organizer/ParticipantStatus', auth: true, role: 'organizer' },
+    { slug: 'organizer-preselection-queue', url: '/Organizer/PreselectionQueue', auth: true, role: 'organizer' },
+    { slug: 'organizer-volunteer-availability', url: '/Organizer/VolunteerAvailability', auth: true, role: 'organizer' },
+    { slug: 'organizer-volunteer-schedule', url: '/Organizer/Schedule', auth: true, role: 'organizer' },
+    { slug: 'organizer-hotel-overview', url: '/Organizer/HotelOverview', auth: true, role: 'organizer' },
+    { slug: 'organizer-travel-reimbursements', url: '/Organizer/TravelReimbursements', auth: true, role: 'organizer' },
+    { slug: 'organizer-lunch', url: '/Organizer/Lunch', auth: true, role: 'organizer' },
+    { slug: 'organizer-swag', url: '/Organizer/Swag', auth: true, role: 'organizer' },
+    { slug: 'organizer-mail-campaigns', url: '/Organizer/MailCampaigns', auth: true, role: 'organizer' },
+    { slug: 'organizer-settings', url: '/Organizer/Settings', auth: true, role: 'organizer' },
+    { slug: 'organizer-platform-health', url: '/Organizer/PlatformHealth', auth: true, role: 'organizer' },
+    { slug: 'organizer-evaluation-devices', url: '/Organizer/EvaluationDevices', auth: true, role: 'organizer' },
+    { slug: 'organizer-shop-booth-map', url: '/Organizer/ShopBoothMap', auth: true, role: 'organizer' },
+    { slug: 'organizer-shop-promotions', url: '/Organizer/ShopPromotions', auth: true, role: 'organizer' },
+    { slug: 'organizer-shop-catalog', url: '/Organizer/WebshopCatalog', auth: true, role: 'organizer' },
+    { slug: 'some-capacity', url: '/Organizer/SoMeCapacity', auth: true, role: 'organizer' },
+    { slug: 'some-post-editor', url: '/Organizer/SoMePostEditor', auth: true, role: 'organizer' },
 ];
 
 const VIEWPORTS = [
