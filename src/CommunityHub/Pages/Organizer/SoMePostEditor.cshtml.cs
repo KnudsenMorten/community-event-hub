@@ -163,6 +163,19 @@ public class SoMePostEditorModel : PageModel
 
     public bool GraphicsAvailable => _graphics.CanRead;
 
+    /// <summary>§1390 — whether the editor can take a picture file (the library is writable).</summary>
+    public bool CanUploadPicture => _graphics.CanUpload;
+
+    /// <summary>§1390 — a picture he uploads with Save; stored in the folder and linked.</summary>
+    [BindProperty] public IFormFile? UploadPicture { get; set; }
+
+    /// <summary>
+    /// §1390 — the post links a GENERATED graphic by its SharePoint path (e.g. the §1384 all-tracks
+    /// GIF), not a name in the folder. The publisher reads it from the generated-graphics row, so it is
+    /// a valid link: the editor keeps it selected and previews it per post instead of calling it missing.
+    /// </summary>
+    public bool LinkedIsGeneratedGraphic { get; private set; }
+
     [BindProperty] public int PostId { get; set; }
     [BindProperty] public string? EditText { get; set; }
     [BindProperty] public string? ImageRef { get; set; }
@@ -260,6 +273,41 @@ public class SoMePostEditorModel : PageModel
 
         // A bare file name in the matching library folder, or blank for a text-only post.
         var img = (ImageRef ?? string.Empty).Trim();
+
+        // 🔑 §1390 — an uploaded picture wins over the dropdown: it goes into the folder for this post
+        // type and becomes the link. If the upload is refused, everything ELSE is still saved (his text
+        // and date are on this same form) and the refusal is said, with the previous link kept.
+        string? uploadNote = null;
+        string? uploadError = null;
+        if (UploadPicture is { Length: > 0 } file)
+        {
+            if (file.Length > SoMeGraphicLibrary.MaxUploadBytes)
+            {
+                uploadError = $"The picture was not uploaded: it is {file.Length / 1024 / 1024} MB, and the limit is "
+                            + $"{SoMeGraphicLibrary.MaxUploadBytes / 1024 / 1024} MB.";
+            }
+            else
+            {
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms, ct);
+                var up = await _graphics.UploadPictureAsync(post.TemplateKind, file.FileName, ms.ToArray(), ct);
+                if (up.Ok)
+                {
+                    img = up.FileName!;
+                    MediaKind = SoMePostMediaKind.Graphic;
+                    uploadNote = string.Equals(up.FileName, Path.GetFileName(file.FileName), StringComparison.OrdinalIgnoreCase)
+                        ? $" Picture {up.FileName} was uploaded and linked."
+                        : $" Picture uploaded as {up.FileName} and linked.";
+                }
+                else
+                {
+                    uploadError = "The picture was not uploaded: " + up.Error;
+                }
+            }
+
+            if (uploadError is not null) img = (post.ImageRef ?? string.Empty).Trim();
+        }
+
         post.ImageRef = img.Length == 0 ? null : img;
 
         // §844.3 — the medium is a stored DECISION, never sniffed from the extension. Refused for a
@@ -296,6 +344,12 @@ public class SoMePostEditorModel : PageModel
             ? $"Saved at {DateTimeOffset.UtcNow:HH:mm} — posting date & time is now {savedWhen} "
               + $"(Danish time), and the post text was saved ({(post.ManualTextOverride?.Length ?? 0)} characters)."
             : $"Nothing had changed — this post is already saved as {savedWhen} (Danish time).";
+        if (uploadNote is not null) Message += uploadNote;
+        if (uploadError is not null)
+        {
+            Message = (changed ? "The rest of the post was saved. " : string.Empty) + uploadError;
+            MessageIsError = true;
+        }
 
         await LoadAsync(me.EventId, PostId, ct);
         return Page();
@@ -845,5 +899,26 @@ public class SoMePostEditorModel : PageModel
         // §844.3 — the gallery follows the post's TYPE and its current MEDIUM, so switching to video
         // shows videos rather than the graphics folder.
         Graphics = await _graphics.ListAsync(Post?.TemplateKind, MediaKind, ct);
+
+        // §1390 — a link that is not a name in this folder may still be a GENERATED graphic referenced by
+        // its SharePoint path/URL; the publisher resolves those (SoMeMailPreview), so the editor must too.
+        LinkedIsGeneratedGraphic = false;
+        if (Post is not null && !string.IsNullOrWhiteSpace(ImageRef)
+            && MediaKind == SoMePostMediaKind.Graphic
+            && !Graphics.Any(g => string.Equals(g.FileName, ImageRef, StringComparison.OrdinalIgnoreCase)))
+        {
+            var reference = ImageRef;
+            LinkedIsGeneratedGraphic = await _db.GraphicAssets.AsNoTracking().AnyAsync(
+                g => g.EventId == Post.EventId && g.StorageItemId != null
+                     && (g.SharePointUrl == reference || g.SharePointPath == reference), ct);
+        }
+    }
+
+    /// <summary>§1390 — the last path segment of a link, for showing a generated graphic's name.</summary>
+    public static string LinkLabel(string? reference)
+    {
+        var s = (reference ?? string.Empty).Split('?')[0].TrimEnd('/');
+        var i = s.LastIndexOfAny(new[] { '/', '\\' });
+        return Uri.UnescapeDataString(i >= 0 ? s[(i + 1)..] : s);
     }
 }

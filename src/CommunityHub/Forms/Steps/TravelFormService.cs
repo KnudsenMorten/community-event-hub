@@ -336,20 +336,14 @@ public sealed class TravelFormService : IWizardFormService
         // ---- Field-level validation (REQUIREMENTS §21). Only meaningful when claiming.
         if (model.RequestReimbursement)
         {
-            if (string.IsNullOrEmpty(model.AmountChoice))
+            // Operator 2026-11-09: "the dropdown should be a custom amount and not predefined amounts". The form
+            // posts AmountChoice = "other" and the typed amount; an empty choice is treated the same way. A preset
+            // (an old page still open in a browser) keeps working. The explanation is optional now: a typed amount
+            // is the real cost, not a departure from a preset that had to be justified.
+            if (string.IsNullOrEmpty(model.AmountChoice)) model.AmountChoice = TravelFormModel.ChoiceOther;
+            if (model.AmountChoice == TravelFormModel.ChoiceOther && model.OtherAmountEur is not > 0)
             {
-                modelState.AddModelError(nameof(model.AmountChoice), _loc["Travel.ErrPickAmount"]);
-            }
-            else if (model.AmountChoice == TravelFormModel.ChoiceOther)
-            {
-                if (model.OtherAmountEur is not > 0)
-                {
-                    modelState.AddModelError(nameof(model.OtherAmountEur), _loc["Travel.ErrOtherAmount"]);
-                }
-                if (string.IsNullOrWhiteSpace(model.Explanation))
-                {
-                    modelState.AddModelError(nameof(model.Explanation), _loc["Travel.ErrOtherExplanation"]);
-                }
+                modelState.AddModelError(nameof(model.OtherAmountEur), _loc["Travel.ErrOtherAmount"]);
             }
         }
 
@@ -504,11 +498,9 @@ public sealed class TravelFormService : IWizardFormService
     // ----- amount compose/decompose ---------------------------------------
     private static (string?, decimal?) DecomposeAmount(decimal? amount)
     {
-        if (amount is null) return (TravelFormModel.ChoiceNone, null);
-        if (amount == TravelFormModel.Cap300) return (TravelFormModel.Choice300, null);
-        if (amount == TravelFormModel.Cap400) return (TravelFormModel.Choice400, null);
-        if (amount == TravelFormModel.Cap800) return (TravelFormModel.Choice800, null);
-        if (amount == TravelFormModel.Cap600) return (TravelFormModel.Choice600, null);   // §1387
+        // 2026-11-09 — the form has one amount field, so a stored amount (also a former preset like 400) is
+        // shown in it as typed.
+        if (amount is null) return (TravelFormModel.ChoiceOther, null);
         return (TravelFormModel.ChoiceOther, amount);
     }
 

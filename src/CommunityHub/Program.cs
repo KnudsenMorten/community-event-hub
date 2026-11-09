@@ -1797,6 +1797,9 @@ CommunityHub.Core.Integrations.SessionizeFieldMap.ApplyMapFile(
         {
             using var scope = app.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+            // §1389 — the migrations were squashed into one baseline: a fully migrated pre-squash database records the
+            // baseline as applied (one history row, no schema change); a database that is behind refuses to start.
+            CommunityHub.Core.Data.MigrationBaseline.AdoptIfNeeded(db, migrateLog);
             db.Database.Migrate();
             migrateLog.LogInformation(
                 "Database migrations applied (attempt {Attempt}).", attempt);
@@ -2231,6 +2234,38 @@ app.MapGet("/organizer/some-graphic", async (
     // The gallery loads dozens of these per page; they are immutable per name.
     http.Response.Headers["Cache-Control"] = "private, max-age=3600";
     return Results.File(f.Content, f.ContentType);
+}).RequireAuthorization();
+
+// §1390: ORGANIZER-ONLY — the picture ONE post will publish with, through the SAME resolver the
+// publisher and the reminder mails use (SoMeMailPreview.ResolveImageAsync). The editor uses it for a
+// link that is not a bare name in the folder (a generated graphic linked by its SharePoint path, e.g.
+// the §1384 all-tracks GIF), which the by-name proxy above rightly refuses.
+app.MapGet("/organizer/some-post-picture/{postId:int}", async (
+        int postId,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore store,
+        CommunityHub.Core.Integrations.SoMeGraphicLibrary library,
+        CommunityHub.Auth.ICurrentParticipantAccessor participant,
+        HttpContext http,
+        CancellationToken ct) =>
+{
+    var me = participant.Current;
+    if (me is null) return Results.Unauthorized();
+    if (me.Role != CommunityHub.Core.Domain.ParticipantRole.Organizer) return Results.Forbid();
+
+    var post = await db.SoMePosts.AsNoTracking()
+        .FirstOrDefaultAsync(p => p.Id == postId && p.EventId == me.EventId, ct);
+    if (post is null || post.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video) return Results.NotFound();
+
+    var (bytes, _, fileName) = await new CommunityHub.Core.Integrations.SoMeMailPreview(db, null, store, library)
+        .ResolveImageAsync(post, ct);
+    if (bytes is null) return Results.NotFound();
+
+    var ext = System.IO.Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+    var type = ext switch { ".gif" => "image/gif", ".jpg" or ".jpeg" => "image/jpeg", _ => "image/png" };
+    // Not cached: the link can change on Save, and §917 can swap the subject's graphic.
+    http.Response.Headers["Cache-Control"] = "private, no-store";
+    return Results.File(bytes, type);
 }).RequireAuthorization();
 
 // §1032: the picture for ONE announcement, for the SPONSOR or SPEAKER it is about — so their

@@ -59,17 +59,17 @@ Every signed-in person also gets the **AI Community Helper**, which answers ques
 
 ## By the numbers
 
-Measured on this repository on 2026-10-22.
+Measured on this repository on 2026-11-09.
 
 | | |
 |---|---|
-| Delivered features in the catalog | **250** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
-| Application code (C#, excluding migrations) | **232,780** lines in 1,162 files |
-| Razor views | **49,580** lines in 292 files (227 pages) |
-| Scheduled background jobs | **47** timer-triggered functions, plus an order webhook |
-| Database migrations | **292** EF Core migrations |
-| Branded e-mail templates | **50** |
-| Automated tests | **7,622** xUnit tests (159,188 lines of test code), plus Pester and Playwright suites |
+| Delivered features in the catalog | **251** entries ([`docs/FEATURES.md`](docs/FEATURES.md)) |
+| Application code (C#, excluding migrations) | **244,782** lines in 1,209 files |
+| Razor views | **51,843** lines in 302 files (235 pages) |
+| Scheduled background jobs | **49** timer-triggered functions, plus an order webhook |
+| Database migrations | **1** EF Core baseline migration (302 earlier migrations squashed into it, schema-identical) |
+| Branded e-mail templates | **62** |
+| Automated tests | **7,988** xUnit tests (165,974 lines of test code), plus Pester and Playwright suites |
 | Infrastructure as code | **7** Bicep files (1,087 lines) |
 
 ---
@@ -223,7 +223,7 @@ A summary of what is delivered today. Each area has much more detail — and the
 ### Sign-in & embedding
 
 - **Passwordless**: a one-time PIN by e-mail that expires in 15 minutes, with lockout and rate limiting and messages that never reveal whether an address is registered.
-- **One-tap sign-in links** in the hub's e-mails, revocable, and a "remember me" choice.
+- **One-tap sign-in links** in the hub's e-mails, revocable, a "remember me" choice, and personal permanent links organizers can hand to people who sign in often.
 - Signed-out visitors go straight to sign-in; the public programme pages stay reachable on their own addresses.
 - Hub access follows the person's ticket or role, and the hub **embeds safely** inside your event portal.
 
@@ -240,10 +240,12 @@ A summary of what is delivered today. Each area has much more detail — and the
 
 ### Self-service forms & logistics
 
-- **Hotel** across several hotels, with room blocks, confirmation numbers and a rooming list — and a clear split between the nights the event pays and the nights the guest pays.
+- **Hotel** across several hotels, with **room blocks per night**, priorities, a forecast of how many rooms you will need, confirmation numbers, a rooming list and a hotel spreadsheet with a change log — and a clear split between the nights the event pays and the nights the guest pays. Sponsor speakers are kept out of the hotel list.
 - **Appreciation dinner** with structured diet and allergy capture, a kitchen allergy roll-up and a run-sheet.
 - **Catering numbers you can order against** and lunch lists for both days.
-- **Party RSVP**, swag choices, a two-step **travel reimbursement** offered only to people who can claim it, and a group-photo planner.
+- **Party RSVP**, swag choices and a group-photo planner.
+- **Travel reimbursement** offered only to people who can claim it: the speaker types what they paid and uploads the documents; an **AI check** reads them against your rules, and an organizer accepts or overrules each finding line by line, previews the mail, and either sends the claim to finance with the full review or sends it back to the speaker with a kind, specific list of what is missing.
+- **Visa applications** for speakers and volunteers who need one, with the organizers told on submit and an invitation letter per applicant.
 - Every form shows when it was last saved; edits close to the deadline become organizer action items.
 
 ### Tasks & reminders
@@ -268,8 +270,9 @@ A summary of what is delivered today. Each area has much more detail — and the
 - **The sponsor shop runs inside the hub**: an organizer sends an offer, the sponsor reserves or orders and **signs the contract online**, and everyone receives the signed PDF. Reservations have deadlines, reminders and "ask for more time"; the hub counts stock itself so nothing is sold twice, keeps a live availability page and booth map, and invoices each contract line by line through your finance system (credit notes included).
 - Each sponsor has **one public name, website and LinkedIn**, which the sponsor can edit and every public place uses; the legal name is kept for contract and invoice. Company details and contacts follow your finance system.
 - A public **`/Sponsors`** page by tier and a booth page with **live venue photos** served from your document library; the organizer list shows what every sponsor bought, and a bought sponsor session appears in the agenda straight away.
-- Optional **exhibitor sync** to your event platform, **finance integration** with clear ownership of each field, and withdrawal of lapsed sponsors.
-- **Coupon pools and volume packages** with invoicing and a usage page for the customer; a discount-only code can be ignored.
+- Optional **exhibitor sync** to your event platform and **finance integration** with clear ownership of each field; a sponsor that lapses in the finance system is flagged for an organizer to withdraw.
+- **Coupon pools and volume packages** with invoicing and a usage page for the customer; a discount-only code can be ignored; companies can **sign up for coupons themselves** on a public form with a captcha.
+- A **commercial corner** promotes up to three products to sponsors, and a prepared order greets the sponsor at sign-in.
 - A sponsor **Leads API** with a lead pipeline and quality scoring.
 
 ### Attendees & master-class seats
@@ -281,7 +284,8 @@ A summary of what is delivered today. Each area has much more detail — and the
 ### E-mail & notifications
 
 - **Branded templates** rendered for every e-mail client, with an in-hub editor and test sends.
-- **Release rings, a kill switch and a welcome safety cap** keep a half-configured environment from mailing real people; a send that reached nobody says so.
+- **A release ring per mail and a kill switch** keep a half-configured environment from mailing real people; a send that reached nobody says so.
+- **Mail campaigns** to target audiences (for example previous attendees without a ticket yet), **released in steps** on a timetable — organizers first, then a small share, then everyone — with a stop button between the steps.
 - A **complete e-mail log** with re-send, and a Comms page showing who got what.
 - Paced sending and repeat suppression so nobody receives the same message twice.
 
@@ -293,8 +297,8 @@ A summary of what is delivered today. Each area has much more detail — and the
 
 ### Social media & graphics
 
-- **Graphics** for speakers, sessions and sponsors, kept in one shared document library.
-- A **post editor with live variables** that publishes to your LinkedIn company page, **tagging speakers and sponsor contacts** where LinkedIn allows it and telling you who it could not tag.
+- **Graphics** for speakers, sessions and sponsors, kept in one shared document library, plus a live **"all tracks, all speakers"** overview GIF.
+- A **post editor with live variables** (and picture upload) that publishes to your LinkedIn company page, **tagging speakers and sponsor contacts** where LinkedIn allows it and telling you who it could not tag.
 - A **campaign planner**: per-category rounds and start dates, a holiday pause, a capacity view that tells you whether the campaign fits, and a "not ready" reason on every held-back post.
 - Posts are **approved as they come due**, and your own artwork is never overwritten.
 - Sponsor announcements **tag the company first**, found automatically (or tag only the company, if the sponsor prefers); a post never goes out with a missing speaker photo, and withdrawn sponsors and test accounts stay out of the campaign.

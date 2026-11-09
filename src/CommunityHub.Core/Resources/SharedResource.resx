@@ -734,18 +734,18 @@
   <data name="Travel.ClaimNo" xml:space="preserve"><value>No, I'm not claiming</value></data>
   <data name="Travel.OriginCity" xml:space="preserve"><value>Travelling from (city / country)</value></data>
   <data name="Travel.OriginPlaceholder" xml:space="preserve"><value>e.g. Berlin, Germany</value></data>
-  <data name="Travel.AmountLabel" xml:space="preserve"><value>Amount I'm claiming</value></data>
+  <data name="Travel.AmountLabel" xml:space="preserve"><value>Amount I'm claiming (EUR)</value></data>
   <data name="Travel.PickAmount" xml:space="preserve"><value>-- pick an amount --</value></data>
-  <data name="Travel.AmountSingle" xml:space="preserve"><value>EUR {0} (single-speaker session)</value></data>
-  <data name="Travel.AmountCo" xml:space="preserve"><value>EUR {0} (co-speaking session)</value></data>
+  <data name="Travel.AmountSingle" xml:space="preserve"><value>EUR {0} (Europe, single-speaker session)</value></data>
+  <data name="Travel.AmountCo" xml:space="preserve"><value>EUR {0} (Europe, co-speaking session)</value></data>
   <data name="Travel.AmountIntercontinental" xml:space="preserve"><value>EUR {0} (intercontinental, single-speaker session)</value></data>
   <data name="Travel.AmountIntercontinentalCo" xml:space="preserve"><value>EUR {0} (intercontinental, co-speaking session, per person)</value></data>
   <data name="Travel.AmountOther" xml:space="preserve"><value>Other (please explain)</value></data>
   <data name="Travel.OtherAmount" xml:space="preserve"><value>Other amount (EUR)</value></data>
-  <data name="Travel.Explanation" xml:space="preserve"><value>Explanation (required if "Other")</value></data>
+  <data name="Travel.Explanation" xml:space="preserve"><value>Explanation (optional)</value></data>
   <data name="Travel.ExplanationPlaceholder" xml:space="preserve"><value>Cheapest flight found, route, dates, etc.</value></data>
   <data name="Travel.ErrPickAmount" xml:space="preserve"><value>Choose an amount, or select "No, I'm not claiming".</value></data>
-  <data name="Travel.ErrOtherAmount" xml:space="preserve"><value>Enter the amount in EUR (greater than 0) for "Other".</value></data>
+  <data name="Travel.ErrOtherAmount" xml:space="preserve"><value>Enter the amount you are claiming in EUR (greater than 0).</value></data>
   <data name="Travel.ErrOtherExplanation" xml:space="preserve"><value>An explanation is required when you choose "Other".</value></data>
   <data name="Travel.Save" xml:space="preserve"><value>Request Travel Reimbursement</value></data>
 
@@ -1460,7 +1460,7 @@
   <data name="Settings.DependsOn" xml:space="preserve"><value>Needs: {0}</value></data>
   <data name="Settings.DependencyWarning" xml:space="preserve"><value>{0} is on but its prerequisite {1} is off, so it stays inert until you enable {1}.</value></data>
   <data name="Settings.KillSwitchHeading" xml:space="preserve"><value>Outbound email</value></data>
-  <data name="Settings.KillSwitchHelp" xml:space="preserve"><value>The master switch for all email leaving the hub. Turn it off to instantly stop every send — sign-in codes, welcomes, reminders and round-ups — across the web app and the background jobs. Recipients are also limited by the safe-recipient allowlist; nothing is ever sent to people outside it.</value></data>
+  <data name="Settings.KillSwitchHelp" xml:space="preserve"><value>The master switch for all email leaving the hub. Turn it off to instantly stop every send — sign-in codes, welcomes, reminders and round-ups — across the web app and the background jobs. Recipients are also limited by each mail's release ring; nothing is sent to people outside it.</value></data>
   <data name="Settings.AllowlistLabel" xml:space="preserve"><value>Safe-recipient allowlist (read-only)</value></data>
   <data name="Settings.AllowlistEmpty" xml:space="preserve"><value>No allowlist configured — every send is blocked (fail-closed).</value></data>
   <data name="Settings.RedirectLabel" xml:space="preserve"><value>Redirect all mail to (test mode)</value></data>

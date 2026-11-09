@@ -122,7 +122,7 @@ test.describe('@gui §4 Self-service forms (speaker)', () => {
             // Unlocked: the claim block toggles with the reimbursement choice.
             await page.locator('#ReqYes').check();
             await expect(page.locator('#ClaimBlock')).toBeVisible();
-            await expect(page.locator('#AmountChoice')).toBeVisible();
+            await expect(page.locator('#OtherAmountEur')).toBeVisible();
             await page.locator('#ReqNo').check();
             await expect(page.locator('#ClaimBlock')).toBeHidden();
         }

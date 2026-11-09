@@ -156,8 +156,12 @@ public sealed class TravelValidationTests
         Assert.Null(model.Message);
     }
 
+    /// <summary>
+    /// Operator 2026-11-09: "the dropdown should be a custom amount and not predefined amounts". The typed amount
+    /// is the real cost, so no explanation is required for it (it was, for "Other").
+    /// </summary>
     [Fact]
-    public async Task Other_with_blank_explanation_is_rejected()
+    public async Task A_typed_amount_saves_without_an_explanation()
     {
         using var db = NewDb();
         var speaker = await SeedSpeakerAsync(db);
@@ -166,18 +170,19 @@ public sealed class TravelValidationTests
 
         model.RequestReimbursement = true;
         model.AmountChoice = TravelModel.ChoiceOther;
-        model.OtherAmountEur = 250m;
+        model.OtherAmountEur = 268.24m;
         model.Explanation = "   ";               // whitespace-only
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
-        Assert.True(model.ModelState.ContainsKey(nameof(TravelModel.Explanation)));
-        Assert.Empty(await db.TravelReimbursements.ToListAsync());
+        Assert.True(model.ModelState.IsValid);
+        var row = Assert.Single(await db.TravelReimbursements.ToListAsync());
+        Assert.Equal(268.24m, row.ClaimAmountEur);
     }
 
     [Fact]
-    public async Task Claiming_without_choosing_an_amount_is_rejected()
+    public async Task Claiming_without_an_amount_is_rejected()
     {
         using var db = NewDb();
         var speaker = await SeedSpeakerAsync(db);
@@ -185,12 +190,12 @@ public sealed class TravelValidationTests
         var model = NewModel(db, http);
 
         model.RequestReimbursement = true;
-        model.AmountChoice = TravelModel.ChoiceNone;   // nothing picked
+        model.AmountChoice = TravelModel.ChoiceNone;   // nothing typed (an old page, or a blank post)
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
-        Assert.True(model.ModelState.ContainsKey(nameof(TravelModel.AmountChoice)));
+        Assert.True(model.ModelState.ContainsKey(nameof(TravelModel.OtherAmountEur)));
         Assert.Empty(await db.TravelReimbursements.ToListAsync());
     }
 

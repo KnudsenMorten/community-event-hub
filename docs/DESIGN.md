@@ -2837,6 +2837,19 @@ exactly, and the browser posts line breaks as CR+LF, so an untouched save became
 `SoMeAutoApproveService.EditAllowsAutoApproval`: unedited, spacing-only, or `TemplateKind == Session` (Type 2: 2a, 2b,
 2c) passes; other kinds with changed wording keep waiting for a human (§918 guard 3). The approval gate still applies.
 
+**Picture upload and generated-graphic links in the post editor (§1390, 2026-11-09).** The editor's Save form is
+`multipart/form-data` with an optional `UploadPicture` file. `SoMeGraphicLibrary.UploadPictureAsync(kind, name, bytes)`
+stores it with `ISharePointFileStore.UploadToFolderAsync` in the GRAPHIC folder of `RegistryKeyFor(kind, Graphic)` (the
+folder the picker lists): ≤ 10 MB (`MaxUploadBytes`), extension png/jpg/jpeg/gif AND the first bytes must match it
+(`SniffPicture`), the leaf name reduced to `[A-Za-z0-9_-]` (`SafeUploadName`), a taken name gets `-2`, `-3` …
+(`UniqueName`, never overwrites another post's picture). The bare name becomes `ImageRef`, medium Graphic. A refused
+upload still saves the rest of the form and keeps the previous link. `CanUpload` = store can write and read.
+An `ImageRef` that is a generated graphic's SharePoint path/URL (a `GraphicAssets` row with a stored item id — e.g. the
+§1384 all-tracks GIF) sets `LinkedIsGeneratedGraphic`: the dropdown keeps it as a selected "Current: …" option (before,
+the missing option made the browser post "none", so any Save unlinked the picture) and the preview uses
+`GET /organizer/some-post-picture/{postId}` (organizer-only, `no-store`), which runs `SoMeMailPreview.ResolveImageAsync`
+— the publisher's own resolver.
+
 **A tier intro names its companies live, by public name (§1373, 2026-10-28).** `{IntroText}` is generated once and
 stored (§901/§911), while `{SponsorList}` resolves at publish — so a tier intro written from the list froze the names
 of that moment (legal/billing names, and companies that later changed tier). Now the intro carries the token
@@ -5100,6 +5113,16 @@ claims to UnderReview with `ErpSentAt = SubmittedAt` (finance already has them) 
   Accept / Send back buttons post to the preview handlers and the preview's buttons post to the real ones. A
   SentBack claim not yet resubmitted re-sends without reopening or counting. `TravelCheckItem.SpeakerNote` (the AI's
   `speaker_note`, kind sentence + reason) is what the speaker reads (`ForSpeaker`).
+- **Typed claim amount (§1391, 2026-11-09)** — the travel form has one `OtherAmountEur` number field (step 0.01) and
+  a hidden `AmountChoice = "other"`; the caps are listed as maximums. `TravelFormService` treats an empty choice as
+  "other", requires an amount > 0, no longer requires an explanation, still composes a legacy preset, and
+  `DecomposeAmount` always shows the stored amount in the field.
+- **Ring check before the speaker mail (§1390, 2026-11-09)** — `travel-claim-sent-back` is ring-gated (not exempt)
+  and had no `EmailTemplateRings` row, so it resolved to Ring 0 and the transport dropped every speaker's copy while
+  the dialog logged "Mail to …". `TravelReviewService.RingBlockAsync` now asks `EmailTemplateRingService
+  .GetEffectiveRingAsync(SentBackMailKey, speaker role)` (the transport's own answer) and compares the speaker's
+  `Participant.Ring`; when excluded, nothing is sent, the dialog logs "NOT mailed — …" and Send back / Re-send say
+  which ring to open. The outbound-email ceiling is not re-checked here.
 - **Per-line overrides (2026-11-08)** — `TravelCheckItem` carries `AcceptedBy/AcceptedAt/AcceptNote` inside
   `AiFindingsJson` (no schema change); `IsOpenFailure` (✗ and not accepted) drives the speaker's missing list and the
   send-back mail; `TravelReviewService.AcceptCheckAsync/UndoCheckAsync` by index; `CarryAcceptances` keeps an
@@ -5300,6 +5323,14 @@ cd src/CommunityHub.Core
 dotnet ef migrations add <Name> --startup-project ../CommunityHub
 dotnet ef database update --startup-project ../CommunityHub
 ```
+
+**Migration baseline (2026-11-08).** The 302 migrations up to `20261108200000_MailCampaignReleasePlan` were squashed into
+one `20261108210000_Baseline` (they were 2.0 M of Core's 2.2 M lines and dominated every build). An empty database is
+built by the baseline; an existing database that has the last old migration adopts it through
+`MigrationBaseline.AdoptIfNeeded` (one `__EFMigrationsHistory` row, written at web startup before `Migrate()`, no schema
+change); a database that is behind refuses to start. New migrations are added after the baseline as before. The old
+chain is in git history (before commit `4d42f679`'s successor). Existing databases keep 87 database DEFAULT constraints
+the model never declared; a fresh database does not have them — code must supply every NOT NULL column (EF always does).
 
 **Run locally:**
 ```bash

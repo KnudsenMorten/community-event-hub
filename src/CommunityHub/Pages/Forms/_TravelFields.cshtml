@@ -213,26 +213,25 @@ else
         <label for="OriginCity">@Localizer["Travel.OriginCity"]</label>
         <input type="text" asp-for="OriginCity" placeholder="@Localizer["Travel.OriginPlaceholder"]" />
 
-        <label for="AmountChoice">@Localizer["Travel.AmountLabel"]</label>
-        <select asp-for="AmountChoice" id="AmountChoice">
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceNone">@Localizer["Travel.PickAmount"]</option>
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice400">
-                @Localizer["Travel.AmountSingle", CommunityHub.Forms.Steps.TravelFormModel.Cap400]
-            </option>
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice300">
-                @Localizer["Travel.AmountCo", CommunityHub.Forms.Steps.TravelFormModel.Cap300]
-            </option>
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice800">
-                @Localizer["Travel.AmountIntercontinental", CommunityHub.Forms.Steps.TravelFormModel.Cap800]
-            </option>
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice600">
-                @Localizer["Travel.AmountIntercontinentalCo", CommunityHub.Forms.Steps.TravelFormModel.Cap600]
-            </option>
-            <option value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther">
-                @Localizer["Travel.AmountOther"]
-            </option>
-        </select>
+        @* Operator 2026-11-09: "the dropdown should be a custom amount and not predefined amounts 400, 800 etc".
+           A speaker claims what they actually paid, up to the cap for their route — so the amount is typed, and the
+           caps are shown as the maximums. (A pick of "EUR 300" for a EUR 268.24 ticket failed the AI's
+           "claim not above paid" check.) AmountChoice is always "other" now; the amount lives in OtherAmountEur. *@
+        <input type="hidden" name="AmountChoice" value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther" />
+        <label for="OtherAmountEur">@Localizer["Travel.AmountLabel"]</label>
+        <input type="number" asp-for="OtherAmountEur" id="OtherAmountEur" min="0.01" step="0.01" inputmode="decimal"
+               placeholder="e.g. 268.24" style="max-width:200px;" />
+        <span asp-validation-for="OtherAmountEur" class="ceh-field-error"></span>
         <span asp-validation-for="AmountChoice" class="ceh-field-error"></span>
+        <div class="muted" style="font-size:13px;margin:4px 0 10px;">
+            Claim what you actually paid, in EUR — at most:
+            <ul style="margin:4px 0 0 18px;padding:0;">
+                <li>@Localizer["Travel.AmountSingle", CommunityHub.Forms.Steps.TravelFormModel.Cap400]</li>
+                <li>@Localizer["Travel.AmountCo", CommunityHub.Forms.Steps.TravelFormModel.Cap300]</li>
+                <li>@Localizer["Travel.AmountIntercontinental", CommunityHub.Forms.Steps.TravelFormModel.Cap800]</li>
+                <li>@Localizer["Travel.AmountIntercontinentalCo", CommunityHub.Forms.Steps.TravelFormModel.Cap600]</li>
+            </ul>
+        </div>
 
         @* §1387 — decides which second document the check expects: invoice or personal declaration. *@
         <fieldset style="border:0;padding:0;margin:10px 0 6px;">
@@ -241,17 +240,6 @@ else
             <label style="font-weight:normal;"><input type="radio" asp-for="HasCompany" value="false" /> No — I attach a personal declaration</label>
         </fieldset>
         <span asp-validation-for="HasCompany" class="ceh-field-error"></span>
-
-        @{
-            // Keep the "Other amount" block visible on a re-render that failed validation
-            // while "Other" was chosen, so the inline error sits next to the field to fix.
-            var otherChosen = Model.AmountChoice == CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther;
-        }
-        <div id="OtherBlock" style="@(otherChosen ? "" : "display:none;")">
-            <label for="OtherAmountEur">@Localizer["Travel.OtherAmount"]</label>
-            <input type="number" asp-for="OtherAmountEur" min="0" step="1" />
-            <span asp-validation-for="OtherAmountEur" class="ceh-field-error"></span>
-        </div>
 
         <label for="Explanation">@Localizer["Travel.Explanation"]</label>
         <textarea asp-for="Explanation" rows="3"
@@ -265,17 +253,13 @@ else
         var reqYes = document.getElementById('ReqYes');
         var reqNo  = document.getElementById('ReqNo');
         var claim  = document.getElementById('ClaimBlock');
-        var pick   = document.getElementById('AmountChoice');
-        var other  = document.getElementById('OtherBlock');
         var amount = document.getElementById('OtherAmountEur');
-        if (!reqYes || !reqNo || !claim || !pick || !other || !amount) return;
-        var form   = pick.closest('form');
+        if (!reqYes || !reqNo || !claim || !amount) return;
+        var form   = amount.closest('form');
         function syncClaim() { claim.style.display = reqYes.checked ? '' : 'none'; }
-        function syncOther() { other.style.display = pick.value === 'other' ? '' : 'none'; }
         reqYes.addEventListener('change', syncClaim);
         reqNo.addEventListener('change', syncClaim);
-        pick.addEventListener('change', syncOther);
-        syncClaim(); syncOther();
+        syncClaim();
 
         // Client-side mirror of the server field validation (shared pattern). HTML5 custom
         // validity gives an inline message without leaving the page; the server re-checks
@@ -285,15 +269,13 @@ else
             form.addEventListener('submit', function (e) {
                 if (e.submitter && e.submitter.formNoValidate) return;  // sub-action / prev: skip
                 if (!reqYes.checked) return;                            // not claiming: skip
-                if (pick.value === 'other') {
-                    var v = parseFloat(amount.value);
-                    if (!(v > 0)) {
-                        amount.setCustomValidity(
-                            '@Html.Raw(Localizer["Travel.ErrOtherAmount"].Value.Replace("'", "\\'"))');
-                        amount.reportValidity();
-                        amount.classList.add('ceh-input-invalid');
-                        e.preventDefault();
-                    }
+                var v = parseFloat(amount.value);
+                if (!(v > 0)) {
+                    amount.setCustomValidity(
+                        '@Html.Raw(Localizer["Travel.ErrOtherAmount"].Value.Replace("'", "\'"))');
+                    amount.reportValidity();
+                    amount.classList.add('ceh-input-invalid');
+                    e.preventDefault();
                 }
             });
             amount.addEventListener('input', function () {

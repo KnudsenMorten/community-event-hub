@@ -272,6 +272,27 @@ version and merge deliberately.
 Upstream also carries its own edition's tags (`eldkNN-v*`); those are the maintainer's internal event
 milestones. **As a fork, follow `public-v*` only.**
 
+### Upgrading to `public-v2.0.0` — the migration squash (2026-11-09)
+
+**What changed (MAJOR):** the 302 EF Core migrations were squashed into ONE baseline migration,
+`20261108210000_Baseline`. The resulting schema is identical (verified table by table, column by column, index by
+index); builds and test runs are much faster. Old migration files are gone.
+
+**What you have to do depends on your database:**
+
+- **New install** — nothing. The baseline builds the database on first start.
+- **Your database already has `20261108200000_MailCampaignReleasePlan`** (you deployed `public-v1.0.0`) — nothing.
+  On first start, `public-v2.0.0` records the baseline as applied (one history row, no schema change) and carries on.
+- **Your database is older** (you installed from an earlier public sync, e.g. October 2026) — upgrade in **two hops**:
+  1. Merge and deploy **`public-v1.0.0`** and let it start once, so it applies the remaining old migrations.
+  2. Then merge and deploy **`public-v2.0.0`**.
+
+  If you skip hop 1, the app refuses to start with a message naming `public-v1.0.0`. Nothing is changed in the
+  database when it refuses.
+
+**If you added your own migrations** in your fork: generate them again on top of the baseline after merging
+(`dotnet ef migrations add …`), and apply hop 1 first so your database contains everything the baseline assumes.
+
 ---
 
 ## 7. Before you go live with your own edition

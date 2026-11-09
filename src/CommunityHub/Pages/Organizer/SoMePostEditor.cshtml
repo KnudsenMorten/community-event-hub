@@ -416,7 +416,7 @@
 
 @if (!Model.AccessDenied && Model.Post is { } p)
 {
-    <form method="post" asp-page-handler="Save" class="post-form" id="save-post-form">
+    <form method="post" asp-page-handler="Save" class="post-form" id="save-post-form" enctype="multipart/form-data">
         <input type="hidden" name="PostId" value="@p.Id" />
 
         <div class="card">
@@ -754,12 +754,18 @@
                 var mediaIsVideo = Model.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video;
                 var mediaNoun = mediaIsVideo ? "video" : "picture";
                 var previewBase = $"/organizer/some-graphic?kind={(int?)p.TemplateKind}&media={Model.MediaKind}&name=";
-                var currentSrc = string.IsNullOrWhiteSpace(Model.ImageRef)
-                    ? string.Empty
-                    : previewBase + Uri.EscapeDataString(Model.ImageRef!);
-                var linkedButMissing = !string.IsNullOrWhiteSpace(Model.ImageRef)
+                var linkedOutsideFolder = !string.IsNullOrWhiteSpace(Model.ImageRef)
                     && Model.Graphics.Count > 0
                     && !Model.Graphics.Any(g => string.Equals(g.FileName, Model.ImageRef, StringComparison.OrdinalIgnoreCase));
+                // §1390 — a generated graphic linked by its path is previewed per POST, through the
+                // publisher's own resolver; a bare name goes through the folder proxy as before.
+                var postPictureSrc = $"/organizer/some-post-picture/{p.Id}";
+                var currentSrc = string.IsNullOrWhiteSpace(Model.ImageRef)
+                    ? string.Empty
+                    : Model.LinkedIsGeneratedGraphic
+                        ? postPictureSrc
+                        : previewBase + Uri.EscapeDataString(Model.ImageRef!);
+                var linkedButMissing = linkedOutsideFolder && !Model.LinkedIsGeneratedGraphic;
             }
 
             @* 🔒 §844.5 — a DROPDOWN of what is really in the library, never a typed string: a typo
@@ -775,6 +781,14 @@
                         <select id="imgref" name="ImageRef" style="width:100%;"
                                 onchange="cehSetPreview(this.value);">
                             <option value="">— none (text-only post) —</option>
+                            @if (linkedOutsideFolder)
+                            {
+                                @* 🔴 §1390 — the CURRENT link stays an option and stays selected. Without
+                                   it the browser submitted "none", so any Save (text, date) unlinked it. *@
+                                <option value="@Model.ImageRef" selected="selected" data-current="1">
+                                    @(Model.LinkedIsGeneratedGraphic ? "Current: " + SoMePostEditorModel.LinkLabel(Model.ImageRef) + " (generated graphic)" : "Current: " + SoMePostEditorModel.LinkLabel(Model.ImageRef) + " (not found)")
+                                </option>
+                            }
                             @foreach (var g in Model.Graphics)
                             {
                                 <option value="@g.FileName"
@@ -794,14 +808,45 @@
                         <input type="hidden" name="ImageRef" value="@Model.ImageRef" />
                     }
 
-                    @if (linkedButMissing)
+                    @if (Model.LinkedIsGeneratedGraphic)
+                    {
+                        <p class="muted">
+                            Linked to the generated graphic <strong>@SoMePostEditorModel.LinkLabel(Model.ImageRef)</strong>
+                            from the graphics library — it publishes with this picture. Saving keeps it unless you
+                            choose or upload another.
+                        </p>
+                    }
+                    else if (linkedButMissing)
                     {
                         @* Say it, rather than silently showing "none" selected — which would read as
                            the link having been removed. *@
                         <p class="error">
-                            Linked to <strong>@Model.ImageRef</strong>, which is not in this folder.
-                            Choose a file to replace it.
+                            Linked to <strong>@Model.ImageRef</strong>, which cannot be found.
+                            Choose or upload a picture to replace it.
                         </p>
+                    }
+
+                    @if (!mediaIsVideo)
+                    {
+                        @* §1390 — "it would be good if we could upload a picture" (organizer, 2026-11-09). *@
+                        <div style="margin-top:10px;">
+                            <label for="uploadPicture">Or upload a new picture</label>
+                            @if (Model.CanUploadPicture)
+                            {
+                                <input type="file" id="uploadPicture" name="UploadPicture"
+                                       accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif"
+                                       style="width:100%;" onchange="cehPreviewUpload(this);" />
+                                <p class="muted" style="margin:4px 0 0;">
+                                    PNG, JPG or GIF, up to @(CommunityHub.Core.Integrations.SoMeGraphicLibrary.MaxUploadBytes / 1024 / 1024) MB.
+                                    It is added to the picture folder for this post type and linked when you press
+                                    <strong>Save</strong>. A name that is already taken gets a number added.
+                                </p>
+                            }
+                            else
+                            {
+                                <p class="muted" style="margin:4px 0 0;">Uploading is not available in this environment.</p>
+                            }
+                        </div>
                     }
 
                     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
@@ -852,7 +897,12 @@
                     if (!el) return;
                     var isVideo = el.tagName === 'VIDEO';
                     if (name) {
-                        var url = '@Html.Raw(previewBase)' + encodeURIComponent(name);
+                        // §1390 — the current generated graphic is previewed per post, not by name.
+                        var sel = document.getElementById('imgref');
+                        var opt = sel ? sel.options[sel.selectedIndex] : null;
+                        var url = (opt && opt.dataset.current === '1' && opt.value === name)
+                            ? '@Html.Raw(postPictureSrc)'
+                            : '@Html.Raw(previewBase)' + encodeURIComponent(name);
                         if (isVideo) {
                             // §844.7 — a video is only fetched when he asks for it; picking a
                             // different one re-arms the button rather than downloading 80 MB.
@@ -870,6 +920,15 @@
                         el.style.display = 'none';
                         if (empty) empty.style.display = '';
                     }
+                }
+                // §1390 — show the chosen file in the preview box before it is uploaded.
+                function cehPreviewUpload(input) {
+                    var el = document.getElementById('mediaPreview');
+                    var empty = document.getElementById('previewEmpty');
+                    if (!el || el.tagName !== 'IMG' || !input.files || !input.files[0]) return;
+                    el.src = URL.createObjectURL(input.files[0]);
+                    el.style.display = '';
+                    if (empty) empty.style.display = 'none';
                 }
                 function cehTogglePreview() {
                     var box = document.getElementById('previewBox');

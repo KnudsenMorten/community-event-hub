@@ -176,6 +176,119 @@ public sealed class SoMeGraphicLibrary
         }
     }
 
+    /// <summary>§1390 — the largest picture the editor accepts. LinkedIn takes far more; this keeps a
+    /// stray photo-camera original from being buffered through the app.</summary>
+    public const long MaxUploadBytes = 10 * 1024 * 1024;
+
+    /// <summary>True when the editor can offer an upload at all.</summary>
+    public bool CanUpload => _store.CanStore && _store.CanRead;
+
+    /// <summary>The outcome of <see cref="UploadPictureAsync"/>: the stored FILE NAME, or why not.</summary>
+    public sealed record UploadResult(string? FileName, string? Error)
+    {
+        public bool Ok => FileName is not null;
+    }
+
+    /// <summary>
+    /// §1390 — store an organizer's picture in the GRAPHICS folder for this post type and return the
+    /// bare file name to link (what <see cref="SoMePost.ImageRef"/> holds for a library picture).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 Checked by CONTENT, not by name: the first bytes must be a PNG, JPEG or GIF and match the
+    /// extension, because the file is later sent to LinkedIn and previewed in organizers' browsers.</para>
+    /// <para>🔒 Never overwrites: another post may link a file of the same name, so a clash gets
+    /// "-2", "-3" … instead of silently changing that post's picture.</para>
+    /// </remarks>
+    public async Task<UploadResult> UploadPictureAsync(
+        SoMeTemplateKind? kind, string? originalName, byte[] content, CancellationToken ct = default)
+    {
+        if (!CanUpload) return new(null, "Uploading is not available in this environment.");
+
+        var folder = FolderFor(RegistryKeyFor(kind, SoMePostMediaKind.Graphic));
+        if (string.IsNullOrWhiteSpace(folder)) return new(null, "There is no picture folder for this post type.");
+
+        if (content.Length == 0) return new(null, "The file is empty.");
+        if (content.Length > MaxUploadBytes)
+            return new(null, $"The file is {content.Length / 1024 / 1024} MB — the limit is {MaxUploadBytes / 1024 / 1024} MB.");
+
+        var name = SafeUploadName(originalName);
+        if (name is null) return new(null, "Only PNG, JPG and GIF pictures can be uploaded.");
+
+        var sniffed = SniffPicture(content);
+        if (sniffed is null || !string.Equals(sniffed, PictureTypeOf(name), StringComparison.Ordinal))
+            return new(null, "That file is not a PNG, JPG or GIF picture (its content does not match its name).");
+
+        try
+        {
+            var existing = (await _store.ListAsync(folder, ct))
+                .Select(f => f.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var finalName = UniqueName(name, existing);
+
+            await _store.UploadToFolderAsync(folder, finalName, content, ContentTypeFor(finalName), ct);
+            _log?.LogInformation("§1390: uploaded SoMe picture {Name} ({Bytes} bytes) to {Folder}.",
+                finalName, content.Length, folder);
+            return new(finalName, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log?.LogError(ex, "§1390: could not upload SoMe picture {Name} to {Folder}.", name, folder);
+            return new(null, "The upload to the picture library failed. Please try again.");
+        }
+    }
+
+    /// <summary>§1390 — the leaf name, reduced to letters, digits, '-', '_' and '.', with a picture
+    /// extension; null when it is not a picture name.</summary>
+    internal static string? SafeUploadName(string? originalName)
+    {
+        var leaf = (originalName ?? string.Empty).Replace('\\', '/');
+        leaf = leaf[(leaf.LastIndexOf('/') + 1)..].Trim();
+        var ext = Path.GetExtension(leaf).ToLowerInvariant();
+        if (ext is not (".png" or ".jpg" or ".jpeg" or ".gif")) return null;
+
+        var stem = Path.GetFileNameWithoutExtension(leaf);
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in stem)
+        {
+            if (char.IsAsciiLetterOrDigit(c) || c is '-' or '_') sb.Append(c);
+            else if (c is ' ' or '.' && sb.Length > 0 && sb[^1] != '-') sb.Append('-');
+        }
+        var clean = sb.ToString().Trim('-', '_');
+        if (clean.Length == 0) clean = "picture";
+        if (clean.Length > 80) clean = clean[..80].TrimEnd('-', '_');
+        return clean + ext;
+    }
+
+    internal static string UniqueName(string name, ISet<string> existing)
+    {
+        if (!existing.Contains(name)) return name;
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var ext = Path.GetExtension(name);
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{stem}-{i}{ext}";
+            if (!existing.Contains(candidate)) return candidate;
+        }
+    }
+
+    /// <summary>"png" / "jpeg" / "gif" from the file's first bytes, or null.</summary>
+    internal static string? SniffPicture(byte[] b)
+    {
+        if (b.Length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47
+            && b[4] == 0x0D && b[5] == 0x0A && b[6] == 0x1A && b[7] == 0x0A) return "png";
+        if (b.Length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return "jpeg";
+        if (b.Length >= 6 && b[0] == 'G' && b[1] == 'I' && b[2] == 'F' && b[3] == '8'
+            && (b[4] == '7' || b[4] == '9') && b[5] == 'a') return "gif";
+        return null;
+    }
+
+    private static string PictureTypeOf(string name) => Path.GetExtension(name).ToLowerInvariant() switch
+    {
+        ".png" => "png",
+        ".gif" => "gif",
+        _ => "jpeg",
+    };
+
     /// <summary>§844 — the video formats LinkedIn accepts for a native upload.</summary>
     private static bool IsVideo(string name) =>
         name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)

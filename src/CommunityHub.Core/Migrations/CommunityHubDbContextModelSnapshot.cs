@@ -2586,13 +2586,6 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<DateTimeOffset?>("SentToHotelAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("SentToHotelByEmail")
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
                     b.Property<int>("Priority")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -2600,6 +2593,13 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<int?>("RoomBlockSize")
                         .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SentToHotelAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SentToHotelByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
@@ -2670,12 +2670,6 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int?>("CancelledHotelId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("GuestsInRoom")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("RoommateParticipantId")
-                        .HasColumnType("int");
-
                     b.Property<DateOnly?>("CheckInDate")
                         .HasColumnType("date");
 
@@ -2698,6 +2692,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("GuestsInRoom")
+                        .HasColumnType("int");
+
                     b.Property<bool>("NeedsRoom")
                         .HasColumnType("bit");
 
@@ -2715,6 +2712,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<string>("RoomType")
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
+
+                    b.Property<int?>("RoommateParticipantId")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");

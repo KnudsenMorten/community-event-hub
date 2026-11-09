@@ -23,17 +23,23 @@ DECLARE @Now datetimeoffset = SYSDATETIMEOFFSET();
 
 IF NOT EXISTS (SELECT 1 FROM [Events] WHERE [Code] = @Code)
     INSERT INTO [Events] ([CommunityName], [Code], [DisplayName], [StartDate], [EndDate], [PreDayDate],
-                          [VenueName], [HubHostname], [IsActive], [LockDate], [CreatedAt])
+                          [VenueName], [HubHostname], [IsActive], [LockDate], [AutoCalendarInvitesEnabled], [CreatedAt])
     VALUES (@Community, @Code, @DisplayName, @StartDate, @EndDate, @PreDayDate,
-            @Venue, @Hostname, 1, NULL, @Now);
+            @Venue, @Hostname, 1, NULL, 0, @Now);
 
 DECLARE @EventId int = (SELECT [Id] FROM [Events] WHERE [Code] = @Code);
 
 -- Role 0 = Organizer. LifecycleState 2 = Active (sign-in needs IsActive AND Active).
 -- Ring 0 = the earliest release ring, so your own account receives mail from day one.
 IF NOT EXISTS (SELECT 1 FROM [Participants] WHERE [EventId] = @EventId AND [Email] = @Email)
-    INSERT INTO [Participants] ([EventId], [Email], [FullName], [Role], [IsActive], [LifecycleState], [Ring], [CreatedAt])
-    VALUES (@EventId, @Email, @FullName, 0, 1, 2, 0, @Now);
+    INSERT INTO [Participants] ([EventId], [Email], [FullName], [Role], [IsActive], [LifecycleState], [Ring], [CreatedAt],
+                                [IsSigner], [IsEventCoordinator], [IsBoothMember], [QueueSource], [IsTestUser], [NeedsVisa],
+                                [OnboardingCompleted_Bio], [OnboardingCompleted_Picture], [OnboardingCompleted_Hotel],
+                                [OnboardingCompleted_Appreciation], [OnboardingCompleted_Swag])
+    VALUES (@EventId, @Email, @FullName, 0, 1, 2, 0, @Now,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+            0, 0);
 
 SELECT e.[Code], e.[IsActive], p.[Email], p.[Role], p.[LifecycleState]
 FROM [Events] e JOIN [Participants] p ON p.[EventId] = e.[Id]

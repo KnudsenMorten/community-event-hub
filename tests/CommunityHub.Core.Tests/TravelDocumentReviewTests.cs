@@ -69,7 +69,7 @@ public sealed class TravelDocumentReviewTests
 
     private sealed record World(CommunityHubDbContext Db, TravelReviewService Review, Model Ai, Mail Mail, int ClaimId, int Pid);
 
-    private static async Task<World> NewWorldAsync(bool configured = true)
+    private static async Task<World> NewWorldAsync(bool configured = true, bool withRings = false)
     {
         var db = new CommunityHubDbContext(new DbContextOptionsBuilder<CommunityHubDbContext>()
             .UseInMemoryDatabase($"trv-{Guid.NewGuid():N}").Options);
@@ -84,7 +84,10 @@ public sealed class TravelDocumentReviewTests
         var templates = new EmailTemplateProvider(Options.Create(new EmailTemplateOptions { TemplateDirectory = RepoPaths.EmailTemplates() }));
         var review = new TravelReviewService(db, clock, validator, new TravelErpMailer(db, mail, ctx),
             new TravelClaimLock(db, clock, new TravelClaimLockOptions { FreezeEnabled = true }), mail, templates, ctx,
-            new LogisticsRecipients { ReviewMailbox = "ops@crew.example" });
+            new LogisticsRecipients { ReviewMailbox = "ops@crew.example" },
+            rings: withRings
+                ? new EmailTemplateRingService(db, new CommunityHub.Core.Settings.FeatureGateService(db), TimeProvider.System)
+                : null);
 
         db.Events.Add(new Event { Id = EventId, Code = "T27", CommunityName = "Test", DisplayName = "Test 2027",
             StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10), IsActive = true });
@@ -242,6 +245,44 @@ public sealed class TravelDocumentReviewTests
         Assert.False(m.Ctx!.RingExempt);
         Assert.Equal(TravelReviewService.SentBackMailKey, m.Ctx.TemplateName);
         Assert.Equal("travel-reimbursement-email", m.Ctx.FeatureKey);
+    }
+
+    /// <summary>
+    /// §1390 — operator 2026-11-09: three send-backs "were not received". The mail had no ring row, so it
+    /// resolved to Ring 0 and the transport dropped the speaker's copy while the dialog said "Mail to …".
+    /// It must say it was NOT sent, and send nothing.
+    /// </summary>
+    [Fact]
+    public async Task Send_back_says_not_sent_when_the_mail_ring_excludes_the_speaker()
+    {
+        var w = await NewWorldAsync(withRings: true);
+        w.Ai.Answer = NotApproved;
+        await w.Review.ValidateAsync(EventId, w.ClaimId);
+
+        var r = await w.Review.SendBackAsync(EventId, w.ClaimId, "org@crew.example", "Please add the declaration");
+
+        Assert.True(r.Ok);                                             // the claim IS sent back
+        Assert.Contains("NOT sent", r.Message);
+        Assert.Contains("Ring 0", r.Message);
+        Assert.Empty(w.Mail.Sent);
+        var log = await w.Db.TravelReviewLog.Where(l => l.Kind == TravelReviewLogKinds.MailedSpeaker).ToListAsync();
+        Assert.Contains(log, l => l.Text.StartsWith("NOT mailed", StringComparison.Ordinal));
+
+        // Re-send while still blocked: refused, still nothing sent.
+        var again = await w.Review.SendBackAsync(EventId, w.ClaimId, "org@crew.example", "Second try");
+        Assert.False(again.Ok);
+        Assert.Empty(w.Mail.Sent);
+
+        // He opens the mail to Ring 3 → Re-send goes.
+        w.Db.EmailTemplateRings.Add(new EmailTemplateRing
+        {
+            EventId = EventId, TemplateKey = TravelReviewService.SentBackMailKey,
+            ReleasedToRing = CommunityHub.Core.Settings.Ring.Broad,
+        });
+        await w.Db.SaveChangesAsync();
+        var third = await w.Review.SendBackAsync(EventId, w.ClaimId, "org@crew.example", "Third try");
+        Assert.True(third.Ok);
+        Assert.Single(w.Mail.Sent);
     }
 
     [Fact]

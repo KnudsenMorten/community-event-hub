@@ -57,13 +57,16 @@ public sealed class TravelReviewService
     private readonly LogisticsRecipients? _recipients;
     private readonly EventConfigOptions? _config;
     private readonly ILogger<TravelReviewService>? _log;
+    private readonly EmailTemplateRingService? _rings;
 
     public TravelReviewService(
         CommunityHubDbContext db, TimeProvider clock, TravelDocumentValidator validator, TravelErpMailer erp,
         TravelClaimLock claimLock, IEmailSender email, EmailTemplateProvider? templates = null,
         IEmailContextAccessor? ctx = null, LogisticsRecipients? recipients = null,
-        EventConfigOptions? config = null, ILogger<TravelReviewService>? log = null)
+        EventConfigOptions? config = null, ILogger<TravelReviewService>? log = null,
+        EmailTemplateRingService? rings = null)
     {
+        _rings = rings;
         _db = db;
         _clock = clock;
         _validator = validator;
@@ -327,6 +330,12 @@ public sealed class TravelReviewService
             await _db.SaveChangesAsync(ct);
             await LogAsync(row, TravelReviewLogKinds.SentBack,
                 "Re-sent the send-back mail" + (row.ReviewNote is null ? "." : $" with the note: {row.ReviewNote}"), actor, ct);
+            var againBlocked = await RingBlockAsync(eventId, row, ct);
+            if (againBlocked is not null)
+            {
+                await LogAsync(row, TravelReviewLogKinds.MailedSpeaker, "NOT mailed — " + againBlocked, "hub", ct);
+                return new(false, $"The mail to {row.Participant.FullName} was NOT sent — {againBlocked}");
+            }
             var again = await BuildSpeakerMailAsync(eventId, row, row.ReviewNote, ct);
             var resent = again is not null && await SendSpeakerMailAsync(eventId, row, again, ct);
             if (resent)
@@ -365,6 +374,12 @@ public sealed class TravelReviewService
             "Sent back to the speaker" + (string.IsNullOrWhiteSpace(row.ReviewNote) ? "" : $" with the note: {row.ReviewNote}")
             + (missingNow.Count == 0 ? "." : $" Still needed: {string.Join("; ", missingNow)}."), actor, ct);
 
+        var blocked = await RingBlockAsync(eventId, row, ct);
+        if (blocked is not null)
+        {
+            await LogAsync(row, TravelReviewLogKinds.MailedSpeaker, "NOT mailed — " + blocked, "hub", ct);
+            return new(true, $"Sent back to {row.Participant.FullName}: the claim is open again, but the e-mail was NOT sent — {blocked}");
+        }
         var mail = await BuildSpeakerMailAsync(eventId, row, row.ReviewNote, ct);
         var mailed = mail is not null && await SendSpeakerMailAsync(eventId, row, mail, ct);
         if (mailed)
@@ -487,6 +502,25 @@ public sealed class TravelReviewService
         if (deadline is DateOnly d)
             sb.Append($"<p style=\"margin:0 0 16px;\">⏰ Please upload everything on your travel page by <strong>{d.ToString("d MMMM yyyy", CultureInfo.InvariantCulture)}</strong>.</p>");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// §1390 — why the speaker's copy would be stopped by the ring gate, or null when it can go.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Operator 2026-11-09: three send-backs "were not received". The mail had no ring of its own, so it
+    /// resolved to Ring 0 and the transport DROPPED the speaker's copy silently — while this service
+    /// logged "Mail to …" as if it had gone. The gate itself is right (rings are the PROD audience
+    /// safety); what was wrong is claiming a send that did not happen. Same answer as the transport:
+    /// <see cref="EmailTemplateRingService.GetEffectiveRingAsync"/> for this mail × the speaker's role.
+    /// </remarks>
+    private async Task<string?> RingBlockAsync(int eventId, TravelReimbursement row, CancellationToken ct)
+    {
+        if (_rings is null) return null;
+        var mailRing = await _rings.GetEffectiveRingAsync(eventId, SentBackMailKey, ct, row.Participant.Role);
+        if ((int)row.Participant.Ring <= (int)mailRing) return null;
+        return $"the mail \"{SentBackMailKey}\" is released to Ring {(int)mailRing} and {row.Participant.FullName} is in "
+             + $"Ring {(int)row.Participant.Ring}. Open the mail to Ring {(int)row.Participant.Ring} under Settings → email rings, then press Re-send.";
     }
 
     private async Task<bool> SendSpeakerMailAsync(int eventId, TravelReimbursement row, TravelMailPreview mail, CancellationToken ct)

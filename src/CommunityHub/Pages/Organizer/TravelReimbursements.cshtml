@@ -70,6 +70,15 @@
                     </div>
                 </form>
             </div>
+            @* Operator 2026-11-09: "when i go to the next speaker and click re-send nothing happens". The preview
+               renders at the TOP of the page while the browser keeps the scroll position of a claim further down,
+               so it opened out of sight. Bring it into view. *@
+            <script>
+                (function () {
+                    var el = document.getElementById('preview');
+                    if (el) { el.scrollIntoView({ block: 'start' }); var n = document.getElementById('pvnote'); if (n) n.focus({ preventScroll: true }); }
+                })();
+            </script>
         }
 
         @* §1387 — "Needs your decision": every submitted claim waiting for Accept / Send back, newest response first. *@
