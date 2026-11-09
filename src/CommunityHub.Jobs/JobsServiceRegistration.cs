@@ -268,9 +268,33 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Reminders.GetStartedDeadlineReminderBuilder>();
         // §326bs: hotel release-deadline warning (needs the allotment board for its numbers).
         services.AddScoped<CommunityHub.Core.Organizer.HotelAllotmentService>();
+        // §1386 — hotel logistics refinement (change log, placement, overview, .xls sheet + import, ops mail, contract seed). BOTH hosts.
+        services.AddScoped<CommunityHub.Core.Organizer.HotelChangeLogService>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelPlacementService>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelOverviewService>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelAgreementSheet>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelSheetImportService>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelOpsNotifier>();
+        services.AddScoped<CommunityHub.Core.Organizer.HotelContractSeeder>();
+        // §1387 — the travel document review sweep (TravelReviewJob): validates new submissions and tells
+        // the organizers' mailbox when one is not approved. The claim lock is needed by the service's
+        // Send back path (not used by the sweep), so it is registered here too.
+        services.AddSingleton(sp =>
+        {
+            var o = new CommunityHub.Core.Entitlements.TravelClaimLockOptions();
+            config.GetSection(CommunityHub.Core.Entitlements.TravelClaimLockOptions.SectionName).Bind(o);
+            return o;
+        });
+        services.AddScoped<CommunityHub.Core.Entitlements.TravelClaimLock>();
+        services.AddHttpClient<CommunityHub.Core.Travel.TravelDocumentValidator>(c => c.Timeout = TimeSpan.FromSeconds(90));
+        services.AddScoped<CommunityHub.Core.Travel.TravelErpMailer>();
+        services.AddScoped<CommunityHub.Core.Travel.TravelReviewService>();
         services.AddScoped<CommunityHub.Core.Reminders.HotelCutoffReminderBuilder>();
         // §1127 — chases sponsors whose WEBSHOP website or LinkedIn is blank (weekly until fixed).
         services.AddScoped<CommunityHub.Core.Reminders.SponsorWebshopLinksReminderBuilder>();
+        // §1385 — the weekly "hidden speakers" organizer notice and the check it reads.
+        services.AddScoped<CommunityHub.Core.Participants.HiddenSpeakerCheckService>();
+        services.AddScoped<CommunityHub.Core.Reminders.HiddenSpeakersReminderBuilder>();
 
         // §164: party sign-up task seeding — ensures the staff-role "party sign-up"
         // tasks exist so the reminder run below nags anyone who hasn't answered Yes/No.
@@ -514,6 +538,17 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Integrations.Graphics.SoMeBundleBuildService>();
         // §1312 — named copies of the SoMe sponsor graphics + the exhibitor walls filed by booth level (SponsorFileMirrorJob).
         services.AddScoped<CommunityHub.Core.Integrations.Graphics.SponsorFileMirrorService>();
+
+        // §1379.8 — "Refresh weekly" WordPress posts, run from SoMeScheduleJob's existing slot (operator: "update
+        // each week using the job that adjusts the some posts"). Same connector + options as the web host; it
+        // self-gates on CanWrite, so a host without WordPress__* settings stays inert.
+        var wpOptions = new CommunityHub.Core.Integrations.WordPressOptions();
+        config.GetSection(CommunityHub.Core.Integrations.WordPressOptions.SectionName).Bind(wpOptions);
+        services.AddSingleton(wpOptions);
+        services.AddHttpClient<CommunityHub.Core.Integrations.IWordPressPublisher,
+            CommunityHub.Core.Integrations.LiveWordPressPublisher>();
+        services.AddScoped<CommunityHub.Core.Integrations.WordPressPostDataService>();
+        services.AddScoped<CommunityHub.Core.Integrations.WordPressPostRefreshService>();
 
         // --- §750 C7: publish + notify session evaluation reports -------------
         // EvaluationReportPublishJob runs every 5 minutes and needs the whole chain: derive the
@@ -933,6 +968,8 @@ public static class JobsServiceRegistration
         // registered in the WEB host only, so the mails the JOBS host sends fell back to raw subject
         // keys ("session:1") — the optional dependency was silently null exactly where it mattered.
         services.AddScoped<CommunityHub.Core.Integrations.SoMeSubjectLabeller>();
+        // §1368 — the planning-rule conflict check + mail, run by SoMeScheduleJob after each plan.
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeRuleConflictService>();
         services.AddScoped<CommunityHub.Core.Integrations.SoMeScheduleService>();
         // §824.2D — the AI intro writer, on the SAME Azure OpenAI configuration the AiHelper uses:
         // one endpoint, one key, one place to switch off. The web host binds these already; the JOBS
@@ -967,7 +1004,12 @@ public static class JobsServiceRegistration
         services.AddScoped<CommunityHub.Core.Email.VolumePackageReminderService>();
         // §1080 — the campaign batch sender. 🔒 The unsubscribe secret is required here too: no
         // signed link, no send (MailCampaignService.Gate refuses).
-        services.AddScoped<CommunityHub.Core.Email.MailAudienceResolver>();
+        // §1381 — same extras as the web host, so the preview and the scheduled send resolve the same people.
+        services.AddScoped(sp => new CommunityHub.Core.Email.MailAudienceResolver(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>())
+        {
+            VolunteerAudienceExtraEmails = config.GetSection("MailCampaigns:VolunteerAudienceExtraEmails").Get<string[]>() ?? Array.Empty<string>(),
+        });
         services.AddScoped(sp => new CommunityHub.Core.Email.MailSuppressionService(
             sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
             config["Email:UnsubscribeSecret"],

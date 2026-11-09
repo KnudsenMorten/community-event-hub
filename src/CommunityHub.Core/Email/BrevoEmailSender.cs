@@ -369,6 +369,20 @@ public class BrevoEmailSender : IEmailSender
                     eventId, participantId, ct);
             }
 
+            // §1381 — CAMPAIGN mail to someone with no participant row: a previous attendee (ExternalRecipient) or a
+            // ticket holder (Attendee) of THIS edition is a RING 3 (Broad) person. They are therefore reached only
+            // when the campaign mail's own ring is Broad — step 5 of the operator's rollout — and never at the test
+            // steps (ring 0/1/2). 🔒 Campaign category ONLY: every other mail keeps failing closed for strangers,
+            // and an address on no list at all still drops here.
+            if (!found && _emailContext?.Current?.Category == "campaign")
+            {
+                var db = sp.GetRequiredService<Data.CommunityHubDbContext>();
+                var addr = originalTo.Trim().ToLowerInvariant();
+                var known = await db.ExternalRecipients.AnyAsync(r => r.EventId == eventId && r.Email == addr, ct)
+                            || await db.Attendees.AnyAsync(a => a.EventId == eventId && a.Email.ToLower() == addr, ct);
+                if (known) { found = true; effectiveRing = Ring.Broad; }
+            }
+
             // Unknown address AND no (or unresolvable) participant context ⇒
             // FAIL-CLOSED (rings are the only floor): a typo'd / external /
             // never-imported recipient is never mailed.
@@ -628,11 +642,22 @@ public class BrevoEmailSender : IEmailSender
         // The mail is ACTUALLY sending now (it passed the ring gate + kill switch):
         // add the operator BCC so it mirrors only what really goes out.
         AddOperatorBcc(message);
+        AddCampaignHeaders(message);   // §1381
 
         await DispatchAsync(message, cancellationToken);
         // §234: the mail actually left (a DEV RedirectAllTo redirect counts as
         // delivered — it was dispatched, just to the redirect inbox).
         _outcome?.Record(delivered: true);
+    }
+
+    /// <summary>
+    /// §1381 — campaign mail carries Brevo's tag header so the campaign page can read opens/clicks for exactly that
+    /// campaign from the Brevo API. Only when the caller set a tag; operational mail is untouched.
+    /// </summary>
+    private void AddCampaignHeaders(MailMessage message)
+    {
+        var tag = _emailContext?.Current?.BrevoTag;
+        if (!string.IsNullOrWhiteSpace(tag)) message.Headers.Add("X-Mailin-Tag", tag);
     }
 
     // Add an optional Reply-To header (name optional). A bad address is skipped

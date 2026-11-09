@@ -105,10 +105,15 @@ public sealed class HotelAllotmentService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
 
-    public HotelAllotmentService(CommunityHubDbContext db, TimeProvider clock)
+    private readonly HotelChangeLogService? _log;
+
+    /// <param name="log">§1386 — optional so the existing tests need not build it; DI always injects it,
+    /// and every allocation change is then written to the hotel change log.</param>
+    public HotelAllotmentService(CommunityHubDbContext db, TimeProvider clock, HotelChangeLogService? log = null)
     {
         _db = db;
         _clock = clock;
+        _log = log;
     }
 
     /// <summary>
@@ -121,7 +126,7 @@ public sealed class HotelAllotmentService
     {
         var hotels = await _db.Hotels
             .Where(h => h.EventId == eventId)
-            .OrderBy(h => h.Name)
+            .OrderBy(h => h.Priority).ThenBy(h => h.Name)   // §1386 — prio 1 first
             .Select(h => new { h.Id, h.Name })
             .ToListAsync(ct);
 
@@ -132,14 +137,19 @@ public sealed class HotelAllotmentService
 
         // ACTIVE people only, with their placement. A booking whose dates are missing
         // or inverted contributes no nights (it cannot be counted honestly).
+        // §1386 — a CANCELLED reservation is no longer demand (it stays on the hotel's sheet only).
         var bookings = await _db.HotelBookings
             .Where(b => b.EventId == eventId
                         && b.NeedsRoom
+                        && b.ConfirmationState != HotelConfirmationState.Cancelled
                         && b.Participant.IsActive && !b.Participant.IsTestUser
                         && b.CheckInDate != null
                         && b.CheckOutDate != null)
             .Select(b => new
             {
+                b.ParticipantId,
+                b.RoommateParticipantId,
+                b.ConfirmationState,
                 b.CheckInDate,
                 b.CheckOutDate,
                 HotelId = b.Participant.HotelId,
@@ -168,9 +178,11 @@ public sealed class HotelAllotmentService
             .OrderBy(c => c.CutoffDate)
             .ToListAsync(ct);
 
-        int DemandFor(int? hotelId, DateOnly night) => stays.Count(
-            s => s.HotelId == hotelId
-                 && s.CheckInDate!.Value <= night && night < s.CheckOutDate!.Value);
+        // §1386 — ROOMS, not people: two roommates sleeping at the same hotel are one room (HotelRoomMath).
+        int DemandFor(int? hotelId, DateOnly night) => HotelRoomMath.Count(stays
+            .Where(s => s.HotelId == hotelId && s.CheckInDate!.Value <= night && night < s.CheckOutDate!.Value)
+            .Select(s => new HotelSleeper(s.ParticipantId, s.RoommateParticipantId, s.HotelId,
+                s.ConfirmationState == HotelConfirmationState.Confirmed))).Rooms;
 
         var rows = new List<AllotmentRow>();
         foreach (var h in hotels)
@@ -209,7 +221,8 @@ public sealed class HotelAllotmentService
     /// </summary>
     public async Task<int> SetAllotmentsAsync(
         int eventId, int hotelId, IReadOnlyDictionary<DateOnly, int?> byNight,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? actor = null,
+        HotelChangeSource source = HotelChangeSource.Organizer)
     {
         var hotelExists = await _db.Hotels
             .AnyAsync(h => h.Id == hotelId && h.EventId == eventId, ct);
@@ -222,6 +235,7 @@ public sealed class HotelAllotmentService
 
         var now = _clock.GetUtcNow();
         var changed = 0;
+        var changes = new List<string>();   // §1386 change log
 
         foreach (var (night, value) in byNight)
         {
@@ -229,7 +243,7 @@ public sealed class HotelAllotmentService
 
             if (value is null)
             {
-                if (row is not null) { _db.HotelAllotments.Remove(row); changed++; }
+                if (row is not null) { changes.Add($"{N(night)} {row.RoomsAllotted} → not contracted"); _db.HotelAllotments.Remove(row); changed++; }
                 continue;
             }
 
@@ -241,16 +255,24 @@ public sealed class HotelAllotmentService
                     EventId = eventId, HotelId = hotelId, Night = night,
                     RoomsAllotted = rooms, CreatedAt = now, UpdatedAt = now,
                 });
+                changes.Add($"{N(night)} → {rooms}");
                 changed++;
             }
             else if (row.RoomsAllotted != rooms)
             {
+                changes.Add($"{N(night)} {row.RoomsAllotted} → {rooms}");
                 row.RoomsAllotted = rooms;
                 row.UpdatedAt = now;
                 changed++;
             }
         }
 
+        if (changed > 0 && _log is not null)
+        {
+            var hotelName = await _db.Hotels.Where(h => h.Id == hotelId).Select(h => h.Name).FirstAsync(ct);
+            _log.Add(eventId, source, actor, HotelChangeKinds.Allocation,
+                $"Allocation {hotelName}: {string.Join(", ", changes)}", hotelId);
+        }
         if (changed > 0) await _db.SaveChangesAsync(ct);
         return changed;
     }
@@ -262,13 +284,13 @@ public sealed class HotelAllotmentService
     /// </summary>
     public Task<int> SetRangeAsync(
         int eventId, int hotelId, DateOnly fromNight, DateOnly toNight, int rooms,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? actor = null)
     {
         if (toNight < fromNight) (fromNight, toNight) = (toNight, fromNight);
 
         var map = new Dictionary<DateOnly, int?>();
         for (var n = fromNight; n <= toNight; n = n.AddDays(1)) map[n] = rooms;
-        return SetAllotmentsAsync(eventId, hotelId, map, ct);
+        return SetAllotmentsAsync(eventId, hotelId, map, ct, actor);
     }
 
     // ----- Cut-offs ---------------------------------------------------------
@@ -282,7 +304,7 @@ public sealed class HotelAllotmentService
     /// <summary>Add or update a release deadline (keyed on hotel + date).</summary>
     public async Task<bool> SaveCutoffAsync(
         int eventId, int hotelId, DateOnly cutoffDate, string label,
-        int? releasePercent, string? notes, CancellationToken ct = default)
+        int? releasePercent, string? notes, CancellationToken ct = default, int? warnDaysBefore = null)
     {
         if (string.IsNullOrWhiteSpace(label)) return false;
         var hotelExists = await _db.Hotels
@@ -301,6 +323,7 @@ public sealed class HotelAllotmentService
             {
                 EventId = eventId, HotelId = hotelId, CutoffDate = cutoffDate,
                 Label = label.Trim(), ReleasePercent = pct, Notes = Blank(notes),
+                WarnDaysBefore = Math.Clamp(warnDaysBefore ?? 14, 0, 120),
                 CreatedAt = now, UpdatedAt = now,
             });
         }
@@ -309,6 +332,7 @@ public sealed class HotelAllotmentService
             row.Label = label.Trim();
             row.ReleasePercent = pct;
             row.Notes = Blank(notes);
+            if (warnDaysBefore is int w) row.WarnDaysBefore = Math.Clamp(w, 0, 120);
             row.UpdatedAt = now;
         }
 
@@ -328,4 +352,39 @@ public sealed class HotelAllotmentService
     }
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string N(DateOnly d) => d.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// §1386 — freeze today's allocation as the ORIGINAL reservation for every night of one hotel
+    /// (the base the contract's release percentages apply to). Nights already frozen are left alone
+    /// unless <paramref name="overwrite"/>. Returns how many nights were frozen.
+    /// </summary>
+    public async Task<int> FreezeOriginalAsync(
+        int eventId, int hotelId, string? actor, bool overwrite = false,
+        HotelChangeSource source = HotelChangeSource.Organizer, CancellationToken ct = default)
+    {
+        var rows = await _db.HotelAllotments
+            .Where(a => a.EventId == eventId && a.HotelId == hotelId)
+            .OrderBy(a => a.Night)
+            .ToListAsync(ct);
+        var frozen = new List<string>();
+        foreach (var r in rows)
+        {
+            if (r.OriginalRooms is not null && !overwrite) continue;
+            if (r.OriginalRooms == r.RoomsAllotted) continue;
+            r.OriginalRooms = r.RoomsAllotted;
+            r.UpdatedAt = _clock.GetUtcNow();
+            frozen.Add($"{N(r.Night)} {r.RoomsAllotted}");
+        }
+        if (frozen.Count == 0) return 0;
+        if (_log is not null)
+        {
+            var hotelName = await _db.Hotels.Where(h => h.Id == hotelId).Select(h => h.Name).FirstAsync(ct);
+            _log.Add(eventId, source, actor, HotelChangeKinds.OriginalFrozen,
+                $"Original reservation frozen for {hotelName}: {string.Join(", ", frozen)}", hotelId, notify: false);
+        }
+        await _db.SaveChangesAsync(ct);
+        return frozen.Count;
+    }
 }

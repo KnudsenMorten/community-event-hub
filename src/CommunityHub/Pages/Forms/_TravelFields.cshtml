@@ -52,7 +52,7 @@
 <p style="font-size:14px;">Reimbursement is available to <strong>international speakers only</strong>
     — defined as speakers travelling from outside Denmark.</p>
 
-<h3>Booking requirements</h3>
+<h3 id="requirements">Booking requirements</h3>
 <ul style="font-size:14px;">
     <li><strong>Economy class</strong> — all flights must be booked in economy class. Upgrades,
         premium economy and business class are not reimbursable.</li>
@@ -111,7 +111,47 @@
     declaration here (PDF, JPG or PNG, max 15&nbsp;MB each). You must upload at
     least one file before you can request reimbursement in Step 2.</p>
 
+@* §1387 — the organizers' review: what happened to the claim, in the speaker's own page. *@
+@if (Model.ReviewState == CommunityHub.Core.Domain.TravelReviewState.SentBack)
+{
+    <div role="status" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin:0 0 14px;font-size:14px;">
+        <strong>Thank you for sending your claim 🙂 We had a look and need a little more from you.</strong>
+        Just add the documents below and submit again — your earlier files are still here.
+        @if (!string.IsNullOrWhiteSpace(Model.ReviewNote)) { <br /><span>@Model.ReviewNote</span> }
+        @if (Model.MissingItems.Count > 0)
+        {
+            <ul style="margin:6px 0 0;">
+                @foreach (var m in Model.MissingItems)
+                {
+                    <li style="margin:0 0 4px;">@(string.IsNullOrWhiteSpace(m.SpeakerNote) ? m.Requirement + (string.IsNullOrWhiteSpace(m.Note) ? "" : " — " + m.Note) : m.SpeakerNote)</li>
+                }
+            </ul>
+        }
+        <br /><span style="color:#6b7280;">Questions, or think we got it wrong? Just reply to our mail — we're happy to help.</span>
+    </div>
+}
+else if (Model.ReviewState == CommunityHub.Core.Domain.TravelReviewState.UnderReview)
+{
+    <p role="status" style="background:#f3f6fb;border:1px solid #dde4ee;border-radius:8px;padding:10px 12px;margin:0 0 14px;font-size:14px;">
+        Thank you! 🙂 Your claim is with us for a quick document check. If we need anything else, we'll let you know.
+    </p>
+}
+else if (Model.ReviewState == CommunityHub.Core.Domain.TravelReviewState.Accepted)
+{
+    <p role="status" style="background:#dcfce7;color:#166534;border-radius:8px;padding:10px 12px;margin:0 0 14px;font-size:14px;">
+        All good — thank you! 🎉 Your documents are accepted and the claim has been passed on for payment.
+    </p>
+}
+
 <div style="margin:0 0 14px;">
+    @* §1387 — say what the file is, so the check knows the ticket from the invoice. *@
+    <label for="ReceiptKind" style="display:block;font-size:14px;">This file is</label>
+    <select asp-for="ReceiptKind" id="ReceiptKind" style="margin-bottom:6px;">
+        <option value="@CommunityHub.Core.Domain.TravelDocumentKind.TicketReceipt">Flight ticket / receipt / payment confirmation</option>
+        <option value="@CommunityHub.Core.Domain.TravelDocumentKind.Invoice">Company invoice</option>
+        <option value="@CommunityHub.Core.Domain.TravelDocumentKind.PersonalDeclaration">Personal declaration</option>
+        <option value="@CommunityHub.Core.Domain.TravelDocumentKind.Other">Other</option>
+    </select>
     <input type="file" asp-for="ReceiptFile" accept=".pdf,.jpg,.jpeg,.png" />
     <button type="submit" name="__action" value="uploadReceipt"
             formenctype="multipart/form-data" formnovalidate>Step 1: Upload Receipt</button>
@@ -125,7 +165,7 @@
         {
             <li style="margin:4px 0;">
                 <div style="display:flex;align-items:center;gap:10px;">
-                    <span>&#128206; @r.FileName <span style="color:#6b7280;">(@(((r.SizeBytes + 1023) / 1024)) KB)</span></span>
+                    <span>&#128206; @r.FileName <span style="color:#6b7280;">(@(((r.SizeBytes + 1023) / 1024)) KB@(r.Kind == CommunityHub.Core.Domain.TravelDocumentKind.Unknown ? "" : " · " + CommunityHub.Core.Travel.TravelDocumentValidator.KindText(r.Kind)))</span></span>
                     <button type="submit" name="__action" value="deleteReceipt:@r.Id" formnovalidate
                             style="background:none;border:0;color:#b91c1c;cursor:pointer;text-decoration:underline;padding:0;font-size:13px;">remove</button>
                 </div>
@@ -185,11 +225,22 @@ else
             <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice800">
                 @Localizer["Travel.AmountIntercontinental", CommunityHub.Forms.Steps.TravelFormModel.Cap800]
             </option>
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice600">
+                @Localizer["Travel.AmountIntercontinentalCo", CommunityHub.Forms.Steps.TravelFormModel.Cap600]
+            </option>
             <option value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther">
                 @Localizer["Travel.AmountOther"]
             </option>
         </select>
         <span asp-validation-for="AmountChoice" class="ceh-field-error"></span>
+
+        @* §1387 — decides which second document the check expects: invoice or personal declaration. *@
+        <fieldset style="border:0;padding:0;margin:10px 0 6px;">
+            <legend style="font-weight:600;font-size:14px;">Do you invoice through a registered company?</legend>
+            <label style="font-weight:normal;margin-right:18px;"><input type="radio" asp-for="HasCompany" value="true" /> Yes — I attach a company invoice</label>
+            <label style="font-weight:normal;"><input type="radio" asp-for="HasCompany" value="false" /> No — I attach a personal declaration</label>
+        </fieldset>
+        <span asp-validation-for="HasCompany" class="ceh-field-error"></span>
 
         @{
             // Keep the "Other amount" block visible on a re-render that failed validation

@@ -8,6 +8,11 @@ namespace CommunityHub.Core.Email;
 /// <summary>What an import did — and what it refused.</summary>
 public sealed record ImportResult(int Added, int Updated, int Skipped, IReadOnlyList<string> Problems)
 {
+    /// <summary>§1381 — rows whose source list said they opted out (suppressed instead of imported).</summary>
+    public int OptedOut { get; init; }
+    /// <summary>§1381 — cancelled ticket rows skipped.</summary>
+    public int Cancelled { get; init; }
+
     public override string ToString() =>
         $"{Added} added, {Updated} updated, {Skipped} skipped";
 }
@@ -45,9 +50,21 @@ public sealed class ExternalRecipientImportService
     private static readonly string[] EmailHeaders =
         ["email", "e-mail", "mail", "email address", "e-mail address", "emailaddress"];
     private static readonly string[] NameHeaders =
-        ["name", "full name", "fullname", "attendee", "person"];
+        ["name", "full name", "fullname", "attendee", "person", "contact name"];
+    // §1381 — the two real export formats: Zoho CRM contacts ("First Name"/"Last Name", "Account Name") and the
+    // Backstage ticket export ("first_name"/"last_name", "company_name"). Headers are compared lower-cased.
+    private static readonly string[] FirstNameHeaders = ["first name", "first_name", "firstname"];
+    private static readonly string[] LastNameHeaders = ["last name", "last_name", "lastname"];
     private static readonly string[] CompanyHeaders =
-        ["company", "company name", "organisation", "organization", "firma"];
+        ["company", "company name", "company_name", "organisation", "organization", "firma", "account name"];
+    /// <summary>§1381 — Zoho CRM's own opt-out columns. Someone who opted out there must not be mailed by us.</summary>
+    private static readonly string[] OptOutHeaders = ["email opt out", "unsubscribed mode", "unsubscribed time"];
+    /// <summary>§1381 — the Backstage ticket status; a cancelled ticket is not an attendee.</summary>
+    private static readonly string[] StatusHeaders = ["attendee_status", "attendee status", "status"];
+
+    private static bool Truthy(string v) =>
+        v.Length > 0 && !v.Equals("false", StringComparison.OrdinalIgnoreCase) && !v.Equals("no", StringComparison.OrdinalIgnoreCase)
+        && !v.Equals("0", StringComparison.Ordinal) && !v.Equals("nej", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Read an .xlsx into <see cref="ExternalRecipient"/> rows.
@@ -68,13 +85,19 @@ public sealed class ExternalRecipientImportService
 
         // Header row: find the columns by name.
         var header = used.FirstRow();
-        int emailCol = 0, nameCol = 0, companyCol = 0;
+        int emailCol = 0, nameCol = 0, companyCol = 0, firstCol = 0, lastCol = 0, statusCol = 0;
+        var optOutCols = new List<int>();
         foreach (var cell in header.Cells())
         {
             var text = cell.GetString().Trim().ToLowerInvariant();
-            if (emailCol == 0 && EmailHeaders.Contains(text)) emailCol = cell.Address.ColumnNumber;
-            else if (nameCol == 0 && NameHeaders.Contains(text)) nameCol = cell.Address.ColumnNumber;
-            else if (companyCol == 0 && CompanyHeaders.Contains(text)) companyCol = cell.Address.ColumnNumber;
+            var col = cell.Address.ColumnNumber;
+            if (emailCol == 0 && EmailHeaders.Contains(text)) emailCol = col;
+            else if (nameCol == 0 && NameHeaders.Contains(text)) nameCol = col;
+            else if (firstCol == 0 && FirstNameHeaders.Contains(text)) firstCol = col;
+            else if (lastCol == 0 && LastNameHeaders.Contains(text)) lastCol = col;
+            else if (companyCol == 0 && CompanyHeaders.Contains(text)) companyCol = col;
+            else if (statusCol == 0 && StatusHeaders.Contains(text)) statusCol = col;
+            else if (OptOutHeaders.Contains(text)) optOutCols.Add(col);
         }
 
         if (emailCol == 0)
@@ -91,6 +114,9 @@ public sealed class ExternalRecipientImportService
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var now = _clock.GetUtcNow();
+        var suppressed = (await _db.MailSuppressions.Where(s => s.EventId == eventId)
+            .Select(s => s.Email).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        int optedOut = 0, cancelled = 0;
 
         foreach (var row in used.Rows().Skip(1))
         {
@@ -103,9 +129,30 @@ public sealed class ExternalRecipientImportService
                 problems.Add($"Row {row.RowNumber()}: “{raw.Trim()}” is not an e-mail address.");
                 continue;
             }
+            // §1381 — a cancelled ticket is not an attendee (the Backstage export lists every ticket ever issued).
+            if (statusCol > 0 && row.Cell(statusCol).GetString().Contains("cancel", StringComparison.OrdinalIgnoreCase))
+            { cancelled++; continue; }
+
+            // §1381 — someone who opted out in the source system is SUPPRESSED, never imported as a recipient.
+            // 🔒 Checked before the per-file dedup so an opt-out on any of their rows wins.
+            if (optOutCols.Any(c => Truthy(row.Cell(c).GetString().Trim())))
+            {
+                if (suppressed.Add(email))
+                    _db.MailSuppressions.Add(new MailSuppression
+                    {
+                        EventId = eventId, Email = email, Reason = MailSuppressionReason.Unsubscribed,
+                        Detail = $"Opted out in the source list ({sourceEdition ?? batchLabel ?? "import"})", CreatedAt = now,
+                    });
+                optedOut++;
+                seen.Add(email);
+                continue;
+            }
+
             if (!seen.Add(email)) { skipped++; continue; }            // the same address twice in one file
 
             var name = nameCol > 0 ? row.Cell(nameCol).GetString().Trim() : null;
+            if (string.IsNullOrWhiteSpace(name) && (firstCol > 0 || lastCol > 0))
+                name = $"{(firstCol > 0 ? row.Cell(firstCol).GetString().Trim() : "")} {(lastCol > 0 ? row.Cell(lastCol).GetString().Trim() : "")}".Trim();
             var company = companyCol > 0 ? row.Cell(companyCol).GetString().Trim() : null;
 
             if (existing.TryGetValue(email, out var current))
@@ -131,6 +178,8 @@ public sealed class ExternalRecipientImportService
         }
 
         await _db.SaveChangesAsync(ct);
-        return new ImportResult(added, updated, skipped, problems);
+        if (optedOut > 0) problems.Add($"{optedOut} address(es) had opted out in the source list — suppressed, not imported.");
+        if (cancelled > 0) problems.Add($"{cancelled} cancelled ticket row(s) skipped.");
+        return new ImportResult(added, updated, skipped, problems) { OptedOut = optedOut, Cancelled = cancelled };
     }
 }

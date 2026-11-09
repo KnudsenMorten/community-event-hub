@@ -185,14 +185,16 @@ public sealed class AttendeeTelemetryServiceTests
     /// </remarks>
     [Theory]
     [InlineData("AttendeeTelemetry.cshtml.cs")]
-    [InlineData(@"Sponsor\Telemetry.cshtml.cs")]
+    [InlineData("Sponsor/Telemetry.cshtml.cs")]
     public void The_public_facing_telemetry_pages_ask_as_a_non_organizer(string page)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         string? found = null;
+        // Linux runner (2026-11-08): split on '/' so the path works on both separators.
+        var parts = page.Split('/');
         while (dir is not null && found is null)
         {
-            var p = Path.Combine(dir.FullName, "src", "CommunityHub", "Pages", page);
+            var p = Path.Combine(new[] { dir.FullName, "src", "CommunityHub", "Pages" }.Concat(parts).ToArray());
             if (File.Exists(p)) found = File.ReadAllText(p);
             dir = dir.Parent;
         }

@@ -50,7 +50,14 @@ public sealed class HotelFormModel
     [BindNever] public string? AssignedHotelName { get; set; }
 
     /// <summary>True once the assigned hotel carries a confirmation number — the reservation is CONFIRMED.</summary>
-    [BindNever] public bool IsReservationConfirmed => !string.IsNullOrWhiteSpace(HotelConfirmationNumber);
+    [BindNever] public bool IsReservationConfirmed =>
+        !IsReservationCancelled && !string.IsNullOrWhiteSpace(HotelConfirmationNumber);
+
+    /// <summary>§1386 — the reservation was cancelled (by the participant or the hotel).</summary>
+    [BindNever] public bool IsReservationCancelled { get; set; }
+
+    /// <summary>§1386 — the hotel's cancellation number, when it has sent one back.</summary>
+    [BindNever] public string? HotelCancellationNumber { get; set; }
 
     /// <summary>
     /// §403 (operator 2026-07-26: <i>"bug - i dont see year - can it default to feb 9, 2027 instead
@@ -123,6 +130,7 @@ public sealed class HotelFormService : IWizardFormService
     private readonly OrganizerActionItemService _actions;
     private readonly IStringLocalizer<SharedResource> _loc;
     private readonly ILogger<HotelFormService> _logger;
+    private readonly CommunityHub.Core.Organizer.HotelPlacementService? _placement;   // §1386
 
     // §512 — this service no longer takes a HotelCalendarInviter. The submit-time auto-invite it
     // was for is RETIRED: the participant now presses "Add to calendar" (SendItemInviteAsync
@@ -145,13 +153,16 @@ public sealed class HotelFormService : IWizardFormService
         CommunityHub.Core.Email.CalendarInviteEmailService? calendarInvite = null,
         // §403: same optional-DI pattern — the edition's own dates drive the picker's min/max.
         CommunityHub.Core.Config.EventEditionConfigLoader? configLoader = null,
-        CommunityHub.Core.Config.EventConfigOptions? configOptions = null)
+        CommunityHub.Core.Config.EventConfigOptions? configOptions = null,
+        // §1386: same optional-DI pattern — the placement + reservation-state rules and the change log.
+        CommunityHub.Core.Organizer.HotelPlacementService? placement = null)
     {
         _db = db;
         _clock = clock;
         _actions = actions;
         _loc = loc;
         _logger = logger;
+        _placement = placement;
         _coverage = coverage;
         _calendarInvite = calendarInvite;
         (_stayWindowStart, _stayWindowEnd) = ResolveStayWindow(configLoader, configOptions);
@@ -433,6 +444,7 @@ public sealed class HotelFormService : IWizardFormService
             h => h.EventId == eventId && h.ParticipantId == participantId, ct);
 
         var isNewBooking = booking is null;
+        var before = CommunityHub.Core.Organizer.HotelBookingSnapshot.Of(booking);   // §1386 — for the change log
         if (booking is null)
         {
             booking = new HotelBooking
@@ -458,6 +470,11 @@ public sealed class HotelFormService : IWizardFormService
 
         await _db.SaveChangesAsync(ct);
         await MarkHotelTaskDoneAsync(eventId, participantId, ct);
+
+        // §1386 — reservation state (Cancelled / Reserved again), auto-placement in the priority-1
+        // hotel, and the change-log line the hotel-ops mail is built from. Sends no mail itself.
+        if (_placement is not null)
+            await _placement.OnParticipantSavedAsync(eventId, participantId, before, null, ct);
         model.LastSavedAt = booking.UpdatedAt;
         model.Message = "Your hotel preference has been saved.";
 
@@ -596,10 +613,19 @@ public sealed class HotelFormService : IWizardFormService
         if (placement is not null)
         {
             model.AssignedHotelName = placement.HotelName;
-            model.HotelConfirmationNumber = !string.IsNullOrWhiteSpace(placement.HotelLevelNumber)
-                ? placement.HotelLevelNumber
-                : placement.PerPersonNumber;
+            // §1386 — the PER-PERSON number (imported from the hotel's spreadsheet) wins; the
+            // hotel-level number is only the fallback for a hotel that confirms one block number.
+            model.HotelConfirmationNumber = !string.IsNullOrWhiteSpace(placement.PerPersonNumber)
+                ? placement.PerPersonNumber
+                : placement.HotelLevelNumber;
         }
+
+        var state = await _db.HotelBookings
+            .Where(b => b.EventId == eventId && b.ParticipantId == participantId)
+            .Select(b => new { b.ConfirmationState, b.CancellationNumber })
+            .FirstOrDefaultAsync(ct);
+        model.IsReservationCancelled = state?.ConfirmationState == HotelConfirmationState.Cancelled;
+        model.HotelCancellationNumber = state?.CancellationNumber;
     }
 
     // ----- auto-task: "Complete the Hotel form" --------------------------

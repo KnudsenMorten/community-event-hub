@@ -61,7 +61,7 @@ public class VolunteerWorkerRosterModel : PageModel
         return Page();
     }
 
-    [CommunityHub.Audit.Audit("Added a volunteer to the worker roster", TargetType = "VolunteerPlanningRoster")]
+    [CommunityHub.Audit.Audit("Marked a volunteer as a full-day worker", TargetType = "VolunteerPlanningRoster")]
     public async Task<IActionResult> OnPostAddAsync(int participantId, string? note, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -71,7 +71,7 @@ public class VolunteerWorkerRosterModel : PageModel
         try
         {
             await _roster.AddAsync(Actor(me), participantId, note, ct);
-            Message = "Added to the worker roster — the planner will now auto-assign them.";
+            Message = "Marked as a full-day worker — auto-assign may now schedule them for all the hours they gave.";
         }
         catch (VolunteerValidationException ex) { Message = ex.Message; }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
@@ -79,7 +79,7 @@ public class VolunteerWorkerRosterModel : PageModel
         return RedirectToPage();
     }
 
-    [CommunityHub.Audit.Audit("Removed a volunteer from the worker roster", TargetType = "VolunteerPlanningRoster")]
+    [CommunityHub.Audit.Audit("Unmarked a volunteer as a full-day worker", TargetType = "VolunteerPlanningRoster")]
     public async Task<IActionResult> OnPostRemoveAsync(int participantId, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -92,7 +92,7 @@ public class VolunteerWorkerRosterModel : PageModel
             // ⚠️ Said explicitly: taking somebody out of scope does NOT unassign them. Removing a
             // person from a list looks like it should, and quietly dropping their shifts — with the
             // mail that goes with it — is not something a scope list should be able to do.
-            Message = "Removed from the worker roster. Future planner runs skip them; "
+            Message = "No longer a full-day worker. Future auto-assign runs plan them at up to 50% of their hours; "
                     + "any assignments they already hold are unchanged.";
         }
         catch (VolunteerAccessDeniedException) { return Forbid(); }

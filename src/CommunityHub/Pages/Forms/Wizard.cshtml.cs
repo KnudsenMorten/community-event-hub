@@ -428,8 +428,32 @@ public class WizardModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Sponsor) return Forbid();
 
-        TempData["SponsorContactsMessage"] =
-            await contacts.RemoveContactAsync(me.ParticipantId, contactNumber, ct);
+        var result = await contacts.RemoveContactAsync(
+            me.EventId, me.ParticipantId, me.Email, contactNumber, ct);
+        TempData["SponsorContactsMessage"] = result.Message;
+
+        // 🔴 §1369 — the audit row names WHO was removed and what CEH did about it.
+        if (result.Removed is { } removed)
+        {
+            HttpContext.Items[CommunityHub.Audit.AuditPageFilter.TargetIdKey] =
+                removed.ParticipantId?.ToString() ?? $"erp-contact:{contactNumber}";
+            HttpContext.Items[CommunityHub.Audit.AuditPageFilter.SummaryKey] =
+                $"Removed sponsor contact {result.Name} ({result.Email})";
+            HttpContext.Items[CommunityHub.Audit.AuditPageFilter.DetailKey] =
+                $"e-conomic contact {contactNumber} deleted; in CEH: {removed.Outcome switch
+                {
+                    Core.Integrations.SponsorContactRemovalOutcome.Deactivated => "person deactivated",
+                    Core.Integrations.SponsorContactRemovalOutcome.RolesRemoved => "company link and roles removed (still active: another company or role)",
+                    Core.Integrations.SponsorContactRemovalOutcome.RemovedYourself => "removed themselves — company link removed, account kept",
+                    _ => "no matching person in CEH",
+                }}.";
+        }
+        else if (result.Name is not null)
+        {
+            HttpContext.Items[CommunityHub.Audit.AuditPageFilter.SummaryKey] =
+                $"Did not remove sponsor contact {result.Name} ({result.Email})";
+            HttpContext.Items[CommunityHub.Audit.AuditPageFilter.DetailKey] = result.Message;
+        }
 
         return RedirectToPage(new { step = "contacts" });
     }

@@ -254,18 +254,67 @@ public sealed class VolunteerPlannerTests
         Assert.Contains("COULD NOT FILL 4 slot(s)", r.Summarize());
     }
 
+    // ── §1380 — 50% share for volunteers who also attend sessions ─────────────────────────
+
+    private static PlannerCandidate Attendee(int id, TimeWindow? window) =>
+        Person(id, window) with { FullDayWorker = false };
+
     [Fact]
-    public void An_empty_roster_is_reported_rather_than_left_looking_like_a_broken_planner()
+    public void Nobody_marked_is_reported_in_the_summary()
     {
         var r = VolunteerPlanner.Plan(
             new[] { Task(1, 1, W(9, 0, 10, 0)) },
-            new[] { Person(10, W(6, 40, 17, 0)) },
+            new[] { Attendee(10, W(7, 0, 17, 0)) },
             new Dictionary<int, int>(), new HashSet<(int, int)>(),
-            ParticipantRole.Volunteer,
-            PlannerScope.WorkersOnly, scopeFellBackToEveryone: true);
+            ParticipantRole.Volunteer, PlannerScope.Everyone, reportWorkerSplit: true);
 
-        Assert.True(r.ScopeFellBackToEveryone);
-        Assert.Contains("worker roster is empty", r.Summarize());
+        Assert.Single(r.Proposals);
+        Assert.Equal(0, r.FullDayWorkers);
+        Assert.Contains("No one is marked as a full-day worker", r.Summarize());
+    }
+
+    [Fact]
+    public void A_session_attendee_is_capped_at_half_their_stated_hours_per_day()
+    {
+        // 10h stated (07–17) ⇒ 5h plannable. 3h + 2h fits exactly; a further 1h does not.
+        var r = Run(
+            new[] { Task(1, 1, W(7, 0, 10, 0)), Task(2, 1, W(10, 0, 12, 0)), Task(3, 1, W(13, 0, 14, 0)) },
+            new[] { Attendee(10, W(7, 0, 17, 0)) });
+
+        Assert.Equal(2, r.Proposals.Count);
+        var s = Assert.Single(r.Shortfalls);
+        Assert.Equal(ShortfallReason.ShareReached, s.Reason);
+        Assert.Contains("50% share", s.Explain());
+    }
+
+    [Fact]
+    public void A_full_day_worker_is_not_capped()
+    {
+        var r = Run(
+            new[] { Task(1, 1, W(7, 0, 10, 0)), Task(2, 1, W(10, 0, 12, 0)), Task(3, 1, W(13, 0, 14, 0)) },
+            new[] { Person(10, W(7, 0, 17, 0)) });   // FullDayWorker defaults to true
+
+        Assert.Equal(3, r.Proposals.Count);
+        Assert.Empty(r.Shortfalls);
+    }
+
+    [Fact]
+    public void Existing_assignments_count_toward_the_share()
+    {
+        var held = Attendee(10, W(7, 0, 17, 0)) with { Held = new[] { (Day, W(7, 0, 11, 0)) } };   // 4h held
+        var r = Run(new[] { Task(1, 1, W(12, 0, 14, 0)) }, new[] { held });                        // +2h = 6h > 5h
+
+        Assert.Empty(r.Proposals);
+        Assert.Equal(ShortfallReason.ShareReached, Assert.Single(r.Shortfalls).Reason);
+    }
+
+    [Fact]
+    public void An_unstated_day_counts_as_ten_hours_for_the_share()
+    {
+        // Present, hours not stated (e.g. the binary packing day) ⇒ 10h ⇒ 5h plannable.
+        Assert.Equal(5d, VolunteerPlanner.PlannableHours(DayWindow.AllDay, fullDayWorker: false));
+        Assert.Equal(10d, VolunteerPlanner.PlannableHours(DayWindow.AllDay, fullDayWorker: true));
+        Assert.Equal(0d, VolunteerPlanner.PlannableHours(DayWindow.Absent, fullDayWorker: true));
     }
 
     [Fact]

@@ -106,7 +106,7 @@ public class HotelAssignmentsModel : PageModel
         // gates one Logistics tile — so it has no business narrowing an organizer's own action. The
         // guest mail is a SEPARATE key ("hotel-invite" / "Hotel confirmation email") and keeps its
         // own ring, so nothing about who RECEIVES mail changes here.
-        var ok = await _hotels.AssignParticipantAsync(me.EventId, ParticipantId, HotelId, ct);
+        var ok = await _hotels.AssignParticipantAsync(me.EventId, ParticipantId, HotelId, ct, me.Email);   // §1386 actor
         Message = ok ? "Hotel assignment saved." : "Participant or hotel not found.";
         await LoadAsync(me.EventId, ct);
         return Page();
@@ -118,7 +118,7 @@ public class HotelAssignmentsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
-        var ok = await _hotels.SetConfirmationNumberAsync(me.EventId, ParticipantId, ConfirmationNumber, ct);
+        var ok = await _hotels.SetConfirmationNumberAsync(me.EventId, ParticipantId, ConfirmationNumber, ct, me.Email);   // §1386 actor
         Message = ok ? "Confirmation number saved." : "Participant not found.";
         await LoadAsync(me.EventId, ct);
         return Page();

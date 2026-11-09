@@ -116,6 +116,26 @@
                             <div class="sv-task">
                                 <strong>@t.Title</strong> &middot; @t.Status
                                 @if (!string.IsNullOrWhiteSpace(t.Shift)) { <text>&middot; @t.Shift</text> }
+                                @* §1380 — who is on it, each with a remove (×). *@
+                                @{ var people = Model.Assignees.TryGetValue(t.Id, out var ppl) ? ppl : new(); }
+                                <div class="sv-assignees" style="margin:6px 0;display:flex;flex-wrap:wrap;gap:6px;">
+                                    @if (people.Count == 0) { <span style="font-size:13px;color:#64748b;">Nobody assigned yet@(t.ResourcesNeeded > 0 ? $" — needs {t.ResourcesNeeded}" : "").</span> }
+                                    @foreach (var person in people)
+                                    {
+                                        <span style="display:inline-flex;align-items:center;gap:2px;padding:2px 4px 2px 10px;border-radius:12px;font-size:13px;@(person.Queued ? "background:#fff7ed;border:1px dashed #fb923c;color:#9a3412;" : "background:#e6f3fb;color:#1D3380;")"
+                                              title="@(person.Queued ? "Queued — not published; the volunteer cannot see this yet" : "Published — the volunteer can see this task")">
+                                            @person.Name@(person.Queued ? " · not published" : "")
+                                            <form method="post" asp-page-handler="Unassign" style="display:inline;margin:0;"
+                                                  data-confirm="@(person.Queued ? "" : $"Remove {person.Name} from \"{t.Title}\"? They have already seen this task.")"
+                                                  onsubmit="return !this.dataset.confirm || confirm(this.dataset.confirm);">
+                                                <input type="hidden" name="taskId" value="@t.Id" />
+                                                <input type="hidden" name="volunteerParticipantId" value="@person.ParticipantId" />
+                                                <button type="submit" aria-label="Remove @person.Name from this task" title="Remove"
+                                                        style="border:0;background:transparent;color:inherit;font-size:15px;min-width:28px;min-height:28px;cursor:pointer;border-radius:50%;">&times;</button>
+                                            </form>
+                                        </span>
+                                    }
+                                </div>
                                 <form method="post" asp-page-handler="Assign" class="sv-form">
                                     <input type="hidden" name="taskId" value="@t.Id" />
                                     <select name="volunteerParticipantId" required>

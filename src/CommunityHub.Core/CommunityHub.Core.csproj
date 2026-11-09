@@ -49,6 +49,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
+    <!-- §1386: the hotel spreadsheet must be a real Excel 97-2003 .xls (BIFF8); ClosedXML writes only .xlsx. NPOI also reads the .xls/.xlsx the hotel sends back. -->
+    <PackageReference Include="NPOI" Version="2.7.2" />
     <!-- §752.5 — the evaluation report renderer. This is the OFFICIAL PDFsharp (MIT), NOT the
          PdfSharpCore community fork we started on.
          🔴 The fork had to go because it decodes images through SixLabors.ImageSharp and calls

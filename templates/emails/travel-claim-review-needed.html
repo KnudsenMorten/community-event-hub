@@ -1,0 +1,9 @@
+Subject: Travel claim from {{speakerName}}: {{recommendation}}
+<p style="margin:0 0 12px;">A new response from <strong>{{speakerName}}</strong> on their travel reimbursement has been checked.</p>
+{{resubmitBlock}}
+<p style="margin:0 0 12px;padding:10px 12px;border-radius:6px;background:#f3f6fb;"><strong style="color:{{recommendationColour}};">Recommendation: {{recommendation}}</strong><br />{{recommendationDetail}}</p>
+<p style="margin:0 0 6px;"><strong>AI check: {{verdict}}</strong> — {{summary}}</p>
+{{checksBlock}}
+<p style="margin:0 0 12px;">Claim: EUR {{amount}} · {{fileCount}} document(s), attached to this mail · registered company: {{hasCompany}}.</p>
+<p style="margin:0 0 12px;"><a href="{{hubUrl}}/Organizer/TravelReimbursements?Filter=review#claim-{{claimId}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;text-decoration:none;padding:8px 14px;border-radius:6px;">Open this claim</a></p>
+<p style="margin:0 0 12px;color:#6b7280;">On the page: accept any finding that is fine, then Accept documents (the claim goes to finance with the review) or Send back (the speaker gets the remaining items, with a copy to this mailbox). You see each mail before it is sent. Nothing has gone to finance yet.</p>

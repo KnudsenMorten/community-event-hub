@@ -12,7 +12,10 @@ public sealed record HotelOccupant(
     ParticipantRole Role,
     int? HotelId,
     string? HotelConfirmationNumber,
-    bool NeedsRoom);
+    bool NeedsRoom,
+    // §1386 — people in the room (organizer-set or the default) and whether an organizer set it.
+    int GuestsInRoom = 1,
+    bool GuestsInRoomSet = false);
 
 /// <summary>
 /// A participant placed in a hotel who needs a room, with their own check-in/out
@@ -49,10 +52,15 @@ public sealed class HotelManagementService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
 
-    public HotelManagementService(CommunityHubDbContext db, TimeProvider clock)
+    private readonly HotelChangeLogService? _log;
+
+    /// <param name="log">§1386 — optional so existing tests need not build it; DI injects it and every
+    /// placement / per-person confirmation change is then logged.</param>
+    public HotelManagementService(CommunityHubDbContext db, TimeProvider clock, HotelChangeLogService? log = null)
     {
         _db = db;
         _clock = clock;
+        _log = log;
     }
 
     // ----- Hotel CRUD -------------------------------------------------------
@@ -115,12 +123,63 @@ public sealed class HotelManagementService
     }
 
     /// <summary>
+    /// §1386 — the contract details: priority, agreement number + label, other booking reference,
+    /// hotel-ops recipients. Logged when the priority changes (it decides where new guests go).
+    /// </summary>
+    public async Task<bool> SetContractDetailsAsync(
+        int eventId, int hotelId, int priority, string? agreementNumber, string? agreementLabel,
+        string? bookingReference, string? notifyEmails, string? actor = null, CancellationToken ct = default)
+    {
+        var hotel = await GetHotelAsync(eventId, hotelId, ct);
+        if (hotel is null) return false;
+
+        var p = Math.Clamp(priority, 1, 9);
+        if (_log is not null && hotel.Priority != p)
+            _log.Add(eventId, HotelChangeSource.Organizer, actor, HotelChangeKinds.Allocation,
+                $"Priority of {hotel.Name} {hotel.Priority} → {p}", hotel.Id);
+
+        hotel.Priority = p;
+        hotel.AgreementNumber = Blank(agreementNumber);
+        hotel.AgreementLabel = Blank(agreementLabel);
+        hotel.BookingReference = Blank(bookingReference);
+        hotel.NotifyEmails = Blank(notifyEmails);
+        hotel.UpdatedAt = _clock.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
     /// Set (or clear) the hotel-level booking CONFIRMATION NUMBER (REQUIREMENTS §46)
     /// and return whether the value actually CHANGED to a non-blank state — i.e. the
     /// reservation just became CONFIRMED. The caller uses that signal to decide
     /// whether to re-issue the calendar invites to everyone placed in the hotel.
     /// Returns null when the hotel does not exist in the edition.
     /// </summary>
+    /// <summary>
+    /// §1386 — "Mark as sent to the hotel": the organizer forwarded the hotel's current spreadsheet. The page
+    /// then shows only the changes made since. Logged (not mailed).
+    /// </summary>
+    public async Task<bool> MarkSentToHotelAsync(int eventId, int hotelId, string? actor, CancellationToken ct = default)
+    {
+        var hotel = await GetHotelAsync(eventId, hotelId, ct);
+        if (hotel is null) return false;
+        hotel.SentToHotelAt = _clock.GetUtcNow();
+        hotel.SentToHotelByEmail = actor;
+        _log?.Add(eventId, HotelChangeSource.Organizer, actor, HotelChangeKinds.SentToHotel,
+            $"The guest spreadsheet was sent to {hotel.Name}", hotel.Id, notify: false);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>§1386 — changes to a hotel's guest list since it was last marked as sent (newest first).</summary>
+    public async Task<List<HotelChangeLogEntry>> ChangesSinceSentAsync(int eventId, int hotelId, CancellationToken ct = default)
+    {
+        var sent = await _db.Hotels.Where(h => h.Id == hotelId && h.EventId == eventId).Select(h => h.SentToHotelAt).FirstOrDefaultAsync(ct);
+        return await _db.HotelChangeLog.AsNoTracking()
+            .Where(e => e.EventId == eventId && e.HotelId == hotelId && e.AffectsGuestList && (sent == null || e.At > sent))
+            .OrderByDescending(e => e.At).ToListAsync(ct);
+    }
+
     public async Task<bool?> SetHotelConfirmationNumberAsync(
         int eventId, int hotelId, string? confirmationNumber, CancellationToken ct = default)
     {
@@ -219,7 +278,7 @@ public sealed class HotelManagementService
     /// the hotel both belong to the edition. Returns false if either is missing.
     /// </summary>
     public async Task<bool> AssignParticipantAsync(
-        int eventId, int participantId, int? hotelId, CancellationToken ct = default)
+        int eventId, int participantId, int? hotelId, CancellationToken ct = default, string? actor = null)
     {
         var p = await _db.Participants
             .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == eventId, ct);
@@ -232,20 +291,69 @@ public sealed class HotelManagementService
             if (!exists) return false;
         }
 
+        // §1386 — log the move against BOTH hotels: the old one must hear the guest left.
+        if (_log is not null && p.HotelId != hotelId)
+        {
+            var names = await _db.Hotels.Where(h => h.EventId == eventId)
+                .ToDictionaryAsync(h => h.Id, h => h.Name, ct);
+            string N(int? id) => id is int i && names.TryGetValue(i, out var n) ? n : "no hotel";
+            var booking = await _db.HotelBookings.FirstOrDefaultAsync(
+                b => b.EventId == eventId && b.ParticipantId == p.Id, ct);
+            var onSheet = booking is not null && booking.NeedsRoom;
+            var summary = $"Moved from {N(p.HotelId)} to {N(hotelId)}";
+            if (p.HotelId is int from)
+            {
+                _log.Add(eventId, HotelChangeSource.Organizer, actor, HotelChangeKinds.Placed, summary,
+                    from, p.Id, p.FullName, affectsGuestList: onSheet);
+                // The OLD hotel's confirmation number does not travel to the new hotel: the guest is
+                // Reserved again there. The old hotel hears through its change mail ("Moved from …").
+                if (onSheet && booking!.ConfirmationState != HotelConfirmationState.Cancelled && hotelId is not null)
+                {
+                    booking.ConfirmationNumber = null;
+                    booking.ConfirmationState = HotelConfirmationState.NotConfirmed;
+                    p.HotelConfirmationNumber = null;
+                }
+            }
+            if (hotelId is int to)
+                _log.Add(eventId, HotelChangeSource.Organizer, actor, HotelChangeKinds.Placed, summary,
+                    to, p.Id, p.FullName, affectsGuestList: onSheet);
+        }
+
         p.HotelId = hotelId;
         await _db.SaveChangesAsync(ct);
         return true;
     }
 
-    /// <summary>Set (or clear) a participant's per-person hotel confirmation number.</summary>
+    /// <summary>
+    /// Set (or clear) a participant's per-person hotel confirmation number. §1386 — a number makes
+    /// the reservation Confirmed (as the spreadsheet import does); clearing it makes it Reserved.
+    /// Sends no mail.
+    /// </summary>
     public async Task<bool> SetConfirmationNumberAsync(
-        int eventId, int participantId, string? confirmationNumber, CancellationToken ct = default)
+        int eventId, int participantId, string? confirmationNumber, CancellationToken ct = default, string? actor = null)
     {
         var p = await _db.Participants
             .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == eventId, ct);
         if (p is null) return false;
 
-        p.HotelConfirmationNumber = Blank(confirmationNumber);
+        var number = Blank(confirmationNumber);
+        var before = p.HotelConfirmationNumber;
+        p.HotelConfirmationNumber = number;
+
+        var booking = await _db.HotelBookings.FirstOrDefaultAsync(
+            b => b.EventId == eventId && b.ParticipantId == participantId, ct);
+        if (booking is not null && booking.ConfirmationState != HotelConfirmationState.Cancelled)
+        {
+            booking.ConfirmationNumber = number;
+            booking.ConfirmationState = number is null ? HotelConfirmationState.NotConfirmed : HotelConfirmationState.Confirmed;
+            booking.ConfirmedAt = number is null ? null : (booking.ConfirmedAt ?? _clock.GetUtcNow());
+        }
+        if (_log is not null && before != number)
+        {
+            _log.Add(eventId, HotelChangeSource.Organizer, actor, HotelChangeKinds.StateChanged,
+                $"Confirmation number {before ?? "(none)"} → {number ?? "(none)"} (entered by hand)",
+                p.HotelId, p.Id, p.FullName, affectsGuestList: false);
+        }
         await _db.SaveChangesAsync(ct);
         return true;
     }

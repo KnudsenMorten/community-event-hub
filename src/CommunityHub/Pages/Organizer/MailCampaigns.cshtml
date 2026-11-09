@@ -1,0 +1,232 @@
+@page
+@model CommunityHub.Pages.Organizer.MailCampaignsModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Email
+@{
+    ViewData["Title"] = "Mail campaigns";
+    var danish = CommunityHub.Pages.Organizer.MailCampaignsModel.Danish;
+    string Local(DateTimeOffset? t) => t is { } v ? TimeZoneInfo.ConvertTime(v, danish).ToString("ddd d MMM yyyy HH:mm") : "—";
+}
+
+<style>
+    .mc-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin:10px 0; }
+    .mc-tile { border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px; background:#fff; }
+    .mc-tile .n { font-size:24px; font-weight:700; color:#1D3380; }
+    .mc-tile .l { font-size:13px; color:#4b5563; }
+    .mc-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; }
+    .mc-form label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:#334155; }
+    .mc-form input, .mc-form select { width:100%; box-sizing:border-box; }
+    .mc-steps { list-style:none; margin:8px 0; padding:0; }
+    .mc-steps li { padding:6px 0; border-bottom:1px solid #eef0f3; font-size:14px; }
+    .mc-ok { color:#15803d; font-weight:700; } .mc-no { color:#b91c1c; font-weight:700; } .mc-wait { color:#a16207; font-weight:700; }
+    .mc-actions { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+    .mc-actions form { margin:0; }
+    .mc-actions button { min-height:40px; }
+    .mc-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .mc-table th, .mc-table td { padding:8px; border-bottom:1px solid #eef0f3; text-align:left; vertical-align:top; }
+    .mc-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .mc-preview { width:100%; height:720px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+    @@media (max-width:480px) { .mc-preview { height:560px; } }
+</style>
+
+<div class="card">
+    <h1>Mail campaigns</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        <p>Send a mail to a chosen audience — preview it, test it on yourself, approve the recipient list, schedule it, and see who opened it.</p>
+        <p style="font-size:13px;color:#4b5563;">
+            <strong>Rollout per mail:</strong> each campaign mail has its own ring on the
+            <a asp-page="/Organizer/EmailTemplates">Email templates</a> page. Ring 0 reaches you, ring 1 the organizers,
+            ring 2 the design partners, Broad everyone — previous attendees are only reached at <strong>Broad</strong>.
+        </p>
+        @if (Model.Message is not null) { <div class="vol-ok" role="status" style="margin:8px 0;">@Model.Message</div> }
+        <div class="mc-grid">
+            <div class="mc-tile"><div class="n @(Model.SwitchOn ? "mc-ok" : "mc-no")">@(Model.SwitchOn ? "ON" : "OFF")</div><div class="l">Campaign sending switch (<a asp-page="/Organizer/Settings">Settings</a> → mail-campaigns)</div></div>
+            <div class="mc-tile"><div class="n">@Model.ImportedCount</div><div class="l">previous attendees imported@(Model.ImportedByEdition.Count > 0 ? ": " + string.Join(", ", Model.ImportedByEdition.Select(x => $"{x.Edition} {x.Count}")) : "")</div></div>
+            <div class="mc-tile"><div class="n">@Model.SuppressedCount</div><div class="l">addresses that never get campaign mail (opted out / bounced)</div></div>
+        </div>
+        <p><a asp-page="/Organizer/Comms">&larr; Comms</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @if (Model.Current is { } c)
+    {
+        var gate = Model.GateResult!;
+        var prev = Model.Preview!;
+        var outside = MailAudienceResolver.ReachesOutsideTheHub(c.Audience);
+        <div class="card">
+            <h2 style="margin-top:0;">@c.Name</h2>
+            <p style="margin:0 0 6px;"><strong>@EmailTemplateCatalog.TitleFor(c.TemplateKey)</strong> → @MailAudienceResolver.Describe(c.Audience)</p>
+            <p style="margin:0 0 6px;font-size:14px;">State: <strong>@c.State</strong> · scheduled: <strong>@Local(c.ScheduledFor)</strong> · sent @c.SentCount · failed @c.FailedCount · suppressed @c.SuppressedCount · skipped (bought a ticket / left the audience) @(Model.LeftAudienceCounts.TryGetValue(c.Id, out var left) ? left : 0)</p>
+
+            <ul class="mc-steps">
+                <li>1. Recipients: <strong>@prev.Sendable</strong> will receive it (@prev.Total in the audience, @prev.Suppressed opted out/bounced).
+                    @if (c.DryRunAcknowledgedAt is null) { <span class="mc-wait">Not approved yet.</span> }
+                    else { <span class="mc-ok">Approved (@c.DryRunRecipientCount) by @c.DryRunAcknowledgedByEmail.</span>
+                           @if (prev.Sendable != c.DryRunRecipientCount) { <span class="mc-wait"> The list has changed since — approve again.</span> } }
+                    @if (prev.Sample.Count > 0) { <br><span style="font-size:13px;color:#4b5563;">Sample: @string.Join(", ", prev.Sample)</span> }
+                </li>
+                <li>2–4. Review: this mail's ring is <strong>@Model.MailRing</strong>
+                    (<a asp-page="/Organizer/EmailTemplates">change it</a>). Raise it one step at a time and use
+                    <em>Preview to ring 0 / 1 / 2</em> below — ring 0 is you, ring 1 the organizers, ring 2 the design partners, each marked [PREVIEW].
+                    The campaign audience gets nothing during these steps.</li>
+                <li>5. Real send to the audience:
+                    @if (Model.ReleasedToEveryone) { <span class="mc-ok">this mail is released to Broad — the campaign sends at its scheduled time.</span> }
+                    else { <span class="mc-wait">waits until this mail's ring is Broad. Nothing goes to the audience before that, even if it is scheduled.</span> }
+                </li>
+                <li>Sending switch: @if (Model.SwitchOn) { <span class="mc-ok">ON</span> } else { <span class="mc-no">OFF — scheduled campaigns wait.</span> }
+                    · Ready to send: @if (gate.MaySend && Model.ReleasedToEveryone) { <span class="mc-ok">Yes</span> }
+                    else if (!gate.MaySend) { <span class="mc-no">@gate.Reason</span> } else { <span class="mc-wait">after step 5</span> }</li>
+            </ul>
+
+            <div class="mc-actions">
+                <form method="post" asp-page-handler="Test" asp-route-id="@c.Id"><button type="submit">Send test to me</button></form>
+                @for (var ring = 0; ring <= 2; ring++)
+                {
+                    <form method="post" asp-page-handler="Review" asp-route-id="@c.Id">
+                        <input type="hidden" name="ring" value="@ring" />
+                        <button type="submit" disabled="@((int)Model.MailRing < ring)" title="@((int)Model.MailRing < ring ? $"Raise this mail's ring to {ring} first" : $"Send the preview to rings 0–{ring}")">Preview to ring @ring</button>
+                    </form>
+                }
+                <form method="post" asp-page-handler="Approve" asp-route-id="@c.Id"><button type="submit">Approve recipient list (@prev.Sendable)</button></form>
+                @if (c.State is MailCampaignState.Draft or MailCampaignState.Scheduled)
+                {
+                    <form method="post" asp-page-handler="Schedule" asp-route-id="@c.Id" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        <input type="datetime-local" name="ScheduledLocal" aria-label="Send at (Danish time)"
+                               value="@(c.ScheduledFor is { } s ? TimeZoneInfo.ConvertTime(s, danish).ToString("yyyy-MM-ddTHH:mm") : "")" />
+                        <button type="submit">@(c.State == MailCampaignState.Scheduled ? "Reschedule" : "Schedule")</button>
+                    </form>
+                }
+                @if (c.State == MailCampaignState.Scheduled)
+                { <form method="post" asp-page-handler="Unschedule" asp-route-id="@c.Id"><button type="submit">Back to draft</button></form> }
+            </div>
+            <p style="font-size:13px;color:#4b5563;">Sending runs in batches of @c.BatchSize every @c.BatchIntervalMinutes minutes from the scheduled time.@(c.IncludeUnsubscribeLink ? " Every mail carries an unsubscribe link." : "")</p>
+
+            @* §1388 — the ring-by-ring release plan (operator: "ring 1 at 8am, ring 2 at 9am, ring 3 at 10am … then we can stop"). *@
+            <div style="border:1px solid #dde4ee;border-radius:10px;padding:10px 12px;margin:10px 0;">
+                <h3 style="margin:0 0 6px;">Release in steps</h3>
+                @if (c.PlanEveryoneAt is not null)
+                {
+                    string Step(DateTimeOffset? at, DateTimeOffset? doneAt) =>
+                        doneAt is { } d ? $"✓ {Local(d)}" : c.PlanStoppedAt is not null ? "stopped" : $"waiting — {Local(at)}";
+                    var waveNote = c.PlanWaveSize is int ws ? $"the real mail, {ws} people" : "the real mail";
+                    <ul style="margin:0 0 8px;font-size:14px;">
+                        <li><strong>1. Organizers</strong> (ring 0, a [PREVIEW]): @Step(c.PlanPreviewAt, c.PlanPreviewDoneAt)</li>
+                        <li><strong>2. First @c.PlanWavePercent% of the audience</strong> (@waveNote): @Step(c.PlanWaveAt, c.PlanWaveDoneAt)</li>
+                        <li><strong>3. Everyone else</strong> (in batches): @Step(c.PlanEveryoneAt, c.PlanEveryoneDoneAt)</li>
+                    </ul>
+                    @if (c.PlanStoppedAt is not null)
+                    {
+                        <p class="mc-no" style="margin:0 0 8px;">Stopped @Local(c.PlanStoppedAt) by @c.PlanStoppedByEmail — nothing more is sent. Set a new plan below to continue.</p>
+                    }
+                    else if (c.PlanActive)
+                    {
+                        <form method="post" asp-page-handler="StopPlan" asp-route-id="@c.Id" style="margin:0 0 8px;"
+                              onsubmit="return confirm('Stop the release plan? No further step runs and the campaign goes back to draft.');">
+                            <button type="submit" style="background:#b91c1c;color:#fff;">Stop the release</button>
+                        </form>
+                    }
+                }
+                @if ((c.State is MailCampaignState.Draft or MailCampaignState.Scheduled) && !c.PlanActive)
+                {
+                    var pd = Model.PlanDefaults(c);
+                    <form method="post" asp-page-handler="SetPlan" asp-route-id="@c.Id" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                        <label style="margin:0;">1. Organizers<br /><input type="datetime-local" name="PlanPreviewLocal" value="@pd.Preview.ToString("yyyy-MM-ddTHH:mm")" /></label>
+                        <label style="margin:0;">2. First wave<br /><input type="datetime-local" name="PlanWaveLocal" value="@pd.Wave.ToString("yyyy-MM-ddTHH:mm")" /></label>
+                        <label style="margin:0;">% of audience<br /><input type="number" name="PlanWavePercent" min="1" max="50" value="@c.PlanWavePercent" style="width:70px;" /></label>
+                        <label style="margin:0;">3. Everyone else<br /><input type="datetime-local" name="PlanEveryoneLocal" value="@pd.Everyone.ToString("yyyy-MM-ddTHH:mm")" /></label>
+                        <button type="submit">Set the release plan</button>
+                    </form>
+                    <p style="font-size:13px;color:#4b5563;margin:6px 0 0;">Danish time. Step 1 sends the organizers a [PREVIEW]; step 2 sends the real mail to the first part of the audience; step 3 sends the rest in the normal batches. Stop the release at any point and nothing more goes out. The organizers' mailbox gets one line per step. Needs the recipient list approved first.</p>
+                }
+            </div>
+
+            @if (Model.Stats is { } st)
+            {
+                <h3>Opens and clicks</h3>
+                @if (st.Stats is { } s)
+                {
+                    <div class="mc-grid">
+                        <div class="mc-tile"><div class="n">@s.Delivered</div><div class="l">delivered</div></div>
+                        <div class="mc-tile"><div class="n">@s.UniqueOpens</div><div class="l">opened (@s.OpenRate.ToString("P0"))</div></div>
+                        <div class="mc-tile"><div class="n">@s.UniqueClicks</div><div class="l">clicked (@s.ClickRate.ToString("P0"))</div></div>
+                        <div class="mc-tile"><div class="n">@s.Unsubscribed</div><div class="l">unsubscribed</div></div>
+                        <div class="mc-tile"><div class="n">@(s.HardBounces + s.SoftBounces)</div><div class="l">bounced</div></div>
+                    </div>
+                    <p style="font-size:13px;color:#4b5563;">From Brevo. Opens are approximate — some mail apps load images automatically, others block them.</p>
+                }
+                else { <p class="mc-wait">@st.Problem</p> }
+            }
+
+            @if (Model.Rendered is { } r)
+            {
+                <h3>Preview — as you would receive it</h3>
+                <p style="margin:0 0 6px;"><strong>Subject:</strong> @r.Subject</p>
+                <iframe class="mc-preview" title="Mail preview" sandbox="" srcdoc="@r.Html"></iframe>
+            }
+            <p><a asp-page="/Organizer/MailCampaigns">&larr; All campaigns</a></p>
+        </div>
+    }
+
+    <div class="card">
+        <h2 style="margin-top:0;">Campaigns</h2>
+        @if (Model.Campaigns.Count == 0) { <p>None yet.</p> }
+        else
+        {
+            <div class="mc-scroll"><table class="mc-table">
+                <thead><tr><th scope="col">Name</th><th scope="col">Mail</th><th scope="col">Audience</th><th scope="col">Send at</th><th scope="col">State</th><th scope="col">Sent</th></tr></thead>
+                <tbody>
+                @foreach (var x in Model.Campaigns)
+                {
+                    <tr>
+                        <td><a asp-page="/Organizer/MailCampaigns" asp-route-id="@x.Id">@x.Name</a></td>
+                        <td>@EmailTemplateCatalog.TitleFor(x.TemplateKey)</td>
+                        <td>@MailAudienceResolver.Describe(x.Audience)</td>
+                        <td>@Local(x.ScheduledFor)</td>
+                        <td>@x.State</td>
+                        <td>@x.SentCount</td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">New campaign</h2>
+        <form method="post" asp-page-handler="Create" class="mc-form">
+            <label>Name <input type="text" name="Name" maxlength="200" required placeholder="e.g. Previous attendees — mail 1" /></label>
+            <label>Mail
+                <select name="TemplateKey" required>
+                    @foreach (var k in CommunityHub.Pages.Organizer.MailCampaignsModel.TemplateChoices)
+                    { <option value="@k">@EmailTemplateCatalog.TitleFor(k)</option> }
+                </select>
+            </label>
+            <label>Audience
+                <select name="Audience">
+                    @foreach (var a in Enum.GetValues<MailAudience>())
+                    { <option value="@a" selected="@(a == MailAudience.PreviousAttendeesNotThisEdition)">@MailAudienceResolver.Describe(a)</option> }
+                </select>
+            </label>
+            <label>Send at (Danish time, optional) <input type="datetime-local" name="ScheduledLocal" /></label>
+            <div style="grid-column:1/-1;"><button type="submit">Create draft</button></div>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">Import previous attendees</h2>
+        <p style="font-size:14px;">Upload an .xlsx list (a Zoho CRM contact export or a Backstage ticket export). Columns are found by name.
+           People marked "Email Opt Out"/"Unsubscribed" are added to the never-mail list instead; cancelled tickets are skipped; importing again updates rather than duplicates.</p>
+        <form method="post" asp-page-handler="Import" enctype="multipart/form-data" class="mc-form">
+            <label>File (.xlsx) <input type="file" name="file" accept=".xlsx" required /></label>
+            <label>Edition label <input type="text" name="edition" maxlength="40" placeholder="e.g. ELDK25 (defaults to the file name)" /></label>
+            <div style="grid-column:1/-1;"><button type="submit">Import</button></div>
+        </form>
+    </div>
+}

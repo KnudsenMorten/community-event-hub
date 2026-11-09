@@ -52,11 +52,24 @@ public sealed class MailCampaignJob
             return;
         }
 
+        // §1388 — the ring-by-ring release plans first: a step that releases a mail to Broad lets its batches start below.
+        foreach (var step in await _campaigns.RunPlanStepsAsync(eventId.Value, ct))
+            _log.LogInformation("MailCampaignJob: release plan — {Step}", step);
+
         var due = await _campaigns.DueAsync(eventId.Value, ct);
         if (due.Count == 0) return;
 
         foreach (var campaign in due)
         {
+            // §1381 — the real send waits for the mail to be released to Broad (the operator's step 5).
+            if (!await _campaigns.ReleasedToEveryoneAsync(campaign, ct))
+            {
+                _log.LogInformation(
+                    "MailCampaignJob: campaign {Id} ({Name}) is due but its mail '{Key}' is not released to Broad — waiting, nothing sent.",
+                    campaign.Id, campaign.Name, campaign.TemplateKey);
+                continue;
+            }
+
             // A scheduled campaign becomes a sending one here — freezing its audience at the moment
             // it starts, not at the moment somebody wrote the schedule.
             if (campaign.State == Core.Domain.MailCampaignState.Scheduled)

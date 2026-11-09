@@ -1,0 +1,125 @@
+@model CommunityHub.Core.Organizer.AllotmentBoard
+@* §1386 — the per-hotel night editor + release deadlines, moved here from HotelAllotments.cshtml so the ONE hotel
+   page (Hotel overview) shows it. The forms still post to the existing HotelAllotments handlers, which redirect back. *@
+<style>
+    /* Mobile-first: the night matrix scrolls sideways on a ~360px phone; the hotel
+       name column stays put so a row is still readable while scrolling. */
+    .al-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.al-tbl { border-collapse: collapse; min-width: 640px; }
+    .al-tbl th, .al-tbl td { border: 1px solid #e6e8ee; padding: 6px 8px; font-size: 13px; text-align: center; }
+    .al-tbl th { background: #f9fafb; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; white-space: nowrap; }
+    .al-tbl th.al-name, .al-tbl td.al-name { text-align: left; white-space: nowrap; position: sticky; left: 0; background: #fff; z-index: 1; }
+    .al-tbl th.al-name { background: #f9fafb; }
+    .al-tbl input[type=number] { width: 58px; padding: 4px; font-size: 13px; text-align: center; }
+    .al-demand { color: #6b7280; font-size: 11.5px; display: block; }
+    .al-legend span { display: inline-block; margin-right: 14px; font-size: 12.5px; color: #374151; }
+    .al-key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+    .al-total td { font-weight: 700; background: #f3f4f6; }
+    .al-cut { border-left: 3px solid #f4b400; background: #fffbeb; padding: 10px 12px; border-radius: 4px; margin: 8px 0; }
+    .al-note { color: #6b7280; font-size: 12.5px; }
+</style>
+        @* One editable form per hotel: the whole row saves in a single post. *@
+        @foreach (var row in Model.Rows.Where(r => !r.IsUnassigned))
+        {
+            <div class="card" id="hotel-@row.HotelId">
+                <h2>@row.HotelName</h2>
+                <form method="post" asp-page="/Organizer/HotelAllotments" asp-page-handler="SaveRow">
+                    <input type="hidden" name="hotelId" value="@row.HotelId" />
+                    <div class="al-scroll">
+                        <table class="al-tbl">
+                            <thead>
+                                <tr>
+                                    @foreach (var c in row.Cells)
+                                    {
+                                        <th>@c.Night.ToString("ddd d MMM")</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    @foreach (var c in row.Cells)
+                                    {
+                                        <td style="@CommunityHub.Pages.Organizer.HotelAllotmentsModel.CellStyle(c)">
+                                            <input type="hidden" name="nights" value="@c.Night.ToString("yyyy-MM-dd")" />
+                                            <input type="number" name="rooms" min="0" max="9999"
+                                                   value="@(c.Allotted?.ToString() ?? "")"
+                                                   aria-label="Rooms contracted at @row.HotelName on @c.Night.ToString("d MMM")" />
+                                            <span class="al-demand">need @c.Demand</span>
+                                            @if (c.Variance is int v && v > 0) { <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:10px;padding:0 6px;font-size:11px;font-weight:700;">release @v</span> }
+                                            @if (c.Variance is int sv && sv < 0) { <span style="color:#991b1b;font-size:11px;font-weight:700;">@(-sv) short</span> }
+                                        </td>
+                                    }
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="al-note">Leave a box empty for “not part of the contract”. 0 means the
+                       contract covers that night with no rooms held — the two are different.</p>
+                    <button type="submit">Save @row.HotelName</button>
+                </form>
+
+
+                @* §1386 — the ORIGINAL reservation (the base for the contract's release %). *@
+                <form method="post" asp-page="/Organizer/HotelAllotments" asp-page-handler="FreezeOriginal" style="margin-top:8px;"
+                      onsubmit="return confirm('Record today\'s allocation as the ORIGINAL reservation for every night not frozen yet?');">
+                    <input type="hidden" name="hotelId" value="@row.HotelId" />
+                    <button type="submit" class="secondary">Freeze original reservation</button>
+                    <span class="al-note">Done automatically the day after this hotel's first deadline.</span>
+                </form>
+                <details style="margin-top:14px;">
+                    <summary>Fill a range with one number</summary>
+                    <form method="post" asp-page="/Organizer/HotelAllotments" asp-page-handler="FillRange" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                        <input type="hidden" name="hotelId" value="@row.HotelId" />
+                        <label>From night<br /><input type="date" name="fromNight" required /></label>
+                        <label>To night<br /><input type="date" name="toNight" required /></label>
+                        <label>Rooms<br /><input type="number" name="rooms" min="0" max="9999" value="0" required /></label>
+                        <button type="submit">Fill</button>
+                    </form>
+                </details>
+
+                <h3 style="margin-top:18px;">Release deadlines</h3>
+                @if (row.Cutoffs.Count == 0)
+                {
+                    <p class="al-note">No deadline recorded. Add the contract's cancellation dates so
+                       the hub can warn you 3 days before each one.</p>
+                }
+                else
+                {
+                    @foreach (var c in row.Cutoffs)
+                    {
+                        <div class="al-cut">
+                            <strong>@c.CutoffDate.ToString("d MMMM yyyy")</strong> — @c.Label
+                            @if (c.ReleasePercent is int pct) { <text> (up to @pct% releasable)</text> }
+                            <span class="al-note"> · warnings to hotel-ops @(c.WarnDaysBefore) / 7 / 3 / 1 day(s) before</span>
+                            @if (!string.IsNullOrWhiteSpace(c.Notes))
+                            {
+                                <br /><span class="al-note">@c.Notes</span>
+                            }
+                            <form method="post" asp-page="/Organizer/HotelAllotments" asp-page-handler="DeleteCutoff" style="display:inline;margin-left:8px;"
+                                  onsubmit="return confirm('Remove this release deadline?');">
+                                <input type="hidden" name="cutoffId" value="@c.Id" />
+                                <button type="submit" class="secondary">Remove</button>
+                            </form>
+                        </div>
+                    }
+                }
+                <details>
+                    <summary>Add / update a release deadline</summary>
+                    <form method="post" asp-page="/Organizer/HotelAllotments" asp-page-handler="SaveCutoff" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                        <input type="hidden" name="hotelId" value="@row.HotelId" />
+                        <label>Date<br /><input type="date" name="cutoffDate" required /></label>
+                        <label style="flex:1 1 260px;">What it allows<br />
+                            <input type="text" name="label" maxlength="200" required
+                                   placeholder="e.g. Period 1: max 20% of the original per day" style="width:100%;" /></label>
+                        <label>% releasable<br /><input type="number" name="releasePercent" min="0" max="100" placeholder="20" /></label>
+                        <label>Warn days before<br /><input type="number" name="warnDaysBefore" min="0" max="120" value="14" /></label>
+                        <label style="flex:1 1 100%;">Notes (optional)<br />
+                            <input type="text" name="notes" maxlength="1000" style="width:100%;" /></label>
+                        <button type="submit">Save deadline</button>
+                    </form>
+                    <p class="al-note">Saving the same hotel + date again updates that deadline.
+                       Organizers get an email 3 days before each one; the hotel-ops recipients also get the
+                       per-night detail at the warning lead you set, then 7, 3 and 1 day(s) before (§1386).</p>
+                </details>
+            </div>
+        }

@@ -149,6 +149,32 @@ public sealed class SoMeCategoryRules
                     .ToDictionary(r => r.Key, r => r.First().StartsOn!.Value));
     }
 
+    /// <summary>
+    /// §1368 — the rounds that carry a "publish by" deadline: <c>category → (round → day)</c>.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<SoMeAnnouncementCategory, IReadOnlyDictionary<int, DateOnly>>>
+        RoundDeadlinesAsync(int eventId, CancellationToken ct = default)
+    {
+        var rows = await _db.SoMeCategoryRounds
+            .Where(r => r.EventId == eventId && r.PublishBy != null)
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(r => r.Category)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyDictionary<int, DateOnly>)g
+                    .GroupBy(r => r.RoundNumber)
+                    .ToDictionary(r => r.Key, r => r.First().PublishBy!.Value));
+    }
+
+    /// <summary>
+    /// §1368 — a "publish by" day as the instant the planner may not pass: the END of that day,
+    /// Danish time. "By 15 December" includes 15 December.
+    /// </summary>
+    public static DateTimeOffset PublishByUtc(DateOnly day) =>
+        SoMeSchedulePlanner.ToUtc(day, new TimeOnly(23, 59, 59));
+
     private async Task<List<SoMeCategoryRule>> SeedAsync(
         int eventId, IReadOnlyList<SoMeAnnouncementCategory> categories, CancellationToken ct)
     {
@@ -251,7 +277,13 @@ public sealed class SoMeCategoryRules
     public async Task SaveAsync(
         int eventId, SoMeAnnouncementCategory category, bool enabled, int rounds,
         DateOnly? endsOn, IReadOnlyDictionary<int, DateOnly?> roundStarts,
-        string? byEmail, CancellationToken ct = default)
+        string? byEmail, CancellationToken ct = default,
+        // §1368 — the per-round "publish by" dates and the spacing between rounds. Behind an
+        // ownership flag, as on SoMeSettingsService: null is a real value for both (it CLEARS the
+        // rule), so a caller that knows nothing about them must not wipe them by omission.
+        IReadOnlyDictionary<int, DateOnly?>? roundDeadlines = null,
+        int? minDaysBetweenRounds = null,
+        bool updateSpacingRules = false)
     {
         ArgumentNullException.ThrowIfNull(roundStarts);
 
@@ -267,26 +299,44 @@ public sealed class SoMeCategoryRules
         rule.UpdatedAt = DateTimeOffset.UtcNow;
         rule.LastUpdatedByEmail = byEmail;
 
+        if (updateSpacingRules)
+        {
+            // 0 and blank both mean "no spacing rule"; stored as null so there is one way to say it.
+            rule.MinDaysBetweenRounds = minDaysBetweenRounds is > 0 and var d ? Math.Min(d, 365) : null;
+        }
+
         var existing = await _db.SoMeCategoryRounds
             .Where(r => r.EventId == eventId && r.Category == category)
             .ToListAsync(ct);
+
+        SoMeCategoryRound RowFor(int round)
+        {
+            var row = existing.Find(r => r.RoundNumber == round);
+            if (row is null)
+            {
+                row = new SoMeCategoryRound { EventId = eventId, Category = category, RoundNumber = round };
+                _db.SoMeCategoryRounds.Add(row);
+                existing.Add(row);
+            }
+            return row;
+        }
 
         foreach (var (round, day) in roundStarts)
         {
             if (round < 1 || round > rule.Rounds) continue;
 
-            var row = existing.Find(r => r.RoundNumber == round);
-            if (row is null)
+            // Blanking a round date IS meaningful — it hands that round back to the spread.
+            if (day is null && existing.Find(r => r.RoundNumber == round) is null) continue;
+            RowFor(round).StartsOn = day;
+        }
+
+        if (updateSpacingRules && roundDeadlines is not null)
+        {
+            foreach (var (round, by) in roundDeadlines)
             {
-                _db.SoMeCategoryRounds.Add(new SoMeCategoryRound
-                {
-                    EventId = eventId, Category = category, RoundNumber = round, StartsOn = day,
-                });
-            }
-            else
-            {
-                // Blanking a round date IS meaningful — it hands that round back to the spread.
-                row.StartsOn = day;
+                if (round < 1 || round > rule.Rounds) continue;
+                if (by is null && existing.Find(r => r.RoundNumber == round) is null) continue;
+                RowFor(round).PublishBy = by;
             }
         }
 

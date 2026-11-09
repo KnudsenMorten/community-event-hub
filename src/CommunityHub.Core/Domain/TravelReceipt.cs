@@ -37,4 +37,7 @@ public class TravelReceipt
     public long SizeBytes { get; set; }
 
     public DateTimeOffset UploadedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>§1387 — what the speaker says this file is (ticket/receipt, invoice, declaration, other).</summary>
+    public TravelDocumentKind Kind { get; set; } = TravelDocumentKind.Unknown;
 }

@@ -116,7 +116,7 @@ public sealed class ShopBoothDetector
         };
 
         var url = $"{_options.Endpoint!.TrimEnd('/')}/openai/deployments/{_options.Deployment}/chat/completions?api-version={_options.ApiVersion}";
-        using var msg = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(payload) };
+        using var msg = new HttpRequestMessage(HttpMethod.Post, url) { Content = CommunityHub.Core.Assistant.OpenAiChatContent.Create(payload, _options) };
         // Secret header — from config / Key Vault, never logged.
         msg.Headers.TryAddWithoutValidation("api-key", _options.ApiKey);
         using var resp = await _http.SendAsync(msg, ct);

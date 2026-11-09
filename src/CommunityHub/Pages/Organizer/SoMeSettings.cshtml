@@ -73,6 +73,20 @@
     .aa-blockers summary { cursor:pointer; font-weight:600; color:#374151; }
     .aa-blockers ul { margin:8px 0 0 18px; padding:0; color:#374151; line-height:1.6; }
     .rule-rounds .btn-secondary { font-size:12px; padding:4px 10px; }
+    /* §1368 — the per-day limits, and what in the queue breaks the rules right now. */
+    .rule-limits { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px;
+                   max-width:860px; margin:12px 0 6px; }
+    .rule-limits > div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .rule-limits label, .rule-gap label { font-size:13px; font-weight:600; color:#374151; }
+    .rule-limits input, .rule-limits select { max-width:120px; }
+    .rule-gap { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .rule-gap input { width:80px; }
+    .rule-conflicts { max-width:860px; margin:12px 0; padding:10px 14px; border-radius:8px;
+                      background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; font-size:13px; }
+    .rule-conflicts ul { margin:6px 0 0 18px; padding:0; line-height:1.55; }
+    .rule-conflicts a { color:#7f1d1d; }
+    .rule-ok { max-width:860px; margin:12px 0; padding:8px 12px; border-radius:6px; font-size:13px;
+               background:#e6f2eb; border:1px solid #a7d3bb; color:#1d5b41; }
     @@media (max-width:420px) { .rule-dates { grid-template-columns:1fr; } }
 </style>
 
@@ -261,6 +275,62 @@
             readiness rules still apply on top.
         </p>
 
+        @* 🔴 §1368 — the per-day limits, editable at last (operator 2026-10-26: "maxpostsperday set
+           to 3" — and no page could set it), with the conflicts the job mails listed right here. *@
+        <div class="rule-limits">
+            <div>
+                <label for="perday">Posts per day</label>
+                <select id="perday" name="MaxPostsPerDay">
+                    @for (var n = 1; n <= CommunityHub.Core.Integrations.SoMeSchedulePlanner.PreferredTimes.Length; n++)
+                    {
+                        <option value="@n" selected="@(n == Model.MaxPostsPerDay)">@n</option>
+                    }
+                </select>
+                <span class="rule-fallback">The everyday rhythm. Times are picked from 09:00, 11:00, 13:00 and 14:30.</span>
+            </div>
+            <div>
+                <label for="busyday">Most on a busy day</label>
+                <select id="busyday" name="ExceptionPostsPerDay">
+                    @for (var n = 1; n <= CommunityHub.Core.Integrations.SoMeSchedulePlanner.PreferredTimes.Length; n++)
+                    {
+                        <option value="@n" selected="@(n == Model.ExceptionPostsPerDay)">@n</option>
+                    }
+                </select>
+                <span class="rule-fallback">Used only when a post cannot fit otherwise, or to meet a publish-by date.</span>
+            </div>
+            <div>
+                <label for="sponsorday">Sponsor posts per day</label>
+                <input id="sponsorday" name="MaxSponsorPostsPerDay" type="number" min="1" max="4"
+                       value="@Model.MaxSponsorPostsPerDay" />
+                <span class="rule-fallback">Empty = no limit. 1 keeps two sponsors off the same day.</span>
+            </div>
+        </div>
+
+        @if (Model.Conflicts.Count > 0)
+        {
+            <div class="rule-conflicts" role="status">
+                <strong>@Model.Conflicts.Count post(s) break these rules right now.</strong>
+                The planner never drops a post to keep a rule — move the post, or change the rule.
+                You also get these by mail when the list changes.
+                <ul>
+                    @foreach (var c in Model.Conflicts)
+                    {
+                        <li>
+                            <strong>@c.Rule:</strong> @c.Message
+                            @foreach (var id in c.PostIds)
+                            {
+                                <a asp-page="/Organizer/SoMePostEditor" asp-route-id="@id">#@id</a>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+        else
+        {
+            <p class="rule-ok" role="status">No planned post breaks these rules.</p>
+        }
+
         <div class="rules">
             @for (var i = 0; i < Model.Rules.Count; i++)
             {
@@ -313,6 +383,11 @@
                                     <span class="rule-fallback">
                                         @(r == 0 ? "Empty = when each is ready" : "Empty = spread")
                                     </span>
+                                    @* §1368 — this round's deadline. *@
+                                    <label for="b-@i-@r">Round @(r + 1) published by</label>
+                                    <input type="date" id="b-@i-@r" name="Rules[@i].RoundPublishBy[@r]"
+                                           lang="da-DK" value="@(r < rule.RoundPublishBy.Count ? rule.RoundPublishBy[r]?.ToString("yyyy-MM-dd") : null)" />
+                                    <span class="rule-fallback">Empty = no deadline</span>
                                 </div>
                             }
                             <div>
@@ -338,6 +413,14 @@
                                 <button type="button" class="btn-secondary rule-del" data-del="@i">Remove last</button>
                             }
                             <span class="rule-fallback">Saving plans the new round on the next run.</span>
+                        </div>
+                        @* §1368 — spacing between one subject's rounds (a sponsor's two posts). *@
+                        <div class="rule-gap" style="margin-top:10px;">
+                            <label for="gap-@i">At least</label>
+                            <input id="gap-@i" type="number" min="0" max="365"
+                                   name="Rules[@i].MinDaysBetweenRounds" value="@rule.MinDaysBetweenRounds" />
+                            <span class="rule-count">days between the rounds of one @(rule.Category == SoMeAnnouncementCategory.Sponsors ? "sponsor" : "subject")</span>
+                            <span class="rule-fallback">Empty = no minimum.</span>
                         </div>
                     }
                 </section>
@@ -387,6 +470,20 @@
                         hint.textContent = 'Empty = spread';
 
                         wrap.appendChild(lbl); wrap.appendChild(input); wrap.appendChild(hint);
+
+                        // §1368 — the new round's deadline box, same as the server-rendered ones.
+                        var byId = 'b-' + index + '-' + n;
+                        var byLbl = document.createElement('label');
+                        byLbl.setAttribute('for', byId);
+                        byLbl.textContent = 'Round ' + (n + 1) + ' published by';
+                        var byInput = document.createElement('input');
+                        byInput.type = 'date';
+                        byInput.id = byId;
+                        byInput.name = 'Rules[' + index + '].RoundPublishBy[' + n + ']';
+                        var byHint = document.createElement('span');
+                        byHint.className = 'rule-fallback';
+                        byHint.textContent = 'Empty = no deadline';
+                        wrap.appendChild(byLbl); wrap.appendChild(byInput); wrap.appendChild(byHint);
                         // Before the end-date box, so the rounds stay in order and the end stays last.
                         list.insertBefore(wrap, list.lastElementChild);
                         sync();

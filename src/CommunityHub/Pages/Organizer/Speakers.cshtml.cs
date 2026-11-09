@@ -16,16 +16,26 @@ public class SpeakersModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly SpeakerDeletionService _deletion;
+    // §1385 — optional so existing constructions keep compiling; null ⇒ no hidden-speaker box.
+    private readonly CommunityHub.Core.Participants.HiddenSpeakerCheckService? _hiddenCheck;
 
     public SpeakersModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
-        SpeakerDeletionService deletion)
+        SpeakerDeletionService deletion,
+        CommunityHub.Core.Participants.HiddenSpeakerCheckService? hiddenCheck = null)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _deletion = deletion;
+        _hiddenCheck = hiddenCheck;
     }
+
+    /// <summary>
+    /// §1385 — "No hidden speakers": speakers on no real session, speakers without a speaker
+    /// profile, real sessions with no speakers. Null when the check is not wired.
+    /// </summary>
+    public CommunityHub.Core.Participants.HiddenSpeakerCheckService.Result? Hidden { get; private set; }
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -224,6 +234,11 @@ public class SpeakersModel : PageModel
                     .ToList());
 
         SessionCount = await _db.Sessions.CountAsync(s => s.EventId == eventId, ct);
+
+        // §1385 — the whole edition, not this page of the grid: a hidden speaker must show
+        // whatever the search, sort or page.
+        if (_hiddenCheck is not null)
+            Hidden = await _hiddenCheck.CheckAsync(eventId, ct);
 
         Rows = pageRows
             .Select(r => new Row(

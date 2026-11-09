@@ -1,0 +1,181 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteerCalendarModel
+@{
+    ViewData["Title"] = "Task calendar";
+}
+
+<style>
+    .vc-days { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 0; }
+    .vc-days a { padding:6px 12px; border-radius:16px; border:1px solid #cbd5e1; text-decoration:none; color:#1D3380; font-size:14px; }
+    .vc-days a.on { background:#1D3380; color:#fff; border-color:#1D3380; }
+    .vc-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+    .vc-grid { display:flex; min-width:max-content; }
+    .vc-times { position:relative; width:52px; flex:0 0 52px; border-right:1px solid #e5e7eb; background:#f8fafc; }
+    .vc-time { position:absolute; left:4px; font-size:11px; color:#64748b; transform:translateY(-6px); }
+    .vc-col { position:relative; width:170px; flex:0 0 170px; border-right:1px solid #eef0f3; }
+    .vc-colhead { position:sticky; top:0; height:36px; padding:6px; font-size:13px; font-weight:700; color:#1D3380;
+                  background:#eef2ff; border-bottom:1px solid #e5e7eb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; z-index:1; }
+    .vc-body { position:relative; }
+    .vc-hourline { position:absolute; left:0; right:0; border-top:1px dashed #eef0f3; }
+    .vc-block { position:absolute; box-sizing:border-box; padding:3px 5px; border-radius:6px; font-size:12px; line-height:1.25;
+                text-align:left; overflow:hidden; cursor:pointer; border:1px solid #93c5fd; background:#dbeafe; color:#0f172a; }
+    .vc-block.full { background:#dcfce7; border-color:#86efac; }
+    .vc-block.open { background:#fee2e2; border-color:#fca5a5; }
+    .vc-block:focus-visible { outline:3px solid #1D3380; outline-offset:1px; }
+    .vc-block small { display:block; color:#475569; }
+    .vc-legend span { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px; }
+    dialog.vc-dlg { max-width:560px; width:calc(100% - 32px); border:0; border-radius:12px; padding:0; }
+    dialog.vc-dlg::backdrop { background:rgba(15,23,42,.45); }
+    .vc-dlg .hd { padding:14px 16px; background:#1D3380; color:#fff; display:flex; justify-content:space-between; gap:12px; }
+    .vc-dlg .bd { padding:14px 16px; font-size:14px; }
+    .vc-dlg .bd h4 { margin:12px 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:.03em; color:#475569; }
+    .vc-dlg .bd p { margin:0 0 6px; white-space:pre-line; }
+    .vc-dlg button.x { background:transparent; border:0; color:#fff; font-size:22px; min-width:32px; min-height:32px; cursor:pointer; }
+</style>
+
+<div class="card">
+    <h1>Task calendar</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>Every volunteer task on a timeline, one column per bucket. Click a task to see its notes and who is on it.
+           To change a task, use <a asp-page="/Organizer/VolunteerStructure">Work structure</a> or the task editor.</p>
+        <p class="vc-legend">
+            <span style="background:#fee2e2;border:1px solid #fca5a5;">nobody yet</span>
+            <span style="background:#dbeafe;border:1px solid #93c5fd;">partly filled</span>
+            <span style="background:#dcfce7;border:1px solid #86efac;">full</span>
+        </p>
+        <p><a asp-page="/Organizer/Volunteers">&larr; Back to Volunteers</a> · <a asp-page="/Organizer/VolunteerCoverage">Coverage &amp; shortage</a></p>
+        @if (Model.Days.Count > 0)
+        {
+            <nav class="vc-days" aria-label="Choose a day">
+                @foreach (var d in Model.Days)
+                {
+                    <a asp-page="/Organizer/VolunteerCalendar" asp-route-day="@d.Day.ToString("yyyy-MM-dd")"
+                       class="@(d.Day == Model.Current?.Day ? "on" : null)"
+                       aria-current="@(d.Day == Model.Current?.Day ? "page" : null)">@d.Day.ToString("ddd d MMM")</a>
+                }
+            </nav>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @if (Model.Current is not { } day)
+    {
+        <div class="card"><p>No tasks have a day yet. Give tasks a date and time on Work structure and they appear here.</p></div>
+    }
+    else
+    {
+        var totalMinutes = (day.To - day.From).TotalMinutes;
+        var bodyHeight = totalMinutes * CommunityHub.Pages.Organizer.VolunteerCalendarModel.PxPerMinute;
+        <div class="card" style="padding:8px;">
+            <div class="vc-wrap">
+                <div class="vc-grid">
+                    <div class="vc-times" aria-hidden="true">
+                        <div style="height:36px;border-bottom:1px solid #e5e7eb;"></div>
+                        <div style="position:relative;height:@(bodyHeight.ToString(System.Globalization.CultureInfo.InvariantCulture))px;">
+                            @for (var t = day.From; t < day.To; t = t.AddHours(1))
+                            {
+                                <span class="vc-time" style="top:@(Model.Top(day, t).ToString(System.Globalization.CultureInfo.InvariantCulture))px;">@t.ToString("HH:mm")</span>
+                                if (t.Hour == 23) { break; }
+                            }
+                        </div>
+                    </div>
+                    @foreach (var col in day.Columns)
+                    {
+                        <div class="vc-col">
+                            <div class="vc-colhead" title="@Model.ColumnNames.GetValueOrDefault(col.Key)">@Model.ColumnNames.GetValueOrDefault(col.Key)</div>
+                            <div class="vc-body" style="height:@(bodyHeight.ToString(System.Globalization.CultureInfo.InvariantCulture))px;">
+                                @for (var t = day.From; t < day.To; t = t.AddHours(1))
+                                {
+                                    <div class="vc-hourline" style="top:@(Model.Top(day, t).ToString(System.Globalization.CultureInfo.InvariantCulture))px;"></div>
+                                    if (t.Hour == 23) { break; }
+                                }
+                                @foreach (var b in col.Blocks)
+                                {
+                                    var task = Model.Tasks[b.TaskId];
+                                    var filled = Model.Filled(b.TaskId);
+                                    var cls = task.ResourcesNeeded > 0 && filled >= task.ResourcesNeeded ? "full" : filled == 0 && task.ResourcesNeeded > 0 ? "open" : null;
+                                    var width = 100.0 / b.Lanes;
+                                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                                    <button type="button" class="vc-block @cls" data-task="@b.TaskId"
+                                            style="top:@Model.Top(day, b.Window.Start).ToString(inv)px;height:@Model.Height(b.Window).ToString(inv)px;left:calc(@((b.Lane * width).ToString(inv))% + 2px);width:calc(@(width.ToString(inv))% - 4px);"
+                                            aria-label="@task.Title, @b.Window, @filled of @task.ResourcesNeeded people">
+                                        <strong>@task.Title</strong>
+                                        <small>@b.Window · @filled/@task.ResourcesNeeded</small>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+            @if (day.UntimedTaskIds.Count > 0)
+            {
+                <h3 style="margin:14px 4px 6px;">On this day, no time set</h3>
+                <ul style="margin:0 0 0 18px;">
+                    @foreach (var id in day.UntimedTaskIds)
+                    {
+                        var task = Model.Tasks[id];
+                        <li><button type="button" class="linklike" data-task="@id" style="background:none;border:0;color:#1D3380;text-decoration:underline;cursor:pointer;padding:4px 0;">@task.Title</button>
+                            — @Model.Filled(id)/@task.ResourcesNeeded people · @Model.ColumnNames.GetValueOrDefault(task.CategoryId, "(no bucket)")</li>
+                    }
+                </ul>
+            }
+            @if (Model.UndatedCount > 0)
+            {
+                <p style="font-size:13px;color:#4b5563;margin:10px 4px 0;">@Model.UndatedCount task(s) have no day and are not shown.</p>
+            }
+        </div>
+
+        @* One hidden detail per task on this day; the dialog shows a copy. Server-rendered, so every field is
+           HTML-encoded by Razor — nothing is built from strings in script. *@
+        <div hidden>
+            @foreach (var id in day.Columns.SelectMany(c => c.Blocks).Select(b => b.TaskId).Concat(day.UntimedTaskIds))
+            {
+                var t = Model.Tasks[id];
+                var w = CommunityHub.Core.Volunteers.VolunteerTaskWindow.WindowOf(t);
+                <div id="vc-detail-@id">
+                    <div class="hd"><strong>@t.Title</strong><button type="button" class="x" aria-label="Close" data-close>&times;</button></div>
+                    <div class="bd">
+                        <p>@day.Day.ToString("dddd d MMMM")@(w is { } ww ? $" · {ww}" : "") · @Model.ColumnNames.GetValueOrDefault(t.CategoryId, "(no bucket)")@(t.Subcategory is null ? "" : $" › {t.Subcategory.Name}")</p>
+                        <p><strong>@Model.Filled(id)/@t.ResourcesNeeded</strong> people · status @t.Status@(string.IsNullOrWhiteSpace(t.EldkLeadName) ? "" : $" · lead {t.EldkLeadName}")</p>
+                        <h4>Who is on it</h4>
+                        @if (Model.Published.TryGetValue(id, out var pub) && pub.Count > 0) { <p>@string.Join(", ", pub)</p> }
+                        @if (Model.Queued.TryGetValue(id, out var q) && q.Count > 0) { <p>Queued, not published: @string.Join(", ", q)</p> }
+                        @if (Model.Filled(id) == 0) { <p>Nobody yet.</p> }
+                        @if (!string.IsNullOrWhiteSpace(t.Description)) { <h4>Description</h4><p>@t.Description</p> }
+                        @if (!string.IsNullOrWhiteSpace(t.Instructions)) { <h4>Instructions</h4><p>@t.Instructions</p> }
+                        @if (!string.IsNullOrWhiteSpace(t.Expectations)) { <h4>Expectations</h4><p>@t.Expectations</p> }
+                        @if (!string.IsNullOrWhiteSpace(t.Prerequisites)) { <h4>Prerequisites</h4><p>@t.Prerequisites</p> }
+                        <p style="margin-top:12px;"><a asp-page="/Organizer/EditVolunteerTask" asp-route-taskId="@id">Edit this task</a> · <a asp-page="/Organizer/VolunteerStructure">Assign on Work structure</a></p>
+                    </div>
+                </div>
+            }
+        </div>
+        <dialog class="vc-dlg" id="vc-dlg" aria-label="Task details"></dialog>
+        <script>
+            (function () {
+                var dlg = document.getElementById('vc-dlg');
+                document.addEventListener('click', function (e) {
+                    var btn = e.target.closest('[data-task]');
+                    if (btn) {
+                        var src = document.getElementById('vc-detail-' + btn.getAttribute('data-task'));
+                        if (!src) return;
+                        dlg.replaceChildren(src.cloneNode(true));
+                        dlg.firstElementChild.removeAttribute('id');
+                        dlg.showModal();
+                        return;
+                    }
+                    if (e.target.closest('[data-close]') || e.target === dlg) dlg.close();
+                });
+            })();
+        </script>
+    }
+}

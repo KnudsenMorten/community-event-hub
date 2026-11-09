@@ -37,9 +37,17 @@
             "volunteer-allocation"),
         // §1297 — the worker roster. It belongs next to the availability overview: that page says
         // what everybody answered, this one says who the planner may act on it for.
-        new("/Organizer/VolunteerWorkerRoster", "Worker roster",
-            "Which volunteers the auto-planner draws from — the ones here to work rather than attend, who can be scheduled all day. Everyone else is placed by hand.",
+        // §1380 — renamed: "worker roster" was not understood (Leth 2026-11-02). Same page, plain words.
+        new("/Organizer/VolunteerWorkerRoster", "Full-day workers",
+            "Mark the volunteers who work all day and do not attend sessions. Auto-assign plans every volunteer: full-day workers all day, everyone else up to 50% of the hours they said they can work.",
             "volunteer-allocation"),
+        // §1380 (Leth 2026-11-01) — the overview of how short we are, and the task calendar.
+        new("/Organizer/VolunteerCoverage", "Coverage & shortage",
+            "How many places the tasks need, how many are filled, and how many volunteers we are short — per day and per hour. No auto-assign needed.",
+            "volunteer-allocation"),
+        new("/Organizer/VolunteerCalendar", "Task calendar",
+            "Every task on a timeline per day, one column per bucket — like a schedule builder. Click a task for its notes and who is on it.",
+            "volunteer-tasks"),
         new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value, "volunteer-tasks"),
         new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value, "volunteer-allocation"),
         new("/Organizer/AllocationScenarios", "Allocation scenarios", "Stage a bulk reshuffle, simulate the coverage impact, then commit it — or auto-seed a drop-out backfill.", "volunteer-allocation"),

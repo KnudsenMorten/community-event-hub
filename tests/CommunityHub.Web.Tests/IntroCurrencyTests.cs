@@ -205,6 +205,8 @@ public sealed class IntroCurrencyTests
               + "a partner does nothing new.",
         [241] = "Booth tasks give the right furniture coupon code (§1302). A wrong code in "
               + "task text corrected; no new capability for the sponsor.",
+        [250] = "Visa form for speakers and volunteers (§1374). Reaches only the few people an organizer flags as "
+              + "needing a visa; a passage in the intro would advertise a form most readers can never open.",
         [249] = "Lower monitoring cost: quiet logging by default with an on-demand detail switch (§1317). An operations "
             + "change with no visible behaviour for organizers, sponsors or speakers.",
         [248] ="Public Sponsors page shows the real names and logos (§1315). A display fix on an existing public page; "

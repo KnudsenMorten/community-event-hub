@@ -32,7 +32,7 @@ namespace CommunityHub.Core.Integrations.Graphics;
 /// <para>Pure: bytes in, bytes out. No SharePoint, no DB, no clock — so the whole layout is testable
 /// offline and a sample can be rendered and looked at.</para>
 /// </remarks>
-public sealed class SoMeGraphicRenderer
+public sealed partial class SoMeGraphicRenderer
 {
     // ---- canvas + layers, measured from the ELDK26 samples ----------------------------
     public const int Width = 1200;

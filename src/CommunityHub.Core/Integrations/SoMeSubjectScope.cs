@@ -70,8 +70,25 @@ public sealed class SoMeSubjectScope
     /// already, as part of "what counts as a session at all" rather than as a campaign decision —
     /// folding it in would make this set mean two things.
     /// </remarks>
-    public async Task<IReadOnlyList<Excluded>> ExcludedSessionsAsync(
-        int eventId, CancellationToken ct = default)
+    public Task<IReadOnlyList<Excluded>> ExcludedSessionsAsync(
+        int eventId, CancellationToken ct = default) =>
+        ExcludedSessionsAsync(eventId, ignoreAnnouncementFlag: false, ct);
+
+    /// <summary>
+    /// §1384 — the exclusion set WITHOUT <see cref="Domain.Session.ExcludeFromSoMeAnnouncements"/>:
+    /// every other reason (test data, TEST session, title pattern, all-test speakers) still applies.
+    /// </summary>
+    /// <remarks>
+    /// For the all-tracks overview GIF, which shows ALL speakers of a track. The announcement flag
+    /// keeps a session out of the SoMe campaign (sponsor speaker sessions carry it), not off the
+    /// line-up picture (operator 2026-11-07: <i>"these are all sponsor speakers"</i>).
+    /// </remarks>
+    public async Task<IReadOnlySet<int>> ExcludedSessionIdsIgnoringAnnouncementFlagAsync(
+        int eventId, CancellationToken ct = default) =>
+        (await ExcludedSessionsAsync(eventId, ignoreAnnouncementFlag: true, ct)).Select(x => x.SessionId).ToHashSet();
+
+    private async Task<IReadOnlyList<Excluded>> ExcludedSessionsAsync(
+        int eventId, bool ignoreAnnouncementFlag, CancellationToken ct)
     {
         var rows = await _db.Sessions
             .AsNoTracking()
@@ -109,7 +126,7 @@ public sealed class SoMeSubjectScope
             var reason =
                 s.IsTestData ? "marked as test data (IsTestData)"
                 : s.UsedForTesting ? "marked as a TEST session (UsedForTesting)"
-                : s.ExcludeFromSoMeAnnouncements ? "excluded from social-media announcements"
+                : s.ExcludeFromSoMeAnnouncements && !ignoreAnnouncementFlag ? "excluded from social-media announcements"
                 : SoMeTitleExclusions.IsExcluded(s.Title, patterns) ? "matches an excluded title pattern"
                 : s.HasSpeakers && s.AllSpeakersTest ? "every speaker on it is a test user"
                 : null;

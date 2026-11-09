@@ -455,6 +455,9 @@ public sealed class VolunteerStructureService
             TimeEnd = Clean(timeEnd),
             CreatedAt = _clock.GetUtcNow(),
         };
+        // §1380 — the typed start/end were never set on create (only on import/edit), contrary to the
+        // "called from every path that writes Shift/TimeEnd" contract on SyncTypedTimes.
+        CommunityHub.Core.Volunteers.VolunteerTaskWindow.SyncTypedTimes(task);
         _db.VolunteerTasks.Add(task);
         await _db.SaveChangesAsync(ct);
         return task;

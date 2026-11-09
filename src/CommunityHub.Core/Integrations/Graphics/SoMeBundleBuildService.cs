@@ -103,12 +103,14 @@ public sealed class SoMeBundleBuildService
     /// §1214 — tracks whose graphic the operator replaced BY HAND and whose line-up has since
     /// changed. Named, never rebuilt: overwriting his own artwork is worse than a stale file.
     /// </param>
+    /// <param name="AllTracksOverview">§1384 — 1 when the all-tracks overview GIF was (re)built this sweep.</param>
     public sealed record BundleResult(
         int TrackBundles, int SponsorBundles, int TracksSkippedNoPhoto, bool Inert = false,
         int SessionGraphics = 0, int SponsorGraphics = 0,
         int SessionsLeftToUpload = 0, int SessionsSkippedNoPhoto = 0,
         int TrackGraphicsRetired = 0,
-        IReadOnlyList<string>? StaleOverriddenTracks = null)
+        IReadOnlyList<string>? StaleOverriddenTracks = null,
+        int AllTracksOverview = 0)
     {
         /// <summary>Never null, so a caller can just enumerate.</summary>
         public IReadOnlyList<string> StaleOverrides =>
@@ -174,8 +176,12 @@ public sealed class SoMeBundleBuildService
                 + "(ids {Ids}).", excludedSessionIds.Length, string.Join(", ", excludedSessionIds.Take(50)));
         }
 
+        var photoCache = new Dictionary<int, byte[]?>();
         var tracks = await BuildTrackBundlesAsync(
-            eventId, template, eventLogo, photos, unmatched, excludedSessionIds, ct);
+            eventId, template, eventLogo, photos, unmatched, excludedSessionIds, ct, photoCache);
+        // §1384 — the all-tracks overview: the track sweep's selection, plus the sessions excluded ONLY
+        // by the announcement flag (sponsor speakers); photos the loop above already fetched are reused.
+        var overview = await BuildAllTracksOverviewAsync(eventId, photos, photoCache, ct);
         var sessions = await BuildSessionGraphicsAsync(
             eventId, template, eventLogo, photos, unmatched, excludedSessionIds, ct);
         var sponsors = await BuildSponsorBundlesAsync(eventId, template, eventLogo, ct);
@@ -219,7 +225,188 @@ public sealed class SoMeBundleBuildService
             // §1214 — the two outcomes that need a human, carried out of the sweep rather than
             // living only in the log.
             TrackGraphicsRetired: tracks.Retired,
-            StaleOverriddenTracks: tracks.StaleOverrides);
+            StaleOverriddenTracks: tracks.StaleOverrides,
+            AllTracksOverview: overview ? 1 : 0);
+    }
+
+    // ---- §1384 all-tracks overview -------------------------------------------------------
+
+    /// <summary>§1384 — one track's line-up as the per-track loop resolved it (photos included).</summary>
+    internal sealed record OverviewTrackInput(
+        string Track, IReadOnlyList<(int ParticipantId, string Name, byte[]? Photo)> Speakers);
+
+    /// <summary>
+    /// §1384 — bumps the overview's hash only. Separate from <see cref="DesignVersion"/> so a change
+    /// to the overview layout never re-renders (or re-releases) any per-track or session graphic.
+    /// </summary>
+    public const string AllTracksDesignVersion = "1384.1";
+
+    /// <summary>
+    /// §1384 — the fallback track order when the edition does not state one: Security, Identity,
+    /// Intune, Azure, Microsoft 365, Data Compliance, AI for Makers, AI for Engineers/Developers;
+    /// any other track after those, alphabetically.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Hard-coded on purpose: <c>EventEditionConfig</c> carries no ordered track list (checked
+    /// 2026-11-07), and the session data has no track order either. Matched on the title with any
+    /// trailing parenthetical removed, so "AI for Makers (Copilot &amp; Agents)" still sorts as
+    /// "AI for Makers". Move this to the edition config if a second edition needs a different order.
+    /// </remarks>
+    private static readonly string[][] FallbackTrackOrder =
+    {
+        new[] { "security" },
+        new[] { "identity" },
+        new[] { "intune" },
+        new[] { "azure" },
+        new[] { "microsoft 365", "m365" },
+        new[] { "data compliance" },
+        new[] { "ai for makers" },
+        new[] { "ai for engineers", "ai for developers", "build your own ai" },
+    };
+
+    /// <summary>§1384 — the order the overview's frames come in (see <see cref="FallbackTrackOrder"/>).</summary>
+    public static IReadOnlyList<string> AllTracksOrder(IEnumerable<string> trackNames)
+    {
+        static int Rank(string name)
+        {
+            var t = SoMeGraphicRenderer.OverviewTitle(name).ToLowerInvariant();
+            var full = (name ?? string.Empty).ToLowerInvariant();
+            for (var i = 0; i < FallbackTrackOrder.Length; i++)
+            {
+                if (FallbackTrackOrder[i].Any(k => t == k || t.StartsWith(k + " ", StringComparison.Ordinal)
+                                                   || full.Contains(k, StringComparison.Ordinal)))
+                    return i;
+            }
+            return int.MaxValue;
+        }
+
+        return trackNames
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Rank)
+            .ThenBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// §1384 — the overview's input hash: every track (in frame order), every speaker, and a digest of
+    /// each photo — so a speaker joining or leaving, a renamed track, or a photo arriving or being
+    /// replaced rebuilds it, and an unchanged line-up does not.
+    /// </summary>
+    internal static string AllTracksInputHash(IReadOnlyList<OverviewTrackInput> ordered) =>
+        HashOf(
+            AllTracksDesignVersion, "all-tracks",
+            string.Join("||", ordered.Select(t =>
+                t.Track + "=" + string.Join("|", t.Speakers
+                    .OrderBy(s => s.ParticipantId)
+                    .Select(s => $"{s.ParticipantId}:{s.Name}:{PhotoDigest(s.Photo)}")))));
+
+    private static string PhotoDigest(byte[]? photo) =>
+        photo is { Length: > 0 }
+            ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(photo))[..12]
+            : "-";
+
+    /// <summary>
+    /// §1384 — build the all-tracks overview. A speaker without a photo gets an initials circle here
+    /// rather than holding the whole overview (the §1304 face gate guards the per-track and session
+    /// graphics that go on SoMe posts; this one is not attached to any post). Returns true when it
+    /// rendered.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Selection = the track sweep's, minus ONE exclusion.</b> The query below has the same
+    /// shape as <c>BuildTrackBundlesAsync</c> (no service sessions, a track, §905 test speakers out),
+    /// but excludes sessions via <see cref="SoMeSubjectScope.ExcludedSessionIdsIgnoringAnnouncementFlagAsync"/>:
+    /// a session kept out of the SoMe campaign ONLY by <c>ExcludeFromSoMeAnnouncements</c> — the
+    /// sponsor speaker sessions — is still on the line-up picture (PROD check 2026-11-07: Intune
+    /// showed 16 of 19). Test data, TEST sessions, title patterns and all-test sessions stay out.
+    /// The per-track GIF is untouched and keeps excluding them.</para>
+    /// <para>Photos: the per-track loop's downloads are reused; a speaker it never saw is looked up the
+    /// same way (<c>TryPhotoAsync</c>), then by the leaf of their <c>SpeakerProfile.PhotoSharePointPath</c>
+    /// in the same folder listing — a sponsor speaker's photo file may carry another participant id.</para>
+    /// </remarks>
+    private async Task<bool> BuildAllTracksOverviewAsync(
+        int eventId, PhotoIndex photos, Dictionary<int, byte[]?> photoCache, CancellationToken ct)
+    {
+        var excluded = (await new SoMeSubjectScope(_db)
+            .ExcludedSessionIdsIgnoringAnnouncementFlagAsync(eventId, ct)).ToArray();
+
+        var rows = await _db.Sessions
+            .AsNoTracking()
+            .Where(s => s.EventId == eventId
+                        && !s.IsServiceSession
+                        && !excluded.Contains(s.Id)
+                        // §1384 — the line-up of a TRACK is its technical sessions and master classes.
+                        // Lifting the announcement flag (sponsor sessions) also let in the Welcome and
+                        // Closing keynotes, which carry Track = "Security" on PROD, and put two organizers
+                        // in the Security frame (2026-11-07).
+                        && (s.Type == SessionType.TechnicalSession || s.Type == SessionType.MasterClass)
+                        && s.Track != null && s.Track != ""
+                        && s.SessionSpeakers.Any())
+            .SelectMany(s => s.SessionSpeakers
+                .Where(ss => ss.Participant == null || !ss.Participant.IsTestUser)
+                .Select(ss => new { Track = s.Track!, ss.ParticipantId, Name = ss.Participant.FullName }))
+            .ToListAsync(ct);
+        if (rows.Count == 0) return false;
+
+        // The profile photo path, for speakers whose file the id/name lookup cannot find.
+        var ids = rows.Select(r => r.ParticipantId).Distinct().ToList();
+        var profilePaths = await _db.SpeakerProfiles
+            .AsNoTracking()
+            .Where(p => p.EventId == eventId && ids.Contains(p.ParticipantId) && p.PhotoSharePointPath != null)
+            .Select(p => new { p.ParticipantId, p.PhotoSharePointPath })
+            .ToListAsync(ct);
+        var leafById = profilePaths
+            .GroupBy(p => p.ParticipantId)
+            .ToDictionary(g => g.Key, g => SpeakerPhotoService.SafeLeaf(g.First().PhotoSharePointPath));
+
+        async Task<byte[]?> PhotoOf(int participantId, string name)
+        {
+            if (photoCache.TryGetValue(participantId, out var cached) && cached is { Length: > 0 }) return cached;
+            var photo = await TryPhotoAsync(photos, participantId, name, ct);
+            if (photo is not { Length: > 0 }
+                && leafById.TryGetValue(participantId, out var leaf) && leaf is not null)
+            {
+                var file = photos.ById.Values.Concat(photos.BySlug.Values)
+                    .FirstOrDefault(f => string.Equals(f.Name, leaf, StringComparison.OrdinalIgnoreCase));
+                if (file is not null)
+                {
+                    try { photo = await _store.DownloadAsync(file.ItemId, ct); }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex, "§1384 overview: photo {File} could not be read.", file.Name);
+                    }
+                }
+            }
+            photoCache[participantId] = photo;
+            return photo;
+        }
+
+        var perTrack = new List<OverviewTrackInput>();
+        foreach (var track in rows.GroupBy(r => r.Track, StringComparer.OrdinalIgnoreCase))
+        {
+            var speakers = new List<(int ParticipantId, string Name, byte[]? Photo)>();
+            foreach (var s in track.GroupBy(r => r.ParticipantId).OrderBy(g => g.Key).Select(g => g.First()))
+                speakers.Add((s.ParticipantId, s.Name, await PhotoOf(s.ParticipantId, s.Name)));
+            perTrack.Add(new OverviewTrackInput(track.Key, speakers));
+        }
+
+        var withSpeakers = perTrack.Where(t => t.Speakers.Count > 0).ToList();
+        if (withSpeakers.Count == 0) return false;
+
+        var order = AllTracksOrder(withSpeakers.Select(t => t.Track));
+        var ordered = order
+            .Select(name => withSpeakers.First(t => string.Equals(t.Track, name, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        var hash = AllTracksInputHash(ordered);
+        var tracks = ordered
+            .Select(t => new TrackOverviewTrack(
+                t.Track, t.Speakers.Select(s => (s.Photo, s.Name)).ToList()))
+            .ToList();
+
+        var outcome = await _graphics.GenerateAllTracksSpeakersAsync(eventId, tracks, hash, ct: ct);
+        if (outcome.Rendered)
+            _rebuiltNames.Add($"all tracks overview → {outcome.Asset.FileName}");
+        return outcome.Rendered;
     }
 
     // ---- tracks ------------------------------------------------------------------------
@@ -318,7 +505,8 @@ public sealed class SoMeBundleBuildService
     private async Task<(int Built, int Current, int NoPhoto, int Retired, IReadOnlyList<string> StaleOverrides)>
         BuildTrackBundlesAsync(
         int eventId, byte[] template, byte[]? eventLogo, PhotoIndex photos,
-        List<string> unmatched, int[] excludedSessionIds, CancellationToken ct)
+        List<string> unmatched, int[] excludedSessionIds, CancellationToken ct,
+        Dictionary<int, byte[]?>? photoCache = null)
     {
         // 🔴 §1178 — THE SAME EXCLUSIONS THE PLANNER USES. Operator 2026-09-12: *"the graphics for
         // security track is wrong as no test session speakers must be included"*.
@@ -402,6 +590,11 @@ public sealed class SoMeBundleBuildService
                     unmatched.Add($"{speaker.Name} (#{speaker.ParticipantId})");
                 frames.Add((photo, speaker.Name));
             }
+
+            // §1384 — remember the photos fetched here so the all-tracks overview does not download
+            // them a second time. Recording only; nothing in this loop reads it.
+            if (photoCache is not null)
+                for (var i = 0; i < speakers.Count; i++) photoCache[speakers[i].ParticipantId] = frames[i].Photo;
 
             // 🔴 §1304 — ANY missing face holds the graphic, not only ALL of them. A partly blank
             // graphic reached the company page (the Azure Master Class post, 2026-09-25). The

@@ -101,6 +101,9 @@ public sealed class SoMeScheduleService
     /// <summary>§911 — what is left of this run's generation budget.</summary>
     private int _introBudget;
 
+    /// <summary>§1373 — every name a sponsor company is known by, read once per run.</summary>
+    private IReadOnlyList<string>? _companyNames;
+
     public SoMeScheduleService(
         CommunityHubDbContext db,
         SoMeTemplateService templates,
@@ -183,6 +186,7 @@ public sealed class SoMeScheduleService
             {
                 s.EventSystemUrl, s.EventTags, s.OrganizerCredits,
                 s.MaxPostsPerDay, s.ExceptionPostsPerDay,
+                s.MaxSponsorPostsPerDay,   // §1368
                 // §1181 — the Type 5 window's closing day rides the row this already reads.
                 s.EventPostWindowEndsOn,
             })
@@ -284,6 +288,10 @@ public sealed class SoMeScheduleService
             .ToDictionary(g => g.Key, g => g.First().IntroText!);
 
         _introBudget = MaxIntroGenerationsPerRun;
+        _companyNames = null;
+
+        // 🔴 §1373 — rewrite the tier intros that froze company names, BEFORE anything reuses them.
+        await RepairTierIntrosAsync(eventId, ct);
 
         var stale = await _db.SoMePosts
             .Where(p => p.EventId == eventId
@@ -382,7 +390,9 @@ public sealed class SoMeScheduleService
             .ToList();
 
         var plan = SoMeSchedulePlanner.Plan(
-            subjects, existingTuples, now, eventStartUtc, normalPerDay, exceptionPerDay);
+            subjects, existingTuples, now, eventStartUtc, normalPerDay, exceptionPerDay,
+            maxSponsorPerDay: footer?.MaxSponsorPostsPerDay is > 0 and var sp ? sp : null,   // §1368
+            unkeyedOccupied: await UnkeyedSeatsAsync(eventId, ct));                          // §1379c
 
         // 🔒 §853 — drop what he deleted. Done AFTER planning rather than by removing the subject,
         // because a subject's other occurrences must still be planned: deleting a sponsor's SECOND
@@ -397,9 +407,11 @@ public sealed class SoMeScheduleService
         // Anything wanted but not placed had no room before the event — named, not swallowed.
         var placed = plan.Select(p => (p.SubjectKey, p.Occurrence)).ToHashSet();
         var already = existingTuples.Select(e => (e.Item1, e.Item2)).ToHashSet();
+        // 🔴 §1368 — a post he DELETED is not "no room": it was left out on purpose (§853). Without this,
+        // a published-then-deleted sponsor post was mailed to the organizers as a full calendar.
         var noRoom = subjects
             .SelectMany(s => Enumerable.Range(1, s.Occurrences).Select(n => (s.SubjectKey, n)))
-            .Where(x => !placed.Contains(x) && !already.Contains(x))
+            .Where(x => !placed.Contains(x) && !already.Contains(x) && !suppressedKeys.Contains(x))
             .Select(x => $"{x.SubjectKey} #{x.n}")
             .ToList();
 
@@ -517,18 +529,18 @@ public sealed class SoMeScheduleService
                         || x.StartsWith("tier:", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        // 🔴 §854.1 — sponsors that could not be planned AT ALL because they have no graphic yet.
-        // Named in the run message so he can chase the missing logos; §842.5 makes it his problem
-        // long before it is theirs.
-        if (NotPlannableSponsors.Count > 0)
+        // 🔴 §854.1 / §1370 — sponsors planned but HELD because they have no graphic yet. Named in the
+        // run message so he can chase the missing logos; §842.5 makes it his problem long before it
+        // is theirs.
+        if (SponsorsWaitingForGraphic.Count > 0)
         {
-            msg += $" ⚠️ {NotPlannableSponsors.Count} sponsor(s) could NOT be planned — no logo/graphic "
-                 + "yet, so there is nothing to announce. They must be chased: every sponsor is owed "
-                 + "two announcements.";
+            msg += $" ⏳ {SponsorsWaitingForGraphic.Count} sponsor(s) are planned but held — no "
+                 + "logo/graphic yet, so their posts cannot be approved until it arrives. Chase them: "
+                 + "every sponsor is owed two announcements.";
 
             _log?.LogWarning(
-                "§854 {Count} sponsor(s) not plannable (no graphic): {Companies}.",
-                NotPlannableSponsors.Count, string.Join(", ", NotPlannableSponsors));
+                "§1370 {Count} sponsor(s) planned but waiting for a graphic: {Companies}.",
+                SponsorsWaitingForGraphic.Count, string.Join(", ", SponsorsWaitingForGraphic));
         }
 
         if (sponsorNoRoom.Count > 0)
@@ -627,15 +639,14 @@ public sealed class SoMeScheduleService
     /// declines one that falls outside his window.</para>
     /// </remarks>
     /// <summary>
-    /// §854.1 — sponsors that could not be planned because they have no graphic yet (no logo).
+    /// §854.1 / §1370 — sponsors whose posts are planned but held because they have no graphic yet.
     /// </summary>
     /// <remarks>
-    /// 🔒 Surfaced so "not planned" is a state he can SEE. §842.5 makes two announcements per sponsor
-    /// contractual, so a sponsor missing from the campaign because they never sent a logo is a breach
-    /// waiting to happen — and the person who can chase them is the one who would not otherwise
-    /// notice. Same rule as §850.2's hidden-count: hidden must never mean forgotten.
+    /// 🔒 Surfaced so "waiting for a logo" is a state he can SEE. §842.5 makes two announcements per
+    /// sponsor contractual, and the person who can chase a missing logo is the one who would not
+    /// otherwise notice. Same rule as §850.2's hidden-count: hidden must never mean forgotten.
     /// </remarks>
-    public IReadOnlyList<string> NotPlannableSponsors { get; private set; } = Array.Empty<string>();
+    public IReadOnlyList<string> SponsorsWaitingForGraphic { get; private set; } = Array.Empty<string>();
 
     /// <summary>
     /// §847 — the last moment a Type 5 event post may be scheduled.
@@ -1388,20 +1399,24 @@ public sealed class SoMeScheduleService
             .Select(g => new { CompanyId = g.Key, SignedAt = g.Min(x => x.CreatedAt) })
             .ToList();
 
-        // 🔴 §854 — A SPONSOR WITH NO GRAPHIC IS NOT PLANNED AT ALL.
+        // 🔴 §1370 — A SPONSOR WITH NO GRAPHIC IS PLANNED AND HELD, NOT LEFT OUT.
         //
-        // Operator 2026-08-05: "silver sponsor apento is shown in the list even though they have not
-        // uploaded logo yet". This USED to fall back to the signup date when no graphic existed,
-        // which I justified as "so a sponsor without artwork is not dropped" — and that defeated
-        // §846's whole gate, because a signup date in the past makes them look ready from day one.
+        // Operator 2026-10-27: *"sponsors that dont meet the requirements to be approved like logo and
+        // some text should still be planned. once they live up they should be scheduled"* (reported
+        // for IdentityStack). This SUPERSEDES §854, which planned nothing for a sponsor without a
+        // graphic: on a full calendar (§1368) a sponsor that waited for its logo found no seat left
+        // before its round deadline.
         //
-        // The chain is signed → onboarded → LOGO UPLOADED → graphic built ⇒ eligible. Falling back
-        // past the middle of it announces a company whose artwork does not exist.
-        var plannable = sponsors.Where(s => graphicReady.ContainsKey(s.CompanyId)).ToList();
+        // 🔒 Nothing unready can go out: §1206 — readiness gates APPROVAL, never PLACEMENT.
+        // `SoMeApprovalGate` refuses the post on a missing logo, text or graphic, auto-approval and
+        // dispatch both ask it, and §1205 walks a held post forward if its date passes. When the
+        // graphic is built the proposal is re-planned (§848.2) from that date, exactly as before.
+        //
+        // ⚠️ The signup date is NOT a readiness date (§854's lesson): an unready sponsor gets only the
+        // floor and spreads like any other subject, it does not "hurry" as a fresh arrival.
 
-        // ⚠️ …but they must not become INVISIBLE. §842.5 is contractual, and a sponsor silently
-        // absent because they never sent a logo is a breach waiting to happen. Named, not dropped.
-        NotPlannableSponsors = sponsors
+        // Named in the run message so he can chase the missing logos (§854.1).
+        SponsorsWaitingForGraphic = sponsors
             .Where(s => !graphicReady.ContainsKey(s.CompanyId))
             .Select(s => s.CompanyId)
             .ToList();
@@ -1409,15 +1424,15 @@ public sealed class SoMeScheduleService
         // 🔴 §1194 — from the rule, like every other category.
         var sponsorOpens = OpensOf(SoMeAnnouncementCategory.Sponsors);
 
-        subjects.AddRange(plannable.Select(s => new SoMeSubject(
+        subjects.AddRange(sponsors.Select(s => new SoMeSubject(
             SoMeTemplateKind.Sponsor,
             $"sponsor:{s.CompanyId}",
             RoundsOf(SoMeAnnouncementCategory.Sponsors),
             // 🔴 §1179 — the LATER of the sponsor's own readiness and his floor. Both are "not before
-            // this" and neither excuses the other: the floor must not announce a sponsor whose
-            // artwork does not exist yet (§854), and readiness must not jump the date he set.
-            // Exactly the shape §920 uses for the track floor.
-            EarliestUtc: LaterOrNull(graphicReady[s.CompanyId], sponsorFloor),
+            // this" and neither excuses the other, and readiness must not jump the date he set.
+            // Exactly the shape §920 uses for the track floor. No graphic yet ⇒ the floor alone.
+            EarliestUtc: LaterOrNull(
+                graphicReady.TryGetValue(s.CompanyId, out var built) ? built : null, sponsorFloor),
             // §851 — a sponsor becoming ready is an INDIVIDUAL arrival, so it is announced promptly
             // (§843.6) rather than spread across the window.
             //
@@ -1429,7 +1444,7 @@ public sealed class SoMeScheduleService
             // the exact opposite of *"lets keep the current design"*.
             // ⚠️ Caught by `Sponsors_still_spread_across_the_run_up_after_the_floor`, which exists
             // for this and would fail again the moment someone re-applies the floor here.
-            PromptFromUtc: graphicReady[s.CompanyId],
+            PromptFromUtc: graphicReady.TryGetValue(s.CompanyId, out var ready) ? ready : null,
             EarliestByOccurrence: sponsorOpens.Count > 0 ? sponsorOpens : null,
             LatestUtc: ClosesOf(SoMeAnnouncementCategory.Sponsors))));
 
@@ -1437,7 +1452,33 @@ public sealed class SoMeScheduleService
         // remove what that type has already produced: the scheduler adds and never curates
         // (§824.21a), and deleting posts he may have approved or edited would be exactly the loss
         // that rule exists to prevent.
-        return subjects.Where(s => s.Occurrences > 0).ToList();
+        // 🔴 §1368 — each category's round deadlines and spacing, attached in ONE place rather than
+        // at five construction sites: a category that has a rule cannot have the planner ignore it
+        // because one `new SoMeSubject(...)` was missed.
+        var deadlines = await ruleSvc.RoundDeadlinesAsync(eventId, ct);
+        var masterClassIds = (await _db.Sessions
+                .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass)
+                .Select(s => s.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        return subjects
+            .Where(s => s.Occurrences > 0)
+            .Select(s =>
+            {
+                if (SoMeCategoryRules.CategoryOf(s.Kind, s.SubjectKey, masterClassIds) is not { } c)
+                    return s;
+
+                var minDays = rules.TryGetValue(c, out var r) ? r.MinDaysBetweenRounds ?? 0 : 0;
+                var by = deadlines.TryGetValue(c, out var d)
+                    ? d.ToDictionary(x => x.Key, x => SoMeCategoryRules.PublishByUtc(x.Value))
+                    : null;
+
+                return minDays == 0 && by is null
+                    ? s
+                    : s with { MinDaysBetweenOccurrences = minDays, LatestByOccurrence = by };
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -1555,6 +1596,7 @@ public sealed class SoMeScheduleService
         var otherOccupied = rows
             .Where(p => !movableIds.Contains(p.Id))
             .Select(p => p.ScheduledAtUtc)
+            .Concat(await UnkeyedSeatsAsync(eventId, ct))   // §1379c — ad-hoc posts hold seats too
             .ToList();
 
         var moves = SoMeSchedulePlanner.RetimeIntoWindow(
@@ -1644,6 +1686,23 @@ public sealed class SoMeScheduleService
     /// </summary>
     internal static readonly TimeSpan OverdueGrace = TimeSpan.FromMinutes(30);
 
+    /// <summary>
+    /// 🔴 §1379c — the seats held by posts that belong to NO subject: ad-hoc / hand-written posts
+    /// (no <c>SubjectKey</c>). Operator 2026-11-07: a planned session post landed on 24 Nov next to
+    /// an ad-hoc post, because every occupancy query here read keyed posts only.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 OCCUPANCY ONLY. These are obstacles for <see cref="SoMeSchedulePlanner.Plan"/> and every
+    /// <see cref="SoMeSchedulePlanner.RetimeIntoWindow"/> pass; they are never candidates, so the
+    /// planner still never moves an ad-hoc post. Same filter as the keyed obstacles (not deleted, any
+    /// status — a published post's day is spent too), minus the subject.
+    /// </remarks>
+    private async Task<List<DateTimeOffset>> UnkeyedSeatsAsync(int eventId, CancellationToken ct) =>
+        await _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted && p.SubjectKey == null)
+            .Select(p => p.ScheduledAtUtc)
+            .ToListAsync(ct);
+
     private async Task<OverduePush> PushOverduePostsAsync(
         int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
         CancellationToken ct)
@@ -1703,6 +1762,7 @@ public sealed class SoMeScheduleService
         var otherOccupied = rows
             .Where(p => !movableIds.Contains(p.Id))
             .Select(p => p.ScheduledAtUtc)
+            .Concat(await UnkeyedSeatsAsync(eventId, ct))   // §1379c — ad-hoc posts hold seats too
             .ToList();
 
         // The window opens NOW: the earliest honest slot for something already late.
@@ -1892,6 +1952,9 @@ public sealed class SoMeScheduleService
 
         var moved = 0;
 
+        // §1379c — ad-hoc posts are never moved here, but they hold their seats in every window.
+        var unkeyedSeats = await UnkeyedSeatsAsync(eventId, ct);
+
         // One pass per WINDOW: `RetimeIntoWindow` packs from a single start, so two types opening on
         // different dates cannot share a call without one of them being placed from the other's date.
         foreach (var group in tooEarly
@@ -1915,6 +1978,7 @@ public sealed class SoMeScheduleService
             var occupied = rows
                 .Where(p => !ids.Contains(p.Id))
                 .Select(p => p.ScheduledAtUtc)
+                .Concat(unkeyedSeats)
                 .ToList();
 
             var moves = SoMeSchedulePlanner.RetimeIntoWindow(
@@ -2015,6 +2079,7 @@ public sealed class SoMeScheduleService
         var otherOccupied = rows
             .Where(p => !movableIds.Contains(p.Id))
             .Select(p => p.ScheduledAtUtc)
+            .Concat(await UnkeyedSeatsAsync(eventId, ct))   // §1379c — ad-hoc posts hold seats too
             .ToList();
 
         // The window opens on the first day the holiday is over — or now, if the break has already
@@ -2157,7 +2222,9 @@ public sealed class SoMeScheduleService
 
         if (p.Kind != SoMeTemplateKind.EventPost && bodyUsesTeaser)
         {
-            if (_introReuse.TryGetValue(reuseKey, out var kept) && !string.IsNullOrWhiteSpace(kept))
+            if (_introReuse.TryGetValue(reuseKey, out var kept) && !string.IsNullOrWhiteSpace(kept)
+                && (p.Kind != SoMeTemplateKind.SponsorCategory
+                    || IsLiveTierIntro(kept, await KnownCompanyNamesAsync(eventId, ct))))
             {
                 intro = kept;
             }
@@ -2165,17 +2232,36 @@ public sealed class SoMeScheduleService
             // store every post is a miss, and 78 × up-to-15s is far past the function's execution
             // window. Bounded, the backlog simply fills in over successive ticks — a few posts a
             // run, every 5 minutes — and no single run can ever be the one that dies.
-            else if (_intro is { IsConfigured: true } && _introBudget > 0)
+            // 🔒 §1370 — not for a sponsor that has not delivered its text yet. Unready sponsors are
+            // planned now, and a teaser written from nothing would be reused (§911) after the text
+            // arrives. Left empty, it is written on the first run that has the description.
+            else if (_intro is { IsConfigured: true } && _introBudget > 0
+                     && !(p.Kind == SoMeTemplateKind.Sponsor
+                          && string.IsNullOrWhiteSpace(IntroDetail(p.Kind, values))))
             {
                 _introBudget--;
                 intro = await _intro.GenerateAsync(
                     new SoMeIntroRequest(p.Kind, IntroTitle(p.Kind, id, values), IntroDetail(p.Kind, values)),
                     ct);
 
+                // 🔒 §1373 — a tier intro must name its companies through {SponsorNames}, never typed.
+                if (p.Kind == SoMeTemplateKind.SponsorCategory)
+                {
+                    intro = LiveTierIntroOrFallback(intro, await KnownCompanyNamesAsync(eventId, ct));
+                }
+
                 // Remembered immediately, so a second occurrence of the same subject in THIS run
                 // reuses it rather than spending a second call on the same words.
                 if (!string.IsNullOrWhiteSpace(intro)) _introReuse[reuseKey] = intro;
             }
+        }
+
+        // 🔒 §1373 — a tier post never carries a frozen-name (or name-less) intro, reused or not: the
+        // fixed sentence names the companies live when the AI is off, out of budget or broke the rule.
+        if (p.Kind == SoMeTemplateKind.SponsorCategory && bodyUsesTeaser
+            && !IsLiveTierIntro(intro, await KnownCompanyNamesAsync(eventId, ct)))
+        {
+            intro = TierIntroFallback;
         }
         // Kept in the dictionary because IntroTitle/IntroDetail above read from it, and because the
         // rendering below is what a caller wanting a PREVIEW would use. It is not what is stored.
@@ -2223,6 +2309,146 @@ public sealed class SoMeScheduleService
         foreach (var (k, v) in from) into[k] = v;
     }
 
+    /// <summary>
+    /// 🔴 §1373 — REWRITE EVERY UNPUBLISHED TIER INTRO THAT DOES NOT NAME ITS COMPANIES LIVE.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-10-28: <i>"this shows the billing name which is wrong. some post must always
+    /// show the public name, fix this for any existing posts planned and scheduled and future"</i> ·
+    /// <i>"i did not say to remove the names, i said to use the public company names"</i>. The
+    /// Diamond intro read "GLOBETEAM A/S, Nerdio, and twoday Danmark A/S" — written once from the
+    /// tier list as it stood when planned, then stored (§901) and reused (§911) for ever, while the
+    /// {SponsorList} under it had moved on to the public names and a different line-up.</para>
+    /// <para>🔑 A live intro carries <c>{SponsorNames}</c> and no typed company name; the composer
+    /// resolves the token to the current public names. Anything else is rewritten — the AI where it
+    /// can, else <see cref="TierIntroFallback"/>.</para>
+    /// <para>🔒 Runs on approved and scheduled posts too: the intro is machine text, never his edit
+    /// (an edit lives in ManualTextOverride). Approval and date are not touched.</para>
+    /// </remarks>
+    private async Task RepairTierIntrosAsync(int eventId, CancellationToken ct)
+    {
+        var posts = await _db.SoMePosts
+            .Where(p => p.EventId == eventId
+                        && p.TemplateKind == SoMeTemplateKind.SponsorCategory
+                        && p.Status != SoMePostStatus.Published
+                        && !p.IsDeleted)
+            .ToListAsync(ct);
+        if (posts.Count == 0) return;
+
+        var names = await KnownCompanyNamesAsync(eventId, ct);
+        var stale = posts
+            .Where(p => (p.EffectiveText ?? string.Empty).Contains("{IntroText}", StringComparison.OrdinalIgnoreCase)
+                        && !IsLiveTierIntro(p.IntroText, names))
+            .ToList();
+        if (stale.Count == 0) return;
+
+        var now = _clock.GetUtcNow();
+        foreach (var post in stale)
+        {
+            string? intro = null;
+            var key = post.SubjectKey ?? string.Empty;
+            var tier = key.Contains(':') ? key[(key.IndexOf(':') + 1)..] : key;
+
+            if (_intro is { IsConfigured: true } && _introBudget > 0 && tier.Length > 0)
+            {
+                _introBudget--;
+                intro = await _intro.GenerateAsync(
+                    new SoMeIntroRequest(SoMeTemplateKind.SponsorCategory, tier, null), ct);
+            }
+            intro = LiveTierIntroOrFallback(intro, names);
+
+            _log?.LogInformation(
+                "§1373: SoMe post {PostId} ({Subject}) — tier intro rewritten to name its sponsors live.",
+                post.Id, post.SubjectKey);
+
+            post.IntroText = intro;
+            post.UpdatedAt = now;
+
+            if (post.SubjectKey is not null && post.Occurrence is { } occ)
+            {
+                _introReuse[(post.SubjectKey, occ)] = intro;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// §1373 — the tier intro used when the AI is off, out of budget, or typed a name: the companies
+    /// still named, live, by their public names.
+    /// </summary>
+    internal const string TierIntroFallback =
+        "A huge thank-you to our {SponsorTier} sponsors " + SoMeIntroGenerator.SponsorNamesToken + "!";
+
+    /// <summary>§1373 — names its companies only through <c>{SponsorNames}</c>, exactly once.</summary>
+    internal static bool IsLiveTierIntro(string? intro, IReadOnlyList<string> names)
+    {
+        if (string.IsNullOrWhiteSpace(intro)) return false;
+        var token = SoMeIntroGenerator.SponsorNamesToken;
+        var first = intro.IndexOf(token, StringComparison.Ordinal);
+        if (first < 0 || intro.IndexOf(token, first + token.Length, StringComparison.Ordinal) >= 0) return false;
+        return !NamesACompany(intro.Replace(token, " "), names);
+    }
+
+    internal static string LiveTierIntroOrFallback(string? intro, IReadOnlyList<string> names) =>
+        IsLiveTierIntro(intro, names) ? intro! : TierIntroFallback;
+
+    /// <summary>
+    /// §1373 — every name a sponsor company goes by in this edition: the announcement name, the
+    /// shop's public and LEGAL name (the billing name that leaked), withdrawn companies included.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> KnownCompanyNamesAsync(int eventId, CancellationToken ct)
+    {
+        if (_companyNames is not null) return _companyNames;
+
+        var sponsorNames = await _db.SponsorInfos.IgnoreQueryFilters()
+            .Where(s => s.EventId == eventId && s.CompanyName != null)
+            .Select(s => s.CompanyName!)
+            .ToListAsync(ct);
+        var shop = await _db.ShopCompanies
+            .Where(c => c.EventId == eventId)
+            .Select(c => new { c.LegalName, c.PublicName })
+            .ToListAsync(ct);
+
+        return _companyNames = sponsorNames
+            .Concat(shop.Select(c => c.LegalName))
+            .Concat(shop.Select(c => c.PublicName ?? string.Empty))
+            .Select(CoreCompanyName)
+            .Where(n => n.Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static readonly string[] LegalSuffixes =
+        ["A/S", "ApS", "AS", "AB", "AG", "GmbH", "Ltd", "Ltd.", "Inc", "Inc.", "Oy", "BV", "B.V.", "Nordics", "Danmark", "Denmark"];
+
+    /// <summary>"twoday Danmark A/S" → "twoday": the part of a name that survives a rename.</summary>
+    internal static string CoreCompanyName(string? name)
+    {
+        var words = (name ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (words.Count > 1 && LegalSuffixes.Contains(words[^1].TrimEnd(','), StringComparer.OrdinalIgnoreCase))
+        {
+            words.RemoveAt(words.Count - 1);
+        }
+        return string.Join(' ', words);
+    }
+
+    /// <summary>§1373 — true when the text mentions any of the names as a whole word.</summary>
+    internal static bool NamesACompany(string? text, IReadOnlyList<string> names)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        foreach (var name in names)
+        {
+            var rx = $@"(?<![\p{{L}}\p{{N}}]){System.Text.RegularExpressions.Regex.Escape(name)}(?![\p{{L}}\p{{N}}])";
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                    text, rx, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>What the intro is ABOUT — the already-resolved value, not the raw subject key.</summary>
     /// <remarks>
     /// Falls back to the key only if resolution found nothing, so the model is never handed
@@ -2254,7 +2480,9 @@ public sealed class SoMeScheduleService
         kind switch
         {
             SoMeTemplateKind.Sponsor => values.GetValueOrDefault("SponsorSocialMediaCompanyDescription"),
-            SoMeTemplateKind.SponsorCategory => values.GetValueOrDefault("SponsorList"),
+            // 🔴 §1373 — NOT the company list. Handing the model the names is what put "GLOBETEAM A/S,
+            // Nerdio, and twoday Danmark A/S" into a stored intro; it writes {SponsorNames} instead.
+            SoMeTemplateKind.SponsorCategory => null,
             SoMeTemplateKind.SpeakerTracks => values.GetValueOrDefault("SpeakerNames"),
             // His words: the intro is generated "based on session title and session abstract".
             SoMeTemplateKind.Session => values.GetValueOrDefault("SessionAbstract"),

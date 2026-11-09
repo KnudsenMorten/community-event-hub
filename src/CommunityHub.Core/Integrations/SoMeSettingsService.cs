@@ -98,7 +98,14 @@ public sealed class SoMeSettingsService
         DateOnly? speakerTracksRound3From = null,
         // §1186 — the floor for non-master-class sessions.
         DateOnly? sessionAnnouncementFrom = null,
-        bool updateAnnouncementWindows = false)
+        bool updateAnnouncementWindows = false,
+        // §1368 — posts per day, the busy-day ceiling and the sponsor-per-day limit, finally editable
+        // (operator 2026-10-26: "maxpostsperday set to 3" — and no page could set it). Behind an
+        // ownership flag because a blank sponsor limit is a real value: it means "no limit".
+        int? maxPostsPerDay = null,
+        int? exceptionPostsPerDay = null,
+        int? maxSponsorPostsPerDay = null,
+        bool updatePlanningLimits = false)
     {
         var now = _clock.GetUtcNow();
         var row = await GetAsync(eventId, ct);
@@ -155,6 +162,17 @@ public sealed class SoMeSettingsService
         // the §889.1 burst the guard exists to prevent. Refused here as well as in the service, so
         // the stored value can never express it.
         if (autoApproveLeadDays is { } lead) row.AutoApproveLeadDays = Math.Max(1, lead);
+
+        if (updatePlanningLimits)
+        {
+            // 🔒 Clamped to the preferred times (4): a further post would share a minute with another
+            // or break the 08:00–16:00 rule. The busy-day ceiling is never below the everyday number.
+            var slots = SoMeSchedulePlanner.PreferredTimes.Length;
+            if (maxPostsPerDay is { } perDay) row.MaxPostsPerDay = Math.Clamp(perDay, 1, slots);
+            if (exceptionPostsPerDay is { } busy) row.ExceptionPostsPerDay = Math.Clamp(busy, 1, slots);
+            if (row.ExceptionPostsPerDay < row.MaxPostsPerDay) row.ExceptionPostsPerDay = row.MaxPostsPerDay;
+            row.MaxSponsorPostsPerDay = maxSponsorPostsPerDay is > 0 and var sp ? Math.Min(sp, slots) : null;
+        }
 
         row.UpdatedAt = now;
         row.LastUpdatedByEmail = Trim(byEmail);

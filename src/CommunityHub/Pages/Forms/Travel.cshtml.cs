@@ -92,6 +92,9 @@ public class TravelModel : PageModel
     [BindProperty] public string? Explanation { get; set; }
     /// <summary>Step 1: the receipt/invoice file the speaker is uploading.</summary>
     [BindProperty] public IFormFile? ReceiptFile { get; set; }
+    // §1387 — the document type of the file being uploaded, and the registered-company answer.
+    [BindProperty] public CommunityHub.Core.Domain.TravelDocumentKind ReceiptKind { get; set; }
+    [BindProperty] public bool? HasCompany { get; set; }
 
     /// <summary>The shared render model the <c>_TravelFields</c> partial binds to.</summary>
     public TravelFormModel Form { get; private set; } = new();
@@ -160,6 +163,8 @@ public class TravelModel : PageModel
             OtherAmountEur = OtherAmountEur,
             Explanation = Explanation,
             ReceiptFile = ReceiptFile,
+            ReceiptKind = ReceiptKind,
+            HasCompany = HasCompany,
         };
 
         // Step-1 sub-actions are posted as __action=uploadReceipt / deleteReceipt:{id}. Guard the
@@ -195,6 +200,7 @@ public class TravelModel : PageModel
         AmountChoice = Form.AmountChoice;
         OtherAmountEur = Form.OtherAmountEur;
         Explanation = Form.Explanation;
+        HasCompany = Form.HasCompany;
     }
 
     /// <summary>The delete sub-action carries the row id as <c>deleteReceipt:{id}</c>.</summary>

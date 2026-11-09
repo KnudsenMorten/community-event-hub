@@ -26,6 +26,10 @@ public class HotelsModel : PageModel
     private readonly HotelCalendarInviter _inviter;
     private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly CommunityHub.Core.Settings.RingResolver _rings;
+    private readonly HotelOverviewService? _overview;
+
+    /// <summary>§1386 — per-hotel summary for the list (priority, room-nights, guests).</summary>
+    public Dictionary<int, HotelSummaryLine> Summary { get; private set; } = new();
     private readonly ILogger<HotelsModel> _logger;
 
     public HotelsModel(
@@ -36,7 +40,9 @@ public class HotelsModel : PageModel
         HotelCalendarInviter inviter,
         CommunityHub.Core.Settings.FeatureGateService gate,
         CommunityHub.Core.Settings.RingResolver rings,
-        ILogger<HotelsModel> logger)
+        ILogger<HotelsModel> logger,
+        // §1386 — the per-hotel room summary for the list. Optional so existing constructions/tests are unchanged.
+        HotelOverviewService? overview = null)
     {
         _participant = participant;
         _hotels = hotels;
@@ -45,6 +51,7 @@ public class HotelsModel : PageModel
         _inviter = inviter;
         _gate = gate;
         _rings = rings;
+        _overview = overview;
         _logger = logger;
     }
 
@@ -73,6 +80,13 @@ public class HotelsModel : PageModel
     /// </summary>
     [BindProperty] public string? ConfirmationNumber { get; set; }
 
+    // §1386 — contract details.
+    [BindProperty] public int Priority { get; set; } = 1;
+    [BindProperty] public string? AgreementNumber { get; set; }
+    [BindProperty] public string? AgreementLabel { get; set; }
+    [BindProperty] public string? BookingReference { get; set; }
+    [BindProperty] public string? NotifyEmails { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -93,6 +107,11 @@ public class HotelsModel : PageModel
                 Notes = hotel.Notes;
                 RoomBlockSize = hotel.RoomBlockSize;
                 ConfirmationNumber = hotel.ConfirmationNumber;
+                Priority = hotel.Priority;
+                AgreementNumber = hotel.AgreementNumber;
+                AgreementLabel = hotel.AgreementLabel;
+                BookingReference = hotel.BookingReference;
+                NotifyEmails = hotel.NotifyEmails;
             }
             else
             {
@@ -127,6 +146,9 @@ public class HotelsModel : PageModel
                     me.EventId, id, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize,
                     ConfirmationNumber, ct);
                 Message = ok ? "Hotel updated." : "Hotel not found.";
+                if (ok)
+                    await _hotels.SetContractDetailsAsync(me.EventId, id, Priority, AgreementNumber, AgreementLabel,
+                        BookingReference, NotifyEmails, me.Email, ct);
 
                 // Reservation just became / re-confirmed → re-send the CONFIRMED
                 // calendar invite to everyone placed in this hotel who needs a room.
@@ -146,9 +168,11 @@ public class HotelsModel : PageModel
             }
             else
             {
-                await _hotels.CreateHotelAsync(
+                var createdHotel = await _hotels.CreateHotelAsync(
                     me.EventId, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize,
                     ConfirmationNumber, ct);
+                await _hotels.SetContractDetailsAsync(me.EventId, createdHotel.Id, Priority, AgreementNumber, AgreementLabel,
+                    BookingReference, NotifyEmails, me.Email, ct);
                 Message = "Hotel added.";
                 if (!string.IsNullOrWhiteSpace(ConfirmationNumber))
                 {
@@ -327,6 +351,9 @@ public class HotelsModel : PageModel
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Hotels = await _hotels.ListHotelsAsync(eventId, ct);
+        // §1386 — the list shows priority + rooms per night instead of the single block number.
+        if (_overview is not null)
+            Summary = (await _overview.BuildAsync(eventId, includeNotAnswered: false, ct)).Hotels.ToDictionary(h => h.HotelId);
     }
 
     /// <summary>

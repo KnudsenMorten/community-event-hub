@@ -77,4 +77,74 @@ else
             }
         </div>
     }
+
+    @* §1379.8 — linked WordPress posts that CEH re-renders from live data and updates in place. *@
+    <div class="card wp-refresh" id="refresh-weekly" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Linked posts — Refresh weekly</h2>
+        <p class="muted">Link an existing WordPress post by its id, write its body with tokens, and tick <strong>Refresh weekly</strong>:
+            once a week CEH re-renders the body from live hub data and updates that post <strong>in place</strong> (same URL), even when it is published.
+            Only ticked posts are ever updated; everything else stays draft-only.</p>
+        <details style="margin-bottom:12px;">
+            <summary>Tokens you can use</summary>
+            <p style="word-break:break-word;">@foreach (var t in Model.SupportedTokens) { <code style="margin-right:6px;">{{@t}}</code> }</p>
+            <p class="muted">Counts are computed at render time (never typed). <code>{{SpeakerCountRounded}}</code> shows e.g. "90+".
+                <code>{{SpeakersByTrack}}</code>, <code>{{SponsorList}}</code> and <code>{{ExhibitorList}}</code> insert HTML lists. An unknown token is left as typed and listed in the preview.</p>
+        </details>
+
+        @if (Model.LinkMessage is not null)
+        {
+            <p class="@(Model.LinkMessageIsError ? "error" : "success")" role="status">@Model.LinkMessage</p>
+        }
+
+        @foreach (var post in Model.LinkedPosts)
+        {
+            var open = Model.PreviewLinkId == post.Id;
+            <details class="wp-refresh-row" style="border-top:1px solid #e6eaf2;padding:10px 0;" open="@open">
+                <summary style="cursor:pointer;">
+                    <strong>@post.Label</strong> <span class="muted">(post @post.WordPressPostId)</span>
+                    @if (post.RefreshWeekly) { <span class="badge">Refresh weekly</span> }
+                    <br /><span class="muted" style="font-size:0.9em;">@(post.LastRefreshResult ?? "Not refreshed yet.")</span>
+                </summary>
+                <form method="post" style="margin-top:10px;">
+                    <input type="hidden" name="LinkId" value="@post.Id" />
+                    <label>WordPress post id<br /><input type="number" name="LinkPostId" value="@post.WordPressPostId" min="1" required style="max-width:100%;" /></label><br />
+                    <label>Label<br /><input type="text" name="LinkLabel" value="@post.Label" maxlength="300" style="width:100%;" /></label><br />
+                    <label>Body template (HTML with tokens)<br />
+                        <textarea name="LinkTemplate" rows="10" style="width:100%;font-family:monospace;">@(open && Model.LinkTemplate is not null ? Model.LinkTemplate : post.BodyTemplate)</textarea></label><br />
+                    <label><input type="checkbox" name="LinkRefreshWeekly" value="true" checked="@post.RefreshWeekly" /> Refresh weekly (updates the live post in place)</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                        <button type="submit" asp-page-handler="SaveLink" class="btn-primary">Save</button>
+                        <button type="submit" asp-page-handler="PreviewLink">Preview render</button>
+                        <button type="submit" asp-page-handler="RefreshNow" disabled="@(!post.RefreshWeekly)"
+                                onclick="return confirm('Update WordPress post @post.WordPressPostId now with the SAVED template?');">Refresh now</button>
+                        <button type="submit" asp-page-handler="Unlink" formnovalidate
+                                onclick="return confirm('Unlink this post? The WordPress post itself is not changed.');">Unlink</button>
+                    </div>
+                </form>
+                @if (open && Model.LinkPreview is not null)
+                {
+                    <partial name="_WordPressRenderPreview" model="Model.LinkPreview" />
+                }
+            </details>
+        }
+
+        <details style="border-top:1px solid #e6eaf2;padding:10px 0;" open="@(Model.PreviewLinkId == 0)">
+            <summary style="cursor:pointer;"><strong>+ Link a WordPress post</strong></summary>
+            <form method="post" style="margin-top:10px;">
+                <label>WordPress post id<br /><input type="number" name="LinkPostId" value="@(Model.PreviewLinkId == 0 && Model.LinkPostId > 0 ? (long?)Model.LinkPostId : null)" min="1" style="max-width:100%;" /></label><br />
+                <label>Label<br /><input type="text" name="LinkLabel" value="@(Model.PreviewLinkId == 0 ? Model.LinkLabel : null)" maxlength="300" style="width:100%;" /></label><br />
+                <label>Body template (HTML with tokens)<br />
+                    <textarea name="LinkTemplate" rows="10" style="width:100%;font-family:monospace;">@(Model.PreviewLinkId == 0 ? Model.LinkTemplate : null)</textarea></label><br />
+                <label><input type="checkbox" name="LinkRefreshWeekly" value="true" /> Refresh weekly (updates the live post in place)</label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                    <button type="submit" asp-page-handler="SaveLink" class="btn-primary">Link post</button>
+                    <button type="submit" asp-page-handler="PreviewLink">Preview render</button>
+                </div>
+            </form>
+            @if (Model.PreviewLinkId == 0 && Model.LinkPreview is not null)
+            {
+                <partial name="_WordPressRenderPreview" model="Model.LinkPreview" />
+            }
+        </details>
+    </div>
 }

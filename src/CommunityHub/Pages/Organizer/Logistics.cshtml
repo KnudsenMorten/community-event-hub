@@ -33,7 +33,9 @@
         // Each now says what its own page does.
         new("/Organizer/Hotels", Localizer["Nav.OrgHotels"].Value, Localizer["OrgLogistics.Hotels"].Value),
         new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.HotelAssignments"].Value, "hotel-assignment"),
-        new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.RoomBlocks"].Value),
+        // §1386 — the per-night overview (allocated / reserved / confirmed / forecast / result), the hotel
+        // spreadsheet + import, and the change log; and the per-hotel allocation + deadline editor.
+        new("/Organizer/HotelOverview", "Hotel overview", "Per night: rooms allocated against reserved, confirmed and forecast, with gaps and surplus coloured — click a night for who sleeps there. Edit each hotel's rooms per night and deadlines, see who has not answered or said no, download the hotel spreadsheet, import the confirmation numbers the hotel sends back, and read the hotel change log."),
         // §1296 — the included hotel nights per rule. ALSO linked from Settings (where he asked for
         // it), but this is the hub somebody is already on when they think about hotel nights, and
         // it is where he went looking for it.
@@ -46,6 +48,7 @@
         new("/Organizer/Schedule", Localizer["Nav.OrgSchedule"].Value, "The event schedule (move-in, setup, pre-day, party, dinner, main day, …) — role-tagged, shown on each participant's Key dates panel and synced to their calendar."),
         new("/Organizer/SessionEvalsQr", "Session-evaluation QR codes", "Upload / replace the per-room QR codes attendees scan to rate sessions. Speakers download their session's room QR from their Session Evaluation page."),
         new("/Organizer/PartyRsvps", "Party RSVPs & headcount", "Anonymous Party sign-ups from the public /Party form — the attending headcount for the Bella Center food order, plus a CSV export."),
+        new("/Organizer/VisaApplications", "Visa applications", "Speakers and volunteers who need a visa to Denmark: who has filled in the visa form, each application in full, the application ID they need, and Excel / PDF exports."),
         new("/Organizer/Exports", Localizer["Nav.OrgExports"].Value, Localizer["OrgArea.Exports"].Value),
         new("/Organizer/DataFreshness", Localizer["Fresh.Title"].Value, Localizer["Fresh.Intro"].Value),
         new("/Organizer/SyncHealth", Localizer["Sh.Title"].Value, Localizer["Sh.Intro"].Value),

@@ -5,6 +5,7 @@ using CommunityHub.Core.Email;
 using CommunityHub.Core.Entitlements;
 using CommunityHub.Core.Integrations.Erp;
 using CommunityHub.Core.Resources;
+using CommunityHub.Core.Travel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -25,10 +26,12 @@ public sealed class TravelFormModel
     public const decimal Cap300 = 300m;
     public const decimal Cap400 = 400m;
     public const decimal Cap800 = 800m;   // intercontinental single-speaker tier
+    public const decimal Cap600 = 600m;   // §1387 — intercontinental co-speaking tier (the policy text promised it; the list lacked it)
 
     public const string Choice300   = "300";
     public const string Choice400   = "400";
     public const string Choice800   = "800";
+    public const string Choice600   = "600";
     public const string ChoiceOther = "other";
     public const string ChoiceNone  = "";   // "I'm not claiming reimbursement"
 
@@ -43,6 +46,12 @@ public sealed class TravelFormModel
 
     /// <summary>Step 1: the receipt/invoice file the speaker is uploading (the upload sub-action).</summary>
     public IFormFile? ReceiptFile { get; set; }
+
+    /// <summary>§1387 — what the file being uploaded is (ticket/receipt, invoice, declaration, other).</summary>
+    public TravelDocumentKind ReceiptKind { get; set; } = TravelDocumentKind.Unknown;
+
+    /// <summary>§1387 — "do you invoice through a registered company?" Decides invoice vs personal declaration.</summary>
+    public bool? HasCompany { get; set; }
 
     // ----- display-only (set by the service; never bound) -----------------
     [BindNever] public string FullName { get; set; } = string.Empty;
@@ -61,7 +70,13 @@ public sealed class TravelFormModel
     /// <summary>Step-1 gate: true once at least one receipt has been uploaded.</summary>
     [BindNever] public bool HasReceipt => Receipts.Count > 0;
 
-    public record ReceiptView(int Id, string FileName, long SizeBytes, DateTimeOffset UploadedAt);
+    // §1387 — the organizer review, shown to the speaker.
+    [BindNever] public TravelReviewState ReviewState { get; set; }
+    [BindNever] public string? ReviewNote { get; set; }
+    [BindNever] public IReadOnlyList<TravelCheckItem> MissingItems { get; set; } = Array.Empty<TravelCheckItem>();
+
+    public record ReceiptView(int Id, string FileName, long SizeBytes, DateTimeOffset UploadedAt,
+        TravelDocumentKind Kind = TravelDocumentKind.Unknown);
 }
 
 /// <summary>
@@ -83,10 +98,10 @@ public sealed class TravelFormService : IWizardFormService
     /// REQUIREMENTS §48 — the ERP/bookkeeping inbox that must receive a copy of the
     /// reimbursement request with the receipt/invoice file(s) attached when a speaker
     /// submits Step 2. This is an e-conomic mailbox, NOT an imported participant, so the
-    /// send MUST be ring-exempt (see <see cref="SendErpCopyAsync"/>) or the transport ring
+    /// send MUST be ring-exempt (see <see cref="TravelErpMailer"/>) or the transport ring
     /// gate drops it as an unknown recipient.
     /// </summary>
-    public const string ErpInbox = "773bilag1685551@e-conomic.dk";
+    public const string ErpInbox = TravelErpMailer.ErpInbox;
 
     /// <summary>Accepted receipt/invoice upload types (matches the form copy: PDF / JPG / PNG).</summary>
     private static readonly string[] AllowedExt = { ".pdf", ".jpg", ".jpeg", ".png" };
@@ -100,6 +115,7 @@ public sealed class TravelFormService : IWizardFormService
     // §6.10 / §768.10 D5 — the ONE authority on whether a claim may still be changed.
     private readonly CommunityHub.Core.Entitlements.TravelClaimLock? _lock;
     private readonly ILogger<TravelFormService> _logger;
+    private readonly TravelReviewService? _review;   // §1387
 
     public TravelFormService(
         CommunityHubDbContext db,
@@ -110,7 +126,9 @@ public sealed class TravelFormService : IWizardFormService
         IEmailContextAccessor? emailContext = null,
         // §6.10 — the claim freeze. Optional so existing constructions/tests are unchanged; when it
         // is absent the form behaves exactly as it did before locking existed.
-        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null)
+        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null,
+        // §1387 — the organizer review. Optional: without it the form keeps the §48 send-on-submit.
+        TravelReviewService? review = null)
     {
         _db = db;
         _clock = clock;
@@ -119,6 +137,7 @@ public sealed class TravelFormService : IWizardFormService
         _logger = logger;
         _emailContext = emailContext;
         _lock = claimLock;
+        _review = review;
     }
 
     /// <summary>
@@ -240,6 +259,7 @@ public sealed class TravelFormService : IWizardFormService
             Content = bytes,
             SizeBytes = bytes.LongLength,
             UploadedAt = _clock.GetUtcNow(),
+            Kind = model.ReceiptKind,   // §1387
         });
         await _db.SaveChangesAsync(ct);
 
@@ -333,6 +353,13 @@ public sealed class TravelFormService : IWizardFormService
             }
         }
 
+        // §1387 — which second document is required depends on this, so it is asked when claiming.
+        if (_review is not null && model.RequestReimbursement && model.HasCompany is null)
+        {
+            modelState.AddModelError(nameof(model.HasCompany),
+                "Tell us whether you invoice through a registered company (it decides whether we need an invoice or a personal declaration).");
+        }
+
         if (!modelState.IsValid)
         {
             // Re-render with the field errors; do not touch the database.
@@ -360,6 +387,7 @@ public sealed class TravelFormService : IWizardFormService
 
         row.RequestReimbursement = model.RequestReimbursement;
         row.OriginCity = string.IsNullOrWhiteSpace(model.OriginCity) ? null : model.OriginCity.Trim();
+        row.HasCompany = model.RequestReimbursement ? model.HasCompany : null;   // §1387
 
         if (model.RequestReimbursement)
         {
@@ -390,27 +418,29 @@ public sealed class TravelFormService : IWizardFormService
             if (_lock is not null) await _lock.MarkSubmittedAsync(eventId, participantId, ct);
         }
 
-        // ---- ERP-INBOX COPY (REQUIREMENTS §48). On a real reimbursement request, also email
-        // the bookkeeping inbox with the receipt file(s) + claim details attached. Sent
-        // RING-EXEMPT because the ERP mailbox is not a ring-gated participant. A mail failure
-        // must not fail the user's save.
+        // ---- §1387 — the claim now goes to the ORGANIZER REVIEW, not straight to the ERP inbox.
+        // The ERP mail (§48) is sent when an organizer presses Accept (TravelReviewService). Without
+        // the review service (older constructions/tests) the §48 behaviour is kept: send on submit.
         if (model.RequestReimbursement)
         {
             try
             {
-                await SendErpCopyAsync(eventId, participantId, fullName, email, row, ct);
+                if (_review is not null) await _review.OnSubmittedAsync(eventId, participantId, ct);
+                else await new TravelErpMailer(_db, _email, _emailContext).SendAsync(eventId, participantId, fullName, email, row, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
-                    "Travel reimbursement ERP-inbox email failed for participant {Pid}", participantId);
+                _logger.LogWarning(ex, "Travel reimbursement hand-off failed for participant {Pid}", participantId);
             }
         }
 
         model.LastSavedAt = row.UpdatedAt;
         model.Message = model.RequestReimbursement
-            ? "Your travel reimbursement request has been saved and forwarded to our bookkeeping inbox " +
-              "with your receipt(s) attached. A 'Submit flight ticket + invoice' task has been added to your hub."
+            ? (_review is not null
+                ? "Your travel reimbursement request has been submitted. The organizers check your documents "
+                  + "before passing the claim on for payment; if anything is missing, you will get an e-mail and the claim opens again here."
+                : "Your travel reimbursement request has been saved and forwarded to our bookkeeping inbox " +
+                "with your receipt(s) attached. A 'Submit flight ticket + invoice' task has been added to your hub.")
             : "Saved. You are not claiming reimbursement; any submit-ticket+invoice task has been removed.";
         return WizardStepOutcome.Advance;
     }
@@ -430,6 +460,10 @@ public sealed class TravelFormService : IWizardFormService
             model.RequestReimbursement = existing.RequestReimbursement;
             model.OriginCity = existing.OriginCity;
             model.Explanation = existing.Explanation;
+            model.HasCompany = existing.HasCompany;   // §1387
+            model.ReviewState = existing.ReviewState;
+            model.ReviewNote = existing.ReviewNote;
+            model.MissingItems = TravelReviewService.Checks(existing).Where(c => c.IsOpenFailure).ToList();
             model.LastSavedAt = existing.UpdatedAt;
             (model.AmountChoice, model.OtherAmountEur) = DecomposeAmount(existing.ClaimAmountEur);
         }
@@ -446,7 +480,7 @@ public sealed class TravelFormService : IWizardFormService
         model.Receipts = await _db.TravelReceipts
             .Where(r => r.EventId == eventId && r.ParticipantId == participantId)
             .OrderBy(r => r.UploadedAt)
-            .Select(r => new TravelFormModel.ReceiptView(r.Id, r.FileName, r.SizeBytes, r.UploadedAt))
+            .Select(r => new TravelFormModel.ReceiptView(r.Id, r.FileName, r.SizeBytes, r.UploadedAt, r.Kind))
             .ToListAsync(ct);
     }
 
@@ -464,87 +498,8 @@ public sealed class TravelFormService : IWizardFormService
     /// <para>⚠️ Postfix, not prefix: the existing subject is what finance already recognises, and
     /// moving the recognisable part off the front would break every rule they have.</para>
     /// </remarks>
-    public static string ClaimSubject(string fullName, string momsZoneToken) =>
-        $"Travel Rebursement - {fullName} - ELDK27 [MOMSZONE={momsZoneToken}]";
-
-    // ----- ERP-inbox email (REQUIREMENTS §48) -----------------------------
-    private async Task SendErpCopyAsync(
-        int eventId, int participantId, string fullName, string email, TravelReimbursement row, CancellationToken ct)
-    {
-        var receipts = await _db.TravelReceipts
-            .Where(r => r.EventId == eventId && r.ParticipantId == participantId)
-            .OrderBy(r => r.UploadedAt)
-            .ToListAsync(ct);
-
-        var attachments = receipts
-            .Where(r => r.Content is { Length: > 0 })
-            .Select(r => new EmailAttachment(r.FileName, r.Content, r.ContentType))
-            .ToList();
-
-        // 🔴 §1166 — THE VAT ZONE TRAVELS WITH THE CLAIM.
-        //
-        // Operator 2026-09-02: *"I need the subject to include [MOMSZONE=UDLAND] or [MOMSZONE=EU]
-        // dependent of the country of the speaker … as postfix in the subject"* and the first three
-        // lines of the body to be name, e-mail and the zone.
-        //
-        // 🔑 It is in the SUBJECT because that is the part finance sees in a list without opening
-        // anything, and the zone decides how the expense is booked. The same mapper serves the ERP
-        // customer/invoice path, so a speaker and their sponsor cannot be zoned differently by two
-        // copies of the rule.
-        //
-        // ⚠️ An unknown country produces MOMSZONE=UNKNOWN rather than a guess. A guessed zone is a
-        // tax error that looks like data, and the two wrong answers are not symmetric: charging
-        // Danish VAT wrongly is a refund, omitting it wrongly is money the organiser owes.
-        var speakerCountry = await _db.SpeakerProfiles
-            .Where(s => s.EventId == eventId && s.ParticipantId == participantId)
-            .Select(s => s.Country)
-            .FirstOrDefaultAsync(ct);
-
-        var zoneToken = VatZoneMapper.TokenFor(speakerCountry);
-
-        var subject = ClaimSubject(fullName, zoneToken);
-
-        var amount = row.ClaimAmountEur?.ToString("0.##") ?? "(not specified)";
-        var enc = (string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
-        var body = new StringBuilder();
-        // §1166 — the three lines he asked for, FIRST, before any prose. Finance reads the top of
-        // the mail and files it; putting the identifying facts under an explanatory paragraph is how
-        // they end up being looked for instead of read.
-        body.Append($"<p style=\"font-size:14px;margin:0 0 10px;\">"
-            + $"{enc(fullName)}<br />"
-            + $"{enc(email)}<br />"
-            + $"MOMSZONE={enc(zoneToken)}"
-            + "</p>");
-
-        body.Append("<p>A travel reimbursement request has been submitted via the Experts Live DK Event Hub.</p>");
-        body.Append("<table style=\"border-collapse:collapse;font-size:14px;\">");
-        body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Name</strong></td><td>{enc(fullName)}</td></tr>");
-        body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Email</strong></td><td>{enc(email)}</td></tr>");
-        body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Origin city</strong></td><td>{enc(row.OriginCity)}</td></tr>");
-        body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Amount claimed (EUR)</strong></td><td>{enc(amount)}</td></tr>");
-        body.Append($"<tr><td style=\"padding:2px 12px 2px 0;\"><strong>Explanation</strong></td><td>{enc(row.Explanation)}</td></tr>");
-        body.Append("</table>");
-        body.Append($"<p style=\"font-size:14px;\">Attached file(s): {attachments.Count}</p>");
-
-        // RING-EXEMPT: the ERP mailbox is not a ring-gated participant, so without this the
-        // transport ring gate would drop it as an unknown recipient. The global kill switch +
-        // DEV redirect still apply.
-        using (_emailContext?.Set(new EmailContext(
-            "travel-reimbursement-erp", eventId, participantId, fullName, RingExempt: true)))
-        {
-            if (attachments.Count > 0)
-            {
-                await _email.SendWithAttachmentsAsync(ErpInbox, subject, body.ToString(), attachments, ct);
-            }
-            else
-            {
-                // Defensive: the Step-2 gate guarantees ≥1 receipt, so this branch should not
-                // normally run. Send the details without attachments rather than silently
-                // dropping the ERP notification.
-                await _email.SendAsync(ErpInbox, subject, body.ToString(), ct);
-            }
-        }
-    }
+    public static string ClaimSubject(string fullName, string momsZoneToken) =>   // §1387 — moved to Core
+        TravelErpMailer.ClaimSubject(fullName, momsZoneToken);
 
     // ----- amount compose/decompose ---------------------------------------
     private static (string?, decimal?) DecomposeAmount(decimal? amount)
@@ -553,6 +508,7 @@ public sealed class TravelFormService : IWizardFormService
         if (amount == TravelFormModel.Cap300) return (TravelFormModel.Choice300, null);
         if (amount == TravelFormModel.Cap400) return (TravelFormModel.Choice400, null);
         if (amount == TravelFormModel.Cap800) return (TravelFormModel.Choice800, null);
+        if (amount == TravelFormModel.Cap600) return (TravelFormModel.Choice600, null);   // §1387
         return (TravelFormModel.ChoiceOther, amount);
     }
 
@@ -561,6 +517,7 @@ public sealed class TravelFormService : IWizardFormService
         TravelFormModel.Choice300 => TravelFormModel.Cap300,
         TravelFormModel.Choice400 => TravelFormModel.Cap400,
         TravelFormModel.Choice800 => TravelFormModel.Cap800,
+        TravelFormModel.Choice600 => TravelFormModel.Cap600,   // §1387
         TravelFormModel.ChoiceOther => other is > 0 ? other : null,
         _ => null,
     };

@@ -50,14 +50,18 @@ public sealed class SponsorContactsFormService : IWizardFormService
     private readonly CommunityHubDbContext _db;
     private readonly EconomicContactAdminService _erp;
     private readonly ILogger<SponsorContactsFormService> _log;
+    private readonly SponsorContactRemovalService _removal;
 
     public SponsorContactsFormService(
         CommunityHubDbContext db, EconomicContactAdminService erp,
-        ILogger<SponsorContactsFormService> log)
+        ILogger<SponsorContactsFormService> log,
+        // §1369 — a removal is applied to CEH as well as to e-conomic.
+        SponsorContactRemovalService removal)
     {
         _db = db;
         _erp = erp;
         _log = log;
+        _removal = removal;
     }
 
     private Task<string?> CompanyIdAsync(int participantId, CancellationToken ct) =>
@@ -157,41 +161,64 @@ public sealed class SponsorContactsFormService : IWizardFormService
     /// with a reason rather than allowed and regretted. Removing a signer, or a coordinator while
     /// another remains, is unrestricted.</para>
     /// </remarks>
-    public async Task<string> RemoveContactAsync(
-        int participantId, int contactNumber, CancellationToken ct)
+    /// <summary>§1369 — what a removal did, for the page message and the audit row.</summary>
+    /// <param name="Removed">Set only when the contact was actually deleted in e-conomic.</param>
+    public sealed record ContactRemovalResult(
+        string Message, int ContactNumber, string? Name = null, string? Email = null,
+        SponsorContactRemoval? Removed = null);
+
+    public async Task<ContactRemovalResult> RemoveContactAsync(
+        int eventId, int participantId, string? actorEmail, int contactNumber, CancellationToken ct)
     {
+        ContactRemovalResult Refused(string message) => new(message, contactNumber);
+
         var companyId = await CompanyIdAsync(participantId, ct);
-        if (companyId is null) return "That contact could not be found for your company.";
+        if (companyId is null) return Refused("That contact could not be found for your company.");
 
         var erpNo = await ErpNumberAsync(companyId, ct);
         if (erpNo is null)
-            return "The contacts backend isn't reachable right now — nothing was removed.";
+            return Refused("The contacts backend isn't reachable right now — nothing was removed.");
 
         var current = await CurrentAsync(erpNo.Value, ct);
         var target = current.FirstOrDefault(c => c.ContactNumber == contactNumber);
-        if (target is null) return "That contact could not be found for your company.";
+        if (target is null) return Refused("That contact could not be found for your company.");
 
         if (target.IsEventCoordinator
             && current.Count(c => c.IsEventCoordinator) == 1)
         {
-            return $"{target.Name} is your only event coordinator, so they can't be removed — "
+            return new($"{target.Name} is your only event coordinator, so they can't be removed — "
                  + "every message we send about your booth goes to the coordinators. Add another "
-                 + "coordinator first, then remove this one.";
+                 + "coordinator first, then remove this one.", contactNumber, target.Name, target.Email);
         }
 
         try
         {
             await _erp.DeleteAsync(erpNo.Value, contactNumber, ct);
-            return $"{target.Name} was removed from your contacts.";
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
                 "Sponsor contacts step: delete failed for erp {Erp} contact {Contact}.",
                 erpNo, contactNumber);
-            return "Couldn't remove that contact in the backend right now — please try again, or "
-                 + "manage it on Company Details.";
+            return new("Couldn't remove that contact in the backend right now — please try again, or "
+                 + "manage it on Company Details.", contactNumber, target.Name, target.Email);
         }
+
+        // 🔴 §1369 — and in CEH, in the same action. Deleting only in e-conomic left the person active
+        // here with their roles, still mailed, and warned about by the next sync (SquaredUp, 2026-10-26).
+        var companyName = await SponsorCompanyNameService.LocalNameAsync(_db, companyId, ct);
+        var removed = await _removal.ApplyAsync(
+            eventId, companyId, contactNumber, target.Email, participantId, actorEmail, companyName, ct);
+
+        var message = removed.Outcome switch
+        {
+            SponsorContactRemovalOutcome.Deactivated =>
+                $"{target.Name} was removed from your contacts and will no longer receive messages from us.",
+            SponsorContactRemovalOutcome.RemovedYourself =>
+                "You were removed from your company's contacts. You can still sign in; ask a colleague to add you again if this was a mistake.",
+            _ => $"{target.Name} was removed from your contacts.",
+        };
+        return new(message, contactNumber, target.Name, target.Email, removed);
     }
 
     private static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();

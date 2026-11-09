@@ -318,7 +318,7 @@ else
                         }
                     </td>
                     <td data-label="Subject">@Model.SubjectLabels.GetValueOrDefault(p.Id)</td>
-                    <td data-label="Text" class="som-snippet">@CommunityHub.Pages.Organizer.SoMeQueueModel.Snippet(p)</td>
+                    <td data-label="Text" class="som-snippet">@Model.SnippetFor(p)</td>
                     <td data-label="" class="som-actions">
                         @* 🔒 §889.2 — the row opens the EXISTING editor. Next/Previous stays there:
                            the walk is good for reviewing a batch, it was only bad as the only way in. *@

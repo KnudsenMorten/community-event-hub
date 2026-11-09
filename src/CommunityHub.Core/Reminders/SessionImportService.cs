@@ -66,6 +66,12 @@ public sealed record SessionImportResult(
 /// </summary>
 public sealed class SessionImportService
 {
+    /// <summary>
+    /// 🔒 Operator 2026-11-07: "we must never remove ceh only speakers from a session. ceh wins" · "if a ceh speaker is
+    /// linked to session, never remove". The import ADDS the speakers Sessionize lists and never removes a link.
+    /// </summary>
+    public const bool NeverRemoveSpeakerLinks = true;
+
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
 
@@ -129,6 +135,13 @@ public sealed class SessionImportService
         var emailToParticipantId = await _db.Participants
             .Where(p => p.EventId == eventId)
             .ToDictionaryAsync(p => p.Email, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+
+        // The participants this import MANAGES: the ones on the Sessionize speaker roster. Only their links can be
+        // pruned; a CEH-only speaker's link is never touched (operator 2026-11-07: "ceh wins").
+        var sessionizeManagedParticipantIds = idToEmail.Values
+            .Where(e => emailToParticipantId.ContainsKey(e))
+            .Select(e => emailToParticipantId[e])
+            .ToHashSet();
 
         // Existing sessions for this edition, by Sessionize id, with their links.
         var existing = await _db.Sessions
@@ -381,6 +394,19 @@ public sealed class SessionImportService
             {
                 foreach (var link in currentLinks)
                 {
+                    // 🔴 OPERATOR RULE 2026-11-07: "we must never remove ceh only speakers from a session. ceh wins" ·
+                    // "if a ceh speaker is linked to session, never remove". The import only manages the speakers it
+                    // knows — those on the Sessionize roster (their e-mail is in idToEmail). A CEH-only speaker (created
+                    // in CEH, not in Sessionize) linked to an imported session is CEH's decision and is NEVER removed.
+                    // Before this, every run reset each imported session to exactly its Sessionize speakers and silently
+                    // unlinked CEH-only panelists (PROD: panel "Creating value with AI" lost four within minutes).
+                    if (!sessionizeManagedParticipantIds.Contains(link.ParticipantId)) continue;
+                    // 🔴 AND NOT A SESSIONIZE SPEAKER EITHER (PROD 2026-11-07 19:10: Mathias Mengesha Emiliussen, panel
+                    // moderator, linked in CEH to two panels Sessionize does not list him on — the import removed both).
+                    // Operator: "if a ceh speaker is linked to session, never remove" · "ceh wins". So the import is
+                    // ADD-ONLY for speaker links: it never removes one. Taking a speaker off a session is an organizer's
+                    // act in CEH. (Kept as an explicit gate so the rule is readable where removal used to happen.)
+                    if (NeverRemoveSpeakerLinks) continue;
                     if (!desiredParticipantIds.Contains(link.ParticipantId))
                     {
                         session.SessionSpeakers.Remove(link);

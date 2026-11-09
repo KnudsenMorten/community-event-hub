@@ -174,7 +174,8 @@ public sealed class WriteFromScratchIsFindableTests
         new FixedClock(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
     private static SoMeQueueModel NewModel(CommunityHubDbContext db, Participant org) =>
         new(new FakeAccessor(Session(org)), new SoMeQueueService(db, TimeProvider.System),
-            new SoMeSubjectLabeller(db), BeforeEverything, new SoMeReadiness(db))
+            new SoMeSubjectLabeller(db), BeforeEverything, new SoMeReadiness(db),
+            new SoMePostComposer(db, new SoMeVariableResolver(db)))
         {
             PageContext = new PageContext(),
         };

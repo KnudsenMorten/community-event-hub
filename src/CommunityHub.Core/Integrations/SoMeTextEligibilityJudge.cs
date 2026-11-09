@@ -114,7 +114,7 @@ public sealed class SoMeTextEligibilityJudge
 
             using var msg = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                Content = JsonContent.Create(payload, options: JsonOpts),
+                Content = OpenAiChatContent.Create(payload, _options, JsonOpts),
             };
             msg.Headers.TryAddWithoutValidation("api-key", _options.ApiKey);
 

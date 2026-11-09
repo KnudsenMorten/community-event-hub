@@ -272,9 +272,8 @@ public sealed class LogisticsRunServiceTests
         Assert.All(states, s => Assert.False(string.IsNullOrWhiteSpace(s.Headline)));
         Assert.All(states, s => Assert.False(string.IsNullOrWhiteSpace(s.WebUrl)));
 
-        // The rooming list counts GUESTS, and the one guest seeded is the one reported.
-        var hotel = states.Single(s => s.FileName.Contains("hotel", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal("1 guest", hotel.Headline);
+        // §1386 — the hotel rooming list is retired from this run; its spreadsheet lives on the hotel page.
+        Assert.DoesNotContain(states, s => s.FileName.Contains("hotel", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -374,24 +373,24 @@ public sealed class LogisticsRunServiceTests
         await SeedAsync(db);
         await AddHotelGuestAsync(db, "Hotel One", "Grace Hopper");
 
-        // Inside the 3-week window, so the hotel file is on the ON-CHANGE schedule.
+        // §1386 — the hotel rooming list is retired from this run, so any produced file serves: the
+        // property is that the BUTTON never mails and does not make the next run think the data changed.
         var clock = ClockDaysBefore(5);
         var (svc, mail, _, _) = NewService(db, clock);
 
         await svc.RunAsync(EventId);
         var sentAfterFirstRun = mail.Sent.Count;
 
-        var hotelFile = (await db.LogisticsFileStates
-            .FirstAsync(s => s.FileName.Contains("hotel"))).FileName;
+        var someFile = (await db.LogisticsFileStates.FirstAsync()).FileName;
 
-        var result = await svc.RegenerateOneAsync(EventId, hotelFile);
+        var result = await svc.RegenerateOneAsync(EventId, someFile);
         Assert.True(result.Ok);
         Assert.Equal(sentAfterFirstRun, mail.Sent.Count);      // the button itself sent nothing
 
         clock.Advance(TimeSpan.FromDays(1));
         await svc.RunAsync(EventId);
 
-        // ...and the next run does not mail the hotel a rooming list identical to the one it has.
+        // ...and the next run (inside the week, nothing changed) mails nothing new.
         Assert.Equal(sentAfterFirstRun, mail.Sent.Count);
     }
 
@@ -481,52 +480,21 @@ public sealed class LogisticsRunServiceTests
     }
 
     /// <summary>
-    /// 🔒 A hotel hears from us only when its OWN list moved. A weekly identical rooming list is how
-    /// a venue learns to ignore CEH.
+    /// §1386 (operator 2026-11-08: "Retire it") — the old SharePoint rooming list is no longer produced or
+    /// mailed by the logistics run: the hotel spreadsheet (.xls) and its change mail are HotelOpsJob's now.
     /// </summary>
     [Fact]
-    public async Task A_hotel_is_mailed_when_its_list_CHANGES_and_not_again_when_it_does_not()
+    public async Task The_old_hotel_rooming_list_is_no_longer_produced_or_mailed()
     {
         var name = $"run-{Guid.NewGuid():N}";
         using var db = NewDb(name);
         await SeedAsync(db);
         await AddHotelGuestAsync(db, "Scandic Copenhagen", "Ada Lovelace");
 
-        var clock = ClockDaysBefore(5);      // inside the 3-week window
-        var (svc, mail, _, _) = NewService(db, clock);
-
-        await svc.RunAsync(EventId);
-        var afterFirst = mail.Sent.Count(m => m.Files.Any(f => f.FileName.Contains("hotel")));
-        Assert.Equal(1, afterFirst);
-
-        clock.Advance(TimeSpan.FromDays(1));
-        await svc.RunAsync(EventId);
-        Assert.Equal(afterFirst, mail.Sent.Count(m => m.Files.Any(f => f.FileName.Contains("hotel"))));
-
-        // A new guest arrives ⇒ that hotel's list moved ⇒ exactly one more mail.
-        await AddHotelGuestAsync(db, "Scandic Copenhagen", "Grace Hopper");
-        clock.Advance(TimeSpan.FromDays(1));
-        await svc.RunAsync(EventId);
-        Assert.Equal(afterFirst + 1, mail.Sent.Count(m => m.Files.Any(f => f.FileName.Contains("hotel"))));
-    }
-
-    /// <summary>
-    /// 🔒 §6.4: the hotel mail starts three weeks out. Before that a rooming list is still churning,
-    /// and a hotel does not want a mail every time a speaker is placed.
-    /// </summary>
-    [Fact]
-    public async Task A_hotel_is_NOT_mailed_before_the_three_week_window_opens()
-    {
-        var name = $"run-{Guid.NewGuid():N}";
-        using var db = NewDb(name);
-        await SeedAsync(db);
-        await AddHotelGuestAsync(db, "Scandic Copenhagen", "Ada Lovelace");
-
-        var (svc, mail, _, _) = NewService(db, ClockDaysBefore(40));   // outside the window
-
+        var (svc, mail, _, _) = NewService(db, ClockDaysBefore(5));   // inside the old 3-week window
         await svc.RunAsync(EventId);
 
-        Assert.DoesNotContain(mail.Sent, m => m.Files.Any(f => f.FileName.Contains("hotel")));
+        Assert.DoesNotContain(mail.Sent, m => m.Files.Any(f => f.FileName.Contains("hotel", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]

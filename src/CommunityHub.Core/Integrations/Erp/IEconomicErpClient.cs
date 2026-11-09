@@ -22,7 +22,12 @@ public sealed record ErpCustomer(
     string? City = null,
     string? Country = null,
     string? Phone = null,
-    string? Website = null);
+    string? Website = null,
+    // §1382 — the e-conomic customer GROUP for this create. Null ⇒ the configured default (EconomicErp:CustomerGroupNumber,
+    // 1 = sponsors). The public coupon sign-up creates its customers in group 2 (operator 2026-11-07: "kundegruppe = 2").
+    int? CustomerGroupNumber = null,
+    // §1382 — the EAN (13 digits) a Danish public-sector customer is e-invoiced on. Create only, like the address.
+    string? Ean = null);
 
 /// <summary>One ERP contact (person) to attach to an ERP customer, with a role.</summary>
 public sealed record ErpContact(

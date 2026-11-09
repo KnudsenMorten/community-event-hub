@@ -91,7 +91,7 @@ public sealed class SpeakerZohoGapReporter
             if (!live.TryGetValue(row.Profile.BackstageSpeakerId!, out var z)) continue;
             compared++;
 
-            var gaps = GapsFor(row.Profile, z);
+            var gaps = GapsFor(row.Profile, z, row.FullName);
             if (gaps.Count > 0)
                 found.Add(new SpeakerGap(row.Email ?? "", row.FullName ?? row.Email ?? "(unnamed)", gaps));
         }
@@ -189,9 +189,16 @@ public sealed class SpeakerZohoGapReporter
     /// <para>The label and its colon already delimit the value. Where a value could be genuinely
     /// ambiguous, SAY so in words (as the bio line does) rather than relying on quote marks.</para>
     /// </remarks>
-    public static IReadOnlyList<string> GapsFor(SpeakerProfile ceh, BackstageSpeaker z)
+    public static IReadOnlyList<string> GapsFor(SpeakerProfile ceh, BackstageSpeaker z, string? fullName = null)
     {
         var gaps = new List<string>();
+
+        // 🔴 §1376 — NAME. Operator 2026-10-29: *"just inform us if there is a mismatch as their api currently doesnt
+        // allow to update in zoho"*. CEH's name is the participant's full name — the one organizers edit on the Edit
+        // page, and nothing carries that edit to the speaker profile or to Zoho. Compared ignoring case and spacing;
+        // a Zoho record without a name is not compared (a create always sends one, §1375).
+        if (Has(fullName) && Has(z.Name) && ComparableName(fullName) != ComparableName(z.Name))
+            gaps.Add(Line("Name", fullName!.Trim()));
 
         // 🔴 §1364 — CEH IS THE MASTER, and the CONTENT must match, not only exist. Operator 2026-10-20: *"compare the
         // speaker fields from ceh (master) to zoho … tagline, bio, country, company, skills (accreditation) … they must
@@ -347,6 +354,10 @@ public sealed class SpeakerZohoGapReporter
             .Select(s => s.ToLowerInvariant())
             .Distinct()
             .OrderBy(s => s, StringComparer.Ordinal));
+
+    /// <summary>§1376 — a name for comparison: lower case, runs of spaces collapsed.</summary>
+    public static string ComparableName(string? value) =>
+        string.Join(' ', (value ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
 
     private static bool Has(string? v) => !string.IsNullOrWhiteSpace(v);
     private static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);

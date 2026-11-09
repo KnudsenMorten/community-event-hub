@@ -1,0 +1,194 @@
+@page
+@model CommunityHub.Pages.Organizer.VisaApplicationsModel
+@using CommunityHub.Core.Visa
+@{
+    ViewData["Title"] = "Visa applications";
+    var submitted = Model.Rows.Count(r => r.Submitted);
+    const string Btn = "display:inline-block;padding:9px 14px;border-radius:8px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p style="color:#6b7280;">
+        Speakers and volunteers flagged <strong>Needs visa</strong> see "Visa application" in their menu
+        and fill in <code>/Forms/Visa</code>. Copy their answers into
+        <a href="https://nyidanmark.dk/en-GB/You-want-to-apply/Short-stay-visa/Invitation-of-a-visa-applicant" target="_blank" rel="noopener noreferrer">Invitation of a visa applicant</a>
+        on nyidanmark.dk, then enter the application ID below &mdash; the applicant sees it at the top of their form.
+    </p>
+
+    @if (Model.Message is not null)
+    {
+        <p role="status" style="background:#eef6ff;border:1px solid #b6d4fe;border-radius:8px;padding:10px 14px;">@Model.Message</p>
+    }
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;">
+        <div style="background:#e7f6ec;border-radius:12px;padding:14px 20px;min-width:140px;">
+            <div style="font-size:30px;font-weight:800;color:#1c6b35;">@submitted</div>
+            <div style="color:#1c6b35;font-weight:600;">submitted</div>
+        </div>
+        <div style="background:#eef0f4;border-radius:12px;padding:14px 20px;min-width:140px;">
+            <div style="font-size:30px;font-weight:800;color:#5b636e;">@(Model.Rows.Count - submitted)</div>
+            <div style="color:#5b636e;font-weight:600;">waiting</div>
+        </div>
+    </div>
+
+    <p style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a href="/Organizer/VisaApplications?handler=Xlsx" style="@Btn">⬇ Excel (.xlsx) &mdash; everyone</a>
+        <a href="/Organizer/VisaApplications?handler=Pdf" style="@Btn">⬇ PDF &mdash; all submitted</a>
+    </p>
+
+    @if (Model.CanEdit)
+    {
+        <form method="post" asp-page-handler="Add" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:12px 0;">
+            <div style="flex:1;min-width:240px;">
+                <label for="add">Add a speaker or volunteer who needs a visa</label>
+                <select id="add" name="ParticipantId" required>
+                    <option value="">— select —</option>
+                    @foreach (var c in Model.Candidates) { <option value="@c.Id">@c.Label</option> }
+                </select>
+            </div>
+            <button type="submit">Add</button>
+        </form>
+        <p style="font-size:12px;color:#6b7280;margin-top:-4px;">Anyone else (any role) can be flagged with the "Needs visa" box on their participant page.</p>
+    }
+
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
+        <thead><tr style="text-align:left;border-bottom:2px solid #ddd;">
+            <th style="padding:6px 8px;">Name</th><th style="padding:6px 8px;">Role</th>
+            <th style="padding:6px 8px;">Status</th><th style="padding:6px 8px;">Application ID</th>
+            <th style="padding:6px 8px;"></th>
+        </tr></thead>
+        <tbody>
+        @foreach (var r in Model.Rows)
+        {
+            <tr style="border-bottom:1px solid #eee;@(Model.Selected?.ParticipantId == r.ParticipantId ? "background:#f6f8fb;" : "")">
+                <td style="padding:6px 8px;">@r.FullName<br /><span style="color:#6b7280;">@r.Email</span></td>
+                <td style="padding:6px 8px;">@r.Role</td>
+                <td style="padding:6px 8px;">
+                    @if (r.Submitted) { <text>✅ submitted @r.Application!.SubmittedAt!.Value.ToString("dd MMM")</text> }
+                    else { <text>⏳ not yet</text> }
+                    @if (!r.NeedsVisa) { <br /><span style="color:#b45309;">flag removed</span> }
+                    @if (Model.Letters.ContainsKey(r.ParticipantId)) { <br /><span style="color:#1c6b35;">📄 letter uploaded</span> }
+                </td>
+                <td style="padding:6px 8px;">@(r.Application?.ApplicationId ?? "—")</td>
+                <td style="padding:6px 8px;white-space:nowrap;">
+                    <a href="/Organizer/VisaApplications?Show=@r.ParticipantId#detail">Open</a>
+                    @if (r.Submitted) { <text> · </text><a href="/Organizer/VisaApplications?handler=Pdf&id=@r.ParticipantId">PDF</a> }
+                </td>
+            </tr>
+        }
+        @if (Model.Rows.Count == 0)
+        {
+            <tr><td colspan="5" style="padding:6px 8px;color:#6b7280;">Nobody is flagged as needing a visa yet.</td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+
+    <p style="margin-top:14px;"><a asp-page="/Organizer/Logistics">&larr; Logistics</a></p>
+</div>
+
+@if (Model.Selected is VisaRow s)
+{
+    var a = s.Application;
+    <div class="card" id="detail">
+        <h2 style="margin-top:0;">@s.FullName</h2>
+        <p style="color:#6b7280;">@s.Role · @s.Email
+            @if (s.Submitted) { <text> · <a href="/Organizer/VisaApplications?handler=Pdf&id=@s.ParticipantId">⬇ PDF</a></text> }
+        </p>
+
+        @if (Model.CanEdit)
+        {
+            <form method="post" asp-page-handler="ApplicationId" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                <input type="hidden" name="ParticipantId" value="@s.ParticipantId" />
+                <div style="flex:1;min-width:220px;">
+                    <label for="appid">Application ID (from nyidanmark.dk)</label>
+                    <input id="appid" type="text" name="ApplicationId" value="@a?.ApplicationId" maxlength="200" />
+                </div>
+                <button type="submit">Save application ID</button>
+            </form>
+            <p style="font-size:12px;color:#6b7280;">Saved IDs show at the top of the applicant's visa form. Clear the box and save to remove it.</p>
+        }
+        else
+        {
+            <p><strong>Application ID:</strong> @(a?.ApplicationId ?? "not set")</p>
+        }
+
+        @* §1383 — the PDF handed back to this applicant (e.g. the invitation letter), shown on their form. *@
+        @{ var letter = Model.Letters.GetValueOrDefault(s.ParticipantId); }
+        <div style="border-top:1px solid #eee;margin-top:14px;padding-top:12px;overflow-wrap:anywhere;">
+            <h3 style="margin:0 0 6px;font-size:15px;">Letter for the applicant (PDF)</h3>
+            @if (letter is not null)
+            {
+                <p style="margin:0 0 8px;">
+                    <a href="/Organizer/VisaApplications?handler=Letter&id=@s.ParticipantId">📄 @letter.FileName</a>
+                    <span style="color:#6b7280;">· @(letter.SizeBytes / 1024) kB · uploaded @letter.UploadedAt.ToString("dd MMM yyyy HH:mm") UTC</span>
+                </p>
+            }
+            else
+            {
+                <p style="margin:0 0 8px;color:#6b7280;">No letter yet. Upload it once the application has gone to the Danish authorities &mdash; the applicant can then download it from their visa form.</p>
+            }
+            @if (Model.CanEdit)
+            {
+                <form method="post" asp-page-handler="Letter" enctype="multipart/form-data" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                    <input type="hidden" name="ParticipantId" value="@s.ParticipantId" />
+                    <div style="flex:1;min-width:200px;">
+                        <label for="letter">@(letter is null ? "Upload letter" : "Replace letter") (PDF, max 10 MB)</label>
+                        <input id="letter" type="file" name="Letter" accept="application/pdf,.pdf" required />
+                    </div>
+                    <button type="submit">@(letter is null ? "Upload" : "Replace")</button>
+                </form>
+                @if (letter is not null)
+                {
+                    <form method="post" asp-page-handler="RemoveLetter" style="margin-top:8px;">
+                        <input type="hidden" name="ParticipantId" value="@s.ParticipantId" />
+                        <button type="submit" class="secondary">Remove letter</button>
+                    </form>
+                }
+            }
+        </div>
+
+        @if (a?.SubmittedAt is null)
+        {
+            <p>They have not submitted the form yet.</p>
+        }
+        else
+        {
+            string? currentSection = null;
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            @foreach (var field in VisaApplicationService.Fields)
+            {
+                if (field.Section != currentSection)
+                {
+                    currentSection = field.Section;
+                    <tr><th colspan="2" style="text-align:left;padding:14px 8px 4px;font-size:14px;">@currentSection</th></tr>
+                }
+                <tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:5px 8px;color:#6b7280;width:40%;vertical-align:top;">@field.Label</td>
+                    <td style="padding:5px 8px;white-space:pre-wrap;user-select:all;">@field.Value(a)</td>
+                </tr>
+            }
+            </table>
+        }
+
+        @if (Model.CanEdit && s.NeedsVisa)
+        {
+            <form method="post" asp-page-handler="Remove" style="margin-top:14px;">
+                <input type="hidden" name="ParticipantId" value="@s.ParticipantId" />
+                <button type="submit" class="secondary">Remove "Needs visa"</button>
+            </form>
+        }
+    </div>
+}

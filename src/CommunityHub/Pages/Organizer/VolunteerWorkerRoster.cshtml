@@ -1,11 +1,11 @@
 @page
 @model CommunityHub.Pages.Organizer.VolunteerWorkerRosterModel
 @{
-    ViewData["Title"] = "Worker roster";
+    ViewData["Title"] = "Full-day workers";
 }
 
 <div class="card">
-    <h1>Worker roster</h1>
+    <h1>Full-day workers</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">@Localizer["Common.OrganizersOnly"]</p>
@@ -13,16 +13,21 @@
     }
     else
     {
+        @* §1380 — was "Worker roster"; renamed and re-explained after Leth's mail (2026-11-02): the
+           old text described a scope ("who the planner draws from") that no longer exists. *@
         <p>
-            The volunteers the <strong>auto-planner</strong> draws from: the ones who are here to
-            work rather than to attend, and can be scheduled all day without splitting their time
-            around sessions they want to be at. Everyone else is placed by hand from the allocation
-            queue.
+            <strong>Auto-assign plans every active volunteer.</strong> This list says how much each person
+            can be given:
         </p>
+        <ul style="margin:0 0 10px 18px;">
+            <li><strong>Full-day workers</strong> (marked here) are here to work, not to attend sessions —
+                they can be scheduled for <strong>all</strong> the hours they said they can work.</li>
+            <li><strong>Everyone else</strong> also wants to attend sessions, so they are planned for at most
+                <strong>50%</strong> of the hours they said they can work each day.</li>
+        </ul>
         <p style="font-size:13px;color:#4b5563;">
-            Being on this list is the whole switch — there is nothing else to set. It does
-            <strong>not</strong> change what someone answered on the availability form; the planner
-            still reads their stated hours.
+            Marking someone does <strong>not</strong> change what they answered on the availability form —
+            the planner still only uses the hours they gave. You can always place anyone by hand.
         </p>
         <p><a asp-page="/Organizer/Volunteers">&larr; Back to Volunteers</a></p>
     }
@@ -37,12 +42,11 @@
 
     <div class="card">
         <p style="margin:0 0 12px;">
-            <strong>@Model.InScope</strong> of @Model.Total active volunteers are in scope.
+            <strong>@Model.InScope</strong> of @Model.Total active volunteers are marked as full-day workers.
             @if (Model.InScope == 0)
             {
                 <span style="color:#7a5b00;">
-                    While the roster is empty the planner falls back to <strong>every</strong> active
-                    volunteer, so a run still produces a plan — it just is not scoped yet.
+                    Nobody is marked yet, so auto-assign plans everyone at up to 50% of their hours.
                 </span>
             }
         </p>
@@ -105,14 +109,14 @@
                             {
                                 <form method="post" asp-page-handler="Remove">
                                     <input type="hidden" name="participantId" value="@r.ParticipantId" />
-                                    <button type="submit">Remove from scope</button>
+                                    <button type="submit">Not a full-day worker</button>
                                 </form>
                             }
                             else
                             {
                                 <form method="post" asp-page-handler="Add">
                                     <input type="hidden" name="participantId" value="@r.ParticipantId" />
-                                    <button type="submit">Add to scope</button>
+                                    <button type="submit">Mark as full-day worker</button>
                                 </form>
                             }
                         </td>

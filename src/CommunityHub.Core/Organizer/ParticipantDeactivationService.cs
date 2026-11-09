@@ -129,7 +129,20 @@ public sealed class ParticipantDeactivationService
         p.DeactivatedByOrganizerAt ??= now;
 
         var (rsvpsCancelled, groupKept) = await CancelPartyRsvpsAsync(p, now, ct);
+        var hotelBefore = p.HotelId;   // §1386 — read before ReleaseHotel clears it
         var (bookingsReleased, placementCleared) = ReleaseHotel(p, await LoadBookingsAsync(p, ct), now);
+        if (hotelBefore is int cancelledAt && bookingsReleased > 0)
+        {
+            // §1386 — the hotel holds a room for this person: it must hear it is cancelled (the
+            // booking now carries CancelledHotelId, so it stays on that hotel's spreadsheet).
+            _db.HotelChangeLog.Add(new HotelChangeLogEntry
+            {
+                EventId = p.EventId, HotelId = cancelledAt, ParticipantId = p.Id, ParticipantName = p.FullName,
+                At = now, Source = HotelChangeSource.Organizer, Actor = "deactivation",
+                Kind = HotelChangeKinds.BookingCancelled,
+                Summary = "Participant deactivated — reservation Cancelled", AffectsGuestList = true,
+            });
+        }
         var tasksClosed = await CloseOpenTasksAsync(p, now, ct);
         var (shiftsVacated, vacatedTaskIds, vacatedRecord) = await VacateShiftAssignmentsAsync(p, ct);
 
@@ -621,6 +634,14 @@ public sealed class ParticipantDeactivationService
         foreach (var b in bookings.Where(b => b.NeedsRoom))
         {
             b.NeedsRoom = false;
+            // §1386 — a room the hotel was holding becomes a CANCELLED reservation, remembered against
+            // the hotel it was at; an unplaced request simply had nothing to cancel.
+            if (p.HotelId is not null && b.ConfirmationState != HotelConfirmationState.Cancelled)
+            {
+                b.ConfirmationState = HotelConfirmationState.Cancelled;
+                b.CancelledAt = now;
+                b.CancelledHotelId = p.HotelId;
+            }
             b.UpdatedAt = now;
             released++;
         }

@@ -98,8 +98,25 @@
     }
 }
 
-@* Read-only reservation confirmation (REQUIREMENTS §46). *@
-@if (Model.IsReservationConfirmed)
+@* Read-only reservation confirmation (REQUIREMENTS §46). §1386: a CANCELLED reservation says so,
+   and a placed-but-unconfirmed one shows the assigned hotel as Reserved. *@
+@if (Model.IsReservationCancelled)
+{
+    <p style="background:#fef2f2;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:14px;">
+        <strong>@Localizer["Hotel.ReservationCancelled"]</strong>
+        @if (!string.IsNullOrWhiteSpace(Model.HotelCancellationNumber))
+        {
+            <br />@Localizer["Hotel.CancellationNumberLabel"] <strong>@Model.HotelCancellationNumber</strong>
+        }
+    </p>
+}
+else if (!Model.IsReservationConfirmed && Model.NeedsRoom == true && !string.IsNullOrWhiteSpace(Model.AssignedHotelName))
+{
+    <p style="background:#f3f6fb;color:#1f2937;padding:10px 14px;border-radius:6px;font-size:14px;">
+        @Localizer["Hotel.AssignedReserved", Model.AssignedHotelName!]
+    </p>
+}
+else if (Model.IsReservationConfirmed)
 {
     <p style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:6px;font-size:14px;">
         <strong>@Localizer["Hotel.Confirmed"]</strong><br />

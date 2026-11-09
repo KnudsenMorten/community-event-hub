@@ -213,6 +213,18 @@ public sealed class EmailRegistryCompletenessTests
             "travel-reimbursement-erp", // TravelFormService (ERP inbox)
             "feedback-intake",          // FeedbackIntakeService (organizer ops inbox)
             "engine-alert",             // EngineAlertSender (operator-confirmed: no ring)
+            // §1383 — VisaNotifier.NotifyAsync passes `RingExempt: true` (read before adding): the
+            // recipient is the organizers' mailbox, not a participant.
+            "visa-application-submitted",
+            // §1386 — HotelOpsNotifier passes `RingExempt: true` (read before adding): internal hotel-ops addresses only.
+            "travel-claim-review-needed",   // §1387 — RingExempt: the organizers' mailbox (read before adding)
+            "travel-claims-waiting",        // §1387 — RemindWaitingAsync passes `RingExempt: true` (read before adding): the organizers' mailbox
+            "campaign-release-step",        // §1388 — MailCampaignService.NoticeAsync passes `RingExempt: true` (read before adding): the organizers' mailbox
+            "hotel-ops-change",
+            "hotel-ops-deadline",
+            // §1382 — read before adding: CouponSignupService.SendRequestMailAsync passes `RingExempt: true`. The recipient
+            // is the event mailbox (info@), not a participant — the feedback-intake class.
+            "coupon-signup-request",    // CouponSignupService (event mailbox)
             // 🔒 §707.20 — `masterclass-cancelled` is deliberately NOT here any more. §346 made it
             // exempt under the §326by participant-clicked rule; the operator overruled that on
             // 2026-07-30 (*"it should also be ring-gated … it is a similar mail as any other mail"*),

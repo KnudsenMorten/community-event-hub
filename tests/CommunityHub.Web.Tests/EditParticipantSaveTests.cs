@@ -164,4 +164,116 @@ public sealed class EditParticipantSaveTests
         var reloaded = await db.Participants.FindAsync(target.Id);
         Assert.Equal("old@example.test", reloaded!.Email); // unchanged
     }
+
+    [Fact]
+    public async Task Saving_a_speaker_creates_their_speaker_profile_with_the_name_once()
+    {
+        // 🔴 §1377 (PROD 2026-10-29): a speaker added by hand had no speaker profile until they filled in a form of
+        // their own, so no category could be set and the Zoho push never saw them.
+        using var db = NewDb();
+        var (org, target) = await SeedAsync(db);
+
+        var http = new DefaultHttpContext { User = OrganizerSession(org) };
+        var model = NewModel(db, http);
+        model.Id = target.Id;
+        model.Email = "old@example.test";
+        model.FullName = "Cecilie Waagner Falkenstrom";
+        model.Role = ParticipantRole.Speaker;
+        model.IsActive = true;
+
+        await model.OnPostAsync(default);
+        await model.OnPostAsync(default);   // a second save must not add a second profile
+
+        var profile = Assert.Single(db.SpeakerProfiles.Where(p => p.ParticipantId == target.Id));
+        Assert.Equal(EventId, profile.EventId);
+        Assert.Equal("Cecilie", profile.FirstName);
+        Assert.Equal("Waagner Falkenstrom", profile.LastName);
+        Assert.Null(profile.Category);   // the organizer still picks the category on Speaker Review
+    }
+
+    [Fact]
+    public async Task Saving_a_non_speaker_creates_no_speaker_profile()
+    {
+        using var db = NewDb();
+        var (org, target) = await SeedAsync(db);
+
+        var http = new DefaultHttpContext { User = OrganizerSession(org) };
+        var model = NewModel(db, http);
+        model.Id = target.Id;
+        model.Email = "old@example.test";
+        model.FullName = "Old Name";
+        model.Role = ParticipantRole.Attendee;
+        model.IsActive = true;
+
+        await model.OnPostAsync(default);
+
+        Assert.Empty(db.SpeakerProfiles);
+    }
+
+    // ---------- §1379b — the test-user flag is editable by hand ----------
+
+    private static async Task<(EditParticipantModel model, Participant target)> TestUserCaseAsync(
+        CommunityHubDbContext db, bool flagBefore, CommunityHub.Core.Settings.Ring ring, bool requested)
+    {
+        var (org, target) = await SeedAsync(db);
+        target.IsTestUser = flagBefore; target.Ring = ring;
+        await db.SaveChangesAsync();
+        var model = NewModel(db, new DefaultHttpContext { User = OrganizerSession(org) });
+        model.Id = target.Id; model.Email = target.Email; model.FullName = target.FullName;
+        model.Role = target.Role; model.IsActive = true; model.IsTestUser = requested;
+        await model.OnPostAsync(default);
+        return (model, (await db.Participants.FindAsync(target.Id))!);
+    }
+
+    [Fact]
+    public async Task Clearing_the_test_flag_on_a_real_ring_person_saves()
+    {
+        using var db = NewDb();
+        var (model, p) = await TestUserCaseAsync(db, flagBefore: true, CommunityHub.Core.Settings.Ring.Broad, requested: false);
+        Assert.False(p.IsTestUser);
+        Assert.Equal("Saved.", model.Message);
+    }
+
+    [Fact]
+    public async Task Setting_the_test_flag_saves()
+    {
+        using var db = NewDb();
+        var (_, p) = await TestUserCaseAsync(db, flagBefore: false, CommunityHub.Core.Settings.Ring.Broad, requested: true);
+        Assert.True(p.IsTestUser);
+    }
+
+    [Fact]
+    public async Task Ring1_person_stays_a_test_user_and_the_page_says_why()
+    {
+        using var db = NewDb();
+        var (model, p) = await TestUserCaseAsync(db, flagBefore: true, CommunityHub.Core.Settings.Ring.Ring1, requested: false);
+        Assert.True(p.IsTestUser);                 // §940 wins
+        Assert.True(model.IsTestUser);             // the box re-renders ticked, so a 2nd save cannot clear it
+        Assert.Contains("Ring 1", model.Message);
+    }
+
+    [Fact]
+    public async Task Get_loads_the_flag_so_an_untouched_save_keeps_it()
+    {
+        using var db = NewDb();
+        var (org, target) = await SeedAsync(db);
+        target.IsTestUser = true; await db.SaveChangesAsync();
+        var model = NewModel(db, new DefaultHttpContext { User = OrganizerSession(org) });
+        model.Id = target.Id;
+        await model.OnGetAsync(default);
+        Assert.True(model.IsTestUser);
+    }
+
+    [Fact]
+    public void Contact_inheriting_a_ring1_company_cannot_be_cleared()
+    {
+        var p = new Participant { Ring = CommunityHub.Core.Settings.Rings.Default, IsTestUser = true };
+        var kept = EditParticipantModel.ApplyTestUserFlag(p, requested: false, companyRing: CommunityHub.Core.Settings.Ring.Ring1);
+        Assert.True(kept);
+        Assert.True(p.IsTestUser);
+
+        var real = new Participant { Ring = CommunityHub.Core.Settings.Rings.Default, IsTestUser = true };
+        Assert.False(EditParticipantModel.ApplyTestUserFlag(real, requested: false, companyRing: CommunityHub.Core.Settings.Ring.Broad));
+        Assert.False(real.IsTestUser);
+    }
 }

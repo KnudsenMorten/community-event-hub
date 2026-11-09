@@ -310,12 +310,105 @@ public sealed class OrganizerActingAsAuthzTests
     //  TravelReimbursements MarkPaid  (TravelReimbursements.OnPostMarkPaidAsync)
     // ---------------------------------------------------------------------
 
-    private static TravelReimbursementsModel NewTravel(CommunityHubDbContext db, HttpContext http) =>
+    private static TravelReimbursementsModel NewTravel(
+        CommunityHubDbContext db, HttpContext http,
+        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null) =>
         new(db, Accessor(http), new FixedClock(), emailSender: null!, templates: null!,
-            activeEvent: null!, logger: NullLogger<TravelReimbursementsModel>.Instance)
+            activeEvent: null!, logger: NullLogger<TravelReimbursementsModel>.Instance,
+            claimLock: claimLock)
         {
             PageContext = new PageContext { HttpContext = http },
         };
+
+    // ---------------------------------------------------------------------
+    //  TravelReimbursements Reopen (§768.10 D5) — the handler shipped with no button calling it, so
+    //  a speaker who submitted without her invoice was locked out with no GUI way back (2026-10-22).
+    // ---------------------------------------------------------------------
+
+    private static CommunityHub.Core.Entitlements.TravelClaimLock EnforcingLock(CommunityHubDbContext db) =>
+        new(db, new FixedClock(),
+            new CommunityHub.Core.Entitlements.TravelClaimLockOptions { FreezeEnabled = true });
+
+    private static async Task<int> AddClaimAsync(CommunityHubDbContext db, string name, bool submitted)
+    {
+        var p = new Participant
+        {
+            EventId = EventId, FullName = name, Email = $"{Guid.NewGuid():N}@example.test",
+            Role = ParticipantRole.Speaker, IsActive = true,
+        };
+        db.Participants.Add(p);
+        await db.SaveChangesAsync();
+
+        var claim = new TravelReimbursement
+        {
+            EventId = EventId, ParticipantId = p.Id, RequestReimbursement = true, ClaimAmountEur = 400,
+            SubmittedAt = submitted ? DateTimeOffset.Parse("2026-06-17T09:00:00Z") : null,
+        };
+        db.TravelReimbursements.Add(claim);
+        await db.SaveChangesAsync();
+        return claim.Id;
+    }
+
+    [Fact]
+    public async Task Reopen_real_organizer_unfreezes_the_submitted_claim()
+    {
+        using var db = NewDb();
+        var id = await AddClaimAsync(db, "Ada Lovelace", submitted: true);
+        var model = NewTravel(db, RealOrganizer(), EnforcingLock(db));
+
+        var result = await model.OnPostReopenAsync(id, CancellationToken.None);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.AccessDenied);
+        var row = await db.TravelReimbursements.AsNoTracking().SingleAsync(t => t.Id == id);
+        Assert.Null(row.SubmittedAt);
+        Assert.Equal(1, row.ReopenCount);
+        Assert.Contains("open again", model.Message);
+        // Reloaded row: no longer offers Reopen.
+        Assert.False(model.CanReopen(model.Rows.Single(r => r.Id == id)));
+    }
+
+    [Fact]
+    public async Task Reopen_acting_as_organizer_is_denied_and_the_claim_stays_frozen()
+    {
+        using var db = NewDb();
+        var id = await AddClaimAsync(db, "Ada Lovelace", submitted: true);
+        var model = NewTravel(db, ActingAsIntoOrganizer(), EnforcingLock(db));
+
+        await model.OnPostReopenAsync(id, CancellationToken.None);
+
+        Assert.True(model.AccessDenied);
+        Assert.NotNull((await db.TravelReimbursements.AsNoTracking().SingleAsync(t => t.Id == id)).SubmittedAt);
+    }
+
+    [Fact]
+    public async Task List_offers_Reopen_only_on_submitted_claims()
+    {
+        using var db = NewDb();
+        var submitted = await AddClaimAsync(db, "Ada Lovelace", submitted: true);
+        var open = await AddClaimAsync(db, "Grace Hopper", submitted: false);
+        var model = NewTravel(db, RealOrganizer(), EnforcingLock(db));
+
+        await model.OnGetAsync(CancellationToken.None);
+
+        Assert.True(model.CanReopen(model.Rows.Single(r => r.Id == submitted)));
+        Assert.False(model.CanReopen(model.Rows.Single(r => r.Id == open)));
+    }
+
+    [Fact]
+    public void The_list_view_actually_renders_the_Reopen_button()
+    {
+        // The handler alone is not the feature — it existed for months with nothing calling it.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "src", "CommunityHub", "Pages")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var razor = File.ReadAllText(Path.Combine(
+            dir!.FullName, "src", "CommunityHub", "Pages", "Organizer", "TravelReimbursements.cshtml"));
+
+        Assert.Contains("Model.CanReopen(r)", razor);
+        Assert.Contains("asp-page-handler=\"Reopen\"", razor);
+    }
 
     [Fact]
     public async Task MarkPaid_real_organizer_passes_the_gate()

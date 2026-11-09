@@ -400,6 +400,56 @@ public sealed class SoMeAutoApproveTests
         Assert.False((await db.SoMePosts.FirstAsync()).IsActive);
     }
 
+    /// <summary>
+    /// 🔴 §1372 — PROD post 343439: an "edit" that only changed spacing and line breaks is not an
+    /// edit, so the post is auto-approved like an untouched one.
+    /// </summary>
+    [Fact]
+    public async Task A_post_edited_only_in_spacing_is_auto_approved()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+        var post = WithGraphic(db, Planned(Now.AddDays(3)));
+        post.ManualTextOverride = "  ✨   {TrackName}\r\n\r\n✨  ";
+        db.SoMePosts.Add(post);
+        await db.SaveChangesAsync();
+
+        var result = await NewService(db).RunAsync(EventId);
+
+        Assert.Equal(1, result.Approved);
+        Assert.True((await db.SoMePosts.FirstAsync()).IsActive);
+    }
+
+    /// <summary>
+    /// 🔴 §1372 — operator 2026-10-27: *"auto-approve edited sessions too"*. A session post with
+    /// changed wording passes the text rule; other types with changed wording still wait.
+    /// </summary>
+    [Theory]
+    [InlineData(SoMeTemplateKind.Session, "my own words", true)]
+    [InlineData(SoMeTemplateKind.SpeakerTracks, "my own words", false)]
+    [InlineData(SoMeTemplateKind.Sponsor, "my own words", false)]
+    [InlineData(SoMeTemplateKind.Sponsor, "✨\n{TrackName}  ✨", true)]
+    [InlineData(SoMeTemplateKind.SpeakerTracks, null, true)]
+    public void The_text_rule_allows_untouched_spacing_only_and_edited_session_posts(
+        SoMeTemplateKind kind, string? edit, bool allowed)
+    {
+        var post = Planned(Now.AddDays(3), kind);
+        post.ManualTextOverride = edit;
+
+        Assert.Equal(allowed, SoMeAutoApproveService.EditAllowsAutoApproval(post));
+    }
+
+    /// <summary>
+    /// §1372 — the post editor's "is this an edit?" check: spacing and CR+LF are not edits, words are.
+    /// </summary>
+    [Fact]
+    public void Same_wording_ignores_spacing_and_line_breaks_but_not_words()
+    {
+        Assert.True(SoMePost.SameWording("A {X}\n\nB", "  A  {X}\r\n\r\nB \r\n"));
+        Assert.False(SoMePost.SameWording("A {X} B", "A {X} C"));
+        Assert.False(SoMePost.SameWording("A {X} B", "A {Y} B"));
+    }
+
     /// <summary>🔒 GUARD 3 — Type 5 is his own copy from the deck; never auto-approved.</summary>
     [Fact]
     public async Task An_event_post_is_never_auto_approved()

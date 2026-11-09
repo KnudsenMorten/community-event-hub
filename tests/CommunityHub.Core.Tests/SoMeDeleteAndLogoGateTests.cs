@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// §853 (delete is durable) and §854 (a sponsor with no logo is not planned at all).
+/// §853 (delete is durable) and §1370 (a sponsor with no logo is planned but held; supersedes §854).
 /// </summary>
 public sealed class SoMeDeleteAndLogoGateTests
 {
@@ -75,11 +75,12 @@ public sealed class SoMeDeleteAndLogoGateTests
             intro: null);
 
     /// <summary>
-    /// 🔴 §854 — his bug: "silver sponsor apento is shown in the list even though they have not
-    /// uploaded logo yet". No logo ⇒ no graphic ⇒ nothing to announce.
+    /// 🔴 §1370 (supersedes §854) — operator 2026-10-27: sponsors without a logo or text "should
+    /// still be planned. once they live up they should be scheduled". Both rounds get a seat, held:
+    /// not approved, and the approval gate refuses them until the graphic exists.
     /// </summary>
     [Fact]
-    public async Task A_sponsor_without_a_graphic_is_not_planned()
+    public async Task A_sponsor_without_a_graphic_is_planned_but_held()
     {
         using var db = NewDb();
         await SeedAsync(db, withGraphic: "co-withlogo");
@@ -87,22 +88,33 @@ public sealed class SoMeDeleteAndLogoGateTests
         var svc = Svc(db);
         await svc.RunAsync(EventId);
 
-        var planned = await db.SoMePosts
-            .Where(p => p.TemplateKind == SoMeTemplateKind.Sponsor)
-            .Select(p => p.SubjectKey).Distinct().ToListAsync();
+        var waiting = await db.SoMePosts
+            .Where(p => p.SubjectKey == "sponsor:co-nologo")
+            .OrderBy(p => p.Occurrence)
+            .ToListAsync();
 
-        _out.WriteLine("planned sponsors: " + string.Join(", ", planned));
+        _out.WriteLine("co-nologo posts: " + string.Join(", ",
+            waiting.Select(p => $"#{p.Occurrence} {p.ScheduledAtUtc:yyyy-MM-dd} {p.PlanState}")));
 
-        Assert.Contains("sponsor:co-withlogo", planned);
-        Assert.DoesNotContain("sponsor:co-nologo", planned);
+        Assert.Equal(new[] { 1, 2 }, waiting.Select(p => p.Occurrence ?? 0).ToArray());
+        Assert.All(waiting, p =>
+        {
+            Assert.False(p.IsActive);
+            Assert.Equal(SoMePostPlanState.Proposed, p.PlanState);
+            Assert.Null(p.ImageRef);
+        });
+
+        var gate = new SoMeApprovalGate(db);
+        Assert.NotNull(await gate.BlockedReasonAsync(waiting[0]));
+        Assert.True(await db.SoMePosts.AnyAsync(p => p.SubjectKey == "sponsor:co-withlogo"));
     }
 
     /// <summary>
-    /// 🔒 §854.1 — …but they must not become INVISIBLE. §842.5 owes every sponsor two announcements,
-    /// so one silently absent for want of a logo is a breach waiting to happen.
+    /// 🔒 §854.1 — a held sponsor must not become INVISIBLE. §842.5 owes every sponsor two
+    /// announcements, so the missing logo is named in the run message for him to chase.
     /// </summary>
     [Fact]
-    public async Task A_sponsor_that_cannot_be_planned_is_reported_by_name()
+    public async Task A_sponsor_waiting_for_a_graphic_is_reported_by_name()
     {
         using var db = NewDb();
         await SeedAsync(db, withGraphic: "co-withlogo");
@@ -112,9 +124,9 @@ public sealed class SoMeDeleteAndLogoGateTests
 
         _out.WriteLine(run.Message);
 
-        Assert.Contains("co-nologo", svc.NotPlannableSponsors);
-        Assert.DoesNotContain("co-withlogo", svc.NotPlannableSponsors);
-        Assert.Contains("could NOT be planned", run.Message);
+        Assert.Contains("co-nologo", svc.SponsorsWaitingForGraphic);
+        Assert.DoesNotContain("co-withlogo", svc.SponsorsWaitingForGraphic);
+        Assert.Contains("planned but held", run.Message);
     }
 
     /// <summary>
@@ -154,6 +166,33 @@ public sealed class SoMeDeleteAndLogoGateTests
         Assert.DoesNotContain(deletedOccurrence, live);
         // …and the sponsor's OTHER post is untouched: deleting one must not cancel the rest.
         Assert.NotEmpty(live);
+    }
+
+    /// <summary>
+    /// 🔴 §1368 — a DELETED post is not "no room". PROD 2026-10-26: Surveil's first post was published
+    /// and then deleted from the queue; every run reported "sponsor:36 #1 could not fit before the
+    /// event", and the new conflict mail sent it to the organizers as a full calendar.
+    /// </summary>
+    [Fact]
+    public async Task A_deleted_post_is_not_reported_as_no_room()
+    {
+        using var db = NewDb();
+        await SeedAsync(db, withGraphic: "co-withlogo");
+
+        var svc = Svc(db);
+        await svc.RunAsync(EventId);
+
+        var victim = await db.SoMePosts
+            .Where(p => p.SubjectKey == "sponsor:co-withlogo")
+            .OrderBy(p => p.Occurrence)
+            .FirstAsync();
+        victim.IsDeleted = true;
+        victim.IsActive = false;
+        await db.SaveChangesAsync();
+
+        var run = await svc.RunAsync(EventId);
+
+        Assert.DoesNotContain(run.NoRoom, x => x.StartsWith("sponsor:co-withlogo", StringComparison.Ordinal));
     }
 
     [Fact]

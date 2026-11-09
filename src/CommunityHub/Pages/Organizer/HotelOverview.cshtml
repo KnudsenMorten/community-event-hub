@@ -1,0 +1,433 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelOverviewModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Organizer
+@{
+    ViewData["Title"] = "Hotel overview";
+    var ov = Model.Overview;
+    var M = Model;
+    string Who(int pid) => Url.Page("/Organizer/HotelReservation", new { pid }) ?? "#";
+    var exportUrl = Url.Page("/Organizer/HotelOverview", "GridExport", new
+    {
+        Answer = Model.Answer, Role = Model.Role, Hotel = Model.HotelFilter, State = Model.State,
+        Night = Model.Night?.ToString("yyyy-MM-dd"), Q = Model.Q, Sort = Model.Sort,
+    });
+}
+
+<style>
+    /* Mobile-first: wide tables scroll sideways at ~360px, the first column stays put. */
+    .ho-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.ho-tbl { border-collapse: collapse; min-width: 640px; width: 100%; }
+    .ho-tbl th, .ho-tbl td { border: 1px solid #e6e8ee; padding: 6px 8px; font-size: 13px; text-align: center; }
+    .ho-tbl th { background: #f9fafb; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; white-space: nowrap; }
+    .ho-tbl td.ho-l, .ho-tbl th.ho-l { text-align: left; white-space: nowrap; position: sticky; left: 0; background: #fff; z-index: 1; }
+    .ho-tbl th.ho-l { background: #f9fafb; }
+    .ho-tbl input[type=number] { width: 56px; padding: 4px; font-size: 13px; text-align: center; }
+    .ho-tbl input[type=text] { width: 140px; padding: 4px; font-size: 12.5px; }
+    .ho-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    a.ho-tile { display: block; border: 1px solid #e6e8ee; border-radius: 8px; padding: 10px 12px; color: inherit; text-decoration: none; }
+    a.ho-tile:hover { border-color: #2563eb; box-shadow: 0 1px 4px rgba(37,99,235,.15); }
+    .ho-tile b { display: block; font-size: 22px; }
+    .ho-tile span { font-size: 12.5px; }
+    .ho-note { color: #6b7280; font-size: 12.5px; }
+    .ho-total td { font-weight: 700; background: #f3f4f6; }
+    .ho-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+    .ho-grid td.ho-n { width: 34px; padding: 4px; }
+    .ho-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #2563eb; }
+    .ho-dot.conf { background: #16a34a; }
+    .ho-ok { background: #dcfce7; color: #166534; border-color: #16a34a !important; }
+    .ho-warn { background: #fef3c7; color: #92400e; border-color: #f59e0b !important; }
+    .ho-bad { background: #fee2e2; color: #991b1b; border-color: #dc2626 !important; }
+</style>
+
+<div class="card">
+    <h1>Hotel overview</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p class="ho-note">Every number is a link: click it to see the people behind it. Click a name to edit that person's reservation.
+            Nothing on this page e-mails a guest or a hotel.</p>
+        <p><a asp-page="/Organizer/Hotels">Hotels (details, priority, contacts)</a> &nbsp;·&nbsp; <a href="#guests">Guest grid</a>
+           &nbsp;·&nbsp; <a href="#problems">Problems (@Model.Problems.Count)</a> &nbsp;·&nbsp; <a href="#hotels">Spreadsheets &amp; import</a>
+           &nbsp;·&nbsp; <a href="#nights-edit">Rooms per night &amp; deadlines</a> &nbsp;·&nbsp; <a href="#log">Change log</a></p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
+        @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error" role="alert">@Model.Error</p> }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    var rd = Model.Readiness;
+    @* §1386 — "before we reduce the allotment we need to verify everyone has filled out". *@
+    <div class="card @(rd.Ready ? "ho-ok" : "ho-bad")" style="border:1px solid;">
+        <h2 style="margin-top:0;">@(rd.Ready ? "✓ Ready to reduce rooms" : "Not ready to reduce rooms yet")</h2>
+        <ul style="margin:0;">
+            <li>@(rd.NotAnswered == 0 ? "✓" : "✗") <a href="@M.GridUrl(answer: HotelAnswer.NotAnswered)">@rd.NotAnswered not answered the hotel form</a>
+                @if (rd.NotAnsweredByRole.Count > 0) { <span class="ho-note">(@string.Join(", ", rd.NotAnsweredByRole.Select(kv => $"{kv.Value} {kv.Key}")))</span> }</li>
+            <li>@(rd.Unplaced == 0 ? "✓" : "✗") <a href="@M.GridUrl(answer: HotelAnswer.Room, hotel: 0)">@rd.Unplaced reserved but in no hotel</a></li>
+            <li>@(rd.Problems == 0 ? "✓" : "✗") <a href="#problems">@rd.Problems problem(s) to fix</a></li>
+        </ul>
+        @if (!rd.Ready)
+        {
+            <p class="ho-note" style="margin-bottom:0;">Until all three are green, add the expected people as a <a href="#nights">forecast</a> before you release rooms.</p>
+        }
+    </div>
+
+    <div class="card">
+        <h2>Summary</h2>
+        @{
+            var release = ov.Nights.Where(x => x.Result > 0).Sum(x => x.Result);
+            var covered = ov.Nights.Count(x => x.Result >= 0);
+            var shortTotal = ov.Nights.Where(x => x.Result < 0).Sum(x => x.Result);
+        }
+        <div class="ho-tiles">
+            <a class="ho-tile" href="@M.GridUrl(answer: HotelAnswer.Room, state: HotelConfirmationState.NotConfirmed)"><b>@ov.TotalReservedPeople</b><span>reserved (not confirmed yet)</span></a>
+            <a class="ho-tile" href="@M.GridUrl(answer: HotelAnswer.Room, state: HotelConfirmationState.Confirmed)"><b>@ov.TotalConfirmedPeople</b><span>confirmed by the hotel</span></a>
+            <a class="ho-tile" href="@M.GridUrl(answer: HotelAnswer.Cancelled)"><b>@ov.TotalCancelledPeople</b><span>cancelled</span></a>
+            <a class="ho-tile @(ov.UnplacedPeople > 0 ? "ho-bad" : "")" href="@M.GridUrl(answer: HotelAnswer.Room, hotel: 0)"><b>@ov.UnplacedPeople</b><span>reserved, no hotel yet</span></a>
+            <a class="ho-tile @(ov.NotAnswered.Count > 0 ? "ho-warn" : "")" href="@M.GridUrl(answer: HotelAnswer.NotAnswered)"><b>@ov.NotAnswered.Count</b><span>not answered the hotel form</span></a>
+            <a class="ho-tile" href="@M.GridUrl(answer: HotelAnswer.NoRoom)"><b>@ov.AnsweredNoRoom</b><span>said no room</span></a>
+            <a class="ho-tile @(ov.GapNights > 0 ? "ho-bad" : "")" href="#nights"><b>@ov.GapNights</b><span>night(s) short of rooms</span></a>
+            <a class="ho-tile @(covered > 0 ? "ho-ok" : "")" href="#nights"><b>@covered</b><span>night(s) covered — everyone has a room</span></a>
+            <a class="ho-tile @(release > 0 ? "ho-warn" : "")" href="#nights"><b>@release</b><span>room-nights to release (@ov.TooManyNights night(s))</span></a>
+            <a class="ho-tile @(Model.Problems.Count > 0 ? "ho-bad" : "ho-ok")" href="#problems"><b>@Model.Problems.Count</b><span>problem(s) to fix</span></a>
+        </div>
+        @if (ov.UnplacedPeople > 0 && Model.PrimaryHotelName is not null)
+        {
+            <form method="post" asp-page-handler="PlaceUnassigned" style="margin-top:12px;"
+                  onsubmit="return confirm('Place everyone who reserved a room and has no hotel yet in @Model.PrimaryHotelName? No mail is sent.');">
+                <button type="submit">Place @ov.UnplacedPeople reserved guest(s) in @Model.PrimaryHotelName</button>
+            </form>
+        }
+    </div>
+
+    <div class="card" id="nights">
+        <h2>Per night</h2>
+        @if (ov.Nights.Count == 0)
+        {
+            <p class="ho-note">No allocation, reservation or forecast yet.</p>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="SaveForecast">
+                <div class="ho-scroll">
+                    <table class="ho-tbl">
+                        <thead>
+                            <tr>
+                                <th class="ho-l">Night</th>
+                                <th>Prio 1</th><th>Buffer</th><th>Allocated</th>
+                                <th>Reserved</th><th>Confirmed</th><th>Forecast +</th><th>Forecast note</th>
+                                <th>Needed</th><th>Result</th><th>Prio 1 only</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var n in ov.Nights)
+                        {
+                            <tr>
+                                <td class="ho-l"><a href="@M.GridUrl(night: n.Night)" title="Who sleeps there">@n.Night.ToString("ddd d MMM yyyy")</a>
+                                    @if (n.Unplaced > 0) { <br /><a class="ho-note" href="@M.GridUrl(night: n.Night, answer: HotelAnswer.Room, hotel: 0)">@n.Unplaced without hotel</a> }
+                                    <input type="hidden" name="nights" value="@n.Night.ToString("yyyy-MM-dd")" />
+                                </td>
+                                <td>@n.PrimaryAllocated</td>
+                                <td>@(n.BufferAllocated == 0 ? "" : n.BufferAllocated.ToString())</td>
+                                <td><strong>@n.Allocated</strong></td>
+                                <td><a href="@M.GridUrl(night: n.Night, state: HotelConfirmationState.NotConfirmed)">@n.Reserved</a></td>
+                                <td><a href="@M.GridUrl(night: n.Night, state: HotelConfirmationState.Confirmed)">@n.Confirmed</a></td>
+                                <td><input type="number" name="extras" min="0" max="999" value="@(n.ForecastExtra == 0 ? "" : n.ForecastExtra.ToString())"
+                                           aria-label="Forecast extra rooms on @n.Night.ToString("d MMM")" /></td>
+                                <td><input type="text" name="notes" maxlength="500" value="@n.ForecastNote" placeholder="e.g. 5 speakers + 1 volunteer"
+                                           aria-label="Forecast note for @n.Night.ToString("d MMM")" /></td>
+                                <td><a href="@M.GridUrl(night: n.Night)">@n.Needed</a></td>
+                                <td style="@CommunityHub.Pages.Organizer.HotelOverviewModel.ResultStyle(n.Result)">@CommunityHub.Pages.Organizer.HotelOverviewModel.ResultHtml(n.Result)</td>
+                                <td style="@CommunityHub.Pages.Organizer.HotelOverviewModel.ResultStyle(n.PrimaryResult)">
+                                    @CommunityHub.Pages.Organizer.HotelOverviewModel.ResultHtml(n.PrimaryResult)
+                                    @if (n.PrimaryResult < 0 && n.Result >= 0) { <br /><span class="ho-note">buffer in use</span> }
+                                </td>
+                            </tr>
+                        }
+                            <tr class="ho-total">
+                                <td class="ho-l">Total room-nights</td>
+                                <td>@ov.Nights.Sum(n => n.PrimaryAllocated)</td>
+                                <td>@ov.Nights.Sum(n => n.BufferAllocated)</td>
+                                <td>@ov.TotalAllocated</td>
+                                <td>@ov.Nights.Sum(n => n.Reserved)</td>
+                                <td>@ov.Nights.Sum(n => n.Confirmed)</td>
+                                <td>@ov.Nights.Sum(n => n.ForecastExtra)</td>
+                                <td></td>
+                                <td>@ov.TotalNeeded</td>
+                                <td style="@CommunityHub.Pages.Organizer.HotelOverviewModel.ResultStyle(shortTotal)">
+                                    @if (shortTotal < 0) { @CommunityHub.Pages.Organizer.HotelOverviewModel.ResultHtml(shortTotal) }
+                                    else { @CommunityHub.Pages.Organizer.HotelOverviewModel.ResultHtml(release) }</td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="ho-note">Needed = reserved + confirmed + forecast, counted in ROOMS (roommates share one). Cancelled reservations do not count.<br />
+                    <span class="ho-ok" style="font-weight:700;padding:0 6px;border-radius:4px;">Green OK</span> = everyone has a room.
+                    <span class="ho-warn" style="font-weight:700;padding:0 6px;border-radius:10px;border:1px solid;">release N</span> = we hold N rooms more than needed — reduce the allocation by N before the next deadline.
+                    <span class="ho-bad" style="font-weight:700;padding:0 6px;border-radius:4px;">N short</span> = we need N more rooms (ask the hotel, or use a priority-2 hotel).</p>
+                <button type="submit">Save forecast</button>
+            </form>
+        }
+        <details style="margin-top:12px;">
+            <summary>Add a forecast for another night</summary>
+            <form method="post" asp-page-handler="AddForecast" class="ho-row" style="margin-top:8px;">
+                <label>Night<br /><input type="date" name="night" required /></label>
+                <label>Extra rooms<br /><input type="number" name="extra" min="0" max="999" required /></label>
+                <label style="flex:1 1 200px;">Note<br /><input type="text" name="note" maxlength="500" style="width:100%;" /></label>
+                <button type="submit">Add</button>
+            </form>
+        </details>
+    </div>
+
+    @* §1386 — the guest grid: "a list like excel where all names + role + each of the days are", with filter + export. *@
+    <div class="card" id="guests">
+        <h2>Guest grid (@Model.Grid.Rows.Count of @Model.Grid.Total)</h2>
+        <form method="get" class="ho-row" style="margin-bottom:10px;">
+            <label>Answer<br />
+                <select name="Answer">
+                    <option value="">All</option>
+                    @foreach (var a in Enum.GetValues<HotelAnswer>()) { <option value="@a" selected="@(Model.Answer == a)">@HotelAnswerText.Of(a)</option> }
+                </select></label>
+            <label>Role<br />
+                <select name="Role">
+                    <option value="">All</option>
+                    @foreach (var r in Enum.GetValues<ParticipantRole>().Where(r => r is not (ParticipantRole.Sponsor or ParticipantRole.Attendee)))
+                    { <option value="@r" selected="@(Model.Role == r)">@r</option> }
+                </select></label>
+            <label>Hotel<br />
+                <select name="Hotel">
+                    <option value="">All</option>
+                    <option value="0" selected="@(Model.HotelFilter == 0)">No hotel yet</option>
+                    @foreach (var h in Model.Hotels) { <option value="@h.Id" selected="@(Model.HotelFilter == h.Id)">@h.Name</option> }
+                </select></label>
+            <label>State<br />
+                <select name="State">
+                    <option value="">All</option>
+                    @foreach (var s in Enum.GetValues<HotelConfirmationState>()) { <option value="@s" selected="@(Model.State == s)">@HotelReservationStateText.Of(s)</option> }
+                </select></label>
+            <label>Sleeping on<br />
+                <select name="Night">
+                    <option value="">Any night</option>
+                    @foreach (var n in Model.Grid.NightColumns) { <option value="@n.ToString("yyyy-MM-dd")" selected="@(Model.Night == n)">@n.ToString("ddd d MMM")</option> }
+                </select></label>
+            <label>Name / e-mail<br /><input type="search" name="Q" value="@Model.Q" style="width:160px;" /></label>
+            <label>Sort<br />
+                <select name="Sort">
+                    <option value="">Name</option>
+                    <option value="role" selected="@(Model.Sort == "role")">Role</option>
+                    <option value="answer" selected="@(Model.Sort == "answer")">Answer</option>
+                    <option value="hotel" selected="@(Model.Sort == "hotel")">Hotel</option>
+                    <option value="arrival" selected="@(Model.Sort == "arrival")">Arrival</option>
+                </select></label>
+            <button type="submit">Filter</button>
+            @if (Model.Filtered) { <a href="@M.GridUrl()">Clear</a> }
+            <a style="margin-left:auto;" href="@exportUrl">Export to Excel</a>
+        </form>
+        <div class="ho-scroll">
+            <table class="ho-tbl ho-grid">
+                <thead>
+                    <tr>
+                        <th class="ho-l">Name</th><th>Role</th><th>Answer</th><th>Hotel</th><th>State</th><th>Roommate / guests</th>
+                        @foreach (var n in Model.Grid.NightColumns) { <th title="@n.ToString("dddd d MMMM")">@n.ToString("ddd")<br />@n.ToString("d/M")</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var g in Model.Grid.Rows)
+                {
+                    <tr>
+                        <td class="ho-l"><a href="@Who(g.ParticipantId)">@g.FullName</a></td>
+                        <td>@g.Role</td>
+                        <td class="@(g.Answer == HotelAnswer.NotAnswered ? "ho-warn" : g.Answer == HotelAnswer.Cancelled ? "ho-bad" : "")">@HotelAnswerText.Of(g.Answer)</td>
+                        <td>@(g.Answer == HotelAnswer.Room ? (g.HotelName ?? "— none —") : g.HotelName)</td>
+                        <td>@(g.Answer == HotelAnswer.Room && g.State is HotelConfirmationState gs ? HotelReservationStateText.Of(gs) : "")</td>
+                        <td style="white-space:nowrap;">@(g.RoommateName ?? "")@(g.GuestsInRoom is int gir && gir > 1 && g.RoommateName is null ? $"{gir} guests" : "")</td>
+                        @foreach (var n in Model.Grid.NightColumns)
+                        {
+                            <td class="ho-n">@if (g.Nights.Contains(n)) { <span class="ho-dot @(g.State == HotelConfirmationState.Confirmed ? "conf" : "")" title="@g.FullName sleeps here @n.ToString("d MMM")"></span> }</td>
+                        }
+                    </tr>
+                }
+                    <tr class="ho-total">
+                        <td class="ho-l">People per night</td><td></td><td></td><td></td><td></td><td></td>
+                        @foreach (var n in Model.Grid.NightColumns) { <td>@Model.Grid.Rows.Count(g => g.Nights.Contains(n))</td> }
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="ho-note"><span class="ho-dot"></span> reserved &nbsp; <span class="ho-dot conf"></span> confirmed by the hotel. The grid counts PEOPLE; the per-night table counts ROOMS.</p>
+    </div>
+
+    <div class="card" id="problems">
+        <h2>Problems to fix (@Model.Problems.Count)</h2>
+        @if (Model.Problems.Count == 0)
+        {
+            <p class="ho-note">Nothing to fix.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var p in Model.Problems)
+                {
+                    <li>@if (p.ParticipantId is int ppid) { <a href="@Who(ppid)">@p.Name</a> } else { @p.Name } — @p.Problem</li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="card" id="arrivals">
+        <details>
+            <summary><strong>Arrivals and departures per day</strong></summary>
+            <div class="ho-scroll" style="margin-top:8px;">
+                <table class="ho-tbl">
+                    <thead><tr><th class="ho-l">Day</th><th>Arrive</th><th style="text-align:left;">Who arrives</th><th>Leave</th><th style="text-align:left;">Who leaves</th></tr></thead>
+                    <tbody>
+                    @foreach (var d in Model.Arrivals)
+                    {
+                        <tr>
+                            <td class="ho-l">@d.Day.ToString("ddd d MMM")</td>
+                            <td>@d.Arrivals.Count</td>
+                            <td style="text-align:left;white-space:normal;">@foreach (var a in d.Arrivals) { <a href="@Who(a.ParticipantId)">@a.FullName</a><text>; </text> }</td>
+                            <td>@d.Departures.Count</td>
+                            <td style="text-align:left;white-space:normal;">@foreach (var a in d.Departures) { <a href="@Who(a.ParticipantId)">@a.FullName</a><text>; </text> }</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    </div>
+
+    <div class="card" id="hotels">
+        <h2>Hotels: spreadsheet, import, what the hotel has</h2>
+        <div class="ho-scroll">
+            <table class="ho-tbl">
+                <thead><tr><th class="ho-l">Hotel</th><th>Prio</th><th>Reference</th><th>Room-nights allocated</th><th>Room-nights booked</th><th>Guests</th><th>Confirmed</th><th>Cancelled</th><th>Sent to hotel</th><th>Spreadsheet</th></tr></thead>
+                <tbody>
+                @foreach (var h in ov.Hotels)
+                {
+                    var hotel = Model.Hotels.FirstOrDefault(x => x.Id == h.HotelId);
+                    var since = Model.SinceSent.TryGetValue(h.HotelId, out var sinceList) ? sinceList : new List<HotelChangeLogEntry>();
+                    <tr>
+                        <td class="ho-l"><a href="@M.GridUrl(hotel: h.HotelId)">@h.Name</a></td>
+                        <td>@h.Priority</td>
+                        <td style="text-align:left;">@(h.AgreementNumber is null ? "" : "Agreement " + h.AgreementNumber)@(h.BookingReference is null ? "" : (h.AgreementNumber is null ? "" : " · ") + h.BookingReference)</td>
+                        <td>@h.RoomNightsAllocated</td>
+                        <td>@h.RoomNightsBooked</td>
+                        <td><a href="@M.GridUrl(hotel: h.HotelId, answer: HotelAnswer.Room)">@h.Guests</a></td>
+                        <td>@h.Confirmed</td>
+                        <td>@h.Cancelled</td>
+                        <td style="text-align:left;white-space:normal;min-width:220px;">
+                            @(hotel?.SentToHotelAt is DateTimeOffset at ? $"Last sent {at.UtcDateTime:d MMM HH:mm} UTC" : "Never marked as sent")
+                            @if (since.Count > 0)
+                            {
+                                <details><summary class="ho-warn" style="display:inline-block;padding:0 6px;border-radius:4px;">@since.Count change(s) since</summary>
+                                    <ul style="margin:4px 0;">@foreach (var e in since.Take(40)) { <li class="ho-note">@e.At.UtcDateTime.ToString("d MMM HH:mm") @e.ParticipantName — @e.Summary</li> }</ul>
+                                </details>
+                            }
+                            <form method="post" asp-page-handler="MarkSent" style="margin:4px 0 0;"
+                                  onsubmit="return confirm('Mark the current spreadsheet as sent to @h.Name? Only do this after you have e-mailed it.');">
+                                <input type="hidden" name="hotelId" value="@h.HotelId" />
+                                <button type="submit" class="secondary" style="padding:3px 8px;font-size:12px;">Mark as sent to the hotel</button>
+                            </form>
+                        </td>
+                        <td><a asp-page-handler="Download" asp-route-hotelId="@h.HotelId">Download .xls</a></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        <p class="ho-note">The spreadsheet is Excel 97-2003 (.xls): everyone placed at that hotel who needs a room, plus every cancelled
+            reservation held there. A shared room is one room. Organizers forward it to the hotel; CEH mails the updated file to the hotel-ops recipients when something changes.</p>
+
+        <h3 style="margin-top:16px;">Import the hotel's returned spreadsheet</h3>
+        <form method="post" asp-page-handler="ImportPreview" enctype="multipart/form-data" class="ho-row">
+            <label>Hotel<br />
+                <select name="hotelId" required>
+                    @foreach (var h in ov.Hotels) { <option value="@h.HotelId">@h.Name</option> }
+                </select></label>
+            <label style="flex:1 1 220px;">File (.xls or .xlsx)<br /><input type="file" name="file" accept=".xls,.xlsx" required /></label>
+            <button type="submit">Preview import</button>
+        </form>
+        <p class="ho-note">Reads "Confirmation Number" and "Cancellation Number" per guest (matched by e-mail, then by name).
+            You see every row before anything is saved. A blank cell never removes a number CEH already has.</p>
+
+        @if (Model.ImportPreview is not null && Model.ImportPreview.Count > 0)
+        {
+            <form method="post" asp-page-handler="ImportApply" style="margin-top:10px;">
+                <input type="hidden" name="hotelId" value="@Model.ImportHotelId" />
+                <div class="ho-scroll">
+                    <table class="ho-tbl">
+                        <thead><tr><th>Apply</th><th class="ho-l">Row · sheet name</th><th>Matched</th><th>Confirmation</th><th>Cancellation</th><th>State</th></tr></thead>
+                        <tbody>
+                        @foreach (var l in Model.ImportPreview)
+                        {
+                            <tr style="@(l.Matched ? "" : "background:#fef2f2;")">
+                                <td>
+                                    @if (l.Matched)
+                                    {
+                                        <input type="hidden" name="pids" value="@l.ParticipantId" />
+                                        <input type="hidden" name="confs" value="@l.NewConfirmation" />
+                                        <input type="hidden" name="cancels" value="@l.NewCancellation" />
+                                        <input type="checkbox" name="selected" value="@l.ParticipantId" @(l.HasChange ? "checked" : "")
+                                               aria-label="Apply row @l.RowNumber" />
+                                    }
+                                </td>
+                                <td class="ho-l">@l.RowNumber · @l.SheetName<br /><span class="ho-note">@l.SheetEmail</span></td>
+                                <td>@(l.Matched ? $"{l.MatchedName} (by {l.MatchedBy})" : l.MatchedBy)</td>
+                                <td>@(l.CurrentConfirmation ?? "—")@(l.NewConfirmation != l.CurrentConfirmation ? $" → {l.NewConfirmation}" : "")</td>
+                                <td>@(l.CurrentCancellation ?? "—")@(l.NewCancellation != l.CurrentCancellation ? $" → {l.NewCancellation}" : "")</td>
+                                <td>@(l.CurrentState is HotelConfirmationState cs ? HotelReservationStateText.Of(cs) : "")@(l.NewState is HotelConfirmationState ns && ns != l.CurrentState ? " → " + HotelReservationStateText.Of(ns) : "")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="ho-note">@Model.ImportPreview.Count(l => l.HasChange) row(s) would change · @Model.ImportPreview.Count(l => !l.Matched) not matched.</p>
+                <button type="submit">Apply ticked rows</button>
+            </form>
+        }
+    </div>
+
+    @* §1386 — each hotel's rooms per night + release deadlines, edited here (moved from Allocations). *@
+    <div class="card" id="nights-edit">
+        <h2>Rooms per night &amp; deadlines, per hotel</h2>
+        <p class="ho-note">Change a hotel's allocation when you reduce it or get more rooms. Every change goes in the change log and to the hotel-ops mailbox.</p>
+    </div>
+    @if (!Model.Board.IsEmpty)
+    {
+        <partial name="_HotelNightsEditor" model="Model.Board" />
+    }
+
+    <div class="card" id="log">
+        <details>
+            <summary><strong>Change log (@Model.Log.Count)</strong></summary>
+            <p class="ho-note">Every hotel change — participants, organizers, imports, allocations. "Mailed" = carried by a hotel-ops change mail.</p>
+            <div class="ho-scroll">
+                <table class="ho-tbl">
+                    <thead><tr><th class="ho-l">When (UTC)</th><th>Hotel</th><th>Guest</th><th>Who</th><th style="text-align:left;">Change</th><th>Mailed</th></tr></thead>
+                    <tbody>
+                    @foreach (var e in Model.Log)
+                    {
+                        <tr>
+                            <td class="ho-l">@e.At.UtcDateTime.ToString("d MMM HH:mm")</td>
+                            <td>@Model.HotelName(e.HotelId)</td>
+                            <td>@if (e.ParticipantId is int lp) { <a href="@Who(lp)">@e.ParticipantName</a> }</td>
+                            <td>@e.Source<br /><span class="ho-note">@e.Actor</span></td>
+                            <td style="text-align:left;white-space:normal;">@e.Summary</td>
+                            <td>@(e.NotifiedAt is null ? "pending" : e.NotifiedAt == e.At ? "not needed" : (e.AffectsGuestList ? "yes, with file" : "yes"))</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    </div>
+
+    <p><a asp-page="/Organizer/Index">&larr; Organizer area</a></p>
+}

@@ -175,6 +175,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // §326bs: per-night contracted supply + the contract's release deadlines.
     public DbSet<HotelAllotment> HotelAllotments => Set<HotelAllotment>();
     public DbSet<HotelCutoff> HotelCutoffs => Set<HotelCutoff>();
+    public DbSet<HotelChangeLogEntry> HotelChangeLog => Set<HotelChangeLogEntry>();   // §1386
+    public DbSet<TravelReviewLogEntry> TravelReviewLog => Set<TravelReviewLogEntry>();   // §1387 dialog log
+    public DbSet<HotelForecastExtra> HotelForecastExtras => Set<HotelForecastExtra>();   // §1386
     public DbSet<DinnerSignup> DinnerSignups => Set<DinnerSignup>();
     public DbSet<DietaryRequirement> DietaryRequirements => Set<DietaryRequirement>();
     public DbSet<VolunteerAvailability> VolunteerAvailabilities => Set<VolunteerAvailability>();
@@ -271,6 +274,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>§798.4 — the agreed purchases (top-ups) that make up a prepaid pool.</summary>
     public DbSet<CouponPrepaidPurchase> CouponPrepaidPurchases => Set<CouponPrepaidPurchase>();
 
+    /// <summary>§1382 — requests from the public coupon sign-up form (/coupon-signup).</summary>
+    public DbSet<CouponSignupRequest> CouponSignupRequests => Set<CouponSignupRequest>();
+
     // --- SoMe graphics & SharePoint asset store (REQUIREMENTS §18) -----------
     public DbSet<GraphicAsset> GraphicAssets => Set<GraphicAsset>();
     public DbSet<GraphicsAssetLocation> GraphicsAssetLocations => Set<GraphicsAssetLocation>();
@@ -290,6 +296,13 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
     /// <summary>Anonymous (no-login) Party RSVPs.</summary>
     public DbSet<PartyRsvp> PartyRsvps => Set<PartyRsvp>();
+
+    /// <summary>§1374 — the visa form, one row per participant.</summary>
+    public DbSet<VisaApplication> VisaApplications => Set<VisaApplication>();
+    /// <summary>§1383 — the PDF an organizer hands back to each visa applicant.</summary>
+    public DbSet<VisaLetter> VisaLetters => Set<VisaLetter>();
+    /// <summary>§1379.8 — linked WordPress posts CEH re-renders and updates in place ("Refresh weekly").</summary>
+    public DbSet<WordPressRefreshPost> WordPressRefreshPosts => Set<WordPressRefreshPost>();
 
     /// <summary>Per-participant Code of Conduct + Privacy acceptance (§119, who/when).</summary>
     public DbSet<ParticipantPolicyAcceptance> ParticipantPolicyAcceptances => Set<ParticipantPolicyAcceptance>();
@@ -843,6 +856,68 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.CustomerNumber, x.ContactNumber }).IsUnique();
         });
 
+        // --- VisaApplication (§1374) -----------------------------------------
+        b.Entity<VisaApplication>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // Cascade from the participant only; EventId is a plain column so SQL Server sees ONE
+            // cascade path (Event → Participant → VisaApplication).
+            e.HasOne(x => x.Participant)
+                .WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.ParticipantId).IsUnique();
+            e.HasIndex(x => x.EventId);
+            foreach (var name in new[]
+            {
+                nameof(VisaApplication.FirstNames), nameof(VisaApplication.LastName), nameof(VisaApplication.HomeStreet),
+                nameof(VisaApplication.HomeCity), nameof(VisaApplication.CompanyName), nameof(VisaApplication.CompanyStreet),
+                nameof(VisaApplication.CompanyCity), nameof(VisaApplication.CompanyWebsite), nameof(VisaApplication.DepartmentAndRole),
+                nameof(VisaApplication.ContactOrigin), nameof(VisaApplication.FinancialScope), nameof(VisaApplication.Accommodation),
+                nameof(VisaApplication.Phone), nameof(VisaApplication.CompanyPhone), nameof(VisaApplication.ApplicationId),
+                nameof(VisaApplication.Gender), nameof(VisaApplication.Entries), nameof(VisaApplication.TravelPaidBy),
+                nameof(VisaApplication.StayPaidBy), nameof(VisaApplication.RelationshipDuration),
+            })
+                e.Property(name).HasMaxLength(VisaFormOptions.ShortTextMax);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.CompanyEmail).HasMaxLength(320);
+            e.Property(x => x.Nationality).HasMaxLength(8);
+            e.Property(x => x.HomeCountry).HasMaxLength(8);
+            e.Property(x => x.CompanyCountry).HasMaxLength(8);
+            e.Property(x => x.HomePostalCode).HasMaxLength(20);
+            e.Property(x => x.CompanyPostalCode).HasMaxLength(20);
+            e.Property(x => x.CompanyActivity).HasMaxLength(VisaFormOptions.LongTextMax);
+            e.Property(x => x.Purpose).HasMaxLength(VisaFormOptions.LongTextMax);
+            e.Property(x => x.SpecialCircumstances).HasMaxLength(VisaFormOptions.LongTextMax);
+        });
+
+        // --- VisaLetter (§1383) ----------------------------------------------
+        // The PDF handed back to one applicant. Same cascade shape as VisaApplication.
+        b.Entity<VisaLetter>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne(x => x.Participant)
+                .WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.ParticipantId).IsUnique();
+            e.HasIndex(x => x.EventId);
+            e.Property(x => x.FileName).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Content).IsRequired();
+        });
+
+        // --- WordPressRefreshPost (§1379.8) ----------------------------------
+        // One row per linked WordPress post per edition.
+        b.Entity<WordPressRefreshPost>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.EventId, x.WordPressPostId }).IsUnique();
+            e.Property(x => x.Label).HasMaxLength(300).IsRequired();
+            e.Property(x => x.BodyTemplate).IsRequired();
+            e.Property(x => x.LastRefreshResult).HasMaxLength(1000);
+            e.Property(x => x.LastPushedHash).HasMaxLength(64);
+        });
+
         // --- PartyRsvp (anonymous party sign-up) ----------------------------
         b.Entity<PartyRsvp>(e =>
         {
@@ -1192,6 +1267,31 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // --- §1382 public coupon sign-up requests ---------------------------
+        // 🔒 No foreign keys on purpose: the request is the RECORD of what a customer asked for, and must survive an
+        // organizer deleting or renaming the coupon it produced. EventId / CouponInvoicingSettingId are plain columns.
+        b.Entity<CouponSignupRequest>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrderType).HasConversion<int>();
+            e.Property(x => x.TicketType).HasConversion<int>();
+            e.Property(x => x.VatNumber).IsRequired().HasMaxLength(32);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Address).IsRequired().HasMaxLength(200);
+            e.Property(x => x.PostalCode).IsRequired().HasMaxLength(20);
+            e.Property(x => x.City).IsRequired().HasMaxLength(100);
+            e.Property(x => x.CountryIso2).IsRequired().HasMaxLength(2);
+            e.Property(x => x.RequesterName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.RequesterEmail).IsRequired().HasMaxLength(320);
+            e.Property(x => x.RequesterMobile).IsRequired().HasMaxLength(40);
+            e.Property(x => x.InvoiceEmail).HasMaxLength(320);
+            e.Property(x => x.EanNumber).HasMaxLength(13);
+            e.Property(x => x.PurchaseOrder).HasMaxLength(200);
+            e.Property(x => x.ErpError).HasMaxLength(500);
+            e.Property(x => x.RequestIp).HasMaxLength(64);
+            e.HasIndex(x => new { x.EventId, x.CreatedAt });
+        });
+
         // --- Order (order-level Zoho Backstage mirror, REQUIREMENTS §125) ----
         b.Entity<Order>(e =>
         {
@@ -1324,6 +1424,14 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.ContactEmail).HasMaxLength(320);
             e.Property(x => x.Notes).HasMaxLength(1000);
             e.Property(x => x.ConfirmationNumber).HasMaxLength(64);
+            // §1386 — existing rows become prio 1 (the only hotel each edition had so far).
+            e.Property(x => x.Priority).HasDefaultValue(1);
+            e.Property(x => x.AgreementNumber).HasMaxLength(64);
+            e.Property(x => x.AgreementLabel).HasMaxLength(100);
+            e.Property(x => x.BookingReference).HasMaxLength(100);
+            e.Property(x => x.NotifyEmails).HasMaxLength(1000);
+            e.Property(x => x.SentToHotelByEmail).HasMaxLength(320);
+            e.Ignore(x => x.SheetTitle);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -1331,6 +1439,49 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             // Organizer hotel list + "is this name already used" lookup.
             e.HasIndex(x => new { x.EventId, x.Name });
+        });
+
+        // --- TravelReviewLogEntry (§1387 dialog log) ---------------------------
+        b.Entity<TravelReviewLogEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Actor).HasMaxLength(320);
+            e.Property(x => x.Kind).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Text).IsRequired().HasMaxLength(4000);
+            // No FK to the claim / participant on purpose: the log outlives a deleted row.
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.TravelReimbursementId, x.At });
+        });
+
+        // --- HotelChangeLogEntry / HotelForecastExtra (§1386) ---------------
+        b.Entity<HotelChangeLogEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.ParticipantName).HasMaxLength(200);
+            e.Property(x => x.Actor).HasMaxLength(320);
+            e.Property(x => x.Kind).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Summary).IsRequired().HasMaxLength(1000);
+            e.Property(x => x.Source).HasConversion<int>();
+            // No FK to Hotel / Participant on purpose: the log must outlive a deleted hotel or person.
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.At });
+            // The outbox scan: unmailed entries per edition.
+            e.HasIndex(x => new { x.EventId, x.NotifiedAt });
+        });
+
+        b.Entity<HotelForecastExtra>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.Night }).IsUnique();
         });
 
         // --- HotelAllotment / HotelCutoff (§326bs) --------------------------
@@ -1362,6 +1513,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Label).IsRequired().HasMaxLength(200);
             e.Property(x => x.Notes).HasMaxLength(1000);
+            e.Property(x => x.WarnDaysBefore).HasDefaultValue(14);   // §1386
 
             // The Event FK is NO ACTION on purpose. Event already cascades to Hotel, and
             // Hotel cascades to here — a second direct Event→here cascade would be a
@@ -1906,6 +2058,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.State).HasConversion<int>();
             e.Property(x => x.CreatedByEmail).HasMaxLength(320);
             e.Property(x => x.DryRunAcknowledgedByEmail).HasMaxLength(320);
+            e.Property(x => x.PlanStoppedByEmail).HasMaxLength(320);   // §1388
+            e.Property(x => x.PlanSetByEmail).HasMaxLength(320);       // §1388
+            e.Ignore(x => x.PlanActive);
             e.HasIndex(x => new { x.EventId, x.State });
             e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -2224,6 +2379,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.OriginCity).HasMaxLength(200);
             e.Property(x => x.Explanation).HasMaxLength(2000);
             e.Property(x => x.PaidNotes).HasMaxLength(500);
+            // §1387 — document review.
+            e.Property(x => x.ReviewState).HasConversion<int>();
+            e.Property(x => x.AiVerdict).HasConversion<int>();
+            e.Property(x => x.AiSummary).HasMaxLength(1000);
+            e.Property(x => x.AiFindingsJson).HasMaxLength(8000);
+            e.Property(x => x.AiInputHash).HasMaxLength(64);
+            e.Property(x => x.AiNotifiedHash).HasMaxLength(64);
+            e.Property(x => x.ReviewNote).HasMaxLength(2000);
+            e.Property(x => x.ReviewedByEmail).HasMaxLength(320);
             e.Property(x => x.ClaimAmountEur).HasColumnType("decimal(10,2)");
 
             e.HasOne(x => x.Event).WithMany()
@@ -2245,6 +2409,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasKey(x => x.Id);
             e.Property(x => x.FileName).HasMaxLength(300);
             e.Property(x => x.ContentType).HasMaxLength(150);
+            e.Property(x => x.Kind).HasConversion<int>();   // §1387
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)

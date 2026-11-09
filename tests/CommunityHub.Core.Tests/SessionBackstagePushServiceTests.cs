@@ -1284,6 +1284,43 @@ public sealed class SessionBackstagePushServiceTests
     }
 
     [Fact]
+    public async Task Speaker_push_takes_the_name_from_the_participant_when_the_profile_has_none()
+    {
+        // 🔴 §1375 (PROD 2026-10-29): two speakers added directly in the hub — not from Sessionize —
+        // had a profile with no first/last name, and Zoho refused the create with *"Please enter a
+        // first name for your profile"*. The name is on the participant; it must reach Zoho AND the
+        // profile, so the two hold the same value.
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db, SessionSyncDirection.SessionizeToCeh, SessionSyncDirection.CehToZoho);
+        await SeedSpeakerSyncFeatureAsync(db, enabled: true);
+
+        var id = await SeedSpeakerAsync(db, "noname@x.dk", null, selectedForPublish: true);
+        var prof = db.SpeakerProfiles.Single(p => p.ParticipantId == id);
+        prof.FirstName = null; prof.LastName = null;
+        db.Participants.Single(p => p.Id == id).FullName = "Cecilie Bonde Christiansen";
+        await db.SaveChangesAsync();
+
+        var (zoho, handler) = NewZoho((_, _) => Json(HttpStatusCode.OK, "{\"id\":\"bs-ok\"}"));
+        var r = await NewSpeakerSvc(db, zoho, new FeatureGateService(db)).RunAsync(EventId);
+
+        Assert.Equal(1, r.Created);
+        var body = handler.Calls.Single(c => c.Method == HttpMethod.Post).Body;
+        Assert.Contains("\"name\":\"Cecilie\"", body);
+        Assert.Contains("\"last_name\":\"Bonde Christiansen\"", body);
+        Assert.Equal("Cecilie", prof.FirstName);
+        Assert.Equal("Bonde Christiansen", prof.LastName);
+    }
+
+    [Fact]
+    public void Speaker_name_fill_never_overwrites_a_name_already_on_the_profile()
+    {
+        var p = new SpeakerProfile { FirstName = "Sam", LastName = "Speaker" };
+        SpeakerBackstagePushService.FillNameFromFullName(p, "Someone Else");
+        Assert.Equal("Sam", p.FirstName);
+        Assert.Equal("Speaker", p.LastName);
+    }
+
+    [Fact]
     public async Task Speaker_push_gates_on_approval_only_and_the_ring_is_irrelevant()
     {
         // 🔒 §569 (operator 2026-07-28, verbatim): "yes, approved speaker syncs regardless of ring

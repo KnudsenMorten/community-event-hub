@@ -49,6 +49,19 @@ public sealed class OpenAiOptions
     public double Temperature { get; set; } = 0.2;
 
     /// <summary>
+    /// True when <see cref="Deployment"/> is a reasoning model (the gpt-5 family): requests then send
+    /// <c>max_completion_tokens</c> + <c>reasoning_effort</c> and no <c>temperature</c> — see
+    /// <see cref="OpenAiChatContent"/>. App setting <c>OpenAI__ReasoningModel</c>. False keeps the gpt-4 form.
+    /// </summary>
+    public bool ReasoningModel { get; set; }
+
+    /// <summary>Reasoning effort for a reasoning model (<c>none</c>/<c>minimal</c>/<c>low</c>/<c>medium</c>/<c>high</c>). Low: these are short, factual tasks.</summary>
+    public string? ReasoningEffort { get; set; } = "low";
+
+    /// <summary>Tokens added to each caller's answer limit for a reasoning model's hidden reasoning.</summary>
+    public int ReasoningTokenHeadroom { get; set; } = 4000;
+
+    /// <summary>
     /// The gate: the assistant is live only when enabled AND fully configured. Any blank
     /// endpoint/deployment/key ⇒ no-op (no network, no secret needed).
     /// </summary>

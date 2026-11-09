@@ -126,6 +126,16 @@ public class SoMeSettings
     public int ExceptionPostsPerDay { get; set; } = 3;
 
     /// <summary>
+    /// §1368 — at most this many SPONSOR posts (Type 4) on one day. Null = no limit of its own.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-10-26: <i>"so they dont popup close to each other"</i>. Measured that day, Egiss
+    /// and 2Pint were planned on the same two days. A quality rule like the round spacing: honoured
+    /// when a seat exists, otherwise the post is placed and the conflict is mailed.
+    /// </remarks>
+    public int? MaxSponsorPostsPerDay { get; set; }
+
+    /// <summary>
     /// §851 — the earliest date a SPEAKER-derived post may be scheduled: Type 1 (speaker tracks) and
     /// Type 2 (sessions). Null = no gate.
     /// </summary>

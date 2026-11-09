@@ -118,6 +118,39 @@ public sealed class SoMeSchedulePlannerTests
         Assert.NotEqual(new DateOnly(2026, 8, 6), DateOnly.FromDateTime(local.Date));
     }
 
+    /// <summary>
+    /// 🔴 §1379c — an ad-hoc post (no subject) takes its seat like any other. Operator 2026-11-07: a
+    /// planned session post landed on 24 Nov next to an ad-hoc post.
+    /// </summary>
+    [Fact]
+    public void A_day_filled_by_ad_hoc_posts_is_not_filled_further()
+    {
+        static DateOnly DanishDay(DateTimeOffset utc) =>
+            DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utc, SoMeSchedulePlanner.DanishTime).Date);
+
+        var subjects = new[] { Sponsor("co-NEW", 1) };
+
+        // Where it goes on an empty calendar…
+        var baseline = Assert.Single(SoMeSchedulePlanner.Plan(subjects, None, From, EventStart));
+        var day = DanishDay(baseline.ScheduledAtUtc);
+
+        // …and passing no ad-hoc seats changes nothing (keyed behaviour is untouched).
+        var same = Assert.Single(SoMeSchedulePlanner.Plan(
+            subjects, None, From, EventStart, unkeyedOccupied: Array.Empty<DateTimeOffset>()));
+        Assert.Equal(baseline.ScheduledAtUtc, same.ScheduledAtUtc);
+
+        // Two ad-hoc posts fill that day at the normal rhythm of 2 — the planned post must move.
+        var adHoc = new[]
+        {
+            SoMeSchedulePlanner.ToUtc(day, new TimeOnly(8, 5)),
+            SoMeSchedulePlanner.ToUtc(day, new TimeOnly(16, 5)),
+        };
+        var moved = Assert.Single(SoMeSchedulePlanner.Plan(
+            subjects, None, From, EventStart, unkeyedOccupied: adHoc));
+
+        Assert.NotEqual(day, DanishDay(moved.ScheduledAtUtc));
+    }
+
     [Fact]
     public void Two_posts_never_share_a_slot_and_a_day_holds_at_most_two()
     {

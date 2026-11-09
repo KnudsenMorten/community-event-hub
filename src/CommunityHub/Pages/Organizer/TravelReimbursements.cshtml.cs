@@ -29,7 +29,9 @@ public class TravelReimbursementsModel : PageModel
         ILogger<TravelReimbursementsModel> logger,
         IEmailContextAccessor? context = null,
         // §6.10 / §768.10 D5 — the reopen. Optional to match this page's existing constructions.
-        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null)
+        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null,
+        // §1387 — AI check + Accept / Send back. Optional for the same reason.
+        CommunityHub.Core.Travel.TravelReviewService? review = null)
     {
         _db = db;
         _participant = participant;
@@ -40,9 +42,17 @@ public class TravelReimbursementsModel : PageModel
         _logger = logger;
         _context = context;
         _claimLock = claimLock;
+        _review = review;
     }
 
     private readonly CommunityHub.Core.Entitlements.TravelClaimLock? _claimLock;
+    private readonly CommunityHub.Core.Travel.TravelReviewService? _review;   // §1387
+
+    /// <summary>§1387 — the uploaded files per participant (no bytes), for the list + download links.</summary>
+    public Dictionary<int, List<FileRow>> FilesByParticipant { get; private set; } = new();
+    public record FileRow(int Id, string FileName, long SizeBytes, TravelDocumentKind Kind);
+    public bool CanReview => _review is not null;
+    public int CountNeedsReview { get; private set; }
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -61,7 +71,38 @@ public class TravelReimbursementsModel : PageModel
         bool RequestReimbursement, string? OriginCity,
         decimal? ClaimAmountEur, string? Explanation,
         bool IsPaid, DateTimeOffset? PaidAt, string? PaidNotes,
-        DateTimeOffset? UpdatedAt);
+        DateTimeOffset? UpdatedAt,
+        DateTimeOffset? SubmittedAt = null, int ReopenCount = 0,
+        // §1387 — the review.
+        TravelReviewState ReviewState = TravelReviewState.None, TravelAiVerdict AiVerdict = TravelAiVerdict.NotChecked,
+        string? AiSummary = null, IReadOnlyList<TravelCheckItem>? Checks = null, bool? HasCompany = null,
+        DateTimeOffset? AiCheckedAt = null, string? ReviewNote = null, DateTimeOffset? ErpSentAt = null,
+        int SentBackCount = 0);
+
+    /// <summary>§1387 — "Needs your decision": submitted claims under review, newest response first.</summary>
+    public List<Row> Queue { get; private set; } = new();
+
+    /// <summary>§1387 — each claim's dialog log, newest step first (operator: "can we also get log of dialog").</summary>
+    public Dictionary<int, List<TravelReviewLogEntry>> Dialog { get; private set; } = new();
+
+    /// <summary>A time as the organizers read it (Copenhagen), e.g. "8 Nov 19:05".</summary>
+    public static string Local(DateTimeOffset at)
+    {
+        TimeZoneInfo tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen"); }
+        catch (TimeZoneNotFoundException) { tz = TimeZoneInfo.FindSystemTimeZoneById("Romance Standard Time"); }
+        return TimeZoneInfo.ConvertTime(at, tz).ToString("d MMM HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>A response is "new" for a day after the speaker submitted it.</summary>
+    public bool IsNew(Row r) => r.SubmittedAt is { } s && _clock.GetUtcNow() - s < TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// True when the Reopen button may be offered on a row: the claim is submitted (frozen) and this
+    /// host can actually reopen. 🔒 The handler existed since §768.10 D5 but no button ever called it
+    /// (found 2026-10-22: a speaker locked out with a missing invoice) — so the view asks here.
+    /// </summary>
+    public bool CanReopen(Row r) => r.SubmittedAt is not null && _claimLock is not null;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -86,7 +127,9 @@ public class TravelReimbursementsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
+        // A write, so the same gate as MarkPaid / MarkUnpaid: an acting-as or secretary session must
+        // not reopen a claim (and the audit row would name the wrong person).
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var row = await _db.TravelReimbursements
             .AsNoTracking()
@@ -104,6 +147,8 @@ public class TravelReimbursementsModel : PageModel
         else if (await _claimLock.ReopenAsync(me.EventId, row.ParticipantId, me.Email, ct))
         {
             Message = $"Claim #{id} is open again — the speaker can add files and submit it once more.";
+            if (_review is not null)
+                await _review.LogAsync(me.EventId, id, TravelReviewLogKinds.Reopened, "Reopened the claim (no mail to the speaker).", me.Email, ct);
         }
         else
         {
@@ -128,6 +173,9 @@ public class TravelReimbursementsModel : PageModel
             row.PaidAt = _clock.GetUtcNow();
             row.PaidNotes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
             await _db.SaveChangesAsync(ct);
+            if (_review is not null)
+                await _review.LogAsync(row, TravelReviewLogKinds.Paid,
+                    "Marked as paid" + (row.PaidNotes is null ? "." : $": {row.PaidNotes}"), me.Email, ct);
 
             // Notify the speaker that their reimbursement was paid out.
             var p = await _db.Participants
@@ -189,6 +237,152 @@ public class TravelReimbursementsModel : PageModel
         return Page();
     }
 
+    // ---- §1387 — document review ---------------------------------------------------------------
+
+    /// <summary>Download one uploaded file (organizers only; never a speaker's own route).</summary>
+    public async Task<IActionResult> OnGetFileAsync(int fileId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!me.Role.HasOrganizerAccess()) return Forbid();
+        var f = await _db.TravelReceipts.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == fileId && r.EventId == me.EventId, ct);
+        if (f is null) return NotFound();
+        return File(f.Content, string.IsNullOrWhiteSpace(f.ContentType) ? "application/octet-stream" : f.ContentType, f.FileName);
+    }
+
+    /// <summary>Run the AI check on one claim. Sends nothing.</summary>
+    public async Task<IActionResult> OnPostValidateAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        if (_review is null) { Message = "The AI check is not available on this host."; }
+        else
+        {
+            var v = await _review.ValidateAsync(me.EventId, id, ct);
+            Message = v is null ? $"Claim #{id} has no reimbursement request to check."
+                : $"Claim #{id}: {Verdict(v.Verdict)} — {v.Summary}";
+        }
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>Run the AI check on every submitted, not-yet-accepted claim. Sends nothing.</summary>
+    public async Task<IActionResult> OnPostValidateAllAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        Message = _review is null
+            ? "The AI check is not available on this host."
+            : $"Checked {await _review.ValidateAllSubmittedAsync(me.EventId, ct)} submitted claim(s). Nobody was e-mailed.";
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>Accept the documents: the claim goes to the finance inbox (once).</summary>
+    public async Task<IActionResult> OnPostAcceptAsync(int id, string? note, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        Message = _review is null ? "Review is not available on this host."
+            : (await _review.AcceptAsync(me.EventId, id, me.Email, note, ct)).Message;
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>Send back to the speaker: the claim re-opens and the speaker is e-mailed the note + missing items.</summary>
+    public async Task<IActionResult> OnPostSendBackAsync(int id, string? note, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        Message = _review is null ? "Review is not available on this host."
+            : (await _review.SendBackAsync(me.EventId, id, me.Email, note, ct)).Message;
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    // ---- previews (operator 2026-11-08: "maybe show mail before send") -------------------------
+
+    /// <summary>The mail being previewed, if any; "sendback" or "accept".</summary>
+    public CommunityHub.Core.Travel.TravelMailPreview? Preview { get; private set; }
+    public string? PreviewKind { get; private set; }
+    public int PreviewClaimId { get; private set; }
+    public string? PreviewNote { get; private set; }
+    public string? PreviewName { get; private set; }
+
+    /// <summary>Show the exact send-back mail; nothing is sent and the claim is unchanged.</summary>
+    public async Task<IActionResult> OnPostPreviewSendBackAsync(int id, string? note, CancellationToken ct)
+        => await PreviewAsync(id, note, "sendback", ct);
+
+    /// <summary>Show the exact finance mail Accept would send; nothing is sent and the claim is unchanged.</summary>
+    public async Task<IActionResult> OnPostPreviewAcceptAsync(int id, string? note, CancellationToken ct)
+        => await PreviewAsync(id, note, "accept", ct);
+
+    private async Task<IActionResult> PreviewAsync(int id, string? note, string kind, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        if (_review is null) Message = "Review is not available on this host.";
+        else
+        {
+            Preview = kind == "accept"
+                ? await _review.PreviewAcceptAsync(me.EventId, id, note, me.Email, ct)
+                : await _review.PreviewSendBackAsync(me.EventId, id, note, ct);
+            if (Preview is null) Message = $"Claim #{id} was not found.";
+            PreviewKind = kind;
+            PreviewClaimId = id;
+            PreviewNote = note;
+        }
+        await LoadAsync(me.EventId, ct);
+        PreviewName = Rows.FirstOrDefault(r => r.Id == id)?.Name;
+        return Page();
+    }
+
+    /// <summary>Accept one checklist line (missing or in question) — operator 2026-11-08: "accept/override each topic in question".</summary>
+    public async Task<IActionResult> OnPostAcceptCheckAsync(int id, int index, string? checkNote, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        Message = _review is null ? "Review is not available on this host."
+            : (await _review.AcceptCheckAsync(me.EventId, id, index, me.Email, checkNote, ct)).Message;
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>Undo an organizer's acceptance of one checklist line.</summary>
+    public async Task<IActionResult> OnPostUndoCheckAsync(int id, int index, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+        Message = _review is null ? "Review is not available on this host."
+            : (await _review.UndoCheckAsync(me.EventId, id, index, me.Email, ct)).Message;
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    public static string Verdict(TravelAiVerdict v) => v switch
+    {
+        TravelAiVerdict.Approved => "Approved",
+        TravelAiVerdict.NotApproved => "Not approved",
+        TravelAiVerdict.CouldNotCheck => "Could not check",
+        _ => "Not checked",
+    };
+
+    public static string ReviewText(TravelReviewState s) => s switch
+    {
+        TravelReviewState.UnderReview => "Under review",
+        TravelReviewState.Accepted => "Accepted",
+        TravelReviewState.SentBack => "Sent back",
+        _ => "",
+    };
+
     public async Task<IActionResult> OnPostMarkUnpaidAsync(int id, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -203,6 +397,8 @@ public class TravelReimbursementsModel : PageModel
             row.PaidAt = null;
             row.PaidNotes = null;
             await _db.SaveChangesAsync(ct);
+            if (_review is not null)
+                await _review.LogAsync(row, TravelReviewLogKinds.Unpaid, "Reverted to unpaid.", me.Email, ct);
             Message = $"Reverted claim #{id} to unpaid.";
         }
         await LoadAsync(me.EventId, ct);
@@ -219,7 +415,10 @@ public class TravelReimbursementsModel : PageModel
                 p.FullName, p.Email, p.Role,
                 t.RequestReimbursement, t.OriginCity,
                 t.ClaimAmountEur, t.Explanation,
-                t.IsPaid, t.PaidAt, t.PaidNotes, t.UpdatedAt
+                t.IsPaid, t.PaidAt, t.PaidNotes, t.UpdatedAt,
+                t.SubmittedAt, t.ReopenCount,
+                t.ReviewState, t.AiVerdict, t.AiSummary, t.AiFindingsJson, t.HasCompany, t.AiCheckedAt, t.ReviewNote, t.ErpSentAt,
+                t.SentBackCount
             })
             .ToListAsync(ct);
 
@@ -227,7 +426,21 @@ public class TravelReimbursementsModel : PageModel
             d.Id, d.ParticipantId, d.FullName, d.Email, d.Role.ToString(),
             d.RequestReimbursement, d.OriginCity,
             d.ClaimAmountEur, d.Explanation,
-            d.IsPaid, d.PaidAt, d.PaidNotes, d.UpdatedAt)).ToList();
+            d.IsPaid, d.PaidAt, d.PaidNotes, d.UpdatedAt,
+            d.SubmittedAt, d.ReopenCount,
+            d.ReviewState, d.AiVerdict, d.AiSummary,
+            CommunityHub.Core.Travel.TravelReviewService.Checks(new TravelReimbursement { AiFindingsJson = d.AiFindingsJson }),
+            d.HasCompany, d.AiCheckedAt, d.ReviewNote, d.ErpSentAt, d.SentBackCount)).ToList();
+        if (_review is not null) Dialog = await _review.DialogAsync(eventId, ct);
+
+        // §1387 — the files, without their bytes.
+        FilesByParticipant = (await _db.TravelReceipts
+                .Where(r => r.EventId == eventId)
+                .OrderBy(r => r.UploadedAt)
+                .Select(r => new { r.ParticipantId, Row = new FileRow(r.Id, r.FileName, r.SizeBytes, r.Kind) })
+                .ToListAsync(ct))
+            .GroupBy(x => x.ParticipantId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Row).ToList());
 
         var requesting = all.Where(r => r.RequestReimbursement).ToList();
         CountRequesting     = requesting.Count;
@@ -235,18 +448,24 @@ public class TravelReimbursementsModel : PageModel
         TotalClaimedEur     = requesting.Sum(r => r.ClaimAmountEur ?? 0);
         TotalPaidEur        = requesting.Where(r => r.IsPaid).Sum(r => r.ClaimAmountEur ?? 0);
         TotalOutstandingEur = TotalClaimedEur - TotalPaidEur;
+        CountNeedsReview    = requesting.Count(r => r.ReviewState == TravelReviewState.UnderReview);
+        Queue = requesting.Where(r => r.ReviewState == TravelReviewState.UnderReview && r.SubmittedAt is not null)
+            .OrderByDescending(r => r.SubmittedAt).ToList();
 
         Rows = Filter switch
         {
+            "review"      => requesting.Where(r => r.ReviewState == TravelReviewState.UnderReview).ToList(),   // §1387
             "outstanding" => requesting.Where(r => !r.IsPaid).ToList(),
             "paid"        => requesting.Where(r =>  r.IsPaid).ToList(),
             "requesting"  => requesting,
             _ /* all */   => all,
         };
-        Rows = Rows
-            .OrderBy(r => r.IsPaid)
-            .ThenByDescending(r => r.ClaimAmountEur ?? 0)
-            .ThenBy(r => r.Name)
-            .ToList();
+        Rows = Filter == "review"
+            ? Rows.OrderByDescending(r => r.SubmittedAt).ToList()   // newest response first
+            : Rows
+                .OrderBy(r => r.IsPaid)
+                .ThenByDescending(r => r.ClaimAmountEur ?? 0)
+                .ThenBy(r => r.Name)
+                .ToList();
     }
 }

@@ -218,19 +218,12 @@ public sealed class LogisticsRunService
             batch.Add((DocLibraryPaths.BcExpo, f, LogisticsMailKind.Weekly, to));
         }
 
-        // ---- the hotels: mailed ON CHANGE, and only inside the window ----------------------
-        var daysToEvent = preDayDate is { } pre
-            ? pre.DayNumber - DateOnly.FromDateTime(now.UtcDateTime).DayNumber
-            : startDate.DayNumber - DateOnly.FromDateTime(now.UtcDateTime).DayNumber;
-        var hotelWindowOpen = daysToEvent <= HotelMailWindowDays;
-
-        foreach (var h in await _hotels.BuildAllAsync(eventId, shortName, ct))
-        {
-            batch.Add((
-                DocLibraryPaths.Hotel, h.File,
-                hotelWindowOpen ? LogisticsMailKind.OnChange : LogisticsMailKind.None,
-                h.ContactEmail));
-        }
+        // ---- the hotels: RETIRED here (§1386, operator 2026-11-08: "Retire it") ------------------
+        // The hotel's spreadsheet is now the Excel 97-2003 file on /Organizer/HotelOverview, and its change
+        // mail (with the file attached) is HotelOpsJob's. Producing a second, differently-shaped rooming list
+        // here would give the team two hotel files that can disagree. The unplaced report below stays.
+        _ = preDayDate;
+        _ = startDate;
 
         // 🔒 §774 — WHO ASKED FOR A ROOM AND IS IN NOBODY'S LIST.
         // The rooming lists are built from placements, so a person who needs a bed but has been

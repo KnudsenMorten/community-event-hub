@@ -175,6 +175,10 @@ public class GraphicsModel : PageModel
                     : g.ParticipantId is int spid && names.TryGetValue(spid, out var sn) ? sn
                     : null,
 
+                // §1384 — the new category says what it is, and where it is published.
+                GraphicAssetType.AllTracksSpeakers =>
+                    $"All tracks — all speakers (public: {CommunityHub.Api.AllTracksSpeakersGifEndpoint.Route})",
+
                 _ => g.ParticipantId is int pid && names.TryGetValue(pid, out var n) ? n : null,
             };
 

@@ -17,6 +17,103 @@
         if (!string.IsNullOrEmpty(Model.Error))   { <p class="error">@Model.Error</p> }
         if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
 
+        @* §1385 — "No hidden speakers" (operator 2026-11-07: "we cannot have hidden speakers we
+           forgot"). The whole edition, whatever the grid's search/page. Expected-empty sessions
+           (title has [Placeholder] or TBD) are listed but are not a problem on their own. *@
+        var hidden = Model.Hidden;
+        if (hidden is not null)
+        {
+            var expectedEmpty = hidden.ExpectedEmptySessions;
+            var needing = hidden.SessionsNeedingSpeakers;
+            if (hidden.AnyProblem)
+            {
+                <section id="hidden-speakers" role="status"
+                         style="border:1px solid #f4b400;border-left:4px solid #f4b400;background:#fff8e1;border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:13px;overflow-wrap:anywhere;">
+                    <p style="margin:0 0 6px;">
+                        <strong>Hidden speakers:</strong>
+                        <span data-hidden-no-session="@hidden.SpeakersWithoutSession.Count">@hidden.SpeakersWithoutSession.Count speaker(s) on no session</span>
+                        &middot; <span data-hidden-no-profile="@hidden.SpeakersWithoutProfile.Count">@hidden.SpeakersWithoutProfile.Count without a speaker profile</span>
+                        &middot; <span data-hidden-empty-sessions="@needing.Count">@needing.Count session(s) with no speakers</span>
+                        @if (expectedEmpty.Count > 0)
+                        {
+                            <span data-hidden-expected-empty="@expectedEmpty.Count">(+ @expectedEmpty.Count expected empty)</span>
+                        }
+                    </p>
+                    <p style="margin:0 0 6px;color:#6b7280;">
+                        Counted as speakers or sessions, but nobody can see them on the agenda. Link the speaker
+                        to their session, or add the missing speaker profile, on Edit participant.
+                    </p>
+                    @if (hidden.SpeakersWithoutSession.Count > 0)
+                    {
+                        <details style="margin:4px 0;">
+                            <summary style="cursor:pointer;">Speakers on no session (@hidden.SpeakersWithoutSession.Count)</summary>
+                            <ul style="margin:4px 0 0;padding-left:18px;">
+                                @foreach (var s in hidden.SpeakersWithoutSession)
+                                {
+                                    <li><a asp-page="/Organizer/EditParticipant" asp-route-id="@s.ParticipantId">@s.Name</a>
+                                        <span class="muted">· added @s.CreatedAt.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</span></li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                    @if (hidden.SpeakersWithoutProfile.Count > 0)
+                    {
+                        <details style="margin:4px 0;">
+                            <summary style="cursor:pointer;">Speakers without a speaker profile (@hidden.SpeakersWithoutProfile.Count)</summary>
+                            <ul style="margin:4px 0 0;padding-left:18px;">
+                                @foreach (var s in hidden.SpeakersWithoutProfile)
+                                {
+                                    <li><a asp-page="/Organizer/EditParticipant" asp-route-id="@s.ParticipantId">@s.Name</a>
+                                        <span class="muted">· added @s.CreatedAt.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</span></li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                    @if (needing.Count > 0)
+                    {
+                        <details style="margin:4px 0;">
+                            <summary style="cursor:pointer;">Sessions with no speakers (@needing.Count)</summary>
+                            <ul style="margin:4px 0 0;padding-left:18px;">
+                                @foreach (var s in needing)
+                                {
+                                    <li><a asp-page="/Organizer/Sessions" asp-route-Search="@s.SessionId" asp-fragment="edit-@s.SessionId">@s.Title</a></li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                    @if (expectedEmpty.Count > 0)
+                    {
+                        <details style="margin:4px 0;">
+                            <summary style="cursor:pointer;">Expected empty — placeholders and sponsor slots (@expectedEmpty.Count)</summary>
+                            <ul style="margin:4px 0 0;padding-left:18px;">
+                                @foreach (var s in expectedEmpty)
+                                {
+                                    <li><a asp-page="/Organizer/Sessions" asp-route-Search="@s.SessionId" asp-fragment="edit-@s.SessionId">@s.Title</a></li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                </section>
+            }
+            else
+            {
+                <p id="hidden-speakers" role="status" style="margin:0 0 10px;font-size:13px;color:#15803d;">
+                    &#10003; No hidden speakers
+                    @if (expectedEmpty.Count > 0)
+                    {
+                        <span style="color:#6b7280;">
+                            &middot; @expectedEmpty.Count placeholder session(s) expected empty:
+                            @for (var i = 0; i < expectedEmpty.Count; i++)
+                            {
+                                var s = expectedEmpty[i];
+                                <a asp-page="/Organizer/Sessions" asp-route-Search="@s.SessionId" asp-fragment="edit-@s.SessionId">@s.Title</a>@(i < expectedEmpty.Count - 1 ? ", " : "")
+                            }
+                        </span>
+                    }
+                </p>
+            }
+        }
+
         <p style="font-size:13px;color:#6b7280;margin:0 0 10px;" role="status">
             <strong>@Model.Rows.Count</strong> speaker(s) &middot;
             <strong>@Model.SessionCount</strong> session(s) imported from Sessionize.

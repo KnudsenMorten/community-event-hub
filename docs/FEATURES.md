@@ -727,6 +727,77 @@ place each person in the right one, then manage the room block per hotel.
   needs approval anywhere, and the volunteer lead is e-mailed about every change, whether it
   comes from **My Availability** or from the volunteer sign-up form.
 
+### Hotel logistics — enough rooms every night, and the hotel always up to date *(✅ 2026-11-08)*
+- **Main and back-up hotels.** Each hotel has a **priority**: 1 is the main group agreement; 2 and 3 are secondary or
+  buffer bookings you only use if the main hotel cannot give more rooms. A hotel can carry its group agreement number
+  (printed on the hotel's spreadsheet) and any other booking reference.
+- **Everyone who reserves a room gets their hotel straight away.** New reservations are placed in the priority-1 hotel
+  automatically, and one click places everyone who reserved earlier. Guests see their assigned hotel as **Reserved**,
+  then their **confirmation number** once the hotel has confirmed — and **Cancelled**, with the hotel's cancellation
+  number, if the room is given up. None of this sends the guest an e-mail.
+- **A clear overview per night.** For every night: rooms allocated (main hotel and buffer), reserved, confirmed, the
+  organizers' forecast, and the result — a red **gap** (find more rooms) or an amber **too many** (release them).
+  A summary shows reserved, confirmed, cancelled and unplaced guests at a glance.
+- **Forecast the people who have not answered yet.** The overview lists everyone who could still ask for a room and has
+  not filled in the hotel form, by role, and organizers can add expected extra rooms per night (e.g. "+6 on the 8th")
+  that count in the result.
+- **The hotel's own spreadsheet, in Excel 97-2003.** One file per hotel with the agreement number as its title and the
+  columns the hotel asked for: first and last name, e-mail, arrival and departure, confirmation and cancellation
+  number, guests and rooms, the nights the event pays, the nights the guest pays, and the reservation state.
+  Cancelled rooms stay on the list so the hotel can release them.
+- **Import the hotel's answer.** Upload the spreadsheet the hotel sends back: every row is matched to a guest (by e-mail,
+  then by name) and shown before anything is saved; then the confirmation and cancellation numbers are stored and the
+  guests see them in the hub.
+- **A change log, and a mail when something changes.** Every hotel change — a guest changing dates or dropping the
+  room, an organizer moving someone or granting extra nights, an allocation change, an import — is logged. The
+  organizers' hotel mailbox gets one mail per burst of changes with the hotel's **updated spreadsheet attached**,
+  ready to forward to the hotel. The hub never e-mails the hotel itself.
+- **Warned before every release and payment deadline.** Ahead of each contract deadline (at the hotel's own lead time,
+  then 7, 3 and 1 day before) the hotel mailbox gets the per-night picture — original reservation, allocated now,
+  reserved, confirmed, forecast, result, and how many rooms may still be released free of charge. The original
+  reservation is recorded automatically once the free-cancellation date has passed.
+- **One place for the room picture.** The older "Room block occupancy" page compared a single block number per hotel
+  with the number of people placed, so it could not see nights and showed "within block" when individual nights
+  were short. It is retired: its link now opens the Hotel overview, which shows every night. *(fix)*
+- **Every number opens the people behind it.** On the Hotel overview each summary tile, each night and each
+  reserved / confirmed count is a link to the guest grid, filtered to exactly those people; every name opens that
+  person's reservation.
+- **A guest grid like a spreadsheet.** Everyone the hotel concerns — every role except sponsors and attendees, including
+  those who have not answered or said no, and leaving out sponsor-brought speakers (their sponsor pays the room;
+  guest speakers stay in) — with their answer, hotel, state, roommate and one column per night. Filter
+  by answer, role, hotel, state, the night they sleep, or name; sort; and export the filtered view to Excel.
+- **Rooms, not people.** Two participants who share a room are linked as roommates and count as one room everywhere —
+  the per-night numbers, the deadline warnings and the hotel's spreadsheet. Someone bringing a partner who is not a
+  participant gets "people in the room" set to 2.
+- **One place to edit a reservation.** Organizers change a guest's dates, whether they need a room, hotel, roommate,
+  people in the room, state, confirmation and cancellation number, and notes on one page; every change is logged and
+  goes on the hotel's next spreadsheet. The guest is not e-mailed.
+- **Clear colours.** Green means everyone has a room; a separate yellow "release N" says how many rooms to give back
+  before the next deadline; red "N short" means more rooms are needed.
+- **Ready to reduce rooms?** Before any allocation is reduced, the page — and every deadline warning — shows whether
+  everyone has answered the hotel form, everyone who reserved has a hotel, and nothing is left to fix, with links to
+  who is missing.
+- **Problems to fix, arrivals per day, and what the hotel has.** A list of reservations that need attention (nights
+  outside the contract, "sharing with" written but no roommate linked, roommates in different hotels, a guest still
+  placed after saying no), who arrives and leaves each day, and per hotel a "Mark as sent to the hotel" button with
+  the changes made since the last version the hotel received.
+- **One hotel page.** Allocations and deadlines are edited on the Hotel overview; the separate allocations page now
+  opens it, and the hotel details page links to it instead of showing a single block number.
+
+### Volunteer planning that matches how crews really work *(✅ 2026-11-07)*
+- **Everyone gets planned, nobody misses their sessions.** Auto-assign now plans every active volunteer. People on the
+  new **"Full-day workers (no sessions)"** list can be loaded all day; everyone else is capped at **50 %** of the hours
+  they said they are available, so they still get to attend sessions.
+- **See where you are short — before you plan.** A coverage overview shows people needed vs assigned per day and time
+  slot, and exactly when you are short.
+- **A task calendar.** One column per area, time running down the page; click a task for its notes and who is on it.
+- **Create a task in one place.** A clear "+ New task" form with time, people needed and description; new tasks land in
+  the volunteer team with one person needed, so auto-assign picks them up.
+- **Remove an assignment with one click** — on Work structure and on the supervisor page, which now also shows who is
+  assigned. *(fix)*
+- **Mark a test user by hand** on Edit participant — and clear it for a real person who was flagged by mistake; the
+  organizer and company rules that keep a test flag in place are explained on the page.
+
 ## 4. Self-service forms — crew fill in their own details
 
 Each form is short, mobile-friendly, and wired so that completing it does the right
@@ -798,6 +869,12 @@ follow-up automatically.
   theirs to claim; a fully-supported speaker still sees them all. Forms follow the same
   single source of truth that decides each person's entitlements, so what's offered and
   what's ordered always agree.
+
+### Visa applications: organizers are told, applicants get their letter *(✅ 2026-11-07)*
+- **The organizers know the moment an application arrives** — a mail on the first submit, and again only when an
+  answer actually changed (naming the fields, never their values). *(fix)*
+- **Invitation letters in the hub.** Organizers upload a PDF letter per applicant once the application has gone to the
+  authorities; the applicant downloads it from their own visa page.
 
 ## 5. Tasks & reminders — nothing slips, no inbox spam
 
@@ -1365,12 +1442,23 @@ follow-up automatically.
 - **A speaker's full name is read back from the event platform.** *(✅ 2026-10-20, fix)* The hub now reads each
   speaker's first name from the event platform as well as the last name, so a name changed there is noticed and copied
   across with first and last name exactly as entered (a double first name or a multi-word last name stays intact).
+- **Speakers you add by hand reach the event platform with their name.** *(✅ 2026-10-29, fix)* A speaker created in
+  the hub rather than imported from the call for speakers used to be refused by the event platform for having no first
+  name. The hub now takes the name you entered for them — first word as first name, the rest as last name — sends it,
+  and keeps it on their speaker profile. A name already on the profile is never changed.
+- **A speaker you add by hand is ready for review straight away.** *(✅ 2026-10-29, fix)* Saving someone with the
+  Speaker role on the participant page now creates their speaker profile at once, with their name. Before, it appeared
+  only after the speaker filled in a form of their own, so you could not give them a category and they never reached
+  the event platform.
 - **The hub is the master for speaker details, and you are told when the event platform differs.** *(✅ 2026-10-20)*
   The speaker gap mail now compares tagline, bio, country, company and skills — not only whether they are missing — and
   lists each field to fix as `Field (new value in Zoho from hub) -> value`, so the event platform can be set to match the hub by hand. A
   value only the event platform has is listed the other way, `Field (new value in hub from Zoho) -> value`, so the hub can catch up.
   *(✅ 2026-10-21)* The mail covers only people whose role is Speaker. Organizers, volunteers and sponsors who also speak
   are left out: they never fill in the hub's speaker form, so the hub has no company or skills to compare.
+  *(✅ 2026-10-29)* The **name** is compared too: when you change a speaker's full name in the hub after they reached
+  the event platform, the mail lists `Name (new value in Zoho from hub) -> <new name>`, because the platform cannot be
+  updated automatically. Differences only in capitals or spacing are ignored.
 - **Richer speaker records from the import.** *(✅ 2026-06-24)* The hub now stores each
   speaker's **Zoho Backstage and Sessionize ids** and **first/last/full name**, and the
   Sessionize import pulls a speaker's **profile picture into the shared SharePoint store**
@@ -1380,6 +1468,18 @@ follow-up automatically.
   Speaker Details page captures **Microsoft accreditations as a multi-select** (which maps to
   the speaker's Zoho skills) and offers a proper **country dropdown**, so these fields are
   consistent and easy to fill instead of free text.
+
+### No hidden speakers *(✅ 2026-11-07)*
+- **The hub tells you when a speaker or session has gone missing from the agenda.** The organizer Speakers page now
+  opens with a short check: speakers who are on no session (counted as speakers but shown nowhere), speakers without a
+  speaker profile, and real sessions with no speakers. Each name links straight to where you fix it. Test sessions and
+  test accounts are left out; placeholder and "TBD" sponsor slots are listed separately as expected, so they are not
+  forgotten but do not raise an alarm. When everything is in place it simply says "No hidden speakers".
+- **A weekly reminder to the organizers** — on Monday morning, only while something is hidden, and it stops by itself
+  once everything is linked.
+- **The hub wins over the import.** A speaker linked to a session in the hub — a panelist or moderator added by an
+  organizer, a sponsor speaker — is never taken off that session by the call-for-speakers sync. The sync only adds what
+  it lists; removing a speaker from a session is always an organizer's decision. *(fix)*
 
 ## 7. Sponsors — managed as companies, with the right tasks
 
@@ -1578,6 +1678,13 @@ follow-up automatically.
   attendees can plan around it. Until the sponsor has filled in the details, it reads
   "*Sponsor name*: Session TBD". Once they submit their title, description and speakers, the agenda shows
   those instead. Only real purchases count: a cancelled or test order never appears (§1352).
+
+### Ticket coupons — companies sign up on their own *(✅ 2026-11-07)*
+- **A public sign-up form** for companies that want to give tickets to customers, partners or colleagues: prepaid or
+  invoiced as people register, fully covered or split 50/50, with invoice e-mail or EAN — mobile-first and protected
+  by a captcha and rate limits.
+- **Set up for you on submit:** the coupon is prepared in the hub with a proposed code, the customer is created in the
+  accounting system when new, and the organizers get every detail by mail. Switched on per edition.
 
 ## 8. Sponsor leads — capture, screen and route booth leads
 
@@ -1826,6 +1933,25 @@ follow-up automatically.
   short **hint sits just below the sign-in button** explaining that it signs the person in —
   so a recipient knows what the button does before they tap it.
 
+### Mail campaigns — the right mail to the right people, safely *(✅ 2026-11-07)*
+- **Audiences built in:** previous attendees who have **not** bought a ticket yet, all attendees, pre-day or 1-day
+  ticket holders, exhibitors, sponsors, speakers, volunteers, dinner and party guests, and more.
+- **Previous attendees, kept apart.** Lists from earlier editions are imported into their own store — never mixed with
+  this edition's people — with opt-outs honoured from day one.
+- **Never mail someone who just bought a ticket.** The list is recalculated when a mail starts **and before every
+  batch**; anyone who has bought a ticket or unsubscribed since is skipped.
+- **A careful rollout:** preview exactly as received, send a test to yourself, preview to organizers and then design
+  partners, approve the recipient count, schedule — and only a mail released to everyone can reach the audience. Lower
+  its ring or unschedule it and it pauses, even mid-send.
+- **Edit the text yourself** on Email templates; the campaign sends your edited version. Every mail has a one-click
+  unsubscribe, goes out in paced batches, and carries a tag naming its audience so opens and clicks per group are
+  easy to read.
+- **Release in steps, on a timetable — and stop in time.** *(✅ 2026-11-08)* Set a release plan per campaign: the
+  organizers get a preview at, say, 08:00, the first 5% of the real audience gets the mail at 09:00, and everyone else
+  from 10:00, each step automatically. The organizers' mailbox gets one line per step, and a **Stop the release**
+  button halts everything not yet sent if a last-minute problem shows up — the campaign goes back to draft and nobody
+  further receives it.
+
 ## 11. Organizer hub — run the whole event from one place
 
 | Command center | Live dashboard |
@@ -2051,7 +2177,49 @@ follow-up automatically.
   calendar invites that update cleanly rather than duplicating.
 - **App game.** Register a sponsor's gift and send the gift reminder.
 - **Travel reimbursements.** See all claims, register payouts, and send confirmation
-  emails.
+  emails. *(✅ 2026-10-22)* A submitted claim is locked for the speaker; a **Reopen claim**
+  button next to it hands it back so they can add a forgotten invoice or receipt and submit
+  again. Their earlier uploads stay — new files are added alongside them.
+  - **An AI check of every claim's documents, and you decide.** *(✅ 2026-11-08)* When a speaker submits,
+    the documents are checked against the same requirements the travel form shows them — a receipt with
+    name, route, dates and amount paid, economy class, booked six weeks ahead, plus a company invoice or a
+    personal declaration with the required details and bank information — and the claim shows **Approved**,
+    **Not approved** or **Could not check** with a checklist of what is missing. When it is not approved, the
+    organizers' mailbox is told. Organizers see and download every uploaded file, press **Validate with AI**
+    on one claim or **Validate all submitted**, and then **Accept documents** or **Send back to speaker**.
+    Sending back opens the claim again, re-opens the speaker's task and e-mails them your note and the
+    missing items. Finance receives a claim only when you accept it — once.
+  - **You can overrule the AI line by line.** *(✅ 2026-11-08)* Every requirement that applies is listed — met,
+    missing or in question — and each missing or in-question line has **Accept this** with a short reason (for
+    example a business-class ticket claimed at the economy amount). Accepted lines show who accepted them and
+    when, can be undone, and are not sent to the speaker as missing; when every missing line is accepted the
+    claim reads *Approved (organizer override)*. The check also knows that a higher class claimed at the
+    economy amount is fine, that a class the documents do not show is "in question" rather than a failure, and
+    that a speaker claiming as a private person needs a personal declaration only — never a company invoice.
+  - **Finance sees the whole review.** The accepted claim reaches finance with a *Document review* section:
+    the verdict, every requirement with its status, each override with who, when and why, and who accepted it.
+  - **Mails carry the documents.** The send-back mail to the speaker is copied to the organizers' mailbox, and
+    both it and the "review needed" notice carry the documents the speaker submitted.
+  - **Every new response reaches the organizers with a recommendation.** *(✅ 2026-11-08)* Each time a speaker
+    submits or resubmits, the documents are checked within minutes and the organizers' mailbox gets one mail —
+    approved or not — saying what to do (*Accept*, *Accept after a look*, *Send back* with what to ask for, or *Check
+    by hand*), the full checklist, the documents attached and an **Open this claim** button. A **Needs your
+    decision** list at the top of the page shows waiting claims, newest response first, with a *new* badge, and a
+    short daily reminder lists claims that have waited more than two days.
+  - **See the mail before it goes.** Accept and Send back both open the exact mail first — recipient, copy,
+    subject, attachments and the text — with your note editable; nothing is sent until you confirm. A claim
+    already sent back can be **re-sent** with a fresh note.
+  - **Kind words to speakers.** The send-back mail and the speaker's page thank them, say what we already have,
+    what we still need and why (Danish tax rules), with a smile — and each missing item is a friendly sentence
+    written for the speaker, not a checklist code. The mail also lists, step by step, exactly what the receipt and
+    the invoice or personal declaration must show, our billing details, and a link straight to the instructions on
+    their travel page.
+  - **The whole dialog, on one line per step.** Under each claim, a *Dialog* list shows every step — submitted,
+    checked, mailed, findings accepted, sent back, accepted, paid — with who and when.
+  - **Speakers say what they upload.** Each file is labelled (ticket / receipt, company invoice, personal
+    declaration, other), the form asks whether they invoice through a registered company, and the speaker
+    sees where their claim stands: with the organizers, sent back (with your note), or accepted. The
+    intercontinental co-speaking amount (EUR 600) is now in the amount list. *(✅ 2026-11-08)*
 - **Swag ordering.** Produce a multi-sheet vendor spreadsheet for polo, award and
   jacket orders.
 - **Lunch and dinner overviews.** See pre- and main-day lunch numbers and the
@@ -2462,6 +2630,41 @@ across the line-up is identical in treatment:
 the operator with their own credentials; until configured, the hub still generates graphics and
 builds share drafts — it simply doesn't push anything to an external system.*
 
+### All tracks, all speakers — one live picture *(✅ 2026-11-07)*
+
+A new graphic category: **one animated picture of the whole line-up**, one frame per track — every
+speaker in that track as a round photo with their name, then on to the next track.
+
+- **Always current.** It is rebuilt automatically when a speaker joins or leaves a track or a photo
+  arrives, by the same routine that keeps the track graphics up to date.
+- **One address that never changes.** The picture is published at a fixed public web address, with a
+  smaller version for e-mail. Put it in a mail, a website post or a social post once, and it keeps
+  showing the line-up as it is today.
+- **Reads on its own.** The first frame carries the event name, dates and number of tracks, so mail
+  programs that show only the first frame still show a complete picture.
+- **A speaker without a photo yet** appears with their initials instead of being left out.
+- **Organizers stay in control.** It is listed with the other graphics: replace it with your own
+  design, or take it off the public address, as with any other graphic.
+
+### Website posts that keep their numbers current — "Refresh weekly" *(✅ 2026-11-07)*
+
+Blog posts about the line-up go stale the week after they are published: a new speaker joins, another
+exhibitor books a booth, and "75 speakers" is no longer true. Now a post can update itself.
+
+- **Link an existing website post** in *WordPress BlogPost Content* by its post number, and write its
+  body with placeholders such as `{{SpeakerCountRounded}}`, `{{ExhibitorCount}}`, `{{SpeakersByTrack}}`
+  or `{{SponsorList}}`.
+- **Every number is computed, never typed** — speakers (everyone who speaks, shown as "90+"), countries,
+  MVPs, Regional Directors, Microsoft employees and experts, sessions, master classes, panels, tracks,
+  sponsors and exhibitors — always leaving out test accounts and test sessions.
+- **Ready-made lists:** speakers per track (linked to their public profile where it is published), and
+  sponsors or exhibitors by their public name, linked to their website.
+- **Preview first:** see the post exactly as it would be sent, with any misspelt placeholder pointed out
+  rather than silently dropped.
+- **Tick "Refresh weekly"** and once a week the post is re-rendered and updated **in place** — same
+  address, even when published. Only ticked posts are ever changed; an unchanged post is not re-sent,
+  and **Refresh now** does it on demand.
+
 ### LinkedIn company-page post scheduler *(✅ 2026-06-15)*
 
 A **social-media calendar** for your event's LinkedIn **company page**: organizers schedule posts
@@ -2493,6 +2696,42 @@ the right time — with a review-and-fine-tune step so every post is exactly rig
   organizer gets an email** so they can manually add the speaker's real LinkedIn handle.
 - **Publish notifications.** Choose a list of organizers to be emailed whenever a post publishes —
   with a simple on/off toggle. Nothing is ever double-posted, and any failure is recorded, not lost.
+- **Planning rules you set yourself.** *(✅ 2026-10-26)* On the social-media settings page you choose
+  how many posts go out on a normal day and on a busy day, how many **sponsor** posts may share one
+  day, a **"published by" date for each round** (for example: every sponsor's first post by
+  15 December), and the **fewest days between two rounds of the same subject**, so a sponsor's two
+  posts never appear close together. The planner keeps to these whenever there is room.
+- **A mail when a rule is broken.** *(✅ 2026-10-26)* The planner never drops a post to keep a rule —
+  a sponsor that signs late still gets announced. When a planned post breaks a rule (a first post
+  after its date, two rounds too close, too many posts on a day, or no room left before the event),
+  the organizers get one mail listing each post with a link to open and move it, and the same list
+  is shown on the settings page. The mail is sent again only when the list changes. *(fixed 2026-10-26)* A post you
+  deleted from the queue — for example one that already went out — is no longer reported as having "no room", and the
+  mail names the sponsor and round instead of an internal id.
+- **Every sponsor is planned, even before their logo and text arrive.** *(✅ 2026-10-27)* A sponsor who
+  has not yet delivered a logo or social-media text still gets both announcements planned, so their
+  seats are kept before the round dates. The posts are marked as not ready (for example "logo
+  missing") and cannot be approved or published until the missing piece arrives. After that they
+  can be approved and go out as normal.
+- **The post list shows the real text.** *(✅ 2026-10-27)* The Text column in the post list shows each
+  post as it will read, with session titles, speakers and sponsor names filled in, instead of the
+  template it is built from. Search finds posts by that text too.
+- **Edited session posts are auto-approved too.** *(✅ 2026-10-27)* A session announcement you have
+  edited is approved automatically once it meets the requirements, like an untouched one. Saving a
+  post where only spaces or line breaks changed no longer counts as an edit, so it stays with the
+  planner and is approved automatically. Other edited posts still wait for you.
+- **Sponsor-tier posts always show the companies' public names.** *(fixed 2026-10-28)* The opening
+  sentence of a tier post (for example "Our Diamond sponsors") could show a company's legal or billing
+  name, or a sponsor that had since moved tier, because it was written once when the post was planned.
+  The sentence now names the sponsors when the post is shown and published, using their public names
+  and the tier's current line-up — the same names as the list below it. Planned and scheduled posts
+  were corrected automatically. The same names are available in the post editor as the variable
+  `{SponsorNames}` ("Contoso, Fabrikam and Northwind"), for any tier post you write yourself.
+- **Posts you write yourself keep their day.** *(✅ 2026-11-07, fix)* A post you add by hand now counts
+  as a taken seat in the calendar, exactly like a planned one. The planner no longer puts a planned
+  announcement on a day that your own posts have already filled, whether it is planning a new post or
+  moving one (off the holidays, out of a missed slot, or into its announcement window). Your own posts
+  are never moved by the planner.
 
 *The connection to LinkedIn (which company page, and the access token) is set up by the operator
 with their own credentials; until it's connected, the whole calendar — scheduling, tagging,
@@ -2787,6 +3026,10 @@ ever leaking anything private.
   reference, so a "how do I get hold of the team?" question is answered properly (§149).
 - **A chat panel that handles long replies.** The Community Helper chat panel now **scrolls long
   answers** cleanly instead of overflowing, so a detailed reply stays readable.
+- **Runs on the event's own, newer AI model** *(✅ 2026-11-08)*. Every AI feature in the hub — the helper,
+  the social-media texts, the booth finder and the travel-document check — now uses the event's own
+  pay-as-you-go AI service on a current-generation model, with data kept in the EU data zone. It had still
+  pointed at an older service that was switched off, which made the AI features answer "could not check".
 
 ## 23. Task allocation pipeline & task management *(✅ 2026-06-27)*
 
@@ -6473,6 +6716,11 @@ event platform, the public sponsor list, the event assistant, upload and downloa
 name from the shop, never the legal name with its legal form; e-conomic contacts can be managed by sponsors who registered
 through the shop.
 
+**Removing a contact takes them off the event too** *(✅ 2026-10-26)*. When a sponsor removes a colleague under
+**Company contacts** in Get Started, that person is also deactivated in the hub — they stop receiving event mail and their
+open tasks close — unless they still represent another company or have another role at the event, in which case only
+their roles for this company are removed. The activity log records who was removed and what happened.
+
 **Public name and legal name kept apart for shop registrations** *(fixed 2026-09-29)*. A company that registers through
 the sponsor shop gets a public name without its legal form ("Acme" for "Acme ApS") — used everywhere public: the event
 website, the app, the event platform and social media. The legal name stays on the contract, the invoice and the
@@ -6567,3 +6815,26 @@ clock. Monitoring cost for production dropped by roughly three quarters on the f
 - **Less background noise.** Routine performance counters and repetitive start-up messages from the jobs host are no
   longer recorded.
 - **The test environment records nothing** unless switched on for an investigation.
+
+## 250. A visa form for speakers and volunteers who need one *(✅ 2026-10-28)*
+
+Some speakers and volunteers need a visa to come to Denmark. The hub now collects what the organizers need to invite
+them, in one simple form:
+
+- **Only the people who need it see it.** An organizer ticks **Needs visa** on a speaker's or volunteer's profile (or
+  picks them from a list on the organizer page), and **Visa application** appears in that person's menu. Everyone else
+  never sees it, and it always requires signing in.
+- **One page, five short sections** — about you, your company, how the companies know each other, the visit, and who
+  pays for travel and stay. Dropdowns for gender, nationality and countries, yes/no questions, number of entries and who
+  pays, and day / month / year dropdowns for the dates; the free-text descriptions are limited to 500 characters. The
+  form tells you exactly which required fields
+  are still empty, and you can correct and save it again at any time.
+- **A task on your list.** Speakers who need a visa get "Fill in your visa application" on their task list, with no
+  deadline; it ticks itself off when the form is sent.
+- **Your application ID, where you will look for it.** Once the organizers have submitted the invitation to the Danish
+  authorities, they add the application ID, and it appears at the top of your visa form.
+- **For organizers:** one page lists everyone who needs a visa and whether they have filled in the form, opens each
+  application in full for copying into the authorities' invitation form, stores the application ID, and exports
+  everything to **Excel** or **PDF** (one person or everyone).
+- **Where you stay** is picked from the event hotels, with the address shown once chosen; the event pays for the stay
+  (shown, not asked), and the host guarantee is shown as No.

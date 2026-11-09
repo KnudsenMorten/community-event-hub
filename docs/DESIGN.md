@@ -177,6 +177,75 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   (same shape as `GroupByHotelAsync`). Organizer page `/Organizer/HotelRoomBlocks` (read-only;
   linked from the Logistics hub) — placement + recording the block size stay on the existing
   Hotels / HotelAssignments pages.
+  **Hotel logistics refinement (§1386, 2026-11-08; EF migration `HotelLogisticsRefinement`, additive):**
+  - *Model.* `Hotel` + `Priority` (default 1; lowest = primary), `AgreementNumber`/`AgreementLabel`
+    (→ `SheetTitle` "Group Agreement number: N (label)"), `BookingReference`, `NotifyEmails` (hotel-ops
+    recipients). `HotelConfirmationState` + **`Cancelled = 2`** (`NotConfirmed` is shown as *Reserved*;
+    `HotelReservationStateText` maps both ways). `HotelBooking` + `CancellationNumber`, `CancelledAt`,
+    **`CancelledHotelId`** (a deactivated guest is un-placed, so the cancellation would otherwise vanish
+    from every sheet). `HotelAllotment` + `OriginalRooms` (the base for the contract's release %);
+    `HotelCutoff` + `WarnDaysBefore` (default 14). New **`HotelChangeLogEntry`** (append-only; no FK to
+    hotel/participant so it outlives them; `NotifiedAt` null = not mailed yet — the log IS the outbox;
+    `notify:false` entries are born notified) and **`HotelForecastExtra`** (edition-wide, one per night).
+  - *Rules — one place each.* `HotelPlacementService`: auto-place a reserving, active, non-sponsor
+    guest in the primary hotel; placed + room dropped ⇒ Cancelled (stays placed, `CancelledHotelId`);
+    Cancelled + room needed ⇒ Reserved, old numbers cleared; bulk "place everyone unassigned". Called by
+    `HotelFormService.SaveAsync` with a before-snapshot. `HotelManagementService` logs organizer moves
+    (both hotels) and hand-entered numbers (⇒ Confirmed); `HotelCoverageService.SetExtraNightsAsync`
+    logs extra nights; `HotelAllotmentService` logs allocation changes, orders by priority, excludes
+    Cancelled from demand and has `FreezeOriginalAsync`; `ParticipantDeactivationService` cancels a
+    placed room.
+  - *Overview.* `HotelOverviewService` → per night `PrimaryAllocated` / `BufferAllocated` / `Reserved` /
+    `Confirmed` / `Unplaced` / `ForecastExtra` and `Result = allocated − (reserved + confirmed + forecast)`
+    (+ `PrimaryResult`); per-hotel summary; **not answered** = active non-test non-sponsor non-attendee
+    people with no booking (speakers only when entitled to a hotel, `FormEntitlementGate`).
+  - *Spreadsheet.* `HotelAgreementSheet` (NPOI HSSF, **real Excel 97-2003 .xls**): title row, header row 3,
+    the operator's 12 columns verbatim; rows = placed live reservations + cancellations held at the
+    hotel; ELDK payment days / self-payment from `HotelCoverageService.ResolveManyAsync`; names from the
+    speaker profile, else the last word of the full name is the last name. `Parse` reads .xls/.xlsx
+    (`WorkbookFactory`), finds the header row by its "Email" column. `HotelSheetImportService`:
+    preview (match by e-mail, then folded first+last name, among the hotel's guests; nothing written) →
+    apply approved rows (confirmation ⇒ Confirmed + `Participant.HotelConfirmationNumber`, cancellation
+    ⇒ Cancelled; a blank cell never clears). 🔒 The import never touches the hotel-level
+    `Hotel.ConfirmationNumber`, whose save re-issues the §46 CONFIRMED invite to everyone placed. The
+    participant view now prefers the per-person number over the hotel-level one.
+  - *Ops mail.* `HotelOpsJob` (jobs host, §510 interval 15 min, `JobSystem.Email`, instrumented) runs
+    `HotelContractSeeder` then `HotelOpsNotifier`: freeze originals the day after a hotel's first
+    cut-off; deadline warnings at `WarnDaysBefore`, 7, 3, 1 days (once per lead, keyed in the change log;
+    a late first run sends only the nearest lead); change mails per hotel after a 10-minute quiet
+    period, with the .xls attached when the guest list changed. Mail keys `hotel-ops-change` /
+    `hotel-ops-deadline`, **RingExempt**, Organizer audience. 🔒 Recipients = `NotifyEmails` filtered to
+    the review mailbox's domain and never the hotel's `ContactEmail`; empty ⇒ `LogisticsMail:ReviewMailbox`.
+    CEH never mails the hotel; an organizer forwards the file. Participant hotel mail is unchanged
+    (`hotel-invite` stays off / ring-gated).
+  - *Contract seed.* `contractSeed` in the private `config/hotel.<edition>.json`, applied once per `key`
+    (marker `[seed key]` in the change log), matching an existing hotel by exact name, else by
+    `matchContains` / `matchExcludes`; sets priority/references/recipients, upserts allocations and
+    cut-offs, then bulk-places. Later organizer edits are never overwritten.
+  - *Pages.* `/Organizer/HotelOverview` (summary, per-night table with forecast inputs, per-hotel
+    download + import preview/apply, not-answered list, change log); `/Organizer/Hotels` edits the new
+    fields; `/Organizer/HotelAllotments` gets warn-days and "Freeze original reservation".
+    `/Organizer/HotelRoomBlocks` (single `RoomBlockSize` vs people, blind to nights) is RETIRED: it redirects to
+    `/Organizer/HotelOverview` and has no tile.
+  - *Follow-ups (same day).* `HotelRoomMath` — the ONE room rule (roommates at the same hotel on the same night =
+    one room; a shared room is Confirmed only when all in it are) used by `HotelAllotmentService`, `HotelOverviewService`,
+    the deadline mail and `HotelAgreementSheet` (pair: lower id "1 room", other "0"; both 2 guests unless set).
+    `HotelBooking.GuestsInRoom` + `RoommateParticipantId`, `Hotel.SentToHotelAt/By` (hand-written migration
+    `HotelRoomsAndSentMarker`, model snapshot updated). `HotelReservationEditor` + `/Organizer/HotelReservation?pid=`:
+    all reservation fields in one form, symmetric roommate link, a placed guest set to "no room" becomes Cancelled,
+    one change-log line per save (affects the guest list). `HotelOverviewService.GuestGridAsync` (every role but
+    Sponsor/Attendee and not a Sponsor-category speaker — one `CrewQuery` shared by the grid, not-answered,
+    said-no and readiness; active, non-test; answer Room / NoRoom / NotAnswered / Cancelled; one flag per night; filters
+    answer, role, hotel (0 = none), state, night, search; sorts) + `GridExport` (.xlsx). `ProblemsAsync`,
+    `ArrivalsAsync`, `ReadinessAsync` (not answered, unplaced, problems) — shown on the page and in every deadline
+    mail. `HotelManagementService.MarkSentToHotelAsync` / `ChangesSinceSentAsync`. The not-answered pool no longer
+    filters speakers by hotel entitlement. `/Organizer/HotelAllotments` GET redirects to the overview; its editor
+    is the shared partial `_HotelNightsEditor` (posts to the existing handlers, which return to the overview).
+    Colour rule: covered = green, surplus = separate yellow "release N", gap = red "N short".
+    Release limits in the deadline mail are CUMULATIVE per night against the original reservation (sum of the
+    hotel's cut-off percentages up to that date, minus rooms already released → "Free release left"). The §770.11
+    `LogisticsRunService` hotel rooming list is RETIRED (no file, no mail); `HotelLogisticsProducer.UnplacedAsync` still
+    feeds the run's "awaiting a hotel" report.
 - **`DinnerSignup`**, **`VolunteerAvailability`** — the two other self-service form entities.
 - **`DietaryRequirement`** (structured dietary/allergy capture, added 2026-06-16) — own-row-scoped
   structured catering data, **one row per participant per edition PER `DietarySurface`**
@@ -882,6 +951,15 @@ given integration runs fine on its fallback path.
   new: an ACTIVE CEH signer / coordinator who is not an e-conomic contact, no Role:1 / Role:2 in e-conomic, and an e-conomic
   contact whose name matches a linked person under another e-mail (never created twice). An empty e-conomic answer changes
   nothing.
+- **One exception, made by the sponsor (§1369, 2026-10-26): removing a contact in Get Started.**
+  `SponsorContactsFormService.RemoveContactAsync` deletes the contact in e-conomic and then applies it to CEH in the same
+  action (`SponsorContactRemovalService`): the person is found by the company's e-conomic contact number, else by e-mail
+  within that company only; the company link and (if it was their primary company) the person-level signer/coordinator
+  flags are removed; a **sponsor-role person with no other company is deactivated** through the organizer cascade
+  (`ParticipantDeactivationService`: tasks closed, hotel and RSVPs released). A person with another company or another
+  role keeps their account; a sponsor who removes themselves is never deactivated. The audit row names the person and
+  the outcome (`AuditPageFilter.TargetIdKey/SummaryKey/DetailKey`, which any `[Audit]` handler can set). Before this the
+  step deleted only in e-conomic, so the sync warned about a mismatch the hub itself had created.
 - **Public company name**: `ShopCompany.PublicName` (filled once from the legal name without its legal form, then the
   organizer's), via `SponsorCompanyNameService` for every sponsor-facing reference.
 
@@ -1388,13 +1466,29 @@ First/LastName. Until 2026-10-20 the reader took `name`, so every stored `Backst
 name change carries Zoho's First/LastName in the delta, and the apply writes them as given instead of splitting the full
 name at a space.
 
+**Speaker name on create (§1375).** Only the Sessionize import writes `SpeakerProfile.FirstName/LastName`; the Get
+Started, calendar and visa forms create a profile without them. A speaker created in the hub GUI therefore had a
+nameless profile, and Zoho refuses a speaker create without a first name (HTTP 400 *"Please enter a first name for your
+profile"*). `SpeakerBackstagePushService.FillNameFromFullName` runs just before each create: when the profile's first
+name is blank it splits `Participant.FullName` at the first space (first word → first name, remainder → last name, a
+last name already present is kept) and writes it to the profile, so the hub and Zoho hold the same value. It is saved
+with the create's link; a profile that already has a first name is never touched.
+
+**Speaker profile on organizer save (§1377).** `EditParticipantModel.EnsureSpeakerProfileAsync` runs after both the
+create and the edit save: a participant with the Speaker role and no `SpeakerProfile` for the edition gets one, named
+via `FillNameFromFullName`, with no category. Before, only the speaker's own forms (Get Started, calendar, visa) and the
+Sessionize import created a profile, and Speaker Review, the approval list and the Zoho push all read profiles — so a
+hand-added speaker who had not signed in was invisible to all three.
+
 **Speaker data: CEH is the master (§1364).** Speakers edit their details in the hub; Backstage is updated BY HAND (the
 speakers API is create-only). `SpeakerZohoGapReporter` (job `SpeakerGapReportJob`, feature `speaker-gap-report`) compares
 tagline, bio, country, company and skills (accreditation + MVP categories) as CONTENT and mails one line per field, in
 two directions: CEH has a value Backstage lacks or holds differently ⇒ `Field (new value in Zoho from hub) -> <hub value>` (set it in
 Backstage); CEH is blank but Backstage has a value ⇒ `Field (new value in hub from Zoho) -> <Zoho value>` (catch CEH up — never
 "clear it", which would delete data CEH simply never captured). Text compares as plain text ignoring capitals; skills as
-a case-insensitive set. Only participants with the **Speaker role** are compared (§1365, `IsReported`): an organizer,
+a case-insensitive set. **Name (§1376):** `Participant.FullName` (what organizers edit) against Backstage's first + last
+name, via `ComparableName` (case and runs of spaces ignored); a difference is a `Name (new value in Zoho from hub) ->
+<full name>` line, and a Backstage record without a name is not compared. Only participants with the **Speaker role** are compared (§1365, `IsReported`): an organizer,
 volunteer or sponsor who also speaks never fills the CEH speaker form, so CEH has no company or skills to hold
 Backstage's value and the line could never clear. Every linked profile is still stamped with the hash, so a stale stamp
 on an excluded profile cannot defeat the dedupe. Hash-deduped: one mail per change of the set; subject "Speakers — Backstage and CEH differ". **Nothing from Zoho is written into CEH:** `SpeakerChangeDetectionService` is off in
@@ -2348,6 +2442,9 @@ publishes, not when it was planned.** The model that makes that work:
 - **Everything else is a variable.** `{Organizers}`, `{EventTags}`, `{SponsorTier}`, `{Speakers}` and
   the rest resolve from settings and event data **at publish time**, through the same resolver the
   editor's preview uses — so the preview shows exactly what will publish.
+- **The stored AI intro may carry tokens too (§1373).** `{IntroText}` is the one value written at plan
+  time; tokens inside it (a tier intro's `{SponsorNames}`) are resolved one level against the same
+  values, so nothing it names is frozen.
 - **Session announcements tag their speakers (§1224, 2026-09-14).** The Type 2 template and every
   imported session wording carry `🎤 With {Speakers}` directly under `{IntroText}`. None of them did
   before, so master class, panel and technical session posts named nobody. `{Speakers}` renders a
@@ -2681,6 +2778,79 @@ achieved nothing and cost identity — each rebuild issued a new `Id`, so ids cl
 edition of a few dozen posts and every link already mailed pointed at a row that no longer existed.
 PROD confirmed the fix: `created 50 (31 event posts)` → `created 19 (0 event posts)`, run after run.
 
+**Planning rules and the conflict mail (§1368, 2026-10-26).** Five values on SoMe settings, all read by the planner and
+by one conflict check:
+
+| Setting | Stored on | Planner behaviour |
+|---|---|---|
+| Posts per day / most on a busy day | `SoMeSettings.MaxPostsPerDay` / `ExceptionPostsPerDay` | as §843.3 (now editable; clamped to the 4 preferred times) |
+| Sponsor posts per day | `SoMeSettings.MaxSponsorPostsPerDay` (null = none) | day filter on `sponsor:` keys (not `sponsorsession:`) |
+| Round N published by | `SoMeCategoryRound.PublishBy` (end of that Danish day) | `SoMeSubject.LatestByOccurrence`; target spread is pulled inside the deadline; a miss at the normal rhythm goes to the exception pass before the deadline is given up |
+| Days between rounds | `SoMeCategoryRule.MinDaysBetweenRounds` | `SoMeSubject.MinDaysBetweenOccurrences`; also forces round order |
+
+The deadlines and spacing are attached to every subject in ONE place (end of `CollectSubjectsAsync`, by
+`SoMeCategoryRules.CategoryOf`), not at the five `new SoMeSubject(...)` sites. Each placement tries the rules first
+(`Seat`: strict from the spread target, strict from the floor, then relaxed) — **rules are quality, never a reason to
+drop a post** (§842.5). Placement order of preference: rules + deadline → deadline without the spacing rules → after
+the deadline → after the category end → after nothing (event start).
+
+`SoMeRuleConflictService.Find` (pure) checks the QUEUE, not the plan — approved, locked and hand-moved posts included;
+only unpublished posts from now on count: a round after its publish-by date, two rounds of one subject closer than the
+minimum or out of order, a day over the sponsor or busy-day ceiling, and the run's `NoRoom`. `SoMeScheduleJob` runs it
+after planning and auto-approval and mails through `EngineAlertSender` to the SoMe notice inbox; throttle key
+`some-rule-conflicts:{event}:{Danish day}:{hash of the conflict codes}` ⇒ a changed list mails at once, an unchanged
+one at most once a day. The settings page lists the same conflicts (`FindAsync`, no mail). A round the organizer
+DELETED (§853 tombstone) is excluded from the run's `NoRoom` — it is left out on purpose, not unplaceable — and a
+`NoRoom` item is shown with the subject's label ("<sponsor> (round 1)") where any of its posts provides one. The overdue push, window
+moves and blackout moves (§1144/§1183/§1179) do not apply the spacing rules; whatever they break is reported by the
+same check.
+
+**Ad-hoc posts hold their seats (§1379c, 2026-11-07).** Every occupancy read in `SoMeScheduleService` used to select
+keyed posts only (`SubjectKey != null`), so a hand-written post (no subject) was invisible to the per-day count and a
+planned post could land beside it. `UnkeyedSeatsAsync` returns the slots of every non-deleted post with no `SubjectKey`
+(any status — the same filter as the keyed obstacles) and is added as an OBSTACLE to new-post placement
+(`SoMeSchedulePlanner.Plan`, optional `unkeyedOccupied`: counts toward the day's total and its exact minute, never toward
+any subject's spacing or the sponsor-per-day count) and to the `otherOccupied` list of all four re-time passes (§928,
+§1144, §1183, §1179). The candidate (movable) sets are unchanged, so the planner still never moves an ad-hoc post.
+
+**A sponsor with no graphic is planned and held (§1370, 2026-10-27 — supersedes §854).** `CollectSubjectsAsync` now
+builds a Type 4 subject for EVERY announceable sponsor. With a built graphic: floor = later of graphic date and sponsor
+floor, prompt = graphic date (unchanged). Without one: floor = the sponsor floor only, no prompt date (the signup date is
+not a readiness date), so its rounds spread and take their seats before the round deadlines. The posts are `Proposed`,
+`IsActive = false`, `ImageRef = null`; `SoMeApprovalGate` blocks them ("logo missing" / "sponsor text missing" /
+"graphic missing" chips, §1206), so neither auto-approval nor dispatch can send them. Once the graphic is built the next
+run re-plans the proposal from that date (§848.2); a held post whose date passes is pushed forward (§1205). The AI teaser
+is not generated for a sponsor whose description is still empty, so §911's reuse cannot keep a teaser written from
+nothing. `SponsorsWaitingForGraphic` names them in the run message.
+
+**The queue's Text column is resolved (§1371, 2026-10-27).** The stored body is the template (§901), so
+`/Organizer/SoMeQueue` printed `{SessionTitle} {IntroText} With {Speakers}`. It now calls
+`SoMePostComposer.ResolvedTextsAsync(posts)`, which builds the same values as `ValuesForAsync` (edition values,
+the row's own IntroText/ActionPhrase, the subject's values) but reads the edition values once per event and each
+subject's values once, because the queue lists the whole edition. A post that cannot be resolved shows its raw body.
+The search matches the resolved text as well as the stored body.
+
+**What counts as an edit, and which edits auto-approve (§1372, 2026-10-27).** `SoMePost.SameWording(a, b)` compares
+two bodies with every run of whitespace collapsed to one space; `HasWordingOverride` = an override whose wording
+differs from `AutoText`. The post editor's save stores no override when the wording is the same (§907.2 compared
+exactly, and the browser posts line breaks as CR+LF, so an untouched save became an "edit" — PROD post 343439).
+`SoMeAutoApproveService.EditAllowsAutoApproval`: unedited, spacing-only, or `TemplateKind == Session` (Type 2: 2a, 2b,
+2c) passes; other kinds with changed wording keep waiting for a human (§918 guard 3). The approval gate still applies.
+
+**A tier intro names its companies live, by public name (§1373, 2026-10-28).** `{IntroText}` is generated once and
+stored (§901/§911), while `{SponsorList}` resolves at publish — so a tier intro written from the list froze the names
+of that moment (legal/billing names, and companies that later changed tier). Now the intro carries the token
+`{SponsorNames}` (`SoMeVariableResolver.SponsorTierValuesAsync`: the same announced companies as `{SponsorList}`, plain
+public names, "A, B and C") and `SoMePostComposer.ResolveIntroTokens` resolves tokens inside the stored intro, one
+level, in preview, queue and publish. The model gets no names (`IntroDetail(SponsorCategory)` is null) and is told to
+write the placeholder exactly once. `IsLiveTierIntro` = the token exactly once and no typed company name; anything
+else becomes `TierIntroFallback` ("A huge thank-you to our {SponsorTier} sponsors {SponsorNames}!") — on generation,
+on reuse, and in `RepairTierIntrosAsync`, which runs every planner tick before reuse and rewrites every unpublished,
+undeleted Type 3 post whose body uses `{IntroText}` and whose intro is not live (approval and date untouched). Known
+names = every `SponsorInfos.CompanyName` (query filter ignored) + `ShopCompanies.LegalName/PublicName` for the
+edition, reduced by `CoreCompanyName` (trailing A/S, ApS, AG, GmbH, Ltd, Inc, AB, Oy, BV, Nordics, Danmark…), matched
+as whole words (`NamesACompany`).
+
 ### Sponsor Get-started chase list (§1210, 2026-09-12)
 
 `SponsorGetStartedReport.NotCompletedAsync(eventId)` → one row per in-scope company that has not
@@ -2776,6 +2946,92 @@ sweep just computed).
 
 Both surface on `BundleResult` (`TrackGraphicsRetired`, `StaleOverriddenTracks`) rather than living
 only in the log. ◻ Session graphics have the same override-staleness gap; only tracks are covered.
+
+#### All tracks · all speakers — a new graphic category (§1384, 2026-11-07)
+
+**`GraphicAssetType.AllTracksSpeakers` (= 6, appended — the column stores the int)**: ONE animated GIF per
+edition, a 3.5 s frame per track, every speaker in the track as a circular face with first name / rest of
+name underneath. Built inside the existing §767 sweep — no parallel generator:
+
+- **Selection = the track sweep's, minus ONE exclusion.** `BuildAllTracksOverviewAsync` runs the same query
+  shape as `BuildTrackBundlesAsync` (no service sessions, a track, §905 test speakers out) but excludes via
+  `SoMeSubjectScope.ExcludedSessionIdsIgnoringAnnouncementFlagAsync`: a session out of the SoMe campaign ONLY
+  because of `ExcludeFromSoMeAnnouncements` — the sponsor speaker sessions — is on the overview (PROD check
+  2026-11-07: Intune showed 16 of 19). Test data, TEST sessions, title patterns and all-test sessions stay out;
+  the per-track GIF is unchanged and still excludes the flagged sessions. No §1304 face gate: the overview draws
+  initials for a missing face and is never attached to a post.
+- **Photos:** the per-track loop records what it downloaded in a per-sweep cache (recording only — its own
+  behaviour is unchanged); a speaker it never saw is looked up the same way (`TryPhotoAsync`: name, then id), then
+  by the leaf of `SpeakerProfile.PhotoSharePointPath` in the same folder listing — a sponsor speaker's photo file
+  can carry another participant id.
+- **Order:** `AllTracksOrder` — Security, Identity, Intune, Azure, Microsoft 365, Data Compliance, AI for
+  Makers, AI for Engineers/Developers, then alphabetical. Hard-coded: the edition config has no track list.
+- **Hash:** `AllTracksInputHash` = `AllTracksDesignVersion` + every track (frame order) + every speaker id/name
+  + a SHA-256 digest of each photo. A join/leave, a renamed track or a new/replaced photo rebuilds it; an
+  unchanged line-up does not. The design version is separate from `DesignVersion`, so an overview change never
+  re-renders the per-track or session graphics.
+- **`GraphicsService.GenerateAllTracksSpeakersAsync`** mirrors `GenerateTrackBundleAsync`: key
+  `tracks:all-speakers` (`GraphicStableKey.ForAllTracksSpeakers`), file `tracks-all-speakers.gif` in the
+  track-graphics folder (`PathKeyFor` maps the new type to `SpeakerTrackGraphics`), organizer override left alone
+  unless forced, hash skip, born Released. Event name from the edition row, dates/city from `ApplyEventStrip`.
+- **Renderer:** `SoMeGraphicRenderer.RenderTrackOverviewGif` (partial file `SoMeGraphicRenderer.TrackOverview.cs`;
+  the locked §767 designs are untouched). Navy gradient, no template photo; header = event name, track title
+  (trailing parenthetical dropped), "{n} SPEAKERS IN THE TRACK"; footer = dates · city / "{n} TRACKS · 90+
+  SPEAKERS" (`OverviewSpeakerClaim`). `OverviewLayout(n)`: ≤6 one row, ≤20 two, else three; cols = ⌈n/rows⌉,
+  cell = min(170, 1120 / cols), face = min(118, cell − 20) (76 px cap on three rows), name font 15 / 13 / 12 px for
+  a cell ≥ 140 / ≥ 110 / smaller; rows centred, grid centred between y 175 and the footer top (627 − 60); faces
+  shrink before anything reaches the footer. Each name line is fitted to cell − 8 px (`FitNameLine`: shrink to
+  9 px, then "…"), so it never runs into a neighbour. Design version `1384.1` (follow-up 2026-11-07: three rows
+  of 76 px faces from 13 speakers up looked small). Every frame stands alone (Outlook shows frame 1 only). GIF encoder as the speaker
+  GIF (local colour tables, loop forever).
+- **Public URL:** `GET /graphics/track-speakers.gif[?w=600]` (`CommunityHub.Api.AllTracksSpeakersGifEndpoint`),
+  anonymous. `FindPublicAllTracksSpeakersAsync` = the active edition's row, Released and stored; the endpoint
+  downloads it (`DownloadAllTracksSpeakersAsync`, 600 = `ResizeGif` of the stored 1200 px file), caches the bytes
+  in `IMemoryCache` for 10 min keyed by asset id + item id + `UpdatedAt` + width, and answers
+  `Cache-Control: public, max-age=3600`. No rendering on request. Un-releasing the row on /Organizer/Graphics
+  takes it off the URL.
+- Not speaker-visible (no participant, no session) and not mapped by `SoMeSubjectGraphic`. ◻ The §1214 reconcile
+  covers `TrackBundle` only, so an overview whose tracks all vanish is not retired.
+
+#### "Refresh weekly" WordPress posts — rendered from hub data, updated in place (§1379.8, 2026-11-07)
+
+A linked WordPress post whose body is a **template with `{{Token}}` placeholders**, re-rendered from hub data
+and written back to the SAME post id. Built on the existing §31 connector — no second WordPress client.
+
+- **Data:** table `WordPressRefreshPosts` (migration `20261107140000_WordPressRefreshPosts`, additive):
+  `EventId`, `WordPressPostId` (unique per edition — the post is created in WordPress, the hub only links it),
+  `Label`, `BodyTemplate`, `RefreshWeekly`, `LastRefreshedAt`, `LastRefreshResult`, `LastPushedHash` (SHA-256 of
+  the last HTML sent).
+- **Renderer:** `WordPressPostTokenRenderer` (pure). Counts: `SpeakerCountRounded` ("N0+", floored to tens),
+  `SpeakerCount`, `CountryCount`, `MvpCount`, `RdCount`, `MicrosoftCount` (employees), `MicrosoftExpertCount`,
+  `SessionCount` (technical), `MasterClassCount`, `PanelCount`, `TrackCount` (tracks of technical sessions),
+  `SponsorCount`, `ExhibitorCount`. HTML: `SpeakersByTrack` (`<h3>` + `<ul>` per track), `SponsorList`,
+  `ExhibitorList`. Text is HTML-encoded; only absolute http(s) URLs become links. An unknown token is left as
+  typed and reported (the preview lists it) — never blanked.
+- **Data source:** `WordPressPostDataService`, reusing the hub's existing rules: in-scope sessions = non-service
+  minus `SoMeSubjectScope` (§1178); speakers = active, non-test participants with the Speaker role OR linked to an
+  in-scope session (any role), one per `SamePersonAsId`/e-mail; accreditations from `SpeakerProfile.Accreditation`
+  (single value — an MVP is also counted from `MvpCategories`, so an RD who is an MVP counts in both); country =
+  `Country`, else `BackstageCountry`; track order = `SoMeBundleBuildService.AllTracksOrder` (§1384); speaker link =
+  the public `/Speakers/{participantId}` page under `EmailTemplate:HubUrl`, only when that page shows the speaker
+  (Speaker role + `SelectedForPublish`); companies = `PublicSponsorsService` names/websites (DESIGN §6 chain)
+  filtered by `IsSponsor` / `IsExhibitor` and minus `TestDataScope.NotAnnounceableSponsorCompanyIdsAsync`.
+- **Write:** `IWordPressPublisher.UpdatePostContentAsync` → `POST /wp-json/wp/v2/posts/{id}` with ONLY `content`
+  (status, title, categories, media untouched — a published post stays published). §31's draft-only rule is lifted
+  for flagged rows only: every write path re-reads `RefreshWeekly`.
+- **Gates, decided before any render (§1059 shape):** the `content-studio` feature; `CanWrite` (WordPress__* set);
+  and the new narrow ceiling `ExternalSystems.WordPressPostRefresh` → `Integrations:ExternalWrites:WordPressPostRefresh`
+  (unset ⇒ `Integrations:AllowExternalWrites`: off on DEV, on in PROD). Not `Webshop`, whose DEV posture governs
+  the Company Manager writes.
+- **Cadence:** `WordPressPostRefreshService.RefreshFlaggedPostsAsync` runs at the start of `SoMeScheduleJob` (the
+  job that adjusts the SoMe posts — no new timer), try/catch, never fatal to the planner. A post is due when
+  `LastRefreshedAt` is null or ≥ 7 days old; an unchanged hash is stamped but not re-sent; a failed push is NOT
+  stamped, so it retries on the next run. **Refresh now** (organizer) ignores the cadence but still requires the flag.
+- **UI:** WordPress BlogPost Content (`/Organizer/ContentStudio#refresh-weekly`): link a post id, label, template
+  textarea, "Refresh weekly" checkbox, Preview render (renders the textarea, unsaved too, with the unresolved
+  tokens), Refresh now, Unlink. Editing the template clears the pushed hash so the next refresh sends it.
+- **Jobs host:** now registers `WordPressOptions` + `LiveWordPressPublisher` like the web host; without
+  `WordPress__*` settings on the Functions app the run is inert ("not configured").
 
 #### One readiness answer for every screen (§1206, 2026-09-12)
 
@@ -2914,6 +3170,7 @@ pinned against each job's real `[TimerTrigger]` by `JobCadenceWordsMatchCronTest
 | `getstarted-deadline-reminder` | `ReminderJob` | daily 08:00 UTC | **one-shot**, before the configured speaker deadline |
 | attendee **party** + attendee **Master Class** task chasers | `ReminderJob` | daily 08:00 UTC | **every 14 days** from the task's creation |
 | `hotel-cutoff-reminder` | `ReminderJob` | daily 08:00 UTC | **3 days before** a hotel release deadline (organizers) |
+| `hidden-speakers-weekly` | `ReminderJob` | daily 08:00 UTC | **weekly from Monday 08:00 Danish time**, only while a speaker/session is hidden (organizers, §1385) |
 | `masterclass-selection-invite` | `AttendeeBackstageSyncJob` | every 10 min | a new 2-day ticket holder, once |
 | `pending-master-class-selection` | `AttendeeBackstageSyncJob` | every 10 min | invited **≥14 days** ago and still not selected |
 | `masterclass-offer` / `masterclass-promoted` | `AttendeeBackstageSyncJob` · `WaitlistOfferExpiryJob` · `ZohoWebhookDrainJob` | 10 min / expiry / **1 min** | a seat freed and a waitlisted attendee is next |
@@ -4793,6 +5050,90 @@ composing: claiming requires a chosen amount; choosing *Other* requires `OtherAm
 explanation, each as a **field-level** `ModelState` error. On failure it re-renders with the inline
 messages and persists nothing. Covered by `TravelValidationTests` (6 cases).
 
+**Travel claim freeze + reopen (§6.10 / §768.10 D5).** A successful claim stamps
+`TravelReimbursement.SubmittedAt` (via `TravelClaimLock.MarkSubmittedAsync`); with
+`TravelClaim:FreezeEnabled` on, the upload-receipt, delete-receipt and re-save paths all refuse while it
+is set. The way out is the **Reopen claim** button on `/Organizer/TravelReimbursements`, shown on every
+row whose `SubmittedAt` is set (`TravelReimbursementsModel.CanReopen`). It posts `OnPostReopenAsync`
+(real-organizer gate, like MarkPaid), which clears `SubmittedAt`, stamps `ReopenedAt`/`ReopenedByEmail`,
+increments `ReopenCount` and writes a `travel-claim.reopen` audit entry. Receipts are one
+`TravelReceipt` row per file and are never touched by a reopen — the speaker adds the missing file and
+resubmits, which re-freezes and re-sends the bookkeeping copy with **all** receipts attached.
+⚠️ The handler shipped without the button (2026-08-02 → 2026-10-22); the button was added when a speaker
+was locked out with her invoice missing.
+
+**Travel document review (§1387, 2026-11-08; EF migration `TravelDocumentReview`).** `TravelReimbursement`
+gains `HasCompany` (invoice vs personal declaration), `ReviewState` (None / UnderReview / Accepted /
+SentBack), `AiVerdict` (NotChecked / Approved / NotApproved / CouldNotCheck), `AiSummary`, `AiFindingsJson`
+(`TravelCheckItem[]` — present/missing per requirement, never an extracted ID or account number),
+`AiCheckedAt`, `AiInputHash` (files' name+size+kind and the claim facts), `AiNotifiedHash`, `ReviewNote`,
+`ReviewedAt/By`, `SentBackCount`, **`ErpSentAt`**; `TravelReceipt` gains `Kind` (TicketReceipt / Invoice /
+PersonalDeclaration / Other), chosen by the speaker on upload. The migration sets existing submitted
+claims to UnderReview with `ErpSentAt = SubmittedAt` (finance already has them) and paid ones to Accepted.
+- **Submit** (`TravelFormService.SaveAsync`, with `TravelReviewService` injected) freezes the claim as
+  before and calls `OnSubmittedAsync` → UnderReview; the §48 ERP mail is **no longer sent on submit**
+  (without the review service — older constructions — the old send-on-submit path is kept). The company
+  question is required when claiming. The 600 EUR intercontinental co-speaking tier is in the list.
+- **AI model + request shape (2026-11-08)** — every Azure OpenAI caller (AI helper, social-media intro writer and
+  text judge, booth detector, travel check) builds its body the classic way and sends it through
+  `OpenAiChatContent.Create`. With `OpenAI:ReasoningModel = true` (gpt-5 family) it becomes
+  `max_completion_tokens` (= the caller's limit + `ReasoningTokenHeadroom`, default 4000, since the limit also
+  covers hidden reasoning), no `temperature`/`top_p`, and `reasoning_effort` (`OpenAI:ReasoningEffort`, default
+  `low`); false sends the gpt-4 form unchanged. Each environment uses its own Azure OpenAI service in the event's
+  own subscription, on a pay-as-you-go data-zone deployment; the endpoint, deployment and the flag are slot-sticky
+  app settings on both hosts and the key is a Key Vault reference. The volunteer task-guidance generator uses a
+  different provider and is not affected.
+- **Send-back requirements block (2026-11-08)** — `TravelReviewService.RequirementsHtml(hasCompany, deadline, travelPageUrl)`
+  fills `{{requirementsBlock}}` in `travel-claim-sent-back`: receipt checklist, the company invoice OR personal
+  declaration checklist by `HasCompany` (both as 2a/2b when null), the billing box, a link to
+  `{hubUrl}/Forms/Travel#requirements` (the token set's hub URL = the speaker's magic link when configured) and the
+  travel deadline from the speaker-deadline config.
+- **Review flow, dialog log, previews (2026-11-08)** — `SweepAsync` now mails `travel-claim-review-needed` for EVERY
+  new document set (verdict ≠ NotChecked, once per `AiInputHash`) with `Recommendation(verdict, checks)` (Accept /
+  Accept after a look / Send back + open lines / Check by hand), attachments and a `#claim-{id}` deep link.
+  `RemindWaitingAsync` sends `travel-claims-waiting` (RingExempt) at most once per Copenhagen day from 08:00 when
+  claims are UnderReview > 2 days, marked by `JobRunState("TravelReviewJob").LastContentHash = "reminder:<date>"`.
+  `TravelReviewLog` (table, migration `20261108190000_TravelReviewLog`, no FK to claim/person) — `LogAsync` from
+  submit, AI check, every mail, per-line accept/undo, accept, send back/re-send, and the page's reopen/paid/unpaid;
+  `DialogAsync` for the page. Previews: `PreviewSendBackAsync` / `PreviewAcceptAsync` render through the same
+  builders as the sends (`BuildSpeakerMailAsync`, `TravelErpMailer.RenderAsync`) without saving; the page's
+  Accept / Send back buttons post to the preview handlers and the preview's buttons post to the real ones. A
+  SentBack claim not yet resubmitted re-sends without reopening or counting. `TravelCheckItem.SpeakerNote` (the AI's
+  `speaker_note`, kind sentence + reason) is what the speaker reads (`ForSpeaker`).
+- **Per-line overrides (2026-11-08)** — `TravelCheckItem` carries `AcceptedBy/AcceptedAt/AcceptNote` inside
+  `AiFindingsJson` (no schema change); `IsOpenFailure` (✗ and not accepted) drives the speaker's missing list and the
+  send-back mail; `TravelReviewService.AcceptCheckAsync/UndoCheckAsync` by index; `CarryAcceptances` keeps an
+  acceptance on a re-check naming the same requirement (whitespace/case-insensitive); a re-check that returns
+  CouldNotCheck with no lines keeps the previous verdict + lines and prefixes the summary. `EffectiveVerdictText`
+  = "Approved (organizer override)" when every ✗ is accepted. `TravelErpMailer.ReviewSection` adds the full review
+  (verdict, each line + status + override, accepted-by) to the finance mail; empty for a never-reviewed claim. The
+  send-back mail CCs the review mailbox; send-back and review-needed attach the uploaded files. The prompt lists
+  only the applicable second document by `HasCompany` and treats an unreadable class as null and a higher class
+  claimed within the cap as met.
+- **AI check** — `TravelDocumentValidator` (Core/Travel), the edition's Azure OpenAI deployment
+  (`OpenAiOptions`, the §1060 judge pattern: temperature 0, `response_format: json_object`, strict JSON
+  `{verdict, summary, checks[]}`; a failed call / unparseable answer / unconfigured host ⇒ **CouldNotCheck**,
+  never NotApproved; an "approved" answer with a failed checklist line is read as NotApproved). Images go
+  as `image_url` data URIs; PDFs as `DocumentTextExtractor` text (12k chars per file); a scan without a
+  text layer is marked unreadable in the prompt. The requirements text mirrors `_TravelFields.cshtml`
+  (six-week date from `Event.StartDate`, submission deadline from `speaker-deadlines.<ed>.json` key
+  `travel`). The prompt forbids repeating ID / IBAN / card numbers.
+- **`TravelReviewService`** — `ValidateAsync` / `ValidateAllSubmittedAsync` (store only, no mail);
+  `AcceptAsync` (Accepted; `TravelErpMailer.SendAsync` only when `ErpSentAt` is null, then stamped — a
+  claim reaches finance once); `SendBackAsync` (`TravelClaimLock.ReopenAsync`, SentBack, `ErpSentAt`
+  cleared so corrected documents reach finance on the next Accept, the `travel:submit-ticket-invoice` task
+  re-opened, mail `travel-claim-sent-back` to the speaker — ring-gated under `travel-reimbursement-email`,
+  with the note + the AI's missing items); `SweepAsync` (UnderReview, `ErpSentAt` null, not checked on the
+  current hash ⇒ validate; NotApproved / CouldNotCheck ⇒ `travel-claim-review-needed` to the logistics
+  review mailbox, RingExempt, once per `AiInputHash`). `TravelReviewJob` (jobs host, §510 interval 10 min,
+  `JobSystem.Email`, instrumented) runs the sweep.
+- **`TravelErpMailer`** (Core) is the §48/§1166 ERP mail moved out of the form unchanged — subject format
+  and body are finance's contract; `TravelFormService.ClaimSubject` delegates to it.
+- **Organizer page** `/Organizer/TravelReimbursements`: per claim the files (download handler `File`,
+  organizer-only), the verdict badge + checklist, `Validate with AI`, `Accept documents`, `Send back to
+  speaker` (note field; real-organizer gate); `Validate all submitted with AI`; filter *Needs review*.
+- **Speaker page**: a status box (with the organizers / sent back + note + missing items / accepted).
+
 **4. Honest action-result confirmations (organizer send + QR provisioning, 2026-06-16).** Every organizer
 SEND action (Broadcast, session-evaluation results to speakers) and the QR PROVISIONING action (room QR;
 the master-class Booking sync rides the same shape) now renders an **honest** success / failure / no-op
@@ -6657,12 +6998,13 @@ participants, whom the transport's ring gate exists to refuse. The design is mos
 | Piece | Decision, and why |
 |---|---|
 | `MailAudienceResolver` | The twelve, each in **one place**, deduplicated by address. "All attendees" must mean the same set in the preview an organizer approves and in the send that follows |
-| `MailCampaignRecipient` | One row per person per campaign, **unique index** on (campaign, address). It is what makes a batch resumable and nobody mailed twice — the guarantee belongs to the database, not to the loop that happens to be running. The audience is frozen at **start**; suppression is still re-read per batch |
+| `MailCampaignRecipient` | One row per person per campaign, **unique index** on (campaign, address). It is what makes a batch resumable and nobody mailed twice — the guarantee belongs to the database, not to the loop that happens to be running. The list is frozen at **start** (nobody is ADDED later); suppression is re-read per batch, and **§1381 (2026-11-07) the audience is re-resolved per batch too** — a pending recipient no longer in it (a previous attendee who bought a ticket since; the attendee mirror syncs every 5 min) becomes `LeftAudience` and is not mailed, counted on the organizer page as "skipped (bought a ticket)". Every mail carries the Brevo tag `ceh-{audience}-c{id}` (e.g. `ceh-previous-attendees-no-ticket-c12`), so stats and logs separate the groups |
 | `MailSuppressionService` | Links are **signed, not stored** (HMAC over edition+address): no table, no cleanup, and editing the address in the URL invalidates it. **Fails closed** with no secret |
 | `/unsubscribe` | Anonymous by necessity — previous years' attendees have no account. 🔴 **The GET never unsubscribes**: scanners fetch every URL in a message, so the button POSTs. One message for every invalid case, so it never confirms whether an address exists |
 | `MailBounceIngestService` | Anonymous but **not unauthenticated** — a shared secret compared in constant time; blank refuses everything, because an open webhook lets anybody silence any address we hold. **Hard bounces suppress, soft ones do not**: a full mailbox today is a real attendee tomorrow |
 | `ExternalRecipientImportService` | Columns found **by name, not position** — a spreadsheet that has been through three people has its columns moved, and an importer keyed on "column A is the address" mails names. It **refuses the file** rather than guess; re-import updates rather than duplicates |
 | `MailCampaignJob` | **One batch per campaign per tick.** The pacing lives in the campaign's own interval, not the trigger — draining as fast as the job ticks defeats the batching it exists to provide |
+| `MailCampaignJob` §1388 | **Release plans first, one step per campaign per tick**: `RunPlanStepsAsync` — step 1 at `PlanPreviewAt`: [PREVIEW] to ring 0; step 2 at `PlanWaveAt`: mail ring → Broad, `StartAsync` freezes the audience, `PlanWaveSize` = ceil(total × `PlanWavePercent` %) and `SendBatchAsync` caps at it; step 3 at `PlanEveryoneAt`: cap lifted (migration `20261108200000_MailCampaignReleasePlan`). Stop sets `PlanStoppedAt` and Draft (also mid-wave). Each step mails `campaign-release-step` (RingExempt) to the review mailbox. |
 
 ⚠️ **The imported list is its own table, never `Participant`** — eight thousand strangers in the
 participant tables would corrupt every count in the hub and put them in front of role-gated pages.
@@ -8535,3 +8877,109 @@ which reserves nothing.
 
 **Shop page.** A sticky cart bar shows the item count and subtotal and flashes when something is added; sold-out
 products are hidden unless the sponsor ticks "Show sold-out items".
+
+### §1374 — Visa form for speakers and volunteers
+
+A simple form, not the survey engine and not a mail flow (operator 2026-10-28: *"instead of a survey, it can be a simple
+form"*).
+
+- **Who sees it.** `Participant.NeedsVisa` (organizer-set: the "Needs visa" box on `/Organizer/EditParticipant`, or
+  Add/Remove on `/Organizer/VisaApplications`). The layout resolves it per request and passes `needsVisa` to
+  `NavBuilder.Build`, which adds a top-level "Visa application" item just before Contact, for any role.
+  `/Forms/Visa` is `[Authorize]` and answers **404** unless the signed-in participant is flagged and active.
+- **Data.** `VisaApplication`, one row per participant (unique `ParticipantId`, cascade from the participant;
+  `EventId` is a plain column so SQL Server keeps a single cascade path). Countries and nationality are stored as the
+  ISO code from `Countries`; dropdown answers as the text from `VisaFormOptions`. Migration `VisaApplicationForm`
+  (additive: one column, one table).
+- **One field list.** `VisaApplicationService.Fields` (section, label, value, required) drives the required-field
+  check, the organizer detail view, the Excel columns and the PDF, so none of them can drift from the others.
+- **Saving.** `SubmitAsync` validates (required fields named; 500-character texts; 1–90 days; date of birth in the
+  past; dropdown values from the lists) and copies only the applicant's answers — the organizer's `ApplicationId` and
+  the first `SubmittedAt` survive every resubmit.
+- **Organizer page** `/Organizer/VisaApplications` (Logistics hub): everyone flagged plus anyone unflagged who already
+  answered, submitted/waiting counts, one application opened in full (values selectable for copying into the
+  nyidanmark.dk invitation form), the application ID (set/clear; shown at the top of the applicant's form), Excel
+  (`CsvToXlsx` over `BuildCsv`, every person × every field) and PDF (`VisaApplicationPdf`, PDFsharp + the embedded
+  Open Sans; one person or everyone who submitted). Reading needs organizer access; changes need a real organizer
+  (`OrganizerAuth.IsRealOrganizer`) and are audited.
+- **No e-mail to the applicant.** The applicant sees the application ID (and any letter, below) on their form.
+- **§1383 — the organizers' mailbox is told on submit.** `VisaNotifier` sends `visa-application-submitted` (template
+  file + registry row, ring-exempt because the recipient is a mailbox, Reply-To the applicant) to the configured
+  `Visa:NotifyEmailTo` address (default: the organizers' info mailbox; blank turns it off). `SubmitAsync` decides
+  before overwriting: the FIRST submit mails "submitted"; a later save mails "updated" only when a `Fields` value
+  changed, listing the changed field names but never their values; an identical re-save sends nothing. Best-effort —
+  a mail failure is logged and the save stands. The body carries name, e-mail, role and a link, no passport-grade data.
+- **§1383 — a PDF letter per applicant.** Once the application has gone to the Danish authorities an organizer uploads
+  a PDF (typically the invitation letter) on the applicant's detail card; it replaces any earlier one and can be
+  removed. Stored as bytes in `VisaLetter` (one row per participant, unique `ParticipantId`, cascade from the
+  participant; migration `VisaInvitationLetter`, additive) — the same mechanism as travel receipts, so no new storage
+  and the database backup already covers it; a separate table keeps the bytes out of the organizer list. `VisaLetterStore`
+  validates the content (a `%PDF-` header in the first 1024 bytes, at most 10 MB, only for someone on the visa list).
+  Upload/remove need a real organizer and are audited; the applicant downloads from `/Forms/Visa?handler=Letter`,
+  which takes no id and looks the row up by the signed-in participant behind the same 404 gate as the form.
+- **The task** (operator 2026-10-28: *"add a visa task to their task list"* · *"no deadline"*). SourceKey
+  `visa-form:{participantId}`, title "Fill in your visa application", mandatory, **no due date** — so the reminder job
+  never mails about it. `VisaApplicationService.SyncTaskAsync` keeps it in step: flagged ⇒ exists (Done once
+  submitted); flag removed ⇒ an open task is retired (`ClosedReason = RetiredFromCatalog`, never deleted); re-flagged ⇒
+  reopened. Runs on submit, on a flag change (organizer page and EditParticipant), on `/Speaker/Tasks` load (one
+  person) and on `/Organizer/VisaApplications` load (everyone). Shown on the speaker task list (retired rows hidden);
+  `ParticipantChecklistBuilder.LinkForSourceKey` deep-links it to `/Forms/Visa`. ⚠️ Volunteers have no task list since
+  §950 (Get Started replaced it), so a flagged volunteer's task row exists but no page lists it.
+- **Field sizing.** Every input declares its `type` — `_LayoutStyles` widens fields by type, and an untyped input fell
+  back to the browser's ~20-character width (*"all fields are way to small"*). Both dates are day / month / year
+  dropdowns (birth: 100 years back; arrival: this year and next), because the browser date field hid the year.
+- **Where they stay** is a dropdown of the edition's CEH hotels, stored as "Name, Address" (what the invitation needs,
+  and what Excel/PDF print); the address shows under the dropdown once picked; an unanswered form starts on the hotel
+  an organizer already placed them in (`Participant.HotelId`). **Who pays for the stay** is not asked: it is always
+  `VisaFormOptions.StayPaidByOrganizer` ("The event organizer"), set on every save. The host guarantee is likewise
+  fixed to **No** (`VisaFormOptions.HostGuarantees`).
+
+### §1382 — Public coupon sign-up form
+
+A company asks for a ticket coupon on the public page `/coupon-signup`; `CouponSignupService` does the rest.
+
+- **Protection.** Anonymous, public layout. The sponsor registration's captcha (`ShopCaptcha`: Turnstile when configured,
+  otherwise a sealed arithmetic question with a minimum fill time), a honeypot field, and an hourly limit per IP and per
+  requester e-mail counted on the request table. Gated by the feature `coupon-signup` (off by default; organizers get a
+  preview while it is off).
+- **Validation** is server-side and complete: mandatory fields, VAT format (a bare number takes the country prefix; a
+  Danish number is 8 digits), EAN = 13 digits, e-mail and mobile format, exactly one of invoice e-mail and EAN, split
+  0–99 % (100 % would leave nothing for the company to pay).
+- **Records.** `CouponSignupRequest` stores what was typed (no foreign keys — it outlives the coupon it produced).
+  "The coupon in CEH" is a `CouponInvoicingSetting` with a proposed promo code (`COMPANY-2D-<request no>`), the billing
+  type, the company's share (`InvoicedSharePercent` = 100 − the attendee's split) and, for ad-hoc billing, the ticket
+  count as its cap. The promo code itself must still be created in the ticketing platform by hand (it has no coupon API);
+  a prepaid pool is added by an organizer, because adding tickets raises the invoice.
+- **ERP.** The customer is looked up by VAT number only; only when none exists is it created, in customer group 2, with
+  the invoice e-mail or EAN (`ErpCustomer.CustomerGroupNumber` / `Ean`; other callers keep the configured group). The
+  create needs two external-write ceilings: `ErpCouponCustomerCreate` (unset ⇒ the host default: blocked in development,
+  allowed in production) and the client's own ERP ceiling. A refusal or failure is recorded on the request and shown in
+  the mail; the request and coupon are kept.
+- **Mail.** `coupon-signup-request` to the event mailbox, ring-exempt (a mailbox, not a participant), Reply-To the
+  requester: every field, the proposed code, the ERP outcome and the remaining step.
+
+### §1385 — No hidden speakers
+A speaker who is counted but on no session is invisible on the agenda and every per-session view; a session with no
+speakers shows an empty slot. CEH now finds both itself.
+- **The check — `HiddenSpeakerCheckService.CheckAsync(eventId)`** (Core, read-only). Three lists, each item with its
+  id and name/title (speakers also with when they were created):
+  - *Speakers on no session*: active (`IsActive`), non-test (`!IsTestUser`) participants with `Role = Speaker` linked
+    to no **real** session.
+  - *Speakers without a speaker profile*: the same people with no `SpeakerProfile` row for the edition.
+  - *Sessions with no speakers*: real sessions with no `SessionSpeakers` row.
+  - **Real session** = same edition, `!UsedForTesting && !IsTestData && !IsServiceSession`. ⚠️
+    `ExcludeFromSoMeAnnouncements` and the SoMe title patterns are **not** applied: they decide whether a session is
+    announced, not whether it exists. A speaker linked only to a test session therefore counts as on no session.
+  - **Expected empty**: a session whose title contains `[Placeholder]` or `TBD` (case-insensitive) is listed
+    separately and never counts as a problem on its own — known placeholders and sponsor slots stay visible without
+    raising an alarm.
+- **Organizer Speakers page.** A box at the top covering the whole edition (not just the grid's search/page): the
+  counts, then collapsible lists — each speaker links to Edit participant, each session to its edit drawer on the
+  Sessions page (searched by session id). When nothing is hidden it shows a small green "No hidden speakers" (plus any
+  expected-empty placeholders).
+- **Weekly organizer notice — `hidden-speakers-weekly`.** Built by `HiddenSpeakersReminderBuilder` inside the reminder
+  job (same run gate as the other reminders) and sent through the reminder engine to the edition's remindable
+  organizers. Due from **Monday 08:00 Danish time**; the occasion key carries the ISO week, so the ledger allows one
+  per organizer per week and a missed Monday run self-heals later that week. Built **only when the check finds a
+  problem**, so it stops by itself. Its own (mail × role) ring; with no ring set it reaches the inner ring only, like
+  every new mail.

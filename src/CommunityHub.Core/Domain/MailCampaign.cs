@@ -28,6 +28,16 @@ public enum MailAudience
     /// therefore the only one the ring gate would refuse.
     /// </summary>
     PreviousAttendeesNotThisEdition = 11,
+
+    /// <summary>§1381 — everyone who answered YES to the appreciation dinner.</summary>
+    AppreciationDinner = 12,
+
+    /// <summary>§1381 — everyone who said they are coming to the party.</summary>
+    PartyParticipants = 13,
+
+    /// <summary>§1381 — all volunteers PLUS the named extra people configured for this edition
+    /// (<c>MailCampaigns:VolunteerAudienceExtraEmails</c>; operator 2026-11-07: "All volunteers + Eli + Morten + Sabine").</summary>
+    VolunteersPlusExtras = 14,
 }
 
 /// <summary>Where a campaign is in its life.</summary>
@@ -84,6 +94,31 @@ public class MailCampaign
     /// </remarks>
     public int BatchSize { get; set; } = 50;
     public int BatchIntervalMinutes { get; set; } = 15;
+
+    // ---- §1388 — the staged RELEASE PLAN (operator 2026-11-08: "ring 1 gets mail at 8am, ring 2 and 9am and ring 3 starts at
+    // 10am. then we can stop if last minute issues are found" → refined: "send to organizers at 8, send to 5% at 9 then rest
+    // at 10"). All null = no plan (release by hand as before).
+
+    /// <summary>§1388 step 1 — a [PREVIEW] of the mail to the organizers (ring 0).</summary>
+    public DateTimeOffset? PlanPreviewAt { get; set; }
+    /// <summary>§1388 step 2 — the REAL mail to the first <see cref="PlanWavePercent"/> % of the audience.</summary>
+    public DateTimeOffset? PlanWaveAt { get; set; }
+    /// <summary>§1388 step 3 — the rest of the audience, in the campaign's normal batches.</summary>
+    public DateTimeOffset? PlanEveryoneAt { get; set; }
+    public DateTimeOffset? PlanPreviewDoneAt { get; set; }
+    public DateTimeOffset? PlanWaveDoneAt { get; set; }
+    public DateTimeOffset? PlanEveryoneDoneAt { get; set; }
+    /// <summary>§1388 — the size of the first wave, in percent of the audience (default 5).</summary>
+    public int PlanWavePercent { get; set; } = 5;
+    /// <summary>§1388 — the first wave's size in recipients, fixed when the wave starts; the batches stop there until step 3.</summary>
+    public int? PlanWaveSize { get; set; }
+    /// <summary>§1388 — the Stop button: no further step runs once this is set.</summary>
+    public DateTimeOffset? PlanStoppedAt { get; set; }
+    public string? PlanStoppedByEmail { get; set; }
+    public string? PlanSetByEmail { get; set; }
+
+    /// <summary>§1388 — a plan is set, not stopped, and its last step has not run.</summary>
+    public bool PlanActive => PlanEveryoneAt is not null && PlanStoppedAt is null && PlanEveryoneDoneAt is null;
 
     /// <summary>
     /// 🔴 §1080b — whether THIS campaign's mail carries an unsubscribe link. <b>Default false.</b>
@@ -161,6 +196,13 @@ public enum MailCampaignRecipientState
 
     /// <summary>Skipped because the address was suppressed AT SEND TIME.</summary>
     Suppressed = 3,
+
+    /// <summary>
+    /// §1381 — skipped because the person is NO LONGER IN THE AUDIENCE at send time — typically a previous
+    /// attendee who bought a ticket after the campaign started (operator 2026-11-07: <i>"an attendee that
+    /// bought a ticket 1 hr ago will NOT get the 5 'no ticket yet' emails"</i>). APPENDED — stored as int.
+    /// </summary>
+    LeftAudience = 4,
 }
 
 /// <summary>

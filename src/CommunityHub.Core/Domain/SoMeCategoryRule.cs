@@ -113,6 +113,22 @@ public class SoMeCategoryRule
     /// </remarks>
     public DateOnly? EndsOn { get; set; }
 
+    /// <summary>
+    /// §1368 — the fewest days allowed between two rounds of the SAME subject (a sponsor's first and
+    /// second post). Null or 0 = no spacing rule.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-10-26: <i>"we need to be able to publish them 2 times with enough time
+    /// between so they dont popup close to each other"</i> · <i>"all these rules or dates in the
+    /// settings so we can modify ourselves"</i>. Measured that day: Egiss and 2Pint were both planned
+    /// 3 + 5 February — two days apart, because nothing kept a subject's own rounds apart (§855.4.1
+    /// proposed it and it was never built).</para>
+    /// <para>🔒 A QUALITY rule: the planner honours it when a seat exists, and otherwise places the
+    /// post anyway and reports the conflict. A sponsor post that never goes out is a contract breach
+    /// (§842.5); one that goes out too close to its pair is a mail to the organizers.</para>
+    /// </remarks>
+    public int? MinDaysBetweenRounds { get; set; }
+
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? LastUpdatedByEmail { get; set; }
 }

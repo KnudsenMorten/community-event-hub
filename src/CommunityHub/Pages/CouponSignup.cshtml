@@ -1,0 +1,152 @@
+@page "/coupon-signup"
+@model CommunityHub.Pages.CouponSignupModel
+@using CommunityHub.Core.Domain
+@{
+    // §1382 — anonymous public page: the public layout never shows internal/auth chrome.
+    Layout = "_PublicLayout";
+    ViewData["Title"] = "Order a ticket coupon";
+    var byEan = string.Equals(Model.InvoiceBy, "ean", StringComparison.OrdinalIgnoreCase);
+}
+
+<div class="card" style="max-width:760px;margin:0 auto;">
+    <h1 style="margin-bottom:4px;">Order a ticket coupon</h1>
+    @if (Model.EventName is not null) { <p style="font-size:20px;font-weight:600;color:#374151;margin:0 0 16px;">@Model.EventName</p> }
+
+    @if (Model.Closed)
+    {
+        <p class="info">Coupon orders are not open here yet. Please contact the organizers.</p>
+    }
+    else if (Model.Done)
+    {
+        <p class="info" role="status">@(Model.Message ?? "Thank you — we have received your request.")</p>
+        <p><a href="/">Back to the start page</a></p>
+    }
+    else
+    {
+        @if (Model.IsPreview)
+        {
+            <p class="info" style="border-left:4px solid #b45309;"><strong>Preview</strong> — the coupon form is switched off; only organizers can see this page.</p>
+        }
+        @if (Model.Problems.Count > 0)
+        {
+            <div class="error" role="alert"><p>Please fix:</p><ul>@foreach (var p in Model.Problems) { <li>@p</li> }</ul></div>
+        }
+
+        <p>Order tickets for your colleagues with a coupon code. Choose <strong>prepaid</strong> to buy the tickets up front, or
+           <strong>ad-hoc billing</strong> to be invoiced only for the tickets that are actually used.</p>
+
+        <form method="post" class="cs-form" id="cs-form">
+            <p class="cs-hint">Fields marked <span class="req">*</span> are required.</p>
+
+            <fieldset>
+                <legend>1 · Your order</legend>
+                <div class="cs-choice" role="radiogroup" aria-label="Order type">
+                    <span class="cs-label">Order type <span class="req" aria-hidden="true">*</span></span>
+                    <label><input type="radio" name="OrderType" value="Prepaid" required checked="@(Model.OrderType == CouponSignupOrderType.Prepaid)" /> Prepaid</label>
+                    <label><input type="radio" name="OrderType" value="AdHoc" checked="@(Model.OrderType == CouponSignupOrderType.AdHoc)" /> Ad-hoc billing</label>
+                </div>
+                <div class="cs-choice" role="radiogroup" aria-label="Ticket type">
+                    <span class="cs-label">Ticket type <span class="req" aria-hidden="true">*</span></span>
+                    <label><input type="radio" name="TicketType" value="TwoDay" required checked="@(Model.TicketType == CouponSignupTicketType.TwoDay)" /> 2-day ticket</label>
+                    <label><input type="radio" name="TicketType" value="OneDay" checked="@(Model.TicketType == CouponSignupTicketType.OneDay)" /> 1-day ticket</label>
+                </div>
+                <label>Number of tickets <span class="req" aria-hidden="true">*</span>
+                    <input name="TicketCount" type="number" inputmode="numeric" min="1" max="500" required value="@Model.TicketCount" style="max-width:160px;" /></label>
+                <label>Split payment % (optional)
+                    <input name="SplitPercent" type="number" inputmode="numeric" min="0" max="99" value="@Model.SplitPercent" style="max-width:160px;" />
+                    <span class="cs-hint">The share of each ticket the attendee pays. 0 (or empty) = your company pays 100 %. 50 = your company pays 50 % and the attendee pays the other 50 %.</span>
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>2 · Company</legend>
+                <label>Company name <span class="req" aria-hidden="true">*</span> <input name="CompanyName" value="@Model.CompanyName" required maxlength="200" autocomplete="organization" /></label>
+                <label>VAT number <span class="req" aria-hidden="true">*</span> <input name="VatNumber" value="@Model.VatNumber" required maxlength="32" placeholder="DK12345678" autocapitalize="characters" /></label>
+                <label>Address <span class="req" aria-hidden="true">*</span> <input name="Address" value="@Model.Address" required maxlength="200" autocomplete="street-address" /></label>
+                <div class="cs-row">
+                    <label>Postal code <span class="req" aria-hidden="true">*</span> <input name="PostalCode" value="@Model.PostalCode" required maxlength="20" autocomplete="postal-code" /></label>
+                    <label>City <span class="req" aria-hidden="true">*</span> <input name="City" value="@Model.City" required maxlength="100" autocomplete="address-level2" /></label>
+                </div>
+                <label>Country <span class="req" aria-hidden="true">*</span>
+                    <select name="Country" required>
+                        @foreach (var c in CommunityHub.Pages.CouponSignupModel.Countries)
+                        {
+                            <option value="@c.Code" selected="@(c.Code == Model.Country)">@c.Name</option>
+                        }
+                    </select>
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>3 · You (the requester)</legend>
+                <label>Full name <span class="req" aria-hidden="true">*</span> <input name="RequesterName" value="@Model.RequesterName" required maxlength="200" autocomplete="name" /></label>
+                <label>E-mail <span class="req" aria-hidden="true">*</span> <input name="RequesterEmail" type="email" value="@Model.RequesterEmail" required maxlength="320" autocomplete="email" /></label>
+                <label>Mobile <span class="req" aria-hidden="true">*</span> <input name="RequesterMobile" type="tel" value="@Model.RequesterMobile" required maxlength="40" autocomplete="tel" placeholder="+45 12 34 56 78" /></label>
+            </fieldset>
+
+            <fieldset>
+                <legend>4 · Invoice</legend>
+                <div class="cs-choice" role="radiogroup" aria-label="Invoice details">
+                    <span class="cs-label">Send the invoice by <span class="req" aria-hidden="true">*</span></span>
+                    <label><input type="radio" name="InvoiceBy" value="email" checked="@(!byEan)" /> E-mail</label>
+                    <label><input type="radio" name="InvoiceBy" value="ean" checked="@byEan" /> EAN (public sector)</label>
+                </div>
+                <label id="cs-invoice-email">Invoice e-mail <span class="req" aria-hidden="true">*</span> <input name="InvoiceEmail" type="email" value="@Model.InvoiceEmail" maxlength="320" /></label>
+                <label id="cs-ean">EAN number (13 digits) <span class="req" aria-hidden="true">*</span> <input name="EanNumber" inputmode="numeric" value="@Model.EanNumber" maxlength="17" autocomplete="off" /></label>
+                <label>Purchase order (optional) <input name="PurchaseOrder" value="@Model.PurchaseOrder" maxlength="200" />
+                    <span class="cs-hint">Your PO number or reference, if it must be on the invoice.</span></label>
+            </fieldset>
+
+            <div class="hp" aria-hidden="true"><label>Leave this empty <input name="Website2" tabindex="-1" autocomplete="off" /></label></div>
+            @if (Model.UsesTurnstile)
+            {
+                <div class="cf-turnstile" data-sitekey="@Model.TurnstileSiteKey"></div>
+                <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+            }
+            else if (Model.Challenge is not null)
+            {
+                <input type="hidden" name="CaptchaToken" value="@Model.Challenge.Token" />
+                <label>@Model.Challenge.Question <span class="req" aria-hidden="true">*</span> <input name="CaptchaAnswer" inputmode="numeric" required autocomplete="off" style="max-width:120px;" /></label>
+            }
+            <button type="submit">Send the order</button>
+        </form>
+        <script>
+        (function () {
+            // Exactly ONE of invoice e-mail and EAN: show the chosen field, require it, and clear the other.
+            const form = document.getElementById('cs-form');
+            const mailRow = document.getElementById('cs-invoice-email'), eanRow = document.getElementById('cs-ean');
+            const mail = mailRow.querySelector('input'), ean = eanRow.querySelector('input');
+            function apply() {
+                const byEan = form.querySelector('input[name=InvoiceBy]:checked').value === 'ean';
+                mailRow.hidden = byEan; eanRow.hidden = !byEan;
+                mail.required = !byEan; ean.required = byEan;
+                if (byEan) mail.value = ''; else ean.value = '';
+            }
+            form.querySelectorAll('input[name=InvoiceBy]').forEach(r => r.addEventListener('change', apply));
+            apply();
+        })();
+        </script>
+    }
+</div>
+<style>
+    /* Same roomy, mobile-first fields as the sponsor registration (16px stops phones zooming in). */
+    .card input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .card select {
+        width:100%; box-sizing:border-box; padding:11px 12px; font-size:16px; line-height:1.3;
+        border:1px solid #9ca3af; border-radius:8px; background:#fff; }
+    .card input:focus, .card select:focus { outline:3px solid #bcd3ee; border-color:#1565c0; }
+    .card button[type=submit] { padding:12px 18px; font-size:17px; border-radius:8px; }
+    .cs-form { display:grid; gap:12px; }
+    .cs-form fieldset { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; display:grid; gap:10px; min-width:0; }
+    .cs-form legend { font-weight:700; }
+    .cs-form [hidden] { display:none !important; }
+    .cs-form label { display:grid; gap:4px; font-size:14px; font-weight:600; }
+    .cs-choice { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; }
+    .cs-choice .cs-label { flex-basis:100%; font-size:14px; font-weight:600; }
+    .cs-choice label { display:flex; gap:8px; align-items:center; font-weight:normal; font-size:16px; }
+    .cs-choice input[type=radio] { width:20px; height:20px; margin:0; }
+    .cs-row { display:grid; grid-template-columns:1fr 2fr; gap:10px; }
+    .cs-hint { font-size:13px; color:#4b5563; font-weight:normal; margin:0; }
+    .req { color:#b91c1c; font-weight:700; }
+    .hp { position:absolute; left:-10000px; width:1px; height:1px; overflow:hidden; }
+    @@media (max-width:480px) { .cs-row { grid-template-columns:1fr; } }
+</style>

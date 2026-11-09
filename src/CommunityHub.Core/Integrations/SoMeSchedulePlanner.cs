@@ -67,7 +67,24 @@ public sealed record SoMeSubject(
     /// window has closed still falls back to the event-start ceiling rather than going unannounced,
     /// and the run reports it. A missing sponsor post is contractual (§842.5).</para>
     /// </remarks>
-    DateTimeOffset? LatestUtc = null);
+    DateTimeOffset? LatestUtc = null,
+    /// <summary>
+    /// §1368 — a DEADLINE for a specific round ("every sponsor's first post by 15 December").
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="LatestUtc"/> it caps one round only. Tried first at the normal rhythm, then
+    /// at the exception ceiling, and only then given up — the post still goes out, late, and the
+    /// conflict check mails it.
+    /// </remarks>
+    IReadOnlyDictionary<int, DateTimeOffset>? LatestByOccurrence = null,
+    /// <summary>
+    /// §1368 — the fewest days between two rounds of THIS subject. 0 = no spacing rule.
+    /// </summary>
+    /// <remarks>
+    /// Whenever spacing applies, a later round also never lands before an earlier one. Honoured when
+    /// a seat exists; otherwise the post is placed anyway (§842.5) and the conflict is reported.
+    /// </remarks>
+    int MinDaysBetweenOccurrences = 0);
 
 /// <summary>
 /// §824.2E — decides WHEN each post goes out. Pure: no database, no clock of its own, no randomness
@@ -183,13 +200,24 @@ public static class SoMeSchedulePlanner
     /// like every single day, which is a §843.1 attendee-experience change rather than a capacity
     /// tweak. His ELDK26 exceptions were days they had run OUT of room, not a chosen cadence.</para>
     /// </param>
+    /// <param name="maxSponsorPerDay">
+    /// §1368 — at most this many SPONSOR posts (<see cref="SponsorKeyPrefix"/>) on one day. Null = no
+    /// limit of its own. A quality rule: relaxed rather than leave a sponsor unannounced.
+    /// </param>
+    /// <param name="unkeyedOccupied">
+    /// 🔴 §1379c — the slots of posts that belong to NO subject (ad-hoc / hand-written posts, which
+    /// have no <c>SubjectKey</c>). They take a seat on their day exactly like an existing post, but
+    /// take part in no subject's spacing rule. Null = none.
+    /// </param>
     public static IReadOnlyList<PlannedSoMePost> Plan(
         IEnumerable<SoMeSubject> subjects,
         IReadOnlyCollection<(string SubjectKey, int Occurrence, DateTimeOffset ScheduledAtUtc)> existing,
         DateTimeOffset fromUtc,
         DateTimeOffset eventStartUtc,
         int normalPerDay = 2,
-        int? exceptionPerDay = null)
+        int? exceptionPerDay = null,
+        int? maxSponsorPerDay = null,
+        IReadOnlyCollection<DateTimeOffset>? unkeyedOccupied = null)
     {
         ArgumentNullException.ThrowIfNull(subjects);
         ArgumentNullException.ThrowIfNull(existing);
@@ -247,14 +275,86 @@ public static class SoMeSchedulePlanner
         // the existing posts instead of on top of one.
         var used = new Dictionary<DateOnly, int>();
         var taken = new HashSet<DateTimeOffset>();
+        // §1368 — where each subject's rounds already sit, and how many sponsors each day holds, so
+        // the spacing rules see the queue as it is (approved and published posts included).
+        var subjectDays = new Dictionary<string, Dictionary<int, DateOnly>>(StringComparer.Ordinal);
+        var sponsorUsed = new Dictionary<DateOnly, int>();
         foreach (var e in existing)
         {
             taken.Add(e.ScheduledAtUtc);
             var d = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(e.ScheduledAtUtc, DanishTime).DateTime);
             used[d] = used.GetValueOrDefault(d) + 1;
+            Occupy(e.SubjectKey, e.Occurrence, d);
+        }
+        // 🔴 §1379c — an ad-hoc post holds its seat too; it just has no subject to space against.
+        foreach (var slot in unkeyedOccupied ?? Array.Empty<DateTimeOffset>())
+        {
+            taken.Add(slot);
+            var d = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(slot, DanishTime).DateTime);
+            used[d] = used.GetValueOrDefault(d) + 1;
         }
 
         var planned = new List<PlannedSoMePost>();
+
+        // 🔑 §1368 — THE TWO SPACING RULES, as a day filter. "Strict" applies them; when no seat
+        // satisfies them the planner retries without (a post that goes out too close to its pair is a
+        // conflict mail, one that never goes out is a §842.5 breach).
+        Func<DateOnly, bool> Strict(SoMeSubject subject, int occurrence) => day =>
+        {
+            if (maxSponsorPerDay is { } cap && IsSponsor(subject.SubjectKey)
+                && sponsorUsed.GetValueOrDefault(day) >= cap)
+            {
+                return false;
+            }
+
+            if (subject.MinDaysBetweenOccurrences <= 0
+                || !subjectDays.TryGetValue(subject.SubjectKey, out var rounds))
+            {
+                return true;
+            }
+
+            foreach (var (other, otherDay) in rounds)
+            {
+                if (other == occurrence) continue;
+                // A later round never before an earlier one…
+                if (other < occurrence && otherDay >= day) return false;
+                if (other > occurrence && otherDay <= day) return false;
+                // …and never closer than the minimum.
+                if (Math.Abs(day.DayNumber - otherDay.DayNumber) < subject.MinDaysBetweenOccurrences)
+                    return false;
+            }
+            return true;
+        };
+
+        // The round's own deadline, clamped to the subject's ceiling. Null = none.
+        DateTimeOffset? DeadlineOf(SoMeSubject subject, int occurrence, DateTimeOffset ceiling) =>
+            subject.LatestByOccurrence is { } byOcc && byOcc.TryGetValue(occurrence, out var by)
+                ? (by < ceiling ? by : ceiling)
+                : null;
+
+        // Floor for a round: its own window wins over the subject-wide floor (§908), never the past.
+        DateTimeOffset FloorOf(SoMeSubject subject, int occurrence)
+        {
+            var roundStart = subject.EarliestByOccurrence is { } byOcc
+                             && byOcc.TryGetValue(occurrence, out var ro)
+                ? (DateTimeOffset?)ro
+                : null;
+            var floor = roundStart ?? subject.EarliestUtc;
+            return floor is { } f && f > fromUtc ? f : fromUtc;
+        }
+
+        // One seat before `until` at one per-day ceiling: the spacing rules from the preferred day,
+        // then from the earliest; only then without them. A rule-abiding seat anywhere in range beats
+        // a rule-breaking one at the preferred spread position.
+        DateTimeOffset? Seat(SoMeSubject subject, int occurrence, DateTimeOffset preferred,
+            DateTimeOffset earliest, DateTimeOffset until, int perDay)
+        {
+            var strict = Strict(subject, occurrence);
+            return FindSlot(subject.SubjectKey, occurrence, preferred, until, used, taken, perDay, strict)
+                ?? FindSlot(subject.SubjectKey, occurrence, earliest, until, used, taken, perDay, strict)
+                ?? FindSlot(subject.SubjectKey, occurrence, preferred, until, used, taken, perDay)
+                ?? FindSlot(subject.SubjectKey, occurrence, earliest, until, used, taken, perDay);
+        }
 
         // 🔑 §843.3 — TWO PASSES, so an exception is EARNED rather than available.
         //
@@ -289,11 +389,11 @@ public static class SoMeSchedulePlanner
                 ? (DateTimeOffset?)ro
                 : null;
 
-            var floor = roundStart ?? subject.EarliestUtc;
-            var earliest = floor is { } e && e > fromUtc ? e : fromUtc;
+            var earliest = FloorOf(subject, occurrence);
 
             // Where this post WANTS to sit, before availability is considered.
-            var target = windowStart.AddDays(windowDays * index / count);
+            var position = (double)index / count;
+            var target = windowStart.AddDays(windowDays * position);
             index++;
 
             // 🔒 A LATE ARRIVAL IS NOT SPREAD — it goes promptly.
@@ -324,12 +424,33 @@ public static class SoMeSchedulePlanner
                 ? latest
                 : eventStartUtc;
 
-            var slot = FindSlot(subject.SubjectKey, occurrence, searchFrom, ceiling, used, taken, normalPerDay);
+            // 🔴 §1368 — THE ROUND'S OWN DEADLINE ("every sponsor's first post by 15 December").
+            // The spread still applies, but inside [earliest, deadline]: a target past the deadline is
+            // pulled back to the same relative position within it, so the round spreads across the
+            // allowed weeks instead of piling onto the first free days.
+            var deadline = DeadlineOf(subject, occurrence, ceiling);
+            if (deadline is { } dl && searchFrom >= dl && dl > earliest)
+            {
+                searchFrom = earliest + TimeSpan.FromTicks((long)((dl - earliest).Ticks * position));
+            }
 
             // ⚠️ If nothing is free from the target onwards, fall back to searching from the
             // subject's own earliest date. Spreading is a PREFERENCE; placing the post at all is the
             // requirement, and a sponsor is contractual (§842.5).
-            slot ??= FindSlot(subject.SubjectKey, occurrence, earliest, ceiling, used, taken, normalPerDay);
+            var slot = Seat(subject, occurrence, searchFrom, earliest, deadline ?? ceiling, normalPerDay);
+
+            // 🔑 §1368 — a deadline the normal rhythm cannot meet goes to the EXCEPTION pass before it
+            // is given up: a third post on a day before 15 December beats a first post in January.
+            if (slot is null && deadline is not null && exceptionPerDay is { } exc && exc > normalPerDay)
+            {
+                leftovers.Add((subject, occurrence));
+                continue;
+            }
+
+            if (slot is null && deadline is not null)
+            {
+                slot = Seat(subject, occurrence, earliest, earliest, ceiling, normalPerDay);
+            }
 
             // 🔒 §1194 — AND THE CEILING IS NOT A REASON TO DROP A POST. If the category's window is
             // full or already past, the post still goes out before the EVENT rather than silently
@@ -337,7 +458,7 @@ public static class SoMeSchedulePlanner
             // is that an absence is the one failure nobody notices. It lands late and is reported.
             if (slot is null && ceiling < eventStartUtc)
             {
-                slot = FindSlot(subject.SubjectKey, occurrence, earliest, eventStartUtc, used, taken, normalPerDay);
+                slot = Seat(subject, occurrence, earliest, earliest, eventStartUtc, normalPerDay);
             }
 
             if (slot is null)
@@ -393,7 +514,12 @@ public static class SoMeSchedulePlanner
             DateTimeOffset? slot = null;
             if (exceptionPerDay is { } ceiling && ceiling > normalPerDay)
             {
-                slot = FindSlot(subject.SubjectKey, occurrence, earliest, eventStartUtc, used, taken, ceiling);
+                // §1368 — inside the round's deadline first, then anywhere before the event.
+                if (DeadlineOf(subject, occurrence, eventStartUtc) is { } dl)
+                {
+                    slot = Seat(subject, occurrence, earliest, earliest, dl, ceiling);
+                }
+                slot ??= Seat(subject, occurrence, earliest, earliest, eventStartUtc, ceiling);
             }
 
             if (slot is null) { stillUnplaced.Add((subject, occurrence)); continue; }
@@ -414,7 +540,7 @@ public static class SoMeSchedulePlanner
         foreach (var (subject, occurrence) in stillUnplaced)
         {
             var earliest = subject.EarliestUtc is { } e && e > fromUtc ? e : fromUtc;
-            var slot = FindSlot(subject.SubjectKey, occurrence, earliest, eventStartUtc, used, taken, normalPerDay);
+            var slot = Seat(subject, occurrence, earliest, earliest, eventStartUtc, normalPerDay);
             if (slot is null) continue;   // genuinely no room before the event — the caller reports it
 
             Place(subject, occurrence, slot.Value);
@@ -427,9 +553,30 @@ public static class SoMeSchedulePlanner
             taken.Add(slot);
             var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(slot, DanishTime).DateTime);
             used[day] = used.GetValueOrDefault(day) + 1;
+            Occupy(subject.SubjectKey, occurrence, day);
             planned.Add(new PlannedSoMePost(subject.Kind, subject.SubjectKey, occurrence, slot));
         }
+
+        void Occupy(string subjectKey, int occurrence, DateOnly day)
+        {
+            if (!subjectDays.TryGetValue(subjectKey, out var rounds))
+            {
+                subjectDays[subjectKey] = rounds = new Dictionary<int, DateOnly>();
+            }
+            rounds.TryAdd(occurrence, day);
+            if (IsSponsor(subjectKey)) sponsorUsed[day] = sponsorUsed.GetValueOrDefault(day) + 1;
+        }
     }
+
+    /// <summary>§1368 — the subject-key prefix of a Type 4 (single-sponsor) post.</summary>
+    /// <remarks>
+    /// ⚠️ <c>sponsorsession:</c> (Type 2c) is NOT a sponsor post for this rule — the colon is what
+    /// keeps the two apart, so the check is on the full prefix, never on "sponsor".
+    /// </remarks>
+    public const string SponsorKeyPrefix = "sponsor:";
+
+    internal static bool IsSponsor(string? subjectKey) =>
+        subjectKey is not null && subjectKey.StartsWith(SponsorKeyPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// §928 — pack posts that ALREADY EXIST into a window that opens on a given day, in order,
@@ -550,7 +697,9 @@ public static class SoMeSchedulePlanner
     private static DateTimeOffset? FindSlot(
         string subjectKey, int occurrence,
         DateTimeOffset earliestUtc, DateTimeOffset eventStartUtc,
-        Dictionary<DateOnly, int> used, HashSet<DateTimeOffset> taken, int maxPerDay)
+        Dictionary<DateOnly, int> used, HashSet<DateTimeOffset> taken, int maxPerDay,
+        // §1368 — the spacing rules, as a filter on the DAY. Null = no filter (the relaxed retry).
+        Func<DateOnly, bool>? dayAllowed = null)
     {
         // The subject's own stable hash decides where it starts looking and which time it prefers, so
         // two different sponsors do not queue up on the same morning just because they were added in
@@ -579,6 +728,7 @@ public static class SoMeSchedulePlanner
             // nobody is reading is not a slot. This is the site that places every NEW post.
             if (SoMeBlackout.IsBlackedOut(day)) continue;
             if (used.GetValueOrDefault(day) >= maxPerDay) continue;
+            if (dayAllowed is not null && !dayAllowed(day)) continue;
 
             // Prefer this subject's own time, then the other one — never a third time, and never
             // outside the guard rail.

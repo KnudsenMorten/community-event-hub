@@ -30,14 +30,27 @@ public class SoMeQueueModel : PageModel
         TimeProvider clock,
         // §1206 — the shared readiness rule, so this list says the same thing the settings page and
         // the calendar say about the same post.
-        SoMeReadiness readiness)
+        SoMeReadiness readiness,
+        // §1371 — the Text column shows the post as it will read, not its template.
+        SoMePostComposer composer)
     {
         _participant = participant;
         _queue = queue;
         _subjects = subjects;
         _clock = clock;
         _readiness = readiness;
+        _composer = composer;
     }
+
+    private readonly SoMePostComposer _composer;
+
+    /// <summary>§1371 — post id → its text with the variables filled in (the editor's preview).</summary>
+    public IReadOnlyDictionary<int, string> ResolvedTexts { get; private set; } =
+        new Dictionary<int, string>();
+
+    /// <summary>§1371 — the row's snippet, from the resolved text where there is one.</summary>
+    public string SnippetFor(SoMePost p) =>
+        Snippet(ResolvedTexts.TryGetValue(p.Id, out var text) ? text : p.EffectiveText);
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -159,9 +172,11 @@ public class SoMeQueueModel : PageModel
         new Dictionary<int, string>();
 
     /// <summary>A one-line snippet of the body — how he recognises his own posts.</summary>
-    public static string Snippet(SoMePost p, int max = 90)
+    public static string Snippet(SoMePost p, int max = 90) => Snippet(p.EffectiveText, max);
+
+    public static string Snippet(string? body, int max = 90)
     {
-        var text = (p.EffectiveText ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        var text = (body ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
         while (text.Contains("  ", StringComparison.Ordinal))
             text = text.Replace("  ", " ", StringComparison.Ordinal);
         return text.Length <= max ? text : text[..max].TrimEnd() + "…";
@@ -324,6 +339,9 @@ public class SoMeQueueModel : PageModel
         // §1209 — one query, so the Type column can tell 2a from 2b.
         _masterClassSessionIds = (await _queue.MasterClassSessionIdsAsync(eventId, ct)).ToHashSet();
 
+        // §1371 — the text as it will read, for the Text column and for the search below.
+        ResolvedTexts = await _composer.ResolvedTextsAsync(all, ct);
+
         // §889 — search the BODY, because that is how he identifies a post. Case-insensitive and
         // substring: "500 tickets" should find it without him recalling the exact wording.
         // 🔑 The SUBJECT is searched too, so "azure" finds the Azure track posts — their bodies are
@@ -333,6 +351,8 @@ public class SoMeQueueModel : PageModel
             var q = Q.Trim();
             all = all.Where(p =>
                     (p.EffectiveText ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (ResolvedTexts.GetValueOrDefault(p.Id) ?? string.Empty)
+                        .Contains(q, StringComparison.OrdinalIgnoreCase)
                     || (SubjectLabels.GetValueOrDefault(p.Id) ?? string.Empty)
                         .Contains(q, StringComparison.OrdinalIgnoreCase)
                     || p.Id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase))

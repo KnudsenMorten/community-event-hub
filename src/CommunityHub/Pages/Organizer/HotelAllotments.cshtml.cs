@@ -43,9 +43,10 @@ public class HotelAllotmentsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
-        Message = msg;
-        await LoadAsync(me.EventId, ct);
-        return Page();
+        // §1386 — this board now lives on the ONE hotel page (Hotel overview), via _HotelNightsEditor.
+        // The POST handlers below stay (the partial posts to them) and return there.
+        await Task.CompletedTask;
+        return RedirectToPage("/Organizer/HotelOverview", new { msg });
     }
 
     /// <summary>
@@ -71,8 +72,8 @@ public class HotelAllotmentsModel : PageModel
                 map[night] = n;
         }
 
-        var changed = await _allotments.SetAllotmentsAsync(me.EventId, hotelId, map, ct);
-        return RedirectToPage(new { msg = changed == 0
+        var changed = await _allotments.SetAllotmentsAsync(me.EventId, hotelId, map, ct, me.Email);
+        return RedirectToPage("/Organizer/HotelOverview", new { msg = changed == 0
             ? "No changes to save."
             : $"Saved {changed} night(s) for this hotel." });
     }
@@ -85,12 +86,12 @@ public class HotelAllotmentsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
-        var changed = await _allotments.SetRangeAsync(me.EventId, hotelId, fromNight, toNight, rooms, ct);
-        return RedirectToPage(new { msg = $"Filled {changed} night(s) with {Math.Max(0, rooms)} room(s)." });
+        var changed = await _allotments.SetRangeAsync(me.EventId, hotelId, fromNight, toNight, rooms, ct, me.Email);
+        return RedirectToPage("/Organizer/HotelOverview", new { msg = $"Filled {changed} night(s) with {Math.Max(0, rooms)} room(s)." });
     }
 
     public async Task<IActionResult> OnPostSaveCutoffAsync(
-        int hotelId, DateOnly cutoffDate, string label, int? releasePercent, string? notes,
+        int hotelId, DateOnly cutoffDate, string label, int? releasePercent, string? notes, int? warnDaysBefore,
         CancellationToken ct)
     {
         var me = _participant.Current;
@@ -98,10 +99,23 @@ public class HotelAllotmentsModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var ok = await _allotments.SaveCutoffAsync(
-            me.EventId, hotelId, cutoffDate, label ?? string.Empty, releasePercent, notes, ct);
-        return RedirectToPage(new { msg = ok
+            me.EventId, hotelId, cutoffDate, label ?? string.Empty, releasePercent, notes, ct, warnDaysBefore);
+        return RedirectToPage("/Organizer/HotelOverview", new { msg = ok
             ? $"Saved the release deadline for {cutoffDate:d MMM yyyy}."
             : "A release deadline needs a hotel and a label — nothing was saved." });
+    }
+
+    /// <summary>§1386 — freeze today's allocation as the ORIGINAL reservation (nights not frozen yet).</summary>
+    public async Task<IActionResult> OnPostFreezeOriginalAsync(int hotelId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var n = await _allotments.FreezeOriginalAsync(me.EventId, hotelId, me.Email, ct: ct);
+        return RedirectToPage("/Organizer/HotelOverview", new { msg = n == 0
+            ? "Every night already has an original reservation recorded."
+            : $"Original reservation recorded for {n} night(s)." });
     }
 
     public async Task<IActionResult> OnPostDeleteCutoffAsync(int cutoffId, CancellationToken ct)
@@ -111,7 +125,7 @@ public class HotelAllotmentsModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var ok = await _allotments.DeleteCutoffAsync(me.EventId, cutoffId, ct);
-        return RedirectToPage(new { msg = ok ? "Release deadline removed." : "That deadline no longer exists." });
+        return RedirectToPage("/Organizer/HotelOverview", new { msg = ok ? "Release deadline removed." : "That deadline no longer exists." });
     }
 
     private async Task LoadAsync(int eventId, CancellationToken ct)
@@ -128,7 +142,7 @@ public class HotelAllotmentsModel : PageModel
     {
         if (c.NotContracted) return c.Demand > 0 ? "background:#fee2e2;" : string.Empty;
         if (c.IsShort) return "background:#fee2e2;";
-        if (c.HasSlack) return "background:#fef3c7;";
+        if (c.HasSlack) return "background:#dcfce7;";   // §1386 — covered is GREEN; the surplus shows as a separate yellow "release N"
         return "background:#dcfce7;";
     }
 }

@@ -1,0 +1,10 @@
+Subject: Visa application {{state}}: {{applicantName}}
+<p style="margin:0 0 16px;"><strong>{{applicantName}}</strong> has {{state}} their visa application for {{eventDisplayName}}.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
+  <tr><td style="padding:2px 12px 2px 0;color:#6b7280;">Name</td><td style="padding:2px 0;">{{applicantName}}</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;color:#6b7280;">E-mail</td><td style="padding:2px 0;">{{applicantEmail}}</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;color:#6b7280;">Role</td><td style="padding:2px 0;">{{applicantRole}}</td></tr>
+</table>
+{{changesHtml}}
+<p style="margin:0 0 16px;"><a href="{{hubUrl}}/Organizer/VisaApplications?Show={{participantId}}#detail">Open the application in the hub</a></p>
+<p style="margin:16px 0 0;color:#6b7280;font-size:13px;">Sent by CEH to the organizers' mailbox. The answers themselves stay in the hub; reply to this mail to reach the applicant.</p>

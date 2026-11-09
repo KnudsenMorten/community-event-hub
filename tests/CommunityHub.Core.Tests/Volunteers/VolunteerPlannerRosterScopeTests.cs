@@ -71,44 +71,44 @@ public sealed class VolunteerPlannerRosterScopeTests
 
     // ── Scope ────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task An_EMPTY_roster_falls_back_to_everyone_and_says_so()
-    {
-        // 🔴 The behaviour that keeps this shippable on the day it lands: nobody has curated the
-        // roster yet, and a run that silently proposed nothing would read as a broken planner
-        // rather than an empty list.
-        using var db = Seed();
-        AddTask(db, "Check-in desk", "07:00", "12:00", needed: 1);
-        AddVolunteer(db, "a@x", "Full day");
-
-        var r = await Engine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
-
-        Assert.True(r.ScopeFellBackToEveryone);
-        Assert.Single(r.Proposals);
-        Assert.Contains("worker roster is empty", r.Summarize());
-    }
+    // §1380 — these two REPLACE §1297's "empty roster falls back" / "roster scopes the run": the operator
+    // chose Leth's model (2026-11-07). Everyone is planned; the roster marks full-day workers; the rest are
+    // capped at 50% of their stated hours per day.
 
     [Fact]
-    public async Task A_curated_roster_SCOPES_the_run_to_its_members()
+    public async Task Everyone_is_planned_even_with_nobody_marked_and_the_summary_says_so()
     {
-        // Operator 2026-09-22: *"we will only scope the first group."*
         using var db = Seed();
-        AddTask(db, "Check-in desk", "07:00", "12:00", needed: 2);
-        var worker = AddVolunteer(db, "worker@x", "Full day");
-        var attendee = AddVolunteer(db, "attendee@x", "Full day");
-
-        await new VolunteerPlanningRosterService(db, new FixedClock())
-            .AddAsync(Organizer(), worker);
+        AddTask(db, "Check-in desk", "07:00", "10:00", needed: 2);   // 3h — inside anyone's 50%
+        var a = AddVolunteer(db, "a@x", "Full day");
+        var b = AddVolunteer(db, "b@x", "Full day");
 
         var r = await Engine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
 
         Assert.False(r.ScopeFellBackToEveryone);
+        Assert.Equal(new[] { a, b }.OrderBy(x => x), r.Proposals.Select(p => p.ParticipantId).OrderBy(x => x));
+        Assert.Equal(0, r.FullDayWorkers);
+        Assert.Contains("No one is marked as a full-day worker", r.Summarize());
+    }
+
+    [Fact]
+    public async Task A_full_day_worker_takes_a_long_shift_that_would_exceed_anyone_elses_50_percent()
+    {
+        // Leth 2026-11-02: "dem som ikke var i worker roster kun havde 50 utilization".
+        using var db = Seed();
+        AddTask(db, "Set-up crew", "07:00", "15:00", needed: 2);     // 8h — over half of a full day
+        var worker = AddVolunteer(db, "worker@x", "Full day");
+        var attendee = AddVolunteer(db, "attendee@x", "Full day");
+
+        await new VolunteerPlanningRosterService(db, new FixedClock()).AddAsync(Organizer(), worker);
+
+        var r = await Engine(db).SeedProposalsAsync(Organizer(), ParticipantRole.Volunteer, OrganizerId);
+
         Assert.Equal(worker, Assert.Single(r.Proposals).ParticipantId);
         Assert.DoesNotContain(r.Proposals, p => p.ParticipantId == attendee);
-
-        // ⚠️ Scoping REDUCES supply — stated, because the shortfall it creates is deliberate and
-        // the remainder is a hand-placement list rather than a surprise.
-        Assert.Equal(1, r.SlotsShort);
+        Assert.Equal(ShortfallReason.ShareReached, Assert.Single(r.Shortfalls).Reason);
+        Assert.Equal(1, r.FullDayWorkers);
+        Assert.Contains("1 full-day worker(s)", r.Summarize());
     }
 
     // ── Interval matching, against real stored rows ──────────────────────────────────────

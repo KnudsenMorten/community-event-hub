@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Core.Volunteers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -180,17 +181,38 @@ public class VolunteerStructureModel : PageModel
 
     /// <summary>§1299 — a task is created under a subcategory when one is chosen, otherwise
     /// directly under the category. The subcategory is optional.</summary>
+    /// <summary>
+    /// Create a task. §1380 — the form now carries every field planning needs (start AND end, people needed,
+    /// team, instructions). Before, a task made here had no end time, 0 people needed and no team — so it
+    /// routed to TrackedOnly and was invisible to auto-assign and coverage, which is why Leth concluded
+    /// "det er kun muligt at lave nye tasks hvis man bruger excel arket".
+    /// </summary>
+    /// <param name="target">"c:&lt;categoryId&gt;" or "s:&lt;subcategoryId&gt;" from the "+ New task" picker; the
+    /// inline per-bucket forms post <paramref name="categoryId"/>/<paramref name="subcategoryId"/> instead.</param>
+    [CommunityHub.Audit.Audit("Created a volunteer task", TargetType = "VolunteerTask")]
     public Task<IActionResult> OnPostCreateTaskAsync(
         int? subcategoryId, int? categoryId, string title, string? description, DateOnly? due, string? shift,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? timeEnd = null, int? resourcesNeeded = null, string? responsibleTeam = null,
+        string? instructions = null, string? target = null)
         => RunAsync(async a =>
         {
+            if (target is { Length: > 2 } && int.TryParse(target[2..], out var tid))
+            {
+                if (target.StartsWith("s:")) subcategoryId = tid;
+                else if (target.StartsWith("c:")) categoryId = tid;
+            }
+            // Defaults for a task created on the VOLUNTEER work structure: a volunteer task, one person.
+            var team = string.IsNullOrWhiteSpace(responsibleTeam) ? ResponsibleTeamRouter.VolunteerTeam : responsibleTeam;
+            var people = resourcesNeeded ?? 1;
             if (subcategoryId is int sid)
-                await _svc.CreateTaskAsync(a, sid, title, description, due, shift, ct: ct);
+                await _svc.CreateTaskAsync(a, sid, title, description, due, shift,
+                    resourcesNeeded: people, responsibleTeam: team, instructions: instructions, timeEnd: timeEnd, ct: ct);
             else if (categoryId is int cid)
-                await _svc.CreateTaskInCategoryAsync(a, cid, title, description, due, shift, ct: ct);
+                await _svc.CreateTaskInCategoryAsync(a, cid, title, description, due, shift,
+                    resourcesNeeded: people, responsibleTeam: team, instructions: instructions, timeEnd: timeEnd, ct: ct);
             else
-                return "Pick a category first.";
+                return "Pick a bucket first.";
             return $"Task '{title}' added.";
         });
 

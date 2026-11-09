@@ -246,6 +246,14 @@ builder.Services.AddScoped<CommunityHub.Core.Auth.IEmailMagicLinkService>(sp =>
     sp.GetRequiredService<CommunityHub.Core.Auth.EmailMagicLinkService>());
 // Anonymous Party RSVP (public /Party form + organizer headcount).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PartyRsvpService>();
+builder.Services.AddScoped<CommunityHub.Core.Visa.VisaApplicationService>();   // §1374 — the visa form
+// §1383 — the organizers' mailbox hears about a visa submit ("Visa:NotifyEmailTo", default info@), and
+// the PDF letter handed back to each applicant (bytes in the DB, like travel receipts).
+var visaNotifyOptions = new CommunityHub.Core.Visa.VisaNotifyOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Visa.VisaNotifyOptions.SectionName).Bind(visaNotifyOptions);
+builder.Services.AddSingleton(visaNotifyOptions);
+builder.Services.AddScoped<CommunityHub.Core.Visa.VisaNotifier>();
+builder.Services.AddScoped<CommunityHub.Core.Visa.VisaLetterStore>();
 // In-hub Master Class signup + waitlist (CEH-owned; replaces Zoho Bookings).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassSignupService>();
 // Ring-gated "you got a seat" promotion email (waitlist -> confirmed).
@@ -568,6 +576,8 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantSearchService>
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionDeletionService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SpeakerDeletionService>();
+// §1385 — "No hidden speakers": the check shown at the top of /Organizer/Speakers.
+builder.Services.AddScoped<CommunityHub.Core.Participants.HiddenSpeakerCheckService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SponsorInfoDeletionService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.TestDataCleanupService>();
 // §327: the organizer background-jobs page (inventory + per-job throttle).
@@ -594,6 +604,11 @@ builder.Services.AddSingleton(sp =>
     return o;
 });
 builder.Services.AddScoped<CommunityHub.Core.Entitlements.TravelClaimLock>();
+// §1387 — travel document review: the AI check (Azure OpenAI, images + PDF text; bounded so a slow
+// model costs the organizer one click, not the page), Accept → ERP inbox once, Send back → reopen + mail.
+builder.Services.AddHttpClient<CommunityHub.Core.Travel.TravelDocumentValidator>(c => c.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddScoped<CommunityHub.Core.Travel.TravelErpMailer>();
+builder.Services.AddScoped<CommunityHub.Core.Travel.TravelReviewService>();
 
 // §6.9 — photo cleanup on deactivation. 🔒 THE ONLY SERVICE IN CEH THAT DELETES A DOCUMENT-LIBRARY
 // FILE, so it ships DRY-RUN and stays that way until PhotoCleanup:DryRun is set to false. Bound from
@@ -680,6 +695,15 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelBulkOperationService
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelRoomBlockService>();
 // §326bs: per-night allotment vs demand + the contract release deadlines.
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelAllotmentService>();
+// §1386 — hotel logistics refinement (change log, placement, overview, .xls sheet + import, ops mail, contract seed). BOTH hosts.
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelChangeLogService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelPlacementService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelOverviewService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelAgreementSheet>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelSheetImportService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelOpsNotifier>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelContractSeeder>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelReservationEditor>();   // §1386 — the one reservation editor
 
 // --- Volunteer Buckets: plan import, gap detection, draft->commit allocation ---
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAllocationService>();
@@ -698,6 +722,7 @@ builder.Services.AddScoped<CommunityHub.Core.Volunteers.AllocationScenarioServic
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.AvailabilityAutoAssignEngine>();
 // §1297 — the curated WORKER roster the planner scopes to, and the per-bucket preferred volunteers.
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerPlanningRosterService>();
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerCoverageService>();   // §1380
 builder.Services.AddScoped<CommunityHub.Core.Email.CommitNotificationService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.ICommitNotificationService>(
     sp => sp.GetRequiredService<CommunityHub.Core.Email.CommitNotificationService>());
@@ -1094,9 +1119,18 @@ builder.Services.AddScoped<CommunityHub.Core.Email.VolumePackagePostEventMailSer
 // 🔴 The unsubscribe SECRET comes from configuration (Email:UnsubscribeSecret). Blank ⇒ no link can
 // be signed, and a campaign send must refuse: a mass mailing with a dead unsubscribe link costs the
 // sending reputation and the legal basis at the same time.
-builder.Services.AddScoped<CommunityHub.Core.Email.MailAudienceResolver>();
+// §1381 — the "volunteers + extras" audience reads its extra addresses from MailCampaigns:VolunteerAudienceExtraEmails.
+builder.Services.AddScoped(sp => new CommunityHub.Core.Email.MailAudienceResolver(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>())
+{
+    VolunteerAudienceExtraEmails = builder.Configuration.GetSection("MailCampaigns:VolunteerAudienceExtraEmails").Get<string[]>() ?? Array.Empty<string>(),
+});
 builder.Services.AddScoped<CommunityHub.Core.Email.MailCampaignService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.ExternalRecipientImportService>();
+// §1381 — campaign stats from Brevo (read-only). Key from Brevo:ApiKey (Key Vault reference); blank ⇒ "not connected".
+builder.Services.AddSingleton(builder.Configuration.GetSection(CommunityHub.Core.Email.BrevoApiOptions.SectionName)
+    .Get<CommunityHub.Core.Email.BrevoApiOptions>() ?? new CommunityHub.Core.Email.BrevoApiOptions());
+builder.Services.AddHttpClient<CommunityHub.Core.Email.BrevoStatsClient>(c => c.Timeout = TimeSpan.FromSeconds(15));
 // 🔒 The bounce webhook's shared secret — blank ⇒ the endpoint refuses everything.
 builder.Services.AddScoped(sp => new CommunityHub.Core.Email.MailBounceIngestService(
     sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
@@ -1215,6 +1249,8 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoSyncService
 // the scheduled sync ran, which reads as "my change did nothing".
 // §1235 — the person↔sponsor-company links (one contact may serve several companies).
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorCompanyMembershipService>();
+// §1369 — a contact removed in Get Started is applied to CEH too (deactivate by default).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorContactRemovalService>();
 // §1236 — which company a sponsor contact is acting for (the portal switcher). Scoped: it reads the
 // request's cookie and re-validates it against the contact's links on every read.
 builder.Services.AddScoped<CommunityHub.Sponsors.SponsorActingCompanyService>();
@@ -1286,6 +1322,8 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.IWebshopOrderS
         CommunityHub.Core.Integrations.Erp.ICvrValidator, CommunityHub.Core.Integrations.Erp.CvrValidator>(builder.Services);
     builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Webshop.ShopVatChecker>();
     builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopRegistrationService>();
+    // §1382 — the public coupon sign-up form (/coupon-signup): coupon + e-conomic customer (group 2, guarded) + mailbox mail.
+    builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponSignupService>();
     builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopEntitlementService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopReservationService>(); // §1308
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Webshop.ShopCompanyDirectoryService>(); // §1309
@@ -1378,6 +1416,9 @@ builder.Configuration.GetSection(CommunityHub.Core.Integrations.ContentStudioOpt
 builder.Services.AddSingleton(contentStudioOptions);
 builder.Services.AddSingleton<CommunityHub.Core.Integrations.ContentTemplateEngine>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.ContentStudioService>();
+// §1379.8 — "Refresh weekly": linked WordPress posts re-rendered from CEH data (page: Preview / Refresh now).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.WordPressPostDataService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.WordPressPostRefreshService>();
 
 // --- Speaker onboarding wizard (§28, design A): guided shell over the existing
 // speaker forms (Speaker Details → Hotel → Dinner → Lunch → Swag → Travel) with
@@ -2247,6 +2288,18 @@ app.MapGet("/og/session-graphic/{sessionId:int}", async (
     http.Response.Headers["Cache-Control"] = "public, max-age=3600";
     return Results.File(f.Content, f.ContentType);
 }).AllowAnonymous();
+
+// §1384: PUBLIC (no-auth) all-tracks overview GIF — one frame per track, every speaker in it — at a
+// STABLE URL for mails, WordPress and SoMe (?w=600 for mail width). Streams the stored asset the §767
+// sweep keeps current; no rendering here. Released + active edition only (see the handler).
+app.MapGet(CommunityHub.Api.AllTracksSpeakersGifEndpoint.Route, (
+        int? w,
+        CommunityHub.Core.Integrations.Graphics.GraphicsService graphics,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+        HttpContext http,
+        CancellationToken ct) =>
+    CommunityHub.Api.AllTracksSpeakersGifEndpoint.HandleAsync(w, graphics, cache, http, ct))
+    .AllowAnonymous();
 
 // §192 (reworking §166): server-proxied download of a session's FINAL evaluation PDF of a
 // KIND (score|feedback) — streamed from SharePoint with the app's creds so a speaker (no

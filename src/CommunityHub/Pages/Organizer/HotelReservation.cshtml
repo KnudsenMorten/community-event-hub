@@ -1,0 +1,73 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelReservationModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Hotel reservation";
+    var v = Model.View;
+}
+
+<div class="card">
+    @if (Model.AccessDenied)
+    {
+        <h1>Hotel reservation</h1>
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else if (v is not null)
+    {
+        <h1>@v.FullName — hotel</h1>
+        <p class="ho-note" style="color:#6b7280;">@v.Role · @v.Email ·
+            <a asp-page="/Organizer/EditParticipant" asp-route-id="@v.ParticipantId">Participant page (extra ELDK-covered nights)</a> ·
+            <a asp-page="/Organizer/HotelOverview" asp-fragment="guests">Back to the hotel overview</a></p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
+        @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error" role="alert">@Model.Error</p> }
+        @if (!v.HasBooking) { <p class="info">@v.FullName has not answered the hotel form. Saving here creates their reservation.</p> }
+        @if (!string.IsNullOrWhiteSpace(v.ShareWith)) { <p class="info">They wrote: “sharing with @v.ShareWith”.</p> }
+
+        <form method="post" style="max-width:640px;">
+            <input type="hidden" asp-for="Pid" />
+            <fieldset style="border:0;padding:0;margin:0 0 10px;">
+                <legend style="font-weight:600;">Needs a hotel room?</legend>
+                <label style="font-weight:normal;margin-right:18px;"><input type="radio" asp-for="NeedsRoom" value="true" /> Yes</label>
+                <label style="font-weight:normal;"><input type="radio" asp-for="NeedsRoom" value="false" /> No</label>
+            </fieldset>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                <label>Arrival<br /><input type="date" asp-for="CheckIn" /></label>
+                <label>Departure<br /><input type="date" asp-for="CheckOut" /></label>
+            </div>
+            <label for="HotelId">Hotel</label>
+            <select asp-for="HotelId">
+                <option value="">— no hotel —</option>
+                @foreach (var h in v.Hotels) { <option value="@h.Id">@h.Name (priority @h.Priority)</option> }
+            </select>
+            <label for="RoommateId">Shares the room with (a participant)</label>
+            <select asp-for="RoommateId">
+                <option value="">— nobody / not a participant —</option>
+                @foreach (var m in v.RoommateChoices) { <option value="@m.Id">@m.Name</option> }
+            </select>
+            <small style="display:block;color:#6b7280;margin:-4px 0 8px;">Two participants sharing count as ONE room. Both sides are linked automatically.</small>
+            <label for="GuestsInRoom">People in the room</label>
+            <input asp-for="GuestsInRoom" type="number" min="1" max="6" placeholder="automatic" />
+            <small style="display:block;color:#6b7280;margin:-4px 0 8px;">E.g. 2 for someone bringing a partner who is not a participant. Blank = automatic (2 with a roommate, otherwise 1).</small>
+            <label for="State">Reservation state</label>
+            <select asp-for="State">
+                @foreach (var s in Enum.GetValues<HotelConfirmationState>()) { <option value="@s">@HotelReservationStateText.Of(s)</option> }
+            </select>
+            <label for="ConfirmationNumber">Confirmation number (from the hotel)</label>
+            <input asp-for="ConfirmationNumber" maxlength="64" />
+            <label for="CancellationNumber">Cancellation number (from the hotel)</label>
+            <input asp-for="CancellationNumber" maxlength="64" />
+            <label for="Notes">Notes</label>
+            <textarea asp-for="Notes" rows="2" maxlength="1000"></textarea>
+            <button type="submit">Save reservation</button>
+            <p style="color:#6b7280;font-size:12.5px;">Saving logs the change and puts it on the hotel's next spreadsheet. The guest is not e-mailed.</p>
+        </form>
+
+        @if (v.History.Count > 0)
+        {
+            <h2>History</h2>
+            <ul style="font-size:13px;">
+                @foreach (var e in v.History) { <li>@e.At.UtcDateTime.ToString("d MMM HH:mm") UTC · @e.Source (@e.Actor) — @e.Summary</li> }
+            </ul>
+        }
+    }
+</div>

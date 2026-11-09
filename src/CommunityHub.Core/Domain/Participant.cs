@@ -293,6 +293,12 @@ public class Participant
     /// </summary>
     public bool IsTestUser { get; set; }
 
+    /// <summary>
+    /// §1374 — this person needs a visa to Denmark for the event. Organizer-set; it puts
+    /// "Visa application" in their menu and opens <c>/Forms/Visa</c> to them (404 for everyone else).
+    /// </summary>
+    public bool NeedsVisa { get; set; }
+
     // --- Release ring (controlled-rollout access level, REQUIREMENTS §23) ----
     /// <summary>
     /// This person's RELEASE RING — their access level for the progressive

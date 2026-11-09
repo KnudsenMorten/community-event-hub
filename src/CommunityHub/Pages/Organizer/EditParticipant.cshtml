@@ -84,6 +84,16 @@
                 Active (can sign in)
             </label>
 
+            <label style="font-weight:normal; display:flex; align-items:center; gap:8px; margin-top:6px;">
+                <input type="checkbox" asp-for="IsTestUser" style="width:auto;margin:0;" />
+                Test user (left out of counts, exports, mail audiences and SoMe; removed by <a href="/Organizer/TestDataCleanup">test data cleanup</a>. Ring 1 is always a test user.)
+            </label>
+
+            <label style="font-weight:normal; display:flex; align-items:center; gap:8px; margin-top:6px;">
+                <input type="checkbox" asp-for="NeedsVisa" style="width:auto;margin:0;" />
+                Needs visa (shows the visa form in their menu — <a href="/Organizer/VisaApplications">visa applications</a>)
+            </label>
+
             @if (Model.IsNew)
             {
                 <label style="font-weight:normal; display:flex; align-items:center; gap:8px; margin-top:8px;">

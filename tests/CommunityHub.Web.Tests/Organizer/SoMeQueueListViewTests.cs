@@ -133,7 +133,8 @@ public sealed class SoMeQueueListViewTests
         new FixedClock(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
     private static SoMeQueueModel NewModel(CommunityHubDbContext db, Participant org) =>
         new(new FakeAccessor(Session(org)), new SoMeQueueService(db, TimeProvider.System),
-            new SoMeSubjectLabeller(db), BeforeEverything, new SoMeReadiness(db))
+            new SoMeSubjectLabeller(db), BeforeEverything, new SoMeReadiness(db),
+            new SoMePostComposer(db, new SoMeVariableResolver(db)))
         {
             PageContext = new PageContext(),
         };
@@ -252,6 +253,26 @@ public sealed class SoMeQueueListViewTests
         await model.OnGetAsync(default);
 
         Assert.Equal(new[] { 13, 12, 11 }, model.Posts.Select(p => p.Id).ToArray());
+    }
+
+    /// <summary>
+    /// 🔴 §1371 — operator 2026-10-27: <i>"why does it show the template here and not real text"</i>.
+    /// The Text column shows the post as it will read: {SessionTitle} becomes the session's title.
+    /// </summary>
+    [Fact]
+    public async Task The_text_column_shows_the_resolved_text_not_the_template()
+    {
+        using var db = NewDb();
+        var org = await SeedAsync(db);
+        var model = NewModel(db, org);
+
+        await model.OnGetAsync(default);
+
+        var session = model.Posts.Single(p => p.Id == 13);
+        var snippet = model.SnippetFor(session);
+
+        Assert.Contains("Persistence for fun & profit", snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("{SessionTitle}", snippet, StringComparison.Ordinal);
     }
 
     /// <summary>The snippet is one line — a list row must not become a paragraph.</summary>

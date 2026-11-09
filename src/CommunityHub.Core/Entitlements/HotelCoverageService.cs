@@ -128,6 +128,32 @@ public sealed class HotelCoverageService
         var row = await _db.HotelCoverageExtras
             .FirstOrDefaultAsync(x => x.EventId == eventId && x.ParticipantId == participantId, ct);
 
+        // §1386 — extra agreed nights change "ELDK Payment Days" on the hotel's spreadsheet, so the
+        // change is logged (and, for a placed guest, mailed to hotel-ops with the updated file).
+        var before = row?.ExtraNights ?? 0;
+        if (before != extra)
+        {
+            var who = await _db.Participants
+                .Where(p => p.Id == participantId && p.EventId == eventId)
+                .Select(p => new { p.FullName, p.HotelId })
+                .FirstOrDefaultAsync(ct);
+            var needs = await _db.HotelBookings.AnyAsync(
+                b => b.EventId == eventId && b.ParticipantId == participantId && b.NeedsRoom, ct);
+            if (who is not null)
+            {
+                _db.HotelChangeLog.Add(new HotelChangeLogEntry
+                {
+                    EventId = eventId, HotelId = who.HotelId, ParticipantId = participantId,
+                    ParticipantName = who.FullName, At = _clock.GetUtcNow(),
+                    Source = HotelChangeSource.Organizer, Actor = byEmail ?? "system",
+                    Kind = HotelChangeKinds.ExtraNights,
+                    Summary = $"Extra ELDK-covered nights {before} → {extra}"
+                              + (string.IsNullOrWhiteSpace(note) ? "" : $" ({note.Trim()})"),
+                    AffectsGuestList = needs && who.HotelId is not null,
+                });
+            }
+        }
+
         if (extra == 0 && string.IsNullOrWhiteSpace(note))
         {
             if (row is not null) _db.HotelCoverageExtras.Remove(row);

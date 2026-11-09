@@ -116,6 +116,52 @@ public sealed class LiveWordPressPublisher : IWordPressPublisher
         }
     }
 
+    /// <summary>
+    /// §1379.8 — <c>POST {SiteUrl}/wp-json/wp/v2/posts/{id}</c> with ONLY <c>content</c>, so status,
+    /// title, categories and featured media are left exactly as the operator set them in wp-admin.
+    /// Guarded by its own narrow ceiling (<see cref="ExternalSystems.WordPressPostRefresh"/>) — not
+    /// <see cref="ExternalSystems.Webshop"/>, whose DEV posture governs Company Manager writes.
+    /// </summary>
+    public async Task<WordPressPublishResult> UpdatePostContentAsync(
+        long postId, string contentHtml, CancellationToken ct = default)
+    {
+        if (!CanWrite)
+            return new WordPressPublishResult(false, postId, null,
+                "WordPress connector is not configured — post not updated.");
+
+        if (!await _writes.AllowAsync(ExternalSystems.WordPressPostRefresh, "UpdateWordPressPostContent", ct))
+            return new WordPressPublishResult(false, postId, null,
+                "External writes to WordPress posts are blocked on this host — post not updated.");
+
+        var endpoint = $"{_options.SiteUrl.TrimEnd('/')}/wp-json/wp/v2/posts/{postId}";
+        var json = JsonSerializer.Serialize(new Dictionary<string, object?> { ["content"] = contentHtml });
+        using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        {
+            Content = new StringContent(json, new UTF8Encoding(false), "application/json"),
+        };
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _log.LogWarning("WordPress post {PostId} update failed: {Status} {Body}",
+                    postId, (int)resp.StatusCode, Truncate(body, 500));
+                return new WordPressPublishResult(false, postId, null,
+                    $"WordPress returned {(int)resp.StatusCode}: {Truncate(body, 300)}");
+            }
+
+            var editUrl = $"{_options.SiteUrl.TrimEnd('/')}/wp-admin/post.php?post={postId}&action=edit";
+            return new WordPressPublishResult(true, postId, editUrl, $"Post {postId} updated in WordPress.");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "WordPress post {PostId} update threw.", postId);
+            return new WordPressPublishResult(false, postId, null, $"WordPress call failed: {ex.Message}");
+        }
+    }
+
     private static string Truncate(string s, int max) =>
         string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "…";
 }

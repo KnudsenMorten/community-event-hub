@@ -12,6 +12,18 @@
     .vs-cat-head h3::before { content:"▸ "; }
     details.vs-cat[open] > .vs-cat-head h3::before { content:"▾ "; }
     .vs-pill.vs-queued { background:#fff7ed; color:#9a3412; border:1px dashed #fb923c; }
+    /* §1380 — "+ New task" */
+    .vs-newtask { margin:12px 0; border:1px solid #c7d2fe; border-radius:10px; background:#eef2ff; padding:10px 12px; }
+    .vs-newtask summary { cursor:pointer; color:#1D3380; min-height:28px; }
+    .vs-newtask-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:10px; }
+    .vs-newtask-form label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:#334155; }
+    .vs-newtask-form .wide { grid-column:1 / -1; }
+    .vs-newtask-form input, .vs-newtask-form select, .vs-newtask-form textarea { width:100%; box-sizing:border-box; }
+    /* §1380 — the remove (×) inside an assignee pill; 28px tap target for mobile */
+    .vs-unassign { display:inline; margin:0 0 0 4px; }
+    .vs-unassign button { border:0; background:transparent; color:inherit; font-size:15px; line-height:1;
+        min-width:28px; min-height:28px; padding:0 4px; cursor:pointer; border-radius:50%; vertical-align:middle; }
+    .vs-unassign button:hover, .vs-unassign button:focus-visible { background:rgba(0,0,0,.08); }
     .vs-cat-head h3 { margin:0; font-size:17px; }
     .vs-cat-head .owners { font-size:12.5px; opacity:.92; margin-top:4px; line-height:1.5; }
     .vs-body { padding:12px 14px; }
@@ -68,6 +80,46 @@
             <input type="text" name="description" placeholder="Description (optional)" maxlength="2000" />
             <button type="submit">Add category</button>
         </form>
+
+        @* §1380 — one obvious "+ New task" form with every field planning needs (Leth 2026-11-01: "det er også kun
+           muligt at lave nye tasks hvis man bruger excel arket … vi har ikke alle felter med"). *@
+        @if (Model.Tree.Count > 0)
+        {
+            <details class="vs-newtask">
+                <summary><strong>+ New task</strong> — bucket, day, start and end, people needed, description</summary>
+                <form method="post" asp-page-handler="CreateTask" class="vs-newtask-form">
+                    <label>Bucket
+                        <select name="target" required>
+                            <option value="">— choose —</option>
+                            @foreach (var c in Model.Tree.OrderBy(c => c.Name))
+                            {
+                                <optgroup label="@c.Name">
+                                    <option value="c:@c.Id">@c.Name (no subcategory)</option>
+                                    @foreach (var s in c.Subcategories.OrderBy(s => s.Name))
+                                    { <option value="s:@s.Id">@c.Name › @s.Name</option> }
+                                </optgroup>
+                            }
+                        </select>
+                    </label>
+                    <label class="wide">Title <input type="text" name="title" maxlength="300" required /></label>
+                    <label>Day <input type="date" name="due" /></label>
+                    <label>Start <input type="time" name="shift" /></label>
+                    <label>End <input type="time" name="timeEnd" /></label>
+                    <label>People needed <input type="number" name="resourcesNeeded" min="0" max="200" value="1" /></label>
+                    <label>Team
+                        <select name="responsibleTeam">
+                            <option value="@CommunityHub.Core.Volunteers.ResponsibleTeamRouter.VolunteerTeam" selected>Volunteers (auto-assign can plan it)</option>
+                            <option value="@CommunityHub.Core.Volunteers.ResponsibleTeamRouter.OrganizerTeam">Organizers</option>
+                            <option value="Tracked">Tracked only (never auto-assigned)</option>
+                        </select>
+                    </label>
+                    <label class="wide">Description <textarea name="description" rows="2" maxlength="4000"></textarea></label>
+                    <label class="wide">Instructions for the volunteer <textarea name="instructions" rows="2" maxlength="4000"></textarea></label>
+                    <div class="wide"><button type="submit">Add task</button>
+                        <span style="font-size:13px;color:#4b5563;">Need more fields? Open the task afterwards in the task editor. To move tasks, tick them below and use <em>Move</em>.</span></div>
+                </form>
+            </details>
+        }
     }
 </div>
 
@@ -192,13 +244,30 @@
                     @if (t.ResourcesNeeded > 0) { <text>&middot; @(t.Assignments.Count + queued.Count)/@t.ResourcesNeeded people</text> }
                 </span>
                 <div class="assignees">
+                    @* §1380 — every assignee can be removed again (Leth 2026-11-01: "når man har assignet en
+                       volunteer til en task – kan man ikke fjerne vedkommende igen"). The Unassign handler
+                       existed; nothing on the page called it. *@
                     @foreach (var a in t.Assignments)
                     {
-                        <span class="vs-pill" title="Published — the volunteer can see this task">@Model.NameOf(a.ParticipantId)</span>
+                        <span class="vs-pill" title="Published — the volunteer can see this task">@Model.NameOf(a.ParticipantId)
+                            <form method="post" asp-page-handler="Unassign" class="vs-unassign"
+                                  data-confirm="@($"Remove {Model.NameOf(a.ParticipantId)} from \"{t.Title}\"? This assignment is published, so they have already seen it.")"
+                                  onsubmit="return confirm(this.dataset.confirm);">
+                                <input type="hidden" name="taskId" value="@t.Id" />
+                                <input type="hidden" name="volunteerParticipantId" value="@a.ParticipantId" />
+                                <button type="submit" aria-label="Remove @Model.NameOf(a.ParticipantId) from this task" title="Remove from this task">&times;</button>
+                            </form>
+                        </span>
                     }
                     @foreach (var pid in queued)
                     {
-                        <span class="vs-pill vs-queued" title="Queued — not published; the volunteer cannot see this yet">@Model.NameOf(pid) &middot; not published</span>
+                        <span class="vs-pill vs-queued" title="Queued — not published; the volunteer cannot see this yet">@Model.NameOf(pid) &middot; not published
+                            <form method="post" asp-page-handler="Unassign" class="vs-unassign">
+                                <input type="hidden" name="taskId" value="@t.Id" />
+                                <input type="hidden" name="volunteerParticipantId" value="@pid" />
+                                <button type="submit" aria-label="Remove @Model.NameOf(pid) from the queue for this task" title="Remove from the queue">&times;</button>
+                            </form>
+                        </span>
                     }
                 </div>
                 <form method="post" asp-page-handler="Assign" class="vs-form">
@@ -333,7 +402,9 @@
                         <input type="hidden" name="categoryId" value="@cat.Id" />
                         <input type="text" name="title" placeholder="New task title" maxlength="300" required />
                         <input type="date" name="due" />
-                        <input type="text" name="shift" placeholder="Shift (optional)" maxlength="200" />
+                        <input type="time" name="shift" aria-label="Start" title="Start" />
+                        <input type="time" name="timeEnd" aria-label="End" title="End" />
+                        <input type="number" name="resourcesNeeded" min="0" max="200" value="1" aria-label="People needed" title="People needed" style="width:5em;" />
                         <button type="submit">Add task</button>
                     </form>
                 </div>
@@ -355,7 +426,9 @@
                             <input type="hidden" name="subcategoryId" value="@sub.Id" />
                             <input type="text" name="title" placeholder="New task title" maxlength="300" required />
                             <input type="date" name="due" />
-                            <input type="text" name="shift" placeholder="Shift (optional)" maxlength="200" />
+                            <input type="time" name="shift" aria-label="Start" title="Start" />
+                        <input type="time" name="timeEnd" aria-label="End" title="End" />
+                        <input type="number" name="resourcesNeeded" min="0" max="200" value="1" aria-label="People needed" title="People needed" style="width:5em;" />
                             <button type="submit">Add task</button>
                         </form>
                     </div>

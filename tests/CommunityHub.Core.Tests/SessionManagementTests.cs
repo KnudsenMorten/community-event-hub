@@ -156,6 +156,74 @@ public sealed class SessionManagementTests
         Assert.Equal(2, await db.Sessions.CountAsync(s => s.EventId == eventId));
     }
 
+    /// <summary>
+    /// 🔴 Operator 2026-11-07: "we must never remove ceh only speakers from a session. ceh wins" — PROD: four CEH-only
+    /// panelists linked to an imported panel were unlinked by the next scheduled import. The import reconciles ONLY the
+    /// speakers on the Sessionize roster; a CEH-only speaker linked in CEH is never removed.
+    /// </summary>
+    [Fact]
+    public async Task Import_never_removes_a_CEH_only_speaker_from_an_imported_session()
+    {
+        using var db = TestDb.New();
+        var (eventId, _, sessionizeSpeakerId) = await SeedAsync(db);   // speaker B = "second@example.test", on the roster
+        var cehOnly = new Participant
+        {
+            EventId = eventId, FullName = "Ceh Only Panelist", Email = "ceh-only@example.test",
+            Role = ParticipantRole.Speaker, IsActive = true,
+        };
+        db.Participants.Add(cehOnly);
+        await db.SaveChangesAsync();
+        var import = new SessionImportService(db, new FixedClock(Now));
+        var roster = new[] { new SessionizeSpeaker("second@example.test", "Second", "Speaker", null, SessionizeId: "spk-b") };
+
+        // Run 1: Sessionize puts speaker B on the panel.
+        await import.ImportSessionsAsync(eventId,
+            new[] { new SessionizeSession("panel", "Panel", null, "Room A", null, Now, Now.AddMinutes(60), false, new[] { "spk-b" }) },
+            roster, Array.Empty<string>());
+        var panel = await db.Sessions.SingleAsync(s => s.SessionizeId == "panel");
+        // An organizer links the CEH-only panelist in CEH.
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = panel.Id, ParticipantId = cehOnly.Id });
+        await db.SaveChangesAsync();
+
+        // Run 2: Sessionize no longer lists anyone on the panel (B is still on the roster, so the import does reconcile).
+        await import.ImportSessionsAsync(eventId,
+            new[] { new SessionizeSession("panel", "Panel", null, "Room A", null, Now, Now.AddMinutes(60), false, Array.Empty<string>()) },
+            roster, Array.Empty<string>());
+
+        var linked = await db.SessionSpeakers.Where(ss => ss.SessionId == panel.Id).Select(ss => ss.ParticipantId).ToListAsync();
+        Assert.Contains(cehOnly.Id, linked);                    // CEH wins: a CEH-only speaker is never removed
+        Assert.Contains(sessionizeSpeakerId, linked);           // …and neither is a Sessionize speaker: the import is add-only
+    }
+
+    /// <summary>
+    /// 🔴 PROD 2026-11-07 19:10: the panel moderator — a Sessionize speaker — was linked in CEH to two panels Sessionize
+    /// does not list him on, and the import removed both links. CEH wins: a link made in CEH is never removed by the
+    /// import, whoever the speaker is; the import still ADDS what Sessionize lists.
+    /// </summary>
+    [Fact]
+    public async Task Import_never_removes_a_Sessionize_speaker_linked_in_CEH_to_another_session_and_still_adds()
+    {
+        using var db = TestDb.New();
+        var (eventId, _, moderatorId) = await SeedAsync(db);   // "second@example.test", on the Sessionize roster
+        var import = new SessionImportService(db, new FixedClock(Now));
+        var roster = new[] { new SessionizeSpeaker("second@example.test", "Second", "Speaker", null, SessionizeId: "spk-m") };
+        var sessions = new[]
+        {
+            new SessionizeSession("panel-a", "Panel A", null, "Room A", null, Now, Now.AddMinutes(60), false, new[] { "spk-m" }),
+            new SessionizeSession("panel-b", "Panel B", null, "Room B", null, Now, Now.AddMinutes(60), false, Array.Empty<string>()),
+        };
+        await import.ImportSessionsAsync(eventId, sessions, roster, Array.Empty<string>());
+        var panelB = await db.Sessions.SingleAsync(s => s.SessionizeId == "panel-b");
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = panelB.Id, ParticipantId = moderatorId });   // linked in CEH
+        await db.SaveChangesAsync();
+
+        await import.ImportSessionsAsync(eventId, sessions, roster, Array.Empty<string>());
+
+        var panelA = await db.Sessions.SingleAsync(s => s.SessionizeId == "panel-a");
+        Assert.True(await db.SessionSpeakers.AnyAsync(ss => ss.SessionId == panelA.Id && ss.ParticipantId == moderatorId));   // added from Sessionize
+        Assert.True(await db.SessionSpeakers.AnyAsync(ss => ss.SessionId == panelB.Id && ss.ParticipantId == moderatorId));   // kept: CEH wins
+    }
+
     // ------------------------------------------------------------------ filter ----
 
     [Fact]

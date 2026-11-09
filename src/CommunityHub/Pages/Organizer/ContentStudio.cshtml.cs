@@ -20,11 +20,97 @@ public class ContentStudioModel : PageModel
 {
     private readonly ContentStudioService _studio;
     private readonly ICurrentParticipantAccessor _participant;
+    private readonly WordPressPostRefreshService? _refresh;
 
-    public ContentStudioModel(ContentStudioService studio, ICurrentParticipantAccessor participant)
+    public ContentStudioModel(
+        ContentStudioService studio, ICurrentParticipantAccessor participant,
+        WordPressPostRefreshService? refresh = null)
     {
         _studio = studio;
         _participant = participant;
+        _refresh = refresh;
+    }
+
+    // ---- §1379.8 — linked WordPress posts, "Refresh weekly" -------------------------------
+    [BindProperty] public int? LinkId { get; set; }
+    [BindProperty] public long LinkPostId { get; set; }
+    [BindProperty] public string? LinkLabel { get; set; }
+    [BindProperty] public string? LinkTemplate { get; set; }
+    [BindProperty] public bool LinkRefreshWeekly { get; set; }
+
+    public IReadOnlyList<CommunityHub.Core.Domain.WordPressRefreshPost> LinkedPosts { get; private set; } =
+        Array.Empty<CommunityHub.Core.Domain.WordPressRefreshPost>();
+    public IReadOnlyList<string> SupportedTokens => WordPressPostTokenRenderer.SupportedTokens;
+
+    /// <summary>The row the preview belongs to (0 = the new-link form).</summary>
+    public int? PreviewLinkId { get; private set; }
+    public WordPressPostRender? LinkPreview { get; private set; }
+    public string? LinkMessage { get; private set; }
+    public bool LinkMessageIsError { get; private set; }
+
+    public async Task<IActionResult> OnPostSaveLinkAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+        if (_refresh is not null)
+        {
+            var error = await _refresh.SaveAsync(
+                me.EventId, LinkId, LinkPostId, LinkLabel, LinkTemplate, LinkRefreshWeekly, ct);
+            LinkMessage = error ?? $"Saved the link to WordPress post {LinkPostId}.";
+            LinkMessageIsError = error is not null;
+        }
+        return await ReloadAsync(me.EventId, ct);
+    }
+
+    public async Task<IActionResult> OnPostPreviewLinkAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+        if (_refresh is not null)
+        {
+            // Renders what is in the textarea (saved or not), so a template can be tried before saving.
+            LinkPreview = await _refresh.PreviewAsync(me.EventId, LinkTemplate, ct);
+            PreviewLinkId = LinkId ?? 0;
+        }
+        return await ReloadAsync(me.EventId, ct);
+    }
+
+    public async Task<IActionResult> OnPostRefreshNowAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+        if (_refresh is not null && LinkId is int id)
+        {
+            var result = await _refresh.RefreshNowAsync(me.EventId, id, DateTimeOffset.UtcNow, ct);
+            LinkMessage = result.Message;
+            LinkMessageIsError = result.Updated + result.Unchanged == 0;
+        }
+        return await ReloadAsync(me.EventId, ct);
+    }
+
+    public async Task<IActionResult> OnPostUnlinkAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+        if (_refresh is not null && LinkId is int id)
+        {
+            var removed = await _refresh.DeleteAsync(me.EventId, id, ct);
+            LinkMessage = removed ? "Unlinked. The WordPress post itself is unchanged." : "That link no longer exists.";
+            LinkMessageIsError = !removed;
+        }
+        return await ReloadAsync(me.EventId, ct);
+    }
+
+    private async Task<IActionResult> ReloadAsync(int eventId, CancellationToken ct)
+    {
+        Preview = await _studio.PreviewAsync(eventId, Kind, ct);
+        await LoadLinkedAsync(eventId, ct);
+        return Page();
+    }
+
+    private async Task LoadLinkedAsync(int eventId, CancellationToken ct)
+    {
+        if (_refresh is not null) LinkedPosts = await _refresh.ListAsync(eventId, ct);
     }
 
     [BindProperty(SupportsGet = true)] public ContentKind Kind { get; set; } = ContentKind.TicketSales;
@@ -41,6 +127,7 @@ public class ContentStudioModel : PageModel
         var me = Guard();
         if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
         Preview = await _studio.PreviewAsync(me.EventId, Kind, ct);
+        await LoadLinkedAsync(me.EventId, ct);
         return Page();
     }
 
@@ -54,8 +141,7 @@ public class ContentStudioModel : PageModel
         MessageIsError = !result.Created;
         DraftEditUrl = result.EditUrl;
 
-        Preview = await _studio.PreviewAsync(me.EventId, Kind, ct);
-        return Page();
+        return await ReloadAsync(me.EventId, ct);
     }
 
     private CurrentParticipant? Guard()

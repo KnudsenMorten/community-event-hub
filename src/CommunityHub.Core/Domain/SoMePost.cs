@@ -281,6 +281,24 @@ public class SoMePost
         string.IsNullOrWhiteSpace(ManualTextOverride) ? AutoText : ManualTextOverride!.Trim();
 
     /// <summary>
+    /// §1372 — true only when the edit changed the WORDS, not just spaces and line breaks.
+    /// </summary>
+    /// <remarks>
+    /// PROD 2026-10-27: post 343439 carried an "edit" identical to the composed text apart from
+    /// whitespace (a browser save turns line breaks into CR+LF), and it kept the post out of
+    /// auto-approval for a month.
+    /// </remarks>
+    public bool HasWordingOverride =>
+        !string.IsNullOrWhiteSpace(ManualTextOverride) && !SameWording(ManualTextOverride, AutoText);
+
+    /// <summary>§1372 — the same words in the same order; spacing and line breaks ignored.</summary>
+    public static bool SameWording(string? a, string? b) =>
+        string.Equals(NormalizeSpacing(a), NormalizeSpacing(b), StringComparison.Ordinal);
+
+    private static string NormalizeSpacing(string? text) =>
+        string.Join(' ', (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
     /// True when this is an auto post that has no branding image yet (REQUIREMENTS
     /// §18↔§19 link): the linked speaker/session graphic is missing or still behind
     /// the organizer RELEASE gate, so the auto path attached no image rather than a

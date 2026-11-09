@@ -1,0 +1,217 @@
+@page
+@model CommunityHub.Pages.Forms.VisaModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Visa application";
+    var f = Model.Form;
+    const string Req = "<span style=\"color:#c0392b;\">*</span>";
+    var months = System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.MonthNames.Take(12).ToArray();
+}
+@* §1374 — a date as day / month / year dropdowns; a browser date field hid the year. *@
+@functions {
+    private Microsoft.AspNetCore.Html.IHtmlContent DateDropdowns(string id, string prefix, int? day, int? month, int? year,
+        IEnumerable<int> years, string[] months)
+    {
+        var sb = new System.Text.StringBuilder();
+        string Opt(int v, string text, bool sel) => $"<option value=\"{v}\"{(sel ? " selected" : "")}>{text}</option>";
+        const string Sel = "style=\"flex:1;min-width:0;margin:0;\"";
+        sb.Append("<div style=\"display:flex;gap:8px;max-width:640px;margin:6px 0 14px;\">");
+        sb.Append($"<select id=\"{id}\" name=\"{prefix}Day\" aria-label=\"Day\" {Sel}><option value=\"\">Day</option>");
+        for (var d = 1; d <= 31; d++) sb.Append(Opt(d, d.ToString(), day == d));
+        sb.Append($"</select><select name=\"{prefix}Month\" aria-label=\"Month\" {Sel}><option value=\"\">Month</option>");
+        for (var m = 1; m <= 12; m++) sb.Append(Opt(m, months[m - 1], month == m));
+        sb.Append($"</select><select name=\"{prefix}Year\" aria-label=\"Year\" {Sel}><option value=\"\">Year</option>");
+        foreach (var y in years) sb.Append(Opt(y, y.ToString(), year == y));
+        sb.Append("</select></div>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+}
+@* §1374 — the dropdowns are written by hand (not asp-for) so a bool? and a stored ISO code re-select
+   exactly what was saved; selected="@bool" renders the attribute only when true. *@
+
+<div class="card">
+    <h1>Visa application</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ApplicationId))
+    {
+        <div role="status" style="background:#e7f6ec;border:1px solid #9fd3ae;border-radius:8px;padding:12px 14px;margin-bottom:14px;">
+            <strong>Your application ID: <span style="font-size:1.15em;user-select:all;">@Model.ApplicationId</span></strong><br />
+            Use this ID when you apply for your visa to Denmark.
+        </div>
+    }
+
+    @if (Model.Letter is CommunityHub.Core.Visa.VisaLetterInfo letter)
+    {
+        @* §1383 — the PDF the organizers uploaded for this applicant only. *@
+        <div role="status" style="background:#e7f6ec;border:1px solid #9fd3ae;border-radius:8px;padding:12px 14px;margin-bottom:14px;overflow-wrap:anywhere;">
+            <strong>Your letter from the organizers is ready.</strong><br />
+            <a href="/Forms/Visa?handler=Letter" style="display:inline-block;margin-top:8px;font-weight:600;">⬇ Download @letter.FileName</a>
+            <span style="color:#6b7280;font-size:13px;">(PDF, added @letter.UploadedAt.ToString("dd MMM yyyy"))</span>
+        </div>
+    }
+
+    @if (Model.Message is not null)
+    {
+        <p role="status" style="background:#eef6ff;border:1px solid #b6d4fe;border-radius:8px;padding:12px 14px;">@Model.Message</p>
+    }
+
+    <p>
+        Please fill in the details below. We, the organizers, use them to send the invitation for your
+        visa to the Danish authorities. When that is done we add your <strong>application ID</strong>
+        at the top of this page &mdash; you need it when you apply for the visa.
+        Fields marked @Html.Raw(Req) are required.
+    </p>
+    @if (Model.SubmittedAt is DateTimeOffset s)
+    {
+        <p style="color:#6b7280;font-size:13px;">Submitted @s.ToString("d MMM yyyy"). You can correct your details and save again.</p>
+    }
+
+    @if (Model.Errors.Count > 0)
+    {
+        <div class="error" role="alert" style="border:1px solid #f5c2c7;background:#fdecee;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+            <strong>Please check the form:</strong>
+            <ul style="margin:6px 0 0;">
+                @foreach (var e in Model.Errors) { <li>@e</li> }
+            </ul>
+        </div>
+    }
+
+    <form method="post">
+        <h2>1. About you</h2>
+        <label for="fn">First name(s) @Html.Raw(Req)</label>
+        <input id="fn" type="text" name="Form.FirstNames" value="@f.FirstNames" maxlength="200" autocomplete="given-name" />
+        <label for="ln">Last name @Html.Raw(Req)</label>
+        <input id="ln" type="text" name="Form.LastName" value="@f.LastName" maxlength="200" autocomplete="family-name" />
+        <label for="dob">Date of birth @Html.Raw(Req)</label>
+        @DateDropdowns("dob", "Dob", Model.DobDay, Model.DobMonth, Model.DobYear, Model.BirthYears, months)
+        <label for="gender">Gender @Html.Raw(Req)</label>
+        <select id="gender" name="Form.Gender">
+            <option value="">— select —</option>
+            @foreach (var g in VisaFormOptions.Genders) { <option value="@g" selected="@(f.Gender == g)">@g</option> }
+        </select>
+        <label for="nat">Nationality @Html.Raw(Req)</label>
+        <select id="nat" name="Form.Nationality">
+            <option value="">— select —</option>
+            @foreach (var c in Countries.All) { <option value="@c.Code" selected="@(f.Nationality == c.Code)">@c.Name</option> }
+        </select>
+        <label for="hs">Home address (street and number) @Html.Raw(Req)</label>
+        <input id="hs" type="text" name="Form.HomeStreet" value="@f.HomeStreet" maxlength="200" autocomplete="street-address" />
+        <label for="hp">Postal code @Html.Raw(Req)</label>
+        <input id="hp" type="text" name="Form.HomePostalCode" value="@f.HomePostalCode" maxlength="20" autocomplete="postal-code" />
+        <label for="hc">City @Html.Raw(Req)</label>
+        <input id="hc" type="text" name="Form.HomeCity" value="@f.HomeCity" maxlength="200" />
+        <label for="hco">Country @Html.Raw(Req)</label>
+        <select id="hco" name="Form.HomeCountry">
+            <option value="">— select —</option>
+            @foreach (var c in Countries.All) { <option value="@c.Code" selected="@(f.HomeCountry == c.Code)">@c.Name</option> }
+        </select>
+        <label for="ph">Phone number @Html.Raw(Req)</label>
+        <input id="ph" type="tel" name="Form.Phone" value="@f.Phone" maxlength="200" autocomplete="tel" />
+        <label for="em">Email address @Html.Raw(Req)</label>
+        <input id="em" type="email" name="Form.Email" value="@f.Email" maxlength="320" autocomplete="email" />
+
+        <h2>2. About your company</h2>
+        <label for="cn">Company name @Html.Raw(Req)</label>
+        <input id="cn" type="text" name="Form.CompanyName" value="@f.CompanyName" maxlength="200" autocomplete="organization" />
+        <label for="cs">Company address @Html.Raw(Req)</label>
+        <input id="cs" type="text" name="Form.CompanyStreet" value="@f.CompanyStreet" maxlength="200" />
+        <label for="cp">Postal code @Html.Raw(Req)</label>
+        <input id="cp" type="text" name="Form.CompanyPostalCode" value="@f.CompanyPostalCode" maxlength="20" />
+        <label for="cc">City @Html.Raw(Req)</label>
+        <input id="cc" type="text" name="Form.CompanyCity" value="@f.CompanyCity" maxlength="200" />
+        <label for="cco">Country @Html.Raw(Req)</label>
+        <select id="cco" name="Form.CompanyCountry">
+            <option value="">— select —</option>
+            @foreach (var c in Countries.All) { <option value="@c.Code" selected="@(f.CompanyCountry == c.Code)">@c.Name</option> }
+        </select>
+        <label for="ctel">Telephone number (optional)</label>
+        <input id="ctel" type="tel" name="Form.CompanyPhone" value="@f.CompanyPhone" maxlength="200" />
+        <label for="cem">Email address @Html.Raw(Req)</label>
+        <input id="cem" type="email" name="Form.CompanyEmail" value="@f.CompanyEmail" maxlength="320" />
+        <label for="cw">Website @Html.Raw(Req)</label>
+        <input id="cw" type="text" name="Form.CompanyWebsite" value="@f.CompanyWebsite" maxlength="200" placeholder="https://" />
+        <label for="dr">Your department and your role/function in the company @Html.Raw(Req)</label>
+        <input id="dr" type="text" name="Form.DepartmentAndRole" value="@f.DepartmentAndRole" maxlength="200" />
+
+        <h2>3. Relationship between our companies</h2>
+        <label for="vb">Have you visited Experts Live Denmark before? @Html.Raw(Req)</label>
+        <select id="vb" name="Form.VisitedBefore">
+            <option value="">— select —</option>
+            <option value="true" selected="@(f.VisitedBefore == true)">Yes</option>
+            <option value="false" selected="@(f.VisitedBefore == false)">No</option>
+        </select>
+        <label for="ca">What does your company do? @Html.Raw(Req)</label>
+        <textarea id="ca" name="Form.CompanyActivity" rows="3" maxlength="500">@f.CompanyActivity</textarea>
+        <label for="co">How did the contact between our companies come about? @Html.Raw(Req)</label>
+        <input id="co" type="text" name="Form.ContactOrigin" value="@f.ContactOrigin" maxlength="200" />
+        <label for="rd">How long has the business relationship existed? @Html.Raw(Req)</label>
+        <select id="rd" name="Form.RelationshipDuration">
+            <option value="">— select —</option>
+            @foreach (var o in VisaFormOptions.RelationshipDurations) { <option value="@o" selected="@(f.RelationshipDuration == o)">@o</option> }
+        </select>
+        <label for="fs">Estimated financial scope of the business relationship @Html.Raw(Req)</label>
+        <input id="fs" type="text" name="Form.FinancialScope" value="@f.FinancialScope" maxlength="200" />
+
+        <h2>4. About the visit</h2>
+        <label for="ad">Planned arrival date @Html.Raw(Req)</label>
+        @DateDropdowns("ad", "Arr", Model.ArrDay, Model.ArrMonth, Model.ArrYear, Model.ArrivalYears, months)
+        <label for="lv">Expected length of visit (number of days) @Html.Raw(Req)</label>
+        <input id="lv" type="number" min="1" max="90" name="Form.LengthOfVisitDays" value="@f.LengthOfVisitDays" />
+        <label for="en">Number of entries needed @Html.Raw(Req)</label>
+        <select id="en" name="Form.Entries">
+            <option value="">— select —</option>
+            @foreach (var o in VisaFormOptions.Entries) { <option value="@o" selected="@(f.Entries == o)">@o</option> }
+        </select>
+        <label for="pu">Purpose of the visit @Html.Raw(Req)</label>
+        <p style="margin:-2px 0 6px;font-size:13px;color:#6b7280;">Describe the business relationship and what the visit is for (max 500 characters). A visit programme will be attached later.</p>
+        <textarea id="pu" name="Form.Purpose" rows="5" maxlength="500">@f.Purpose</textarea>
+        <label for="sc">Any special circumstances or events to consider when processing the application? (optional)</label>
+        <textarea id="sc" name="Form.SpecialCircumstances" rows="4" maxlength="500" placeholder="Max 500 characters">@f.SpecialCircumstances</textarea>
+
+        <h2>5. Expenses and accommodation</h2>
+        <label for="tp">Who pays for your travel? @Html.Raw(Req)</label>
+        <select id="tp" name="Form.TravelPaidBy">
+            <option value="">— select —</option>
+            @foreach (var o in VisaFormOptions.PaidBy) { <option value="@o" selected="@(f.TravelPaidBy == o)">@o</option> }
+        </select>
+        @* Operator 2026-10-28: "who pays for your stay is The Event organizer" — an answer, not a choice. *@
+        <p style="margin:0 0 4px;font-weight:600;">Who pays for your stay?</p>
+        <p style="margin:0 0 14px;">@VisaFormOptions.StayPaidByOrganizer</p>
+        <label for="acc">Where will you stay during the visit? @Html.Raw(Req)</label>
+        @{
+            // The CEH hotels for this edition; a saved value no longer in the list (hotel renamed) stays selectable.
+            var hotelKnown = Model.Hotels.Any(h => h.Value == f.Accommodation);
+            var picked = Model.Hotels.FirstOrDefault(h => h.Value == f.Accommodation);
+        }
+        <select id="acc" name="Form.Accommodation">
+            <option value="">— select your hotel —</option>
+            @foreach (var h in Model.Hotels)
+            {
+                <option value="@h.Value" data-address="@h.Address" selected="@(h.Value == f.Accommodation)">@h.Name</option>
+            }
+            @if (!hotelKnown && !string.IsNullOrWhiteSpace(f.Accommodation))
+            {
+                <option value="@f.Accommodation" selected>@f.Accommodation</option>
+            }
+        </select>
+        <p id="acc-address" style="margin:-8px 0 14px;font-size:14px;color:#374151;">@(hotelKnown ? (picked.Address ?? "") : "")</p>
+        <script>
+            (function () {
+                var sel = document.getElementById('acc'), out = document.getElementById('acc-address');
+                sel.addEventListener('change', function () {
+                    var o = sel.options[sel.selectedIndex];
+                    out.textContent = (o && o.getAttribute('data-address')) || '';
+                });
+            })();
+        </script>
+        @* Operator 2026-10-28: the host guarantee "is No" — an answer, not a choice. *@
+        <p style="margin:0 0 4px;font-weight:600;">Will the host company financially guarantee your travel and stay in Denmark?</p>
+        <p style="margin:0 0 14px;">@VisaFormOptions.YesNo(VisaFormOptions.HostGuarantees)</p>
+
+        <div style="margin-top:18px;">
+            <button type="submit" data-ceh-loading-text="@Localizer["Common.Saving"]">@(Model.SubmittedAt is null ? "Send to the organizers" : "Save changes")</button>
+        </div>
+    </form>
+
+    <p style="margin-top:14px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+</div>

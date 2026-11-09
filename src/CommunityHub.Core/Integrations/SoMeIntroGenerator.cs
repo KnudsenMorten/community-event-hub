@@ -103,7 +103,7 @@ public sealed class SoMeIntroGenerator
 
             using var msg = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                Content = JsonContent.Create(payload, options: JsonOpts),
+                Content = OpenAiChatContent.Create(payload, _options, JsonOpts),
             };
             // Secret header — from config / Key Vault, never logged.
             msg.Headers.TryAddWithoutValidation("api-key", _options.ApiKey);
@@ -156,6 +156,9 @@ public sealed class SoMeIntroGenerator
         }
     }
 
+    /// <summary>§1373 — where a tier intro names its companies; resolved at publish.</summary>
+    public const string SponsorNamesToken = "{SponsorNames}";
+
     internal static string BuildUserPrompt(SoMeIntroRequest r)
     {
         var what = r.Kind switch
@@ -165,8 +168,15 @@ public sealed class SoMeIntroGenerator
                 + "to follow that track",
             SoMeTemplateKind.Session =>
                 $"a conference session titled '{r.Title}'",
+            // 🔴 §1373 — a tier intro names the companies through a PLACEHOLDER, never by hand. It is
+            // written once and stored; a typed name outlived both a legal-vs-public name ("twoday
+            // Danmark A/S" for Twoday) and a tier move. {SponsorNames} resolves at publish to the
+            // current public names (operator: "use the public company names").
             SoMeTemplateKind.SponsorCategory =>
-                $"the conference's {r.Title} sponsors, as a group",
+                $"the conference's {r.Title} sponsors, as a group. Name the sponsors by writing the "
+                + $"placeholder {SponsorNamesToken} exactly once where their names belong - it is replaced "
+                + "with the current company names when the post publishes. Never type a company name "
+                + "yourself",
             SoMeTemplateKind.Sponsor =>
                 $"{r.Title}, a sponsor of the conference",
             _ => $"'{r.Title}' at the conference",

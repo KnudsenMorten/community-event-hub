@@ -164,6 +164,7 @@ public sealed class SoMeTemplateService
             ["SponsorLinkedInUrl"] = "Contoso",
             ["SponsorTier"] = "Gold",
             ["SponsorList"] = "Contoso | Fabrikam",
+            ["SponsorNames"] = "Contoso and Fabrikam",
             ["SponsorWebsite"] = "contoso.com",
             ["SponsorHashtag"] = "#Contoso",
             ["SponsorSocialMediaCompanyDescription"] = "(the sponsor's own description from CEH)",

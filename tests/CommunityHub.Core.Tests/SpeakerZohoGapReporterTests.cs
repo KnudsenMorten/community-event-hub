@@ -70,6 +70,29 @@ public class SpeakerZohoGapReporterTests
         Assert.DoesNotContain(gaps, g => g.Contains("Skills"));
     }
 
+    // ---------- §1376 — the name ----------
+
+    [Fact]
+    public void A_full_name_changed_in_CEH_is_reported_with_the_CEH_name()
+    {
+        // Operator 2026-10-29: "just inform us if there is a mismatch as their api currently doesnt allow to update in zoho".
+        var gaps = SpeakerZohoGapReporter.GapsFor(new SpeakerProfile(), Zoho(), "Per Bjerre Larsen");
+
+        Assert.Contains("Name (new value in Zoho from hub) -> Per Bjerre Larsen", gaps);
+    }
+
+    [Theory]
+    [InlineData("Per Larsen")]
+    [InlineData("per larsen")]
+    [InlineData("  Per   Larsen ")]
+    [InlineData(null)]
+    public void The_same_name_or_no_CEH_name_is_not_reported(string? fullName)
+    {
+        var gaps = SpeakerZohoGapReporter.GapsFor(new SpeakerProfile(), Zoho(), fullName);
+
+        Assert.DoesNotContain(gaps, g => g.StartsWith("Name"));
+    }
+
     // ---------- 🔒 the §582 limitation ----------
 
     [Fact]

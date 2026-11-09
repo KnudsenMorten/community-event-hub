@@ -127,6 +127,7 @@ public static class SoMeEmptyVariableGate
         "IntroText" or "SessionTeaserTextAI" => "the session teaser (written by the AI assistant)",
         "SponsorSocialMediaCompanyDescription" => "the sponsor's own social-media text",
         "SponsorList" => "the companies in this tier",
+        "SponsorNames" => "the names of the companies in this tier",
         "Speakers" or "SpeakerNames" => "the speaker list",
         "SessionTitle" => "the session title",
         "SponsorName" => "the sponsor's name",

@@ -437,7 +437,19 @@
             }
             catch { /* nav is best-effort; a missing section is better than a 500 */ }
         }
-        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible);
+        // §1374: "Visa application" shows only for a participant flagged NeedsVisa (any role). One
+        // indexed lookup; best-effort like the rest of the nav.
+        var needsVisa = false;
+        if (me is not null)
+        {
+            try
+            {
+                needsVisa = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .AnyAsync(Db.Participants, p => p.Id == me.ParticipantId && p.EventId == me.EventId && p.NeedsVisa);
+            }
+            catch { /* nav is best-effort */ }
+        }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible, needsVisa);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 

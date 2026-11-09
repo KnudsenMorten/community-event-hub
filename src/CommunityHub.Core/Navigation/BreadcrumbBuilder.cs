@@ -125,6 +125,7 @@ public static class BreadcrumbBuilder
 
             // Comms hub
             ["/organizer/emailcenter"]           = "/organizer/comms",
+            ["/organizer/mailcampaigns"]         = "/organizer/comms",   // §1381
             ["/organizer/emaillog"]              = "/organizer/comms",
             ["/organizer/broadcast"]             = "/organizer/comms",
             ["/organizer/sendinvitations"]       = "/organizer/comms",
@@ -173,13 +174,18 @@ public static class BreadcrumbBuilder
             ["/organizer/editvolunteertask"]     = "/organizer/volunteers",
             ["/organizer/organizerallocation"]   = "/organizer/volunteers",
             ["/organizer/volunteertasksexcel"]   = "/organizer/volunteers",
-            // §1297 — the worker roster (the planner's scope list).
+            // §1297 — the worker roster; §1380 renamed it "Full-day workers" (route unchanged).
             ["/organizer/volunteerworkerroster"] = "/organizer/volunteers",
+            // §1380 — coverage overview + task calendar.
+            ["/organizer/volunteercoverage"]     = "/organizer/volunteers",
+            ["/organizer/volunteercalendar"]     = "/organizer/volunteers",
 
             // Logistics hub
             ["/organizer/hotels"]                = "/organizer/logistics",
             ["/organizer/hotelassignments"]      = "/organizer/logistics",
             ["/organizer/hotelroomblocks"]       = "/organizer/logistics",
+            ["/organizer/hoteloverview"]         = "/organizer/logistics",   // §1386
+            ["/organizer/hotelallotments"]       = "/organizer/logistics",   // §1386
             ["/organizer/swag"]                  = "/organizer/logistics",
             ["/organizer/lunch"]                 = "/organizer/logistics",
             ["/organizer/travelreimbursements"]  = "/organizer/logistics",
@@ -189,6 +195,7 @@ public static class BreadcrumbBuilder
             // Carded on Logistics (not SoMe) — the group PHOTO shoot is a schedule/logistics job.
             ["/organizer/groupphotos"]           = "/organizer/logistics",
             ["/organizer/partyrsvps"]            = "/organizer/logistics",
+            ["/organizer/visaapplications"]      = "/organizer/logistics",   // §1374
             ["/organizer/schedule"]              = "/organizer/logistics",
             ["/organizer/sessionevalsqr"]        = "/organizer/logistics",
             ["/organizer/speakerreview"]         = "/organizer/logistics",

@@ -405,19 +405,29 @@ public sealed class SoMeVariableResolver
         // 🔴 §1347 — nor a WITHDRAWN one: it has stopped being a sponsor in that tier.
         var testCompanies = await TestDataScope.NotAnnounceableSponsorCompanyIdsAsync(_db, eventId, ct);
 
-        var listed = rows
+        var announced = rows
             .Where(r => r.SponsorCompanyId == null || !testCompanies.Contains(r.SponsorCompanyId))
+            .Select(r => new
+            {
+                Name = SponsorCompanyName.Resolve(r.CompanyName, null, null, r.SponsorCompanyId),
+                r.LinkedInOrganizationId, r.SponsorCompanyId,
+            })
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        var listed = announced
             .Select(r => MentionOrName(
-                SponsorCompanyName.Resolve(r.CompanyName, null, null, r.SponsorCompanyId),
-                r.LinkedInOrganizationId, Webshop.CompanyLinks.Of(links, r.SponsorCompanyId).LinkedIn))
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
+                r.Name, r.LinkedInOrganizationId, Webshop.CompanyLinks.Of(links, r.SponsorCompanyId).LinkedIn))
             .ToList();
 
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["SponsorTier"] = tier.ToString(),
             ["SponsorList"] = listed.Count == 0 ? null : string.Join(" | ", listed),
+            // §1373 — the same companies as plain PUBLIC names for a sentence ("A, B and C"). The tier
+            // intro carries this token instead of names, so the names resolve at publish like the list.
+            ["SponsorNames"] = JoinNames(announced.Select(r => r.Name).ToList()),
         };
     }
 
@@ -439,6 +449,14 @@ public sealed class SoMeVariableResolver
         var urn = LinkedInUrlParser.TryBuildOrganizationUrn(organizationId, linkedInUrl);
         return urn is null ? name : $"@[{name}]({urn})";
     }
+
+    /// <summary>§1373 — "A", "A and B", "A, B and C"; null for none.</summary>
+    internal static string? JoinNames(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => null,
+        1 => names[0],
+        _ => string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1],
+    };
 
     /// <summary>§1300 — the company mention, or null when no organization id is known.</summary>
     internal static string? MentionOrNull(string name, string? organizationId, string? linkedInUrl)

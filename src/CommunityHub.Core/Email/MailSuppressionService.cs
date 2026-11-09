@@ -179,7 +179,9 @@ public sealed class MailSuppressionService
         if (link.Length == 0) return string.Empty;
 
         return "<hr style=\"border:0;border-top:1px solid #e5e7eb;margin:24px 0 12px;\" />"
-             + "<p style=\"color:#6b7280;font-size:12px;line-height:1.5;\">"
+             // §1381 — the font inline: this paragraph sits after the layout table, outside any cell, so the sender's
+             // per-cell font step (BrevoEmailSender.FontTables) does not reach it and Outlook would fall back to Times.
+             + "<p style=\"font-family:" + BrevoEmailSender.DefaultFontStack.Replace('"', '\'') + ";color:#6b7280;font-size:12px;line-height:1.5;\">"
              + $"You are receiving this because you have taken part in a {System.Net.WebUtility.HtmlEncode(communityName)} "
              + "event before. "
              + $"<a href=\"{System.Net.WebUtility.HtmlEncode(link)}\">Unsubscribe from event mails</a>"

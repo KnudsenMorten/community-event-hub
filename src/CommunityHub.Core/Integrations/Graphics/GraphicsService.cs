@@ -103,6 +103,87 @@ public sealed class GraphicsService
     }
 
     /// <summary>
+    /// §1384 — build the ONE all-tracks overview GIF: a frame per track, every speaker in it as a face.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <see cref="GenerateTrackBundleAsync"/> rule for rule: same store path (the track-graphics
+    /// folder), an organizer-overruled asset is left alone unless <paramref name="force"/>, and an
+    /// unchanged <paramref name="inputHash"/> does not re-render. The event name comes from the edition
+    /// row; dates and city from the same strip every other graphic prints (<c>ApplyEventStrip</c>).
+    /// </remarks>
+    public async Task<BundleOutcome> GenerateAllTracksSpeakersAsync(
+        int eventId, IReadOnlyList<TrackOverviewTrack> tracks,
+        string? inputHash = null, bool force = false, CancellationToken ct = default)
+    {
+        if (!tracks.Any(t => t.Speakers.Count > 0))
+            throw new ArgumentException("The all-tracks overview needs at least one speaker.", nameof(tracks));
+
+        var key = GraphicStableKey.ForAllTracksSpeakers();
+        var existing = await FindByKeyAsync(eventId, key, ct);
+        if (existing is { IsOrganizerOverridden: true } && !force)
+            return new BundleOutcome(existing, Rendered: false);
+        if (!force && inputHash is not null && existing?.InputHash == inputHash)
+            return new BundleOutcome(existing, Rendered: false);
+
+        var renderer = new SoMeGraphicRenderer
+        {
+            EventName = await _db.Events.Where(e => e.Id == eventId)
+                .Select(e => e.DisplayName).FirstOrDefaultAsync(ct),
+        };
+        ApplyEventStrip(renderer);
+        var gif = renderer.RenderTrackOverviewGif(tracks);
+
+        var asset = await StoreAndUpsertAsync(
+            eventId, key, GraphicAssetType.AllTracksSpeakers, gif, existing,
+            participantId: null, sessionId: null, sponsorCompanyId: null,
+            ct, isGif: true, inputHash: inputHash);
+        return new BundleOutcome(asset, Rendered: true);
+    }
+
+    /// <summary>
+    /// §1384 — the all-tracks overview the PUBLIC URL serves: the active edition's
+    /// <see cref="GraphicAssetType.AllTracksSpeakers"/> row, released and stored. Null otherwise.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Released only — an organizer un-releasing it takes it off the public URL. It is published
+    /// promotion material by design (every face on it is on the public programme already).
+    /// </remarks>
+    public async Task<GraphicAsset?> FindPublicAllTracksSpeakersAsync(CancellationToken ct = default)
+    {
+        var activeId = await _db.Events
+            .Where(e => e.IsActive)
+            .OrderByDescending(e => e.Id)
+            .Select(e => (int?)e.Id)
+            .FirstOrDefaultAsync(ct);
+        if (activeId is null) return null;
+
+        var key = GraphicStableKey.ForAllTracksSpeakers();
+        return await _db.GraphicAssets.AsNoTracking()
+            .Where(g => g.EventId == activeId.Value
+                        && g.StableKey == key
+                        && g.Type == GraphicAssetType.AllTracksSpeakers
+                        && g.Status == GraphicAssetStatus.Released
+                        && g.StorageItemId != null)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// §1384 — the stored overview GIF's bytes, scaled to <paramref name="width"/> (1200 native, 600
+    /// for mail). Null when the store cannot read it. No rendering happens here — only a download and,
+    /// for 600, a resize of the stored file.
+    /// </summary>
+    public async Task<byte[]?> DownloadAllTracksSpeakersAsync(
+        GraphicAsset asset, int width, CancellationToken ct = default)
+    {
+        if (asset.StorageItemId is null || !_store.CanRead) return null;
+        byte[]? bytes;
+        try { bytes = await _store.DownloadAsync(asset.StorageItemId, ct); }
+        catch { return null; }
+        if (bytes is null || bytes.Length == 0) return null;
+        return width == SoMeGraphicRenderer.Width ? bytes : SoMeGraphicRenderer.ResizeGif(bytes, width);
+    }
+
+    /// <summary>
     /// §767 — the bottom strip: <c>9-10 FEB 2027 · COPENHAGEN, DENMARK</c>, and nothing else.
     /// </summary>
     /// <remarks>
@@ -1227,6 +1308,8 @@ public sealed class GraphicsService
     {
         GraphicAssetType.Session => DocLibrary.DocLibraryPaths.SpeakerSessionGraphics,
         GraphicAssetType.TrackBundle => DocLibrary.DocLibraryPaths.SpeakerTrackGraphics,
+        // §1384 — the all-tracks overview lives beside the per-track GIFs it is built from.
+        GraphicAssetType.AllTracksSpeakers => DocLibrary.DocLibraryPaths.SpeakerTrackGraphics,
         GraphicAssetType.Sponsor => DocLibrary.DocLibraryPaths.SponsorGraphicsSponsors,
         GraphicAssetType.SponsorCategory => DocLibrary.DocLibraryPaths.SponsorGraphicsCategories,
         _ => throw new DocLibrary.DocLibraryPathException(
@@ -1242,7 +1325,8 @@ public sealed class GraphicsService
     private string? TryFolderFor(GraphicAssetType type) => type switch
     {
         GraphicAssetType.Session or GraphicAssetType.TrackBundle
-            or GraphicAssetType.Sponsor or GraphicAssetType.SponsorCategory => FolderFor(type),
+            or GraphicAssetType.Sponsor or GraphicAssetType.SponsorCategory
+            or GraphicAssetType.AllTracksSpeakers => FolderFor(type),
         _ => null,
     };
 

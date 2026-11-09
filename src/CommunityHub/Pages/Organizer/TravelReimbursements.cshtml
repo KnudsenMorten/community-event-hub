@@ -36,10 +36,82 @@
             </div>
         </div>
 
+        @* §1387 — the mail preview: nothing is sent until the organizer presses send here. *@
+        @if (Model.Preview is { } pv)
+        {
+            var isAccept = Model.PreviewKind == "accept";
+            <div id="preview" style="border:2px solid #1a1a2e;border-radius:10px;padding:12px 14px;margin:0 0 16px;background:#fff;">
+                <h2 style="margin:0 0 6px;font-size:18px;">@(isAccept ? "Check the mail to finance" : "Check the mail to the speaker") — @Model.PreviewName</h2>
+                <div style="font-size:13px;margin:0 0 8px;">
+                    <strong>To:</strong> @pv.To@(pv.Cc.Count > 0 ? " · cc " + string.Join(", ", pv.Cc) : "")<br />
+                    <strong>Subject:</strong> @pv.Subject<br />
+                    <strong>Attached:</strong> @(pv.AttachmentNames.Count == 0 ? "no documents" : string.Join(", ", pv.AttachmentNames))
+                </div>
+                @if (!string.IsNullOrWhiteSpace(pv.Warning))
+                {
+                    <p class="info" style="margin:0 0 8px;">@pv.Warning</p>
+                }
+                <iframe title="Mail preview" sandbox="" srcdoc="@pv.Html" style="width:100%;height:440px;border:1px solid #dde4ee;border-radius:6px;background:#fff;"></iframe>
+                <form method="post" style="margin:10px 0 0;">
+                    <input type="hidden" name="id" value="@Model.PreviewClaimId" />
+                    <label for="pvnote" style="margin:0 0 4px;">@(isAccept ? "Your note to finance (optional)" : "Your note to the speaker (optional — shown at the top of the mail)")</label>
+                    <textarea id="pvnote" name="note" maxlength="2000" rows="3" style="width:100%;font-size:13px;">@Model.PreviewNote</textarea>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                        <button type="submit" asp-page-handler="@(isAccept ? "PreviewAccept" : "PreviewSendBack")" class="secondary">Update the preview</button>
+                        @if (isAccept)
+                        {
+                            <button type="submit" asp-page-handler="Accept">Accept and send to finance</button>
+                        }
+                        else
+                        {
+                            <button type="submit" asp-page-handler="SendBack">@(Model.Rows.FirstOrDefault(x => x.Id == Model.PreviewClaimId) is { ReviewState: CommunityHub.Core.Domain.TravelReviewState.SentBack, SubmittedAt: null } ? "Re-send to the speaker" : "Send to the speaker")</button>
+                        }
+                        <a href="?Filter=@Model.Filter#claim-@Model.PreviewClaimId" style="align-self:center;">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        }
+
+        @* §1387 — "Needs your decision": every submitted claim waiting for Accept / Send back, newest response first. *@
+        @if (Model.CanReview && Model.Queue.Count > 0)
+        {
+            <div style="border:1px solid #dde4ee;border-radius:10px;padding:10px 12px;margin:0 0 14px;background:#f8fafc;">
+                <h2 style="margin:0 0 6px;font-size:16px;">Needs your decision (@Model.Queue.Count)</h2>
+                <ul style="margin:0;padding-left:18px;font-size:13px;">
+                    @foreach (var q in Model.Queue)
+                    {
+                        var rec = CommunityHub.Core.Travel.TravelReviewService.Recommendation(q.AiVerdict, q.Checks ?? Array.Empty<CommunityHub.Core.Domain.TravelCheckItem>());
+                        var recColour = rec.Short.StartsWith("Accept") ? "#166534" : rec.Short == "Send back" ? "#991b1b" : "#92400e";
+                        <li style="margin:0 0 4px;">
+                            <a href="?Filter=review#claim-@q.Id"><strong>@q.Name</strong></a>
+                            @if (Model.IsNew(q)) { <span style="background:#1d4ed8;color:#fff;border-radius:4px;padding:0 5px;font-size:11px;">new</span> }
+                            — submitted @(q.SubmittedAt is { } sa ? CommunityHub.Pages.Organizer.TravelReimbursementsModel.Local(sa) : "")
+                            @(q.SentBackCount > 0 ? $"· resubmitted after send-back {q.SentBackCount}×" : "")
+                            · EUR @(q.ClaimAmountEur?.ToString("0") ?? "?")
+                            · <span style="color:@recColour;font-weight:600;">@rec.Short</span>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @* §1387 — the AI document check and the organizer decision. *@
+        @if (Model.CanReview)
+        {
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;">
+                <form method="post" asp-page-handler="ValidateAll" style="margin:0;"
+                      onsubmit="return confirm('Run the AI document check on every submitted claim that is not accepted yet? Nobody is e-mailed.');">
+                    <button type="submit">Validate all submitted with AI</button>
+                </form>
+                <span style="font-size:13px;color:#6b7280;">@Model.CountNeedsReview claim(s) waiting for Accept / Send back. Finance only receives a claim when you press Accept.</span>
+            </div>
+        }
+
         <form method="get" style="margin:6px 0 14px;">
             <label for="Filter" style="margin-top:0;">Filter</label>
             <select asp-for="Filter" onchange="this.form.submit()" style="max-width:240px;">
                 <option value="all">All speakers (incl. opt-outs)</option>
+                <option value="review">Needs review (Accept / Send back)</option>
                 <option value="requesting">Requesting only</option>
                 <option value="outstanding">Outstanding (unpaid)</option>
                 <option value="paid">Paid</option>
@@ -56,6 +128,7 @@
                     <th style="padding:6px;">Origin</th>
                     <th style="padding:6px;text-align:right;">Claim (EUR)</th>
                     <th style="padding:6px;">Explanation</th>
+                    <th style="padding:6px;">Documents &amp; review</th>
                     <th style="padding:6px;">Paid</th>
                     <th style="padding:6px;"></th>
                 </tr>
@@ -63,7 +136,7 @@
             <tbody>
                 @foreach (var r in Model.Rows)
                 {
-                    <tr style="border-bottom:1px solid #eee;@(r.IsPaid ? "background:#f4fbf6;" : "")">
+                    <tr id="claim-@r.Id" style="border-bottom:1px solid #eee;@(r.IsPaid ? "background:#f4fbf6;" : "")">
                         <td style="padding:6px;">
                             @r.Name<br/>
                             <span style="color:#8a8f9c;font-size:11px;">@r.Email</span>
@@ -82,6 +155,128 @@
                         <td style="padding:6px;">@r.OriginCity</td>
                         <td style="padding:6px;text-align:right;font-weight:600;">@(r.ClaimAmountEur?.ToString("0") ?? "-")</td>
                         <td style="padding:6px;max-width:260px;">@r.Explanation</td>
+                        <td style="padding:6px;min-width:280px;">
+                            @if (Model.FilesByParticipant.TryGetValue(r.ParticipantId, out var files))
+                            {
+                                <ul style="margin:0 0 6px;padding-left:16px;">
+                                    @foreach (var fl in files)
+                                    {
+                                        <li><a asp-page-handler="File" asp-route-fileId="@fl.Id">@fl.FileName</a>
+                                            <span style="color:#8a8f9c;font-size:11px;">@(fl.Kind == CommunityHub.Core.Domain.TravelDocumentKind.Unknown ? "not labelled" : CommunityHub.Core.Travel.TravelDocumentValidator.KindText(fl.Kind))</span></li>
+                                    }
+                                </ul>
+                            }
+                            @if ((r.RequestReimbursement && r.SubmittedAt is not null) || r.ReviewState != CommunityHub.Core.Domain.TravelReviewState.None)
+                            {
+                                var checkList = r.Checks ?? Array.Empty<CommunityHub.Core.Domain.TravelCheckItem>();
+                                var effective = CommunityHub.Core.Travel.TravelReviewService.EffectiveVerdictText(r.AiVerdict, checkList);
+                                var vStyle = effective.StartsWith("Approved") ? "color:#166534;background:#dcfce7;" : r.AiVerdict switch
+                                {
+                                    CommunityHub.Core.Domain.TravelAiVerdict.NotApproved => "color:#991b1b;background:#fee2e2;",
+                                    CommunityHub.Core.Domain.TravelAiVerdict.CouldNotCheck => "color:#92400e;background:#fef3c7;",
+                                    _ => "color:#374151;background:#f3f4f6;",
+                                };
+                                <div style="font-size:12px;margin:0 0 4px;">
+                                    <span style="@vStyle padding:2px 6px;border-radius:4px;font-weight:600;">AI: @effective</span>
+                                    @if (r.ReviewState != CommunityHub.Core.Domain.TravelReviewState.None)
+                                    {
+                                        <strong style="margin-left:6px;">@CommunityHub.Pages.Organizer.TravelReimbursementsModel.ReviewText(r.ReviewState)</strong>
+                                    }
+                                    <span style="color:#8a8f9c;"> · company: @(r.HasCompany == true ? "yes" : r.HasCompany == false ? "no" : "not stated")@(r.ErpSentAt is null ? "" : " · sent to finance " + r.ErpSentAt.Value.ToString("d MMM"))</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(r.AiSummary))
+                                {
+                                    <div style="font-size:12px;margin:0 0 4px;">@r.AiSummary</div>
+                                }
+                                @if (r.Checks is { Count: > 0 })
+                                {
+                                    var openCount = r.Checks.Count(c => c.IsOpenFailure);
+                                    var questionCount = r.Checks.Count(c => c.Ok is null && !c.IsAccepted);
+                                    <details style="font-size:12px;margin:0 0 6px;" open="@(openCount + questionCount > 0)">
+                                        <summary>All requirements (@r.Checks.Count) — @openCount missing, @questionCount in question, @r.Checks.Count(c => c.IsAccepted) accepted by organizer</summary>
+                                        <ul style="margin:4px 0;padding-left:16px;list-style:none;">
+                                            @for (var ci = 0; ci < r.Checks.Count; ci++)
+                                            {
+                                                var c = r.Checks[ci];
+                                                var colour = c.IsAccepted ? "#1d4ed8" : c.Ok == false ? "#991b1b" : c.Ok == true ? "#166534" : "#92400e";
+                                                <li style="margin:0 0 4px;">
+                                                    <span style="color:@colour;font-weight:600;">@(c.IsAccepted ? "✓ accepted" : c.Ok == true ? "✓" : c.Ok == false ? "✗ missing" : "? in question")</span>
+                                                    @c.Requirement@(string.IsNullOrWhiteSpace(c.Note) ? "" : " — " + c.Note)
+                                                    @if (c.IsAccepted)
+                                                    {
+                                                        <div style="color:#1d4ed8;font-size:11px;">Accepted by @(c.AcceptedBy ?? "an organizer")@(c.AcceptedAt is { } at ? ", " + at.ToString("d MMM HH:mm") : "")@(string.IsNullOrWhiteSpace(c.AcceptNote) ? "" : ": " + c.AcceptNote)</div>
+                                                        @if (Model.CanReview)
+                                                        {
+                                                            <form method="post" asp-page-handler="UndoCheck" style="display:inline;">
+                                                                <input type="hidden" name="id" value="@r.Id" /><input type="hidden" name="index" value="@ci" />
+                                                                <button type="submit" class="secondary" style="padding:2px 6px;font-size:10px;">Undo</button>
+                                                            </form>
+                                                        }
+                                                    }
+                                                    else if (c.CanAccept && Model.CanReview)
+                                                    {
+                                                        <form method="post" asp-page-handler="AcceptCheck" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">
+                                                            <input type="hidden" name="id" value="@r.Id" /><input type="hidden" name="index" value="@ci" />
+                                                            <input type="text" name="checkNote" maxlength="500" placeholder="Why it is OK (finance sees this)" style="font-size:11px;padding:3px;flex:1 1 140px;" aria-label="Why @c.Requirement is OK for @r.Name" />
+                                                            <button type="submit" style="padding:2px 8px;font-size:11px;">Accept this</button>
+                                                        </form>
+                                                    }
+                                                </li>
+                                            }
+                                        </ul>
+                                    </details>
+                                }
+                                @if (Model.CanReview)
+                                {
+                                    <form method="post" asp-page-handler="Validate" style="margin:0 0 4px;">
+                                        <input type="hidden" name="id" value="@r.Id" />
+                                        <button type="submit" class="secondary" style="padding:4px 8px;font-size:11px;" aria-label="Validate the documents of @r.Name">Validate with AI</button>
+                                    </form>
+                                    @if (r.ReviewState != CommunityHub.Core.Domain.TravelReviewState.SentBack)
+                                    {
+                                        @* Operator 2026-11-08: "maybe show mail before send" — both buttons show the mail first. *@
+                                        <form method="post" style="margin:4px 0 0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                                            <input type="hidden" name="id" value="@r.Id" />
+                                            <input type="text" name="note" maxlength="2000" placeholder="Your note (optional)" style="font-size:11px;padding:4px;flex:1 1 160px;" aria-label="Note for @r.Name" />
+                                            @if (r.ReviewState != CommunityHub.Core.Domain.TravelReviewState.Accepted)
+                                            {
+                                                <button type="submit" asp-page-handler="PreviewAccept" style="padding:4px 8px;font-size:11px;">Accept documents…</button>
+                                            }
+                                            <button type="submit" asp-page-handler="PreviewSendBack" class="secondary" style="padding:4px 8px;font-size:11px;">Send back to speaker…</button>
+                                        </form>
+                                        <div style="font-size:11px;color:#8a8f9c;margin-top:2px;">You see the mail before anything is sent.</div>
+                                    }
+                                    else
+                                    {
+                                        if (!string.IsNullOrWhiteSpace(r.ReviewNote))
+                                        {
+                                            <div style="font-size:11px;color:#6b7280;">Sent back: @r.ReviewNote</div>
+                                        }
+                                        @* Operator 2026-11-08: "resend from new template" — the claim stays open; this only mails again. *@
+                                        if (r.SubmittedAt is null)
+                                        {
+                                            <form method="post" style="margin:4px 0 0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                                                <input type="hidden" name="id" value="@r.Id" />
+                                                <input type="text" name="note" maxlength="2000" value="@r.ReviewNote" placeholder="Your note to the speaker (optional)" style="font-size:11px;padding:4px;flex:1 1 160px;" aria-label="Note for @r.Name" />
+                                                <button type="submit" asp-page-handler="PreviewSendBack" class="secondary" style="padding:4px 8px;font-size:11px;">Re-send to speaker…</button>
+                                            </form>
+                                        }
+                                    }
+                                }
+                            }
+                            @if (Model.Dialog.TryGetValue(r.Id, out var steps) && steps.Count > 0)
+                            {
+                                <details style="font-size:12px;margin:6px 0 0;">
+                                    <summary>Dialog (@steps.Count)</summary>
+                                    <ul style="margin:4px 0;padding-left:16px;">
+                                        @foreach (var s in steps)
+                                        {
+                                            <li style="margin:0 0 3px;"><span style="color:#8a8f9c;">@CommunityHub.Pages.Organizer.TravelReimbursementsModel.Local(s.At)@(string.IsNullOrWhiteSpace(s.Actor) ? "" : " · " + s.Actor)</span><br />@s.Text</li>
+                                        }
+                                    </ul>
+                                </details>
+                            }
+                        </td>
                         <td style="padding:6px;">
                             @if (r.IsPaid)
                             {
@@ -105,6 +300,17 @@
                             }
                         </td>
                         <td style="padding:6px;">
+                            @* §768.10 D5 — a submitted claim is frozen for the speaker; this is the way out. *@
+                            @if (Model.CanReopen(r))
+                            {
+                                <form method="post" asp-page-handler="Reopen" style="margin:0 0 4px;"
+                                      onsubmit="return confirm('Reopen this claim? The speaker can then add or remove receipts and submit it again.');">
+                                    <input type="hidden" name="id" value="@r.Id" />
+                                    <button type="submit" class="secondary" style="padding:4px 8px;font-size:11px;"
+                                            aria-label="Reopen the travel claim of @r.Name">Reopen claim</button>
+                                    <div style="font-size:11px;color:#8a8f9c;">Submitted @r.SubmittedAt?.ToString("d MMM yyyy")@(r.ReopenCount > 0 ? $" · reopened {r.ReopenCount}×" : "")</div>
+                                </form>
+                            }
                             @if (r.RequestReimbursement && !r.IsPaid)
                             {
                                 <form method="post" asp-page-handler="MarkPaid" style="margin:0;display:flex;gap:4px;align-items:center;">

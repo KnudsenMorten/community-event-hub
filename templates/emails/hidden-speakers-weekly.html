@@ -1,0 +1,34 @@
+Subject: {{eventDisplayName}}: hidden speakers — {{summary}}
+<h2 style="margin:0 0 16px;font-size:20px;color:#1a1a2e;">Hi {{firstName}},</h2>
+<p style="margin:0 0 16px;">
+  The hub found speakers or sessions that nobody can see on the agenda. A speaker on no session
+  is counted as a speaker but shown nowhere; a session with no speakers shows an empty slot.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
+  <tr><td style="background-color:#fff8e1;border-left:3px solid #f4b400;padding:14px 16px;border-radius:4px;">
+    <strong>{{summary}}</strong>
+  </td></tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 6px;">
+  <tr><td style="background-color:#f8f9fb;padding:14px 16px;border-radius:4px;">
+    {{findingsHtml}}
+  </td></tr>
+</table>
+<p style="margin:0 0 24px;color:#6b7280;font-size:13px;">
+  Fix it on the Speakers page: link the speaker to their session, or add the missing speaker
+  profile. This notice is sent once a week and stops by itself when nothing is hidden.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Organizer/Speakers" style="height:52px;v-text-anchor:middle;width:340px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Open the Speakers page</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/Organizer/Speakers" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:340px;-webkit-text-size-adjust:none;">Open the Speakers page</a>
+        <!--<![endif]-->
+      </td>
+</tr></table>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">(the button signs you in automatically — no password needed)</p>

@@ -62,6 +62,16 @@ public interface IWordPressPublisher
 
     /// <summary>Create the post as a DRAFT. Throws/returns honest result; never publishes.</summary>
     Task<WordPressPublishResult> CreateDraftAsync(WordPressDraft draft, CancellationToken ct = default);
+
+    /// <summary>
+    /// §1379.8 — replace the CONTENT of an existing post in place (same id, same URL). Sends only
+    /// <c>content</c>: the post's status, title, categories and media are never touched, so a published
+    /// post stays published and a draft stays a draft. Only <see cref="WordPressPostRefreshService"/>
+    /// calls this, and only for a post an organizer flagged "Refresh weekly".
+    /// </summary>
+    Task<WordPressPublishResult> UpdatePostContentAsync(long postId, string contentHtml, CancellationToken ct = default) =>
+        Task.FromResult(new WordPressPublishResult(
+            false, null, null, "WordPress connector is not configured — post not updated."));
 }
 
 /// <summary>

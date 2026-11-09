@@ -115,7 +115,7 @@ public sealed class SpeakerBackstagePushService
         var speakers = await _db.SpeakerProfiles
             .Where(p => p.EventId == eventId)
             .Join(_db.Participants, p => p.ParticipantId, pa => pa.Id,
-                (p, pa) => new { Profile = p, pa.Email, pa.IsActive, pa.LifecycleState, pa.Ring })
+                (p, pa) => new { Profile = p, pa.Email, pa.FullName, pa.IsActive, pa.LifecycleState, pa.Ring })
             .ToListAsync(ct);
 
         // §301b SELF-HEAL + §304 ADOPT-BY-EMAIL (operator 2026-07-24): fetch the LIVE
@@ -326,6 +326,15 @@ public sealed class SpeakerBackstagePushService
             // once the import cleans too: both paths now produce the SAME value, so this is a
             // no-op whenever the import has run and a rescue when it has not. It also covers a URL
             // typed straight into the hub, which the importer never sees.
+            //
+            // 🔴 §1375 — A SPEAKER WHO NEVER CAME FROM SESSIONIZE HAS NO NAME ON THE PROFILE.
+            // Only the Sessionize import writes SpeakerProfile.FirstName/LastName; the Get Started,
+            // calendar and visa forms create the profile without them. A speaker added directly in
+            // the hub (2026-10-22, the first two) therefore went to Zoho nameless and was refused:
+            // *"Please enter a first name for your profile"*. Their name IS in the hub — on the
+            // participant, as typed by the organizer — so take it from there and store it, so the
+            // profile and Zoho hold the same value.
+            FillNameFromFullName(p, row.FullName);
             var create = await _zoho.CreateSpeakerAsync(
                 token, email, p.FirstName, p.LastName, p.Country,
                 p.Tagline, p.Biography,
@@ -421,6 +430,18 @@ public sealed class SpeakerBackstagePushService
             await _zohoChanges.NotifyAsync("Speakers", zohoWrites, ct);
 
         return new Result(true, null, true, null, created, alreadyLinked, failed, skipped, items, enqueued);
+    }
+
+    /// <summary>
+    /// §1375 — fill a blank profile name from the participant's full name: the first word is the
+    /// first name, the rest the last name. A name already on the profile is never touched.
+    /// </summary>
+    public static void FillNameFromFullName(SpeakerProfile p, string? fullName)
+    {
+        if (!string.IsNullOrWhiteSpace(p.FirstName) || string.IsNullOrWhiteSpace(fullName)) return;
+        var parts = fullName.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        p.FirstName = parts[0];
+        if (string.IsNullOrWhiteSpace(p.LastName) && parts.Length > 1) p.LastName = parts[1];
     }
 
     /// <summary>

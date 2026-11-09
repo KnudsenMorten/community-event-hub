@@ -252,8 +252,9 @@ public class SoMePostEditorModel : PageModel
         //
         // 🔒 Identical text ⇒ no override, exactly as if he had cleared the box. An edit is a
         // DIFFERENCE, not a button press.
-        var composed = post.AutoText?.Trim() ?? string.Empty;
-        var unchanged = string.Equals(text, composed, StringComparison.Ordinal);
+        // 🔴 §1372 — and a difference in SPACING is not an edit either: the browser posts line breaks
+        // as CR+LF, so an untouched body never compared equal and post 343439 became an "edit".
+        var unchanged = SoMePost.SameWording(text, post.AutoText);
 
         post.ManualTextOverride = text.Length == 0 || unchanged ? null : text;
 

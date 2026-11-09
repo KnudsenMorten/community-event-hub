@@ -227,6 +227,8 @@ public sealed class ParticipantChecklistBuilder
         // (it previously pointed at the per-day availability page, a different live form).
         if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/Forms/VolunteerWizard";
         if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
+        // §1374 — the visa task is the visa form.
+        if (sourceKey.StartsWith(Visa.VisaApplicationService.TaskKeyPrefix + ":", StringComparison.Ordinal)) return "/Forms/Visa";
         // §161: keep My-Tasks rows in step with the Get-Started cards — the manual mark-done
         // steps (Signal join §109, speaker Promote §116, Party RSVP §164) deep-link to the
         // SAME page their Get-Started card opens, so both surfaces tell one story.

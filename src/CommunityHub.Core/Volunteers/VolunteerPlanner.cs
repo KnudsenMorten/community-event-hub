@@ -3,11 +3,17 @@ using CommunityHub.Core.Domain;
 namespace CommunityHub.Core.Volunteers;
 
 /// <summary>Which pool a planner run draws from.</summary>
+/// <remarks>
+/// ⚠️ §1380 — <b>the engine no longer narrows the pool by this value.</b> Every active volunteer is
+/// always planned; the roster now marks who is a FULL-DAY WORKER (uncapped) versus everyone else
+/// (capped at <see cref="VolunteerPlanner.SessionAttendeeShare"/>). The enum stays so existing
+/// callers compile; it is reported back in <see cref="PlannerResult.Scope"/> and nothing more.
+/// </remarks>
 public enum PlannerScope
 {
-    /// <summary>The curated worker roster only (<see cref="VolunteerPlanningRosterEntry"/>) — the default.</summary>
+    /// <summary>Historic default (§1297: roster only). Since §1380 it plans everyone, like <see cref="Everyone"/>.</summary>
     WorkersOnly = 0,
-    /// <summary>Every eligible volunteer, roster or not.</summary>
+    /// <summary>Every eligible volunteer.</summary>
     Everyone = 1,
 }
 
@@ -24,6 +30,9 @@ public enum ShortfallReason
     NobodyAvailable = 3,
     /// <summary>People were eligible and free — there were simply fewer of them than the task needs.</summary>
     NotEnoughPeople = 4,
+    /// <summary>§1380 — people are free at that hour, but each has already used their 50% share of the day
+    /// (they also attend sessions). More volunteers, or more full-day workers, WOULD help.</summary>
+    ShareReached = 5,
 }
 
 /// <summary>One task the run could not fully staff, with the reason and the numbers behind it.</summary>
@@ -51,6 +60,8 @@ public sealed record PlannerShortfall(
             "Everyone eligible and free was used — the pool is smaller than the task needs.",
         ShortfallReason.NobodyAvailable =>
             "Nobody in scope is available on that day at all.",
+        ShortfallReason.ShareReached =>
+            "Everyone free at that hour has already used their 50% share of the day (they also attend sessions) — more volunteers, or more full-day workers, would help.",
         _ => "Covered.",
     };
 }
@@ -68,7 +79,8 @@ public sealed record PlannerResult(
     IReadOnlyList<PlannerShortfall> Shortfalls,
     int CandidatesConsidered,
     PlannerScope Scope,
-    bool ScopeFellBackToEveryone)
+    bool ScopeFellBackToEveryone,
+    int? FullDayWorkers = null)
 {
     public int SlotsShort => Shortfalls.Sum(s => s.Short);
 
@@ -104,16 +116,20 @@ public sealed record PlannerResult(
                 reasons.Add($"{few} where the pool ran out");
             if (byReason.TryGetValue(ShortfallReason.NobodyAvailable, out var none))
                 reasons.Add($"{none} on days nobody in scope is present");
+            if (byReason.TryGetValue(ShortfallReason.ShareReached, out var share))
+                reasons.Add($"{share} where everyone free has used their 50% share of the day");
 
             parts.Add($"COULD NOT FILL {SlotsShort} slot(s) across {Shortfalls.Count} task(s): "
                       + string.Join("; ", reasons) + ".");
         }
 
-        if (ScopeFellBackToEveryone)
-            parts.Add("The worker roster is empty, so this run planned for EVERY active volunteer. "
-                      + "Curate it under Volunteers → Worker roster to scope future runs.");
-        else if (Scope == PlannerScope.WorkersOnly)
-            parts.Add($"Planned from the worker roster ({CandidatesConsidered} in scope); everyone else is hand-placed.");
+        // §1380 — every active volunteer is planned; say how the pool split, in Leth's terms.
+        if (FullDayWorkers is { } workers)
+            parts.Add(workers == 0
+                ? $"Planned all {CandidatesConsidered} available volunteer(s), each up to 50% of the hours they said they can work. "
+                  + "No one is marked as a full-day worker — mark the people who work all day (no sessions) under Volunteers → Full-day workers."
+                : $"Planned all {CandidatesConsidered} available volunteer(s): {workers} full-day worker(s) can be scheduled all day, "
+                  + "everyone else up to 50% of the hours they said they can work, so they can also attend sessions.");
 
         return string.Join(" ", parts);
     }
@@ -141,12 +157,17 @@ public sealed record PlannerTask(
 /// <param name="Availability">Day → what that day's answer means in clock terms. A day absent from the map = no answer = not available.</param>
 /// <param name="Held">Intervals they already occupy (existing assignments and drafts). Grows during a run as the matcher proposes.</param>
 /// <param name="HoursAllocated">Hours already committed — the fairness tie-break's starting point. Also grows during the run.</param>
+/// <param name="FullDayWorker">§1380 — on the full-day worker list (works all day, no sessions): may be loaded
+/// up to everything they said they can work. False = also attends sessions, capped at
+/// <see cref="VolunteerPlanner.SessionAttendeeShare"/> of their stated hours per day. Defaults to true so a
+/// caller that does not know (the undated-task path, older tests) keeps the uncapped behaviour.</param>
 public sealed record PlannerCandidate(
     int ParticipantId,
     int Capacity,
     IReadOnlyDictionary<DateOnly, DayWindow> Availability,
     IReadOnlyList<(DateOnly Day, TimeWindow Window)> Held,
-    double HoursAllocated);
+    double HoursAllocated,
+    bool FullDayWorker = true);
 
 /// <summary>
 /// §1297 — the interval-aware volunteer matcher. PURE: no DB, no clock, no I/O, fully
@@ -175,6 +196,19 @@ public sealed record PlannerCandidate(
 public static class VolunteerPlanner
 {
     /// <summary>
+    /// §1380 — the share of a day's stated hours a volunteer who is NOT a full-day worker may be planned for.
+    /// Leth 2026-11-02: <i>"dem som ikke var i worker roster kun havde 50 utilization"</i>.
+    /// </summary>
+    public const double SessionAttendeeShare = 0.5;
+
+    /// <summary>
+    /// §1380 — the hours assumed for a day answered "present, hours not stated" (<see cref="DayWindow.AllDay"/>,
+    /// e.g. the binary packing day) when applying <see cref="SessionAttendeeShare"/>: the answer has no clock
+    /// hours, and a cap needs a number. Ten hours ≈ the configured full days (07:00–18:30 / 06:40–17:00).
+    /// </summary>
+    public const double UnstatedDayHours = 10d;
+
+    /// <summary>
     /// Compute a plan. Deterministic for a given input — the same state always produces the
     /// same proposals, in the same order.
     /// </summary>
@@ -187,7 +221,8 @@ public static class VolunteerPlanner
         ParticipantRole targetRole,
         PlannerScope scope = PlannerScope.WorkersOnly,
         bool scopeFellBackToEveryone = false,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<int, int>>? preferredByCategory = null)
+        IReadOnlyDictionary<int, IReadOnlyDictionary<int, int>>? preferredByCategory = null,
+        bool reportWorkerSplit = false)
     {
         var wanted = QueueKindFor(targetRole);
         if (wanted is null)
@@ -250,6 +285,7 @@ public static class VolunteerPlanner
 
             var filledHere = 0;
             var blockedByOverlap = false;
+            var blockedByShare = false;
 
             foreach (var s in ranked)
             {
@@ -257,6 +293,7 @@ public static class VolunteerPlanner
                 if (occupied.Contains((task.Id, s.Candidate.ParticipantId))) continue;
 
                 if (Collides(s, task)) { blockedByOverlap = true; continue; }
+                if (OverShare(s, task)) { blockedByShare = true; continue; }   // §1380
 
                 proposals.Add(new AllocationProposal(task.Id, s.Candidate.ParticipantId, targetRole));
                 occupied.Add((task.Id, s.Candidate.ParticipantId));
@@ -277,6 +314,7 @@ public static class VolunteerPlanner
                             ? ShortfallReason.OutsideStatedHours
                             : ShortfallReason.NobodyAvailable)
                     : blockedByOverlap ? ShortfallReason.EveryoneBusy
+                    : blockedByShare ? ShortfallReason.ShareReached
                     : ShortfallReason.NotEnoughPeople;
 
                 shortfalls.Add(new PlannerShortfall(
@@ -292,7 +330,32 @@ public static class VolunteerPlanner
             .ThenBy(s => s.TaskId)
             .ToList();
 
-        return new PlannerResult(proposals, report, state.Count, scope, scopeFellBackToEveryone);
+        return new PlannerResult(proposals, report, state.Count, scope, scopeFellBackToEveryone,
+            reportWorkerSplit ? state.Values.Count(s => s.Candidate.FullDayWorker) : null);
+    }
+
+    /// <summary>
+    /// §1380 — would this task take a NON-full-day worker past <see cref="SessionAttendeeShare"/> of the
+    /// hours they said they can work that day? Full-day workers, undated tasks and tasks without clock
+    /// hours are never capped (there is no day or no length to measure against).
+    /// </summary>
+    private static bool OverShare(RunState s, PlannerTask task)
+    {
+        if (s.Candidate.FullDayWorker) return false;
+        if (task.Day is not { } day || task.Window is not { } w) return false;
+        var stated = s.Candidate.Availability.TryGetValue(day, out var dw) && dw.Window is { } sw
+            ? sw.Hours
+            : UnstatedDayHours;
+        var already = s.Held.Where(h => h.Day == day).Sum(h => h.Window.Hours);
+        return already + w.Hours > stated * SessionAttendeeShare + 1e-9;
+    }
+
+    /// <summary>§1380 — the hours a candidate may be planned for on <paramref name="day"/> (for the overview).</summary>
+    public static double PlannableHours(DayWindow answer, bool fullDayWorker)
+    {
+        if (!answer.Present) return 0d;
+        var stated = answer.Window?.Hours ?? UnstatedDayHours;
+        return fullDayWorker ? stated : stated * SessionAttendeeShare;
     }
 
     /// <summary>The queue kind a target role's proposals belong to, or null when it has none.</summary>

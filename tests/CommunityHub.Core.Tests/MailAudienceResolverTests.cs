@@ -212,4 +212,51 @@ public sealed class MailAudienceResolverTests
         foreach (var a in Enum.GetValues<MailAudience>())
             Assert.Empty(await ResolveAsync(db, a));
     }
+
+    // ---- §1381 — dinner, party, volunteers + extras ---------------------------------------
+
+    [Fact]
+    public async Task Dinner_is_the_people_who_answered_yes()
+    {
+        using var db = await SeedAsync();
+        var speaker = db.Participants.Single(p => p.Email == "speaker@x.test");
+        var volunteer = db.Participants.Single(p => p.Email == "volunteer@x.test");
+        var testUser = db.Participants.Single(p => p.Email == "testuser@x.test");
+        db.DinnerSignups.AddRange(
+            new DinnerSignup { EventId = EventId, ParticipantId = speaker.Id, Rsvp = DinnerRsvp.Yes, Attending = true },
+            new DinnerSignup { EventId = EventId, ParticipantId = volunteer.Id, Rsvp = DinnerRsvp.Maybe },
+            new DinnerSignup { EventId = EventId, ParticipantId = testUser.Id, Rsvp = DinnerRsvp.Yes, Attending = true });
+        await db.SaveChangesAsync();
+
+        Assert.Equal(new[] { "speaker@x.test" }, await ResolveAsync(db, MailAudience.AppreciationDinner));
+    }
+
+    [Fact]
+    public async Task Party_is_the_rsvps_marked_attending()
+    {
+        using var db = await SeedAsync();
+        var media = db.Participants.Single(p => p.Email == "media@x.test");
+        db.PartyRsvps.AddRange(
+            new PartyRsvp { EventId = EventId, Name = "Guest", Email = "Guest@X.test", Attending = true },
+            new PartyRsvp { EventId = EventId, Name = "Media", Email = "typed@x.test", Attending = true, ParticipantId = media.Id },
+            new PartyRsvp { EventId = EventId, Name = "No", Email = "no@x.test", Attending = false });
+        await db.SaveChangesAsync();
+
+        // A linked participant is mailed at their own address, not the one typed on the RSVP.
+        Assert.Equal(new[] { "guest@x.test", "media@x.test" }, await ResolveAsync(db, MailAudience.PartyParticipants));
+    }
+
+    [Fact]
+    public async Task Volunteers_plus_extras_adds_only_configured_active_participants()
+    {
+        using var db = await SeedAsync();
+        var resolver = new MailAudienceResolver(db)
+        {
+            VolunteerAudienceExtraEmails = new[] { "Partner@x.test", "left@x.test", "not-a-participant@x.test" },
+        };
+        var got = (await resolver.ResolveAsync(EventId, MailAudience.VolunteersPlusExtras)).Select(r => r.Email).OrderBy(e => e).ToArray();
+
+        // volunteer + the event partner; the departed volunteer and the stranger are not mailed.
+        Assert.Equal(new[] { "partner@x.test", "volunteer@x.test" }, got);
+    }
 }

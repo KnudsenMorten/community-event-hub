@@ -582,6 +582,15 @@ public static class FeatureCatalog
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // §1382 — the PUBLIC coupon sign-up form (/coupon-signup). 🔒 OFF by default: an anonymous page that creates CEH
+        // coupons, e-conomic customers and mails the event mailbox must not open just because a PROD deploy shipped it —
+        // the same reason sponsor-webshop gates /sponsor-registration. While off only a signed-in organizer sees a preview.
+        // Broad: it gates an anonymous page, where no participant ring can apply.
+        new("coupon-signup", "Settings.Feat.CouponSignup.Name",
+            "Settings.Feat.CouponSignup.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
         // ENGINE (operator 2026-06-22): a backend export of leads to the sponsor (today
         // just a Zoho Backstage link — no API yet). Kill-switch only, NOT ring-scoped.
         new("sponsor-leads", "Settings.Feat.SponsorLeads.Name",

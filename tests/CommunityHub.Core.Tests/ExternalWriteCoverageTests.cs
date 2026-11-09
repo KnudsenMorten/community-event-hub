@@ -80,6 +80,9 @@ public sealed class ExternalWriteCoverageTests
         ["ShopBoothDetector.cs"] =
             "§1305 — Azure OpenAI inference: sends the expo layout picture and the booth numbers, reads back "
             + "rectangles. Mutates nothing outside CEH (the booth spots it saves are CEH rows); no personal data.",
+        ["TravelDocumentValidator.cs"] =
+            "§1387 — Azure OpenAI inference: sends a speaker's travel documents (images / PDF text) and reads back a "
+            + "checklist verdict. Mutates nothing outside CEH (the verdict is a CEH row); the guard governs WRITES.",
         ["SoMeTextEligibilityJudge.cs"] =
             "Azure OpenAI inference (§1060(l)) — sends a session title + abstract and reads back a "
             + "0/1 verdict. Mutates nothing outside CEH, exactly as SoMeIntroGenerator above; the "

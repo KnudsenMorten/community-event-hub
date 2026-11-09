@@ -465,6 +465,20 @@ public static class JobCatalog
             "CEH → SharePoint: rebuilds the venue, swag, hotel and expo spreadsheets, and mails the ones that are due.",
             DefaultIntervalMinutes: 1440, System: JobSystem.SharePoint),   // §878.5 — his list
 
+        // §1386 — hotel operations: the contract seed (once), the hotel change mail with the updated
+        // .xls, and the early release / payment deadline warnings. 15 minutes keeps a participant's
+        // change within half an hour of the ops mailbox (it waits a 10-minute quiet period first).
+        // 🔒 Internal recipients only — never the hotel, never a guest.
+        new JobDescriptor("HotelOpsJob", "Hotel changes + deadline warnings", "Every 15 minutes", "0 */5 * * * *",
+            "CEH → ops mailbox: mails hotel changes with the updated hotel spreadsheet, and warns before each hotel release / payment deadline. Never mails the hotel or a guest.",
+            DefaultIntervalMinutes: 15, System: JobSystem.Email),
+
+        // §1387 — the AI document check of newly submitted travel claims, and the organizer notice when one
+        // is not approved. 10 minutes: a speaker who just submitted sees the organizers react the same day.
+        new JobDescriptor("TravelReviewJob", "Travel claim document check", "Every 10 minutes", "0 */5 * * * *",
+            "CEH → Azure OpenAI: checks newly submitted travel-claim documents against the form's requirements and mails the organizers' mailbox when they are not approved. Never accepts, sends back or mails a speaker.",
+            DefaultIntervalMinutes: 10, System: JobSystem.Email),
+
         // §6.5 — the three post-event survey summaries, rebuilt daily into their §3.4 folders.
         // 🔒 This job NEVER mails: the work order says "no notification mail for these three", so the
         // summaries are read in the library rather than pushed at anybody.

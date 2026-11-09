@@ -662,6 +662,9 @@
   <data name="Hotel.CheckInOut" xml:space="preserve"><value>Check-in: {0} · Check-out: {1}</value></data>
   <data name="Hotel.Confirmed" xml:space="preserve"><value>Your hotel reservation is CONFIRMED.</value></data>
   <data name="Hotel.ConfirmedHotel" xml:space="preserve"><value>Hotel: {0}</value></data>
+  <data name="Hotel.AssignedReserved" xml:space="preserve"><value>Your hotel: {0} — Reserved. Your confirmation number from the hotel will appear here once the hotel has confirmed the room.</value></data>
+  <data name="Hotel.ReservationCancelled" xml:space="preserve"><value>Your hotel reservation is cancelled.</value></data>
+  <data name="Hotel.CancellationNumberLabel" xml:space="preserve"><value>Cancellation number:</value></data>
   <data name="Hotel.ConfirmationNumberLabel" xml:space="preserve"><value>Confirmation number:</value></data>
   <data name="Hotel.ConfirmationNumberHeading" xml:space="preserve"><value>Hotel booking confirmation number</value></data>
   <data name="Hotel.ConfirmationNumberPending" xml:space="preserve"><value>Your confirmation number will appear here once the organizers confirm your booking — nothing to fill in.</value></data>
@@ -736,6 +739,7 @@
   <data name="Travel.AmountSingle" xml:space="preserve"><value>EUR {0} (single-speaker session)</value></data>
   <data name="Travel.AmountCo" xml:space="preserve"><value>EUR {0} (co-speaking session)</value></data>
   <data name="Travel.AmountIntercontinental" xml:space="preserve"><value>EUR {0} (intercontinental, single-speaker session)</value></data>
+  <data name="Travel.AmountIntercontinentalCo" xml:space="preserve"><value>EUR {0} (intercontinental, co-speaking session, per person)</value></data>
   <data name="Travel.AmountOther" xml:space="preserve"><value>Other (please explain)</value></data>
   <data name="Travel.OtherAmount" xml:space="preserve"><value>Other amount (EUR)</value></data>
   <data name="Travel.Explanation" xml:space="preserve"><value>Explanation (required if "Other")</value></data>
@@ -1588,6 +1592,8 @@
   <data name="Settings.Feat.SponsorZohoProvision.Desc" xml:space="preserve"><value>After the order pull, create or link each sponsor and exhibitor in Zoho Backstage from webshop data (replaces the legacy sync script). Existing companies are never overwritten.</value></data>
   <data name="Settings.Feat.WebshopErpInvoicing.Name" xml:space="preserve"><value>Webshop → e-conomic draft invoices</value></data>
   <data name="Settings.Feat.WebshopErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn each completed webshop order into a DRAFT invoice in e-conomic. It stops at the draft — nothing is booked and nothing is sent to the customer until you book it yourself. Each order is invoiced once: the draft carries the web order number, and an order that already appears on a draft or booked invoice is skipped. Att person and Your reference are the company's default signer. An order is left uninvoiced, with the reason logged, when the company has no ERP customer number, when a line has no price, or when the customer invoices in a currency with no exchange rate — CEH will not guess any of those. Replaces the hourly webshop invoicing script: turn that script OFF before you turn this ON.</value></data>
+  <data name="Settings.Feat.CouponSignup.Name" xml:space="preserve"><value>Public coupon sign-up form</value></data>
+  <data name="Settings.Feat.CouponSignup.Desc" xml:space="preserve"><value>The public page /coupon-signup where a company asks for a ticket coupon (prepaid or ad-hoc billing, 2-day or 1-day, number of tickets, VAT number, address, requester, invoice e-mail or EAN, optional split and purchase order), protected by a captcha. On submit CEH stores the request, creates the coupon on Coupon invoicing with a proposed promo code, finds the e-conomic customer by VAT number or creates it in customer group 2, and mails the request to the event mailbox. You still create the promo code in Zoho Backstage yourself. While this is off only signed-in organizers can open the page, as a preview.</value></data>
   <data name="Settings.Feat.CouponErpInvoicing.Name" xml:space="preserve"><value>Coupon tickets → e-conomic draft invoices</value></data>
   <data name="Settings.Feat.CouponErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn claimed coupon tickets into DRAFT invoices in e-conomic — one per coupon, so the partner sees the agreement they recognise. It stops at the draft: nothing is booked and nothing reaches the partner until you book it yourself. A coupon is invoiced once, and it bills the ticket's full price rather than the discounted total — a coupon that covers a ticket entirely leaves the total at zero, and billing that would send the partner an invoice for 0.00. A coupon nobody has mapped to an e-conomic customer is never guessed at: the tickets are left uninvoiced and you get an e-mail linking to the page where you set who pays. Set your coupon mappings under Setup → Coupon invoicing before switching this on.</value></data>
   <data name="Settings.Feat.SponsorLeads.Name" xml:space="preserve"><value>Sponsor leads pipeline</value></data>

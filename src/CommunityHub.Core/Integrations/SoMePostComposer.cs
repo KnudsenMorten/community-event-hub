@@ -81,7 +81,7 @@ public sealed class SoMePostComposer
             SoMeTemplateKind.Session =>
                 ["{SessionTitle}", "{SessionAbstract}", "{TrackName}", "{SpeakerNames}", "{Speakers}"],
             SoMeTemplateKind.SponsorCategory =>
-                ["{SponsorTier}", "{SponsorList}"],
+                ["{SponsorTier}", "{SponsorList}", "{SponsorNames}"],
             SoMeTemplateKind.Sponsor =>
                 ["{SponsorName}", "{SponsorTier}", "{SponsorLinkedInUrl}", "{SponsorWebsite}",
                  "{SponsorSocialMediaCompanyDescription}", "{SponsorHashtag}",
@@ -96,7 +96,81 @@ public sealed class SoMePostComposer
         SoMePost post, CancellationToken ct = default)
     {
         var values = await _variables.EditionValuesAsync(post.EventId, ct);
+        AddPostValues(values, post);
+        Merge(values, await SubjectValuesAsync(post, ct));
+        ResolveIntroTokens(values);
+        return values;
+    }
 
+    /// <summary>
+    /// §1373 — the stored intro may itself carry tokens (a tier intro carries <c>{SponsorNames}</c>),
+    /// resolved here, one level, against the same values — so its names are as live as the body's.
+    /// </summary>
+    private static void ResolveIntroTokens(Dictionary<string, string?> values)
+    {
+        foreach (var key in new[] { "IntroText", "SessionTeaserTextAI" })
+        {
+            if (values.GetValueOrDefault(key) is { } intro && intro.Contains('{'))
+            {
+                values[key] = SoMeTemplateRenderer.Render(intro, values);
+            }
+        }
+    }
+
+    /// <summary>
+    /// §1371 — the RESOLVED text of many posts at once, for a list (the queue's Text column).
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-10-27: <i>"why does it show the template here and not real text"</i>. The
+    /// queue printed the stored body, which since §901 is the TEMPLATE — so a row read
+    /// <c>{SessionTitle} {IntroText} With {Speakers}</c>. Same fix as §1028 on the sponsor's page.</para>
+    /// <para>🔑 Same values as <see cref="ValuesForAsync"/>, but the edition values are read once and
+    /// each subject's values once: the queue lists the whole edition, and per post that is a few
+    /// hundred posts × several queries.</para>
+    /// <para>🔒 A post whose values cannot be read falls back to its raw body, never to nothing.</para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, string>> ResolvedTextsAsync(
+        IReadOnlyCollection<SoMePost> posts, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(posts);
+
+        var result = new Dictionary<int, string>(posts.Count);
+        var editions = new Dictionary<int, Dictionary<string, string?>>();
+        var subjects = new Dictionary<(int, SoMeTemplateKind?, string?), Dictionary<string, string?>>();
+
+        foreach (var post in posts)
+        {
+            try
+            {
+                if (!editions.TryGetValue(post.EventId, out var edition))
+                {
+                    editions[post.EventId] = edition = await _variables.EditionValuesAsync(post.EventId, ct);
+                }
+
+                var subjectKey = (post.EventId, post.TemplateKind, post.SubjectKey);
+                if (!subjects.TryGetValue(subjectKey, out var subject))
+                {
+                    subjects[subjectKey] = subject = await SubjectValuesAsync(post, ct);
+                }
+
+                var values = new Dictionary<string, string?>(edition, edition.Comparer);
+                AddPostValues(values, post);
+                Merge(values, subject);
+                ResolveIntroTokens(values);
+                result[post.Id] = Resolve(post.EffectiveText, values);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                result[post.Id] = post.EffectiveText ?? string.Empty;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>The values stored on the post row itself.</summary>
+    private static void AddPostValues(Dictionary<string, string?> values, SoMePost post)
+    {
         // 🔑 His spelling wins. He asked for {Organizers}; the catalog's own token is
         // {OrganizerLinkedInUrls}. Both resolve to the same value rather than becoming two
         // mechanisms that drift apart (§858.4b — "no need to have 2 or 3 similar").
@@ -123,36 +197,32 @@ public sealed class SoMePostComposer
         // machine-written — which is worth keeping in the token he reads in the editor. 🔒 One
         // value, two spellings; never two mechanisms (§858.4b).
         values["SessionTeaserTextAI"] = post.IntroText;
+    }
 
+    /// <summary>The values of the post's SUBJECT (its track, session, tier, sponsor or deck run).</summary>
+    private async Task<Dictionary<string, string?>> SubjectValuesAsync(SoMePost post, CancellationToken ct)
+    {
         var key = post.SubjectKey ?? string.Empty;
         var id = key.Contains(':') ? key[(key.IndexOf(':') + 1)..] : key;
 
-        switch (post.TemplateKind)
+        return post.TemplateKind switch
         {
-            case SoMeTemplateKind.SpeakerTracks when id.Length > 0:
-                Merge(values, await _variables.TrackValuesAsync(post.EventId, id, ct));
-                break;
+            SoMeTemplateKind.SpeakerTracks when id.Length > 0 =>
+                await _variables.TrackValuesAsync(post.EventId, id, ct),
             // 🔒 §912 — prefix first, exactly as the planner does. Two id spaces, one shaped key.
-            case SoMeTemplateKind.Session
-                when SoMeSponsorSessionKey.TryParse(post.SubjectKey, out var sponsorSessionId):
-                Merge(values, await _variables.SponsorSessionValuesAsync(
-                    post.EventId, sponsorSessionId, ct));
-                break;
-            case SoMeTemplateKind.Session when int.TryParse(id, out var sessionId):
-                Merge(values, await _variables.SessionValuesAsync(sessionId, ct));
-                break;
-            case SoMeTemplateKind.SponsorCategory when Enum.TryParse<SponsorPackage>(id, out var tier):
-                Merge(values, await _variables.SponsorTierValuesAsync(post.EventId, tier, ct));
-                break;
-            case SoMeTemplateKind.Sponsor when id.Length > 0:
-                Merge(values, await _variables.SponsorValuesAsync(post.EventId, id, ct));
-                break;
-            case SoMeTemplateKind.EventPost when id.Length > 0:
-                Merge(values, await _variables.EventPostValuesAsync(post.EventId, id, ct));
-                break;
-        }
-
-        return values;
+            SoMeTemplateKind.Session
+                when SoMeSponsorSessionKey.TryParse(post.SubjectKey, out var sponsorSessionId) =>
+                await _variables.SponsorSessionValuesAsync(post.EventId, sponsorSessionId, ct),
+            SoMeTemplateKind.Session when int.TryParse(id, out var sessionId) =>
+                await _variables.SessionValuesAsync(sessionId, ct),
+            SoMeTemplateKind.SponsorCategory when Enum.TryParse<SponsorPackage>(id, out var tier) =>
+                await _variables.SponsorTierValuesAsync(post.EventId, tier, ct),
+            SoMeTemplateKind.Sponsor when id.Length > 0 =>
+                await _variables.SponsorValuesAsync(post.EventId, id, ct),
+            SoMeTemplateKind.EventPost when id.Length > 0 =>
+                await _variables.EventPostValuesAsync(post.EventId, id, ct),
+            _ => new Dictionary<string, string?>(),
+        };
     }
 
     /// <summary>The text that publishes: his body with every token it carries resolved.</summary>

@@ -40,4 +40,20 @@ public class SoMeCategoryRound
     /// ahead of its own announcement is worse than one with no date at all.
     /// </remarks>
     public DateOnly? StartsOn { get; set; }
+
+    /// <summary>
+    /// §1368 — the last day this round may be PUBLISHED on. Null = no deadline for this round.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-10-26: <i>"all sponsors first post must be no later than dec 15 on
+    /// linkedin"</i> — Sponsors, round 1, 15 December 2026.</para>
+    /// <para>🔑 A DEADLINE, which is not the same thing as <see cref="SoMeCategoryRule.EndsOn"/>: the
+    /// category end caps EVERY round, and a sponsor's reminder round must still be allowed to run in
+    /// January. This caps one round only.</para>
+    /// <para>⚠️ It cannot be met for a sponsor who signs after the date, and that case is expected
+    /// (<i>"this will happen if we havent sold all sponsorship by dec 15, then i will move the
+    /// dates"</i>). The post is then placed as soon as possible and the conflict is MAILED — never
+    /// dropped (§842.5).</para>
+    /// </remarks>
+    public DateOnly? PublishBy { get; set; }
 }

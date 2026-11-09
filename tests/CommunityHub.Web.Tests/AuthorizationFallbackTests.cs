@@ -49,6 +49,10 @@ public sealed class AuthorizationFallbackTests
         // have a cookie. Protected by captcha + an e-mailed one-time code, and GATED by `sponsor-webshop`
         // (off ⇒ only a signed-in organizer sees it), so a PROD deploy does not open it.
         "CommunityHub.Pages.SponsorRegistrationModel",         // /sponsor-registration
+        // §1382 — /coupon-signup: a company asking for a ticket coupon is not in CEH, so it cannot have a cookie.
+        // Protected by the same captcha + honeypot + minimum fill time, rate-limited per IP and e-mail, and GATED by
+        // `coupon-signup` (off ⇒ only a signed-in organizer sees it), so a PROD deploy does not open it.
+        "CommunityHub.Pages.CouponSignupModel",                // /coupon-signup
         // §1305 — /sponsor-catalog: the replacement of the sponsor PowerPoint, for PROSPECTS ("He should
         // not be presented with login"). Published pages + published products only, never company names;
         // gated by `sponsor-webshop` like the registration page.

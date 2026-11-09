@@ -67,7 +67,9 @@ public sealed record EmailContext(
     string? FeatureKey = null,
     bool RingExempt = false,
     bool AttendeeWelcome = false,
-    bool Welcome = false);
+    bool Welcome = false,
+    // §1381 — a Brevo tag (sent as the X-Mailin-Tag header) so a campaign's opens/clicks can be read back per campaign.
+    string? BrevoTag = null);
 
 /// <summary>
 /// Holds the current <see cref="EmailContext"/> for the logical async flow.

@@ -90,9 +90,13 @@ public static class NavBuilder
     /// NOT the whole speaker menu, which would collide with the role's own items.
     /// Ignored when the role IS <see cref="ParticipantRole.Speaker"/> (that menu is complete).
     /// </param>
-    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false, bool speakerHasMasterClass = false, bool attendeeIsTwoDay = false, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false)
+    /// <param name="needsVisa">
+    /// §1374 — the participant is flagged <see cref="Participant.NeedsVisa"/>: adds "Visa application"
+    /// (<c>/Forms/Visa</c>) for any role. Defaults to false, and the page answers 404 without the flag.
+    /// </param>
+    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false, bool speakerHasMasterClass = false, bool attendeeIsTwoDay = false, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false, bool needsVisa = false)
     {
-        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible) };
+        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory, hasSpeakerCapability, volunteerAssignmentsVisible, needsVisa) };
 
         // Server-side management gate: only a role with organizer access ever gets these items (§1312: organizers AND event
         // partners — operator 2026-10-01: "i need all event partners to have access in the organizer pages").
@@ -109,7 +113,7 @@ public static class NavBuilder
     /// per-role visibility exactly (no route added or dropped) — Home, My tasks,
     /// My profile, Resources, then the role-specific hubs + self-service forms.
     /// </summary>
-    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor, bool speakerHasMasterClass, bool attendeeIsTwoDay, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false)
+    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor, bool speakerHasMasterClass, bool attendeeIsTwoDay, bool attendeeGamesEnabled = false, bool speakerIsSponsorCategory = false, bool hasSpeakerCapability = false, bool volunteerAssignmentsVisible = false, bool needsVisa = false)
     {
         var items = new List<NavItem>
         {
@@ -801,6 +805,13 @@ public static class NavBuilder
         // shared /Contact page for EVERY role (operator 2026-06-28: one consistent contact
         // page — generic email + phone, then the organizer-team cards). Sponsors no longer
         // get a separate page.
+        // §1374 — the visa form, only for people an organizer flagged "Needs visa". A plain top-level
+        // item, just before Contact, so the few who need it cannot miss it.
+        if (needsVisa)
+        {
+            items.Add(new("/Forms/Visa", null, FallbackLabel: "Visa application"));
+        }
+
         items.Add(new("/Contact", "Nav.ContactOrganizers"));
 
         // §1255 — a participant who holds a SPEAKER PROFILE but a different role gets a small

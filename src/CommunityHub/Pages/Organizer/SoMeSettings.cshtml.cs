@@ -214,16 +214,32 @@ public class SoMeSettingsModel : PageModel
     /// The day each round opens, indexed from 0 for round 1. A null entry hands that round back to
     /// the spread — it is not "today".
     /// </param>
+    /// <param name="MinDaysBetweenRounds">§1368 — fewest days between a subject's rounds. Null = none.</param>
+    /// <param name="RoundPublishBy">§1368 — per round, the last day it may publish. Null = no deadline.</param>
     public record CategoryRuleInput(
         SoMeAnnouncementCategory Category,
         string Label,
         bool Enabled,
         int Rounds,
         DateOnly? EndsOn,
-        List<DateOnly?> RoundStarts)
+        List<DateOnly?> RoundStarts,
+        int? MinDaysBetweenRounds,
+        List<DateOnly?> RoundPublishBy)
     {
-        public CategoryRuleInput() : this(default, "", true, 1, null, []) { }
+        public CategoryRuleInput() : this(default, "", true, 1, null, [], null, []) { }
     }
+
+    /// <summary>§1368 — the everyday number of posts per day (2 or 3; at most the 4 preferred times).</summary>
+    [BindProperty] public int MaxPostsPerDay { get; set; } = 2;
+
+    /// <summary>§1368 — the busy-day ceiling, used only for posts that cannot otherwise be placed.</summary>
+    [BindProperty] public int ExceptionPostsPerDay { get; set; } = 3;
+
+    /// <summary>§1368 — at most this many sponsor posts on one day. Null = no limit.</summary>
+    [BindProperty] public int? MaxSponsorPostsPerDay { get; set; }
+
+    /// <summary>§1368 — what in the queue breaks these rules right now (the same check that mails).</summary>
+    public IReadOnlyList<SoMeRuleConflict> Conflicts { get; private set; } = [];
 
     /// <summary>
     /// §1195 — every category's rule. Bound as a LIST so the form posts them all in one save.
@@ -278,13 +294,25 @@ public class SoMeSettingsModel : PageModel
         SponsorRound2From = s.SponsorRound2From;   // §1184
         SpeakerTracksRound3From = s.SpeakerTracksRound3From;   // §1185
         SessionAnnouncementFrom = s.SessionAnnouncementFrom;   // §1186
+        MaxPostsPerDay = s.MaxPostsPerDay;                     // §1368
+        ExceptionPostsPerDay = s.ExceptionPostsPerDay;
+        MaxSponsorPostsPerDay = s.MaxSponsorPostsPerDay;
         await LoadExcludedTitlesAsync(me.EventId, ct);
         await LoadMasterClassTitlesAsync(me.EventId, ct);
         await LoadTrackRoundsAsync(me.EventId, ct);   // §1185
         await LoadRulesAsync(me.EventId, ct);         // §1195
         await LoadAutoApproveStateAsync(me.EventId, ct);   // §1202
+        await LoadConflictsAsync(me.EventId, ct);     // §1368
         return Page();
     }
+
+    /// <summary>
+    /// §1368 — the conflicts the job would mail, listed beside the rules that produce them, so a rule
+    /// change can be checked on the page where it is made.
+    /// </summary>
+    private async Task LoadConflictsAsync(int eventId, CancellationToken ct) =>
+        Conflicts = await new SoMeRuleConflictService(_db, labeller: new SoMeSubjectLabeller(_db))
+            .FindAsync(eventId, ct: ct);
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
@@ -331,7 +359,12 @@ public class SoMeSettingsModel : PageModel
             sponsorRound2From: SponsorRound2From,   // §1184
             speakerTracksRound3From: SpeakerTracksRound3From,   // §1185
             sessionAnnouncementFrom: SessionAnnouncementFrom,   // §1186
-            updateAnnouncementWindows: true);
+            updateAnnouncementWindows: true,
+            // §1368 — this page owns the per-day limits.
+            maxPostsPerDay: MaxPostsPerDay,
+            exceptionPostsPerDay: ExceptionPostsPerDay,
+            maxSponsorPostsPerDay: MaxSponsorPostsPerDay,
+            updatePlanningLimits: true);
 
         // 🔴 §1195 — the category rules, saved with everything else. Operator 2026-09-12:
         // *"basically we define the rules like start date, end date, cadence inside the some
@@ -344,9 +377,16 @@ public class SoMeSettingsModel : PageModel
             var days = new Dictionary<int, DateOnly?>();
             for (var i = 0; i < input.RoundStarts.Count; i++) days[i + 1] = input.RoundStarts[i];
 
+            // §1368 — the per-round deadlines, same indexing as the start dates.
+            var by = new Dictionary<int, DateOnly?>();
+            for (var i = 0; i < input.RoundPublishBy.Count; i++) by[i + 1] = input.RoundPublishBy[i];
+
             await ruleSvc.SaveAsync(
                 me.EventId, input.Category, input.Enabled, input.Rounds, input.EndsOn,
-                days, me.Email, ct);
+                days, me.Email, ct,
+                roundDeadlines: by,
+                minDaysBetweenRounds: input.MinDaysBetweenRounds,
+                updateSpacingRules: input.Category != SoMeAnnouncementCategory.EventPosts);
         }
 
         await LoadExcludedTitlesAsync(me.EventId, ct);
@@ -354,6 +394,7 @@ public class SoMeSettingsModel : PageModel
         await LoadTrackRoundsAsync(me.EventId, ct);   // §1185
         await LoadRulesAsync(me.EventId, ct);         // §1195
         await LoadAutoApproveStateAsync(me.EventId, ct);   // §1202
+        await LoadConflictsAsync(me.EventId, ct);     // §1368
 
         Message = PostCopyIncomplete
             ? "Saved — but the post footer is incomplete, so automatic posts will go out without "
@@ -419,11 +460,13 @@ public class SoMeSettingsModel : PageModel
         var svc = new SoMeCategoryRules(_db);
         var rules = await svc.GetAllAsync(eventId, ct);
         var starts = await svc.RoundStartsAsync(eventId, ct);
+        var deadlines = await svc.RoundDeadlinesAsync(eventId, ct);   // §1368
 
         Rules = SoMeCategoryRules.All.Select(c =>
         {
             var rule = rules[c];
             var named = starts.TryGetValue(c, out var n) ? n : null;
+            var byRound = deadlines.TryGetValue(c, out var b) ? b : null;
 
             // 🔴 §1207 — the number the PLANNER will use, not the number in the column. A round he
             // has dated counts; showing the lower saved value would have the page disagree with the
@@ -436,8 +479,13 @@ public class SoMeSettingsModel : PageModel
                 .Select(r => named is not null && named.TryGetValue(r, out var d) ? (DateOnly?)d : null)
                 .ToList();
 
+            var publishBy = Enumerable.Range(1, rounds)
+                .Select(r => byRound is not null && byRound.TryGetValue(r, out var d) ? (DateOnly?)d : null)
+                .ToList();
+
             return new CategoryRuleInput(
-                c, SoMeCategoryRules.Label(c), rule.Enabled, rounds, rule.EndsOn, days);
+                c, SoMeCategoryRules.Label(c), rule.Enabled, rounds, rule.EndsOn, days,
+                rule.MinDaysBetweenRounds, publishBy);
         }).ToList();
     }
 

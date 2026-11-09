@@ -147,9 +147,10 @@ public class BucketAllocationModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try
         {
+            // §1380 — `everyone` is accepted for old links/forms but no longer matters: every run plans all
+            // active volunteers (full-day workers uncapped, the rest at 50%).
             var result = await _engine.SeedProposalsAsync(
-                Actor(me), ParticipantRole.Volunteer, me.ParticipantId,
-                everyone ? PlannerScope.Everyone : PlannerScope.WorkersOnly, ct);
+                Actor(me), ParticipantRole.Volunteer, me.ParticipantId, PlannerScope.Everyone, ct);
 
             // §1297 — the per-task shortfall survives the redirect. A count in the flash
             // message says HOW MUCH is missing; only this list says WHICH tasks, and the

@@ -156,13 +156,16 @@ public sealed class SessionImportScenarioTests
             .Include(s => s.SessionSpeakers)
             .SingleAsync(s => s.SessionizeId == "sess-joint");
         Assert.Equal("Renamed Keynote", joint.Title);
-        // Speaker two's link to the joint session was removed; speaker one kept.
-        Assert.Single(joint.SessionSpeakers);
+        // 🔒 Operator 2026-11-07: "if a ceh speaker is linked to session, never remove" · "ceh wins" — the import is
+        // ADD-ONLY for speaker links. Sessionize dropping speaker two does NOT unlink them in CEH (an organizer does
+        // that in CEH); speaker one is kept as before. (Until 2026-11-07 this asserted the removal.)
+        Assert.Equal(2, joint.SessionSpeakers.Count);
         Assert.Contains(joint.SessionSpeakers, l => l.ParticipantId == seed.SpeakerOneId);
-        Assert.Equal(1, delta.LinksRemoved);
+        Assert.Contains(joint.SessionSpeakers, l => l.ParticipantId == seed.SpeakerTwoId);
+        Assert.Equal(0, delta.LinksRemoved);
 
-        // Speaker two now has only the solo session.
-        Assert.Equal(1, await db.SessionSpeakers.CountAsync(l => l.ParticipantId == seed.SpeakerTwoId));
+        // Speaker two keeps the joint session and has the solo one.
+        Assert.Equal(2, await db.SessionSpeakers.CountAsync(l => l.ParticipantId == seed.SpeakerTwoId));
     }
 
     [Fact]

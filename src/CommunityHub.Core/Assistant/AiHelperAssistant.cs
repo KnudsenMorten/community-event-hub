@@ -109,7 +109,7 @@ public sealed class AiHelperAssistant : IAiHelperAssistant
 
         using var msg = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            Content = JsonContent.Create(request, options: JsonOpts),
+            Content = OpenAiChatContent.Create(request, _options, JsonOpts),
         };
         // Secret header — value comes from config/Key Vault, never logged.
         msg.Headers.TryAddWithoutValidation("api-key", _options.ApiKey);

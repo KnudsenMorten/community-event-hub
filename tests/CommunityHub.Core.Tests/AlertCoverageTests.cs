@@ -205,6 +205,11 @@ public sealed class AlertCoverageTests
         // library means the venue's spreadsheets simply never appear, and "the folder is empty"
         // reads identically to "nothing changed today". It reports which one it is.
         "LogisticsFilesJob",
+        // §1386 — the hotel-ops mail. "Nothing changed" and "the job is broken" are the same silence in
+        // the ops mailbox, and a missed deadline warning costs money — so it says which.
+        "HotelOpsJob",
+        // §1387 — the travel document check: "no new claim" and "the AI call is broken" are the same silence.
+        "TravelReviewJob",
         // §6.5 — the post-event survey summaries. This job sends NO mail by requirement, so the
         // library folder is the only place its work is visible at all. An empty §3.4 folder reads
         // identically as "nobody has answered the survey yet" and "this host cannot write the

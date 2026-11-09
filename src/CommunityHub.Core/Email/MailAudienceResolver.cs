@@ -41,7 +41,7 @@ public sealed class MailAudienceResolver
     {
         MailAudience.AllParticipants => "All participants (everyone with a role in the hub)",
         MailAudience.AllAttendees => "All attendees (active tickets)",
-        MailAudience.TwoDayTicketHolders => "All 2-day ticket holders",
+        MailAudience.TwoDayTicketHolders => "All pre-day attendees (2-day ticket holders)",
         MailAudience.OneDayTicketHolders => "All 1-day ticket holders",
         MailAudience.SponsorsAndExhibitors => "All sponsors and exhibitors",
         MailAudience.ExhibitorsOnly => "All exhibitors",
@@ -52,8 +52,18 @@ public sealed class MailAudienceResolver
         MailAudience.EventPartners => "All event partners",
         MailAudience.PreviousAttendeesNotThisEdition =>
             "Previous ELDK attendees, excluding this edition's attendees",
+        MailAudience.AppreciationDinner => "Appreciation Dinner participants (answered yes)",
+        MailAudience.PartyParticipants => "Party participants (attending)",
+        MailAudience.VolunteersPlusExtras => "All volunteers + the named extra people (configured)",
         _ => audience.ToString(),
     };
+
+    /// <summary>
+    /// §1381 — the extra people added to <see cref="MailAudience.VolunteersPlusExtras"/>: e-mail addresses from the
+    /// edition config (<c>MailCampaigns:VolunteerAudienceExtraEmails</c>). Only addresses that belong to an ACTIVE
+    /// participant of this edition are used, so a typo or a departed person is simply not mailed.
+    /// </summary>
+    public IReadOnlyList<string> VolunteerAudienceExtraEmails { get; init; } = Array.Empty<string>();
 
     /// <summary>
     /// 🔴 True for the one audience that reaches people who are NOT participants of this edition —
@@ -72,6 +82,10 @@ public sealed class MailAudienceResolver
             MailAudience.AllAttendees => await AttendeesAsync(eventId, null, ct),
             MailAudience.TwoDayTicketHolders => await AttendeesAsync(eventId, TicketStatus.TwoDay, ct),
             MailAudience.OneDayTicketHolders => await AttendeesAsync(eventId, TicketStatus.Other, ct),
+            MailAudience.AppreciationDinner => await DinnerAsync(eventId, ct),
+            MailAudience.PartyParticipants => await PartyAsync(eventId, ct),
+            MailAudience.VolunteersPlusExtras => (await ParticipantsAsync(eventId, MailAudience.Volunteers, ct))
+                .Concat(await ExtrasAsync(eventId, ct)).ToList(),
             _ => await ParticipantsAsync(eventId, audience, ct),
         };
 
@@ -147,6 +161,39 @@ public sealed class MailAudienceResolver
 
         return rows
             .Select(r => new MailRecipient(r.Email.Trim().ToLowerInvariant(), r.FullName, r.Id))
+            .ToList();
+    }
+
+    /// <summary>§1381 — dinner: active participants who answered Yes.</summary>
+    private async Task<List<MailRecipient>> DinnerAsync(int eventId, CancellationToken ct) =>
+        (await _db.DinnerSignups.AsNoTracking()
+            .Where(d => d.EventId == eventId && d.Rsvp == DinnerRsvp.Yes
+                        && d.Participant.IsActive && !d.Participant.IsTestUser)
+            .Select(d => new { d.Participant.Email, d.Participant.FullName, d.ParticipantId })
+            .ToListAsync(ct))
+        .Select(r => new MailRecipient(r.Email.Trim().ToLowerInvariant(), r.FullName, r.ParticipantId))
+        .ToList();
+
+    /// <summary>§1381 — party: RSVPs marked attending (a participant's own address when linked).</summary>
+    private async Task<List<MailRecipient>> PartyAsync(int eventId, CancellationToken ct) =>
+        (await _db.PartyRsvps.AsNoTracking()
+            .Where(r => r.EventId == eventId && r.Attending
+                        && (r.Participant == null || (r.Participant.IsActive && !r.Participant.IsTestUser)))
+            .Select(r => new { Email = r.Participant != null ? r.Participant.Email : r.Email, r.Name, r.ParticipantId })
+            .ToListAsync(ct))
+        .Select(r => new MailRecipient(r.Email.Trim().ToLowerInvariant(), r.Name, r.ParticipantId))
+        .ToList();
+
+    /// <summary>§1381 — the configured extra people, resolved to ACTIVE participants of this edition.</summary>
+    private async Task<List<MailRecipient>> ExtrasAsync(int eventId, CancellationToken ct)
+    {
+        var wanted = VolunteerAudienceExtraEmails.Select(e => e.Trim().ToLowerInvariant()).Where(e => e.Contains('@')).ToList();
+        if (wanted.Count == 0) return new();
+        return (await _db.Participants.AsNoTracking()
+                .Where(p => p.EventId == eventId && p.IsActive && !p.IsTestUser && wanted.Contains(p.Email.ToLower()))
+                .Select(p => new { p.Id, p.Email, p.FullName })
+                .ToListAsync(ct))
+            .Select(p => new MailRecipient(p.Email.Trim().ToLowerInvariant(), p.FullName, p.Id))
             .ToList();
     }
 

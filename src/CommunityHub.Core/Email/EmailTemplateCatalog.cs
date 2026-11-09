@@ -102,6 +102,14 @@ public static class EmailTemplateCatalog
             ["hotel-cutoff-reminder"]      = ("Hotel release-deadline reminder", "reminder-jobs"),
             ["onboarding-step-reset"]      = ("Onboarding step reset", "onboarding-step-reset"),
             ["travel-reimbursement-paid"]  = ("Travel reimbursement paid", "travel-reimbursement-email"),
+            // §1387 — the organizer pressed "Send back to speaker": the claim is open again, with the note + missing items.
+            ["travel-claim-sent-back"]     = ("Travel reimbursement sent back for changes", "travel-reimbursement-email"),
+            // §1387 — the AI check did not approve a claim: the judgement to the organizers' mailbox.
+            ["travel-claim-review-needed"] = ("Travel claim needs review (AI check, to the organizers' mailbox)", "outbound-email"),
+            // §1387 — once a day: claims waiting for Accept / Send back more than 2 days.
+            ["travel-claims-waiting"]      = ("Travel claims waiting for a decision (daily, organizers' mailbox)", "outbound-email"),
+            // §1388 — one line to the organizers' mailbox per step of a campaign's ring-by-ring release plan.
+            ["campaign-release-step"]      = ("Mail campaign release plan step (organizers' mailbox)", "outbound-email"),
             ["group-photo-invite"]         = ("Group-photo invite", "group-photo-invites"),
             ["app-game-gift-reminder"]     = ("App-game gift reminder", "sponsor-reminders"),
             // §1127: chases a sponsor whose WEBSHOP website or LinkedIn is blank. Since §1125/§1126
@@ -211,7 +219,34 @@ public static class EmailTemplateCatalog
             ["travel-reimbursement-erp"]  = ("Travel reimbursement claim to ERP", "travel-reimbursement-email"),
             ["feedback-intake"]           = ("AiHelper: bug / feature / question intake", "outbound-email"),
             ["engine-alert"]              = ("Engine alert (internal failure notice)", "outbound-email"),
+            // §1381 — the ELDK27 ticket-teaser campaign series (operator 2026-11-07). Each mail has its OWN ring, so
+            // the operator's rollout per mail — ring 0 (him) → 1 (organizers) → 2 (design partners) → 3 (broad) — is
+            // simply raising that mail's ring. Previous attendees count as ring 3 (BrevoEmailSender, campaign only),
+            // so they are reached only at step 5.
+            ["campaign-learn-from-experts"] = ("Campaign: Ask the people who have done it (11 Nov)", MailCampaignFeature.Key),
+            ["campaign-preday-deep-dive"]   = ("Campaign: Pre-day deep dive, 300/400/500 (2 Dec)", MailCampaignFeature.Key),
+            ["campaign-ai-new-world"]       = ("Campaign: Where do you fit in a world with AI? (16 Dec)", MailCampaignFeature.Key),
+            ["campaign-networking"]         = ("Campaign: Your network is in Copenhagen (6 Jan)", MailCampaignFeature.Key),
+            ["campaign-bring-your-team"]    = ("Campaign: Last call, bring the team (20 Jan)", MailCampaignFeature.Key),
+            // §1383 — a visa application was sent or changed; to the organizers' mailbox (Visa:NotifyEmailTo).
+            ["visa-application-submitted"] = ("Visa application submitted / updated (to the organizers' mailbox)", "outbound-email"),
+            // §1386 — hotel-ops mails to the hotel's internal ops recipients (HotelOpsNotifier). Never to the hotel or a guest.
+            ["hotel-ops-change"]   = ("Hotel changes + updated hotel spreadsheet (to the hotel-ops recipients)", "outbound-email"),
+            ["hotel-ops-deadline"] = ("Hotel release / payment deadline warning (to the hotel-ops recipients)", "outbound-email"),
+            // §1382 — a request from the PUBLIC coupon sign-up form, to the event mailbox (CouponSignupService). Same class
+            // as feedback-intake: an internal MAILBOX, ring-exempt at the send site, Reply-To the person who asked.
+            ["coupon-signup-request"]     = ("Coupon sign-up request (public form)", "outbound-email"),
+            // §1385 — the weekly "hidden speakers" notice to ORGANIZERS (HiddenSpeakersReminderBuilder, run by ReminderJob).
+            // Its OWN ring; like every new mail it has no ring row until the operator sets one, so it starts on the inner ring.
+            ["hidden-speakers-weekly"]    = ("Hidden speakers: weekly organizer notice", "reminder-jobs"),
         };
+
+    /// <summary>§1381 — the campaign mails, in send order (the campaign page offers exactly these).</summary>
+    public static readonly IReadOnlyList<string> CampaignTemplateKeys = new[]
+    {
+        "campaign-learn-from-experts", "campaign-preday-deep-dive", "campaign-ai-new-world",
+        "campaign-networking", "campaign-bring-your-team",
+    };
 
     /// <summary>The feature key governing a template's ring (outbound-email transport when unmapped).</summary>
     public static string FeatureKeyFor(string templateKey) =>
@@ -348,6 +383,17 @@ public static class EmailTemplateCatalog
             "travel-reimbursement-erp",
             "feedback-intake",
             "engine-alert",
+            // §1386 — HotelOpsNotifier passes `RingExempt: true`: internal hotel-ops addresses only.
+            // §1387 — TravelReviewService passes `RingExempt: true`: the organizers' mailbox.
+            "travel-claim-review-needed",
+            "travel-claims-waiting",
+            "campaign-release-step",   // §1388 — RingExempt: the organizers' mailbox
+            "hotel-ops-change",
+            "hotel-ops-deadline",
+            // §1383 — VisaNotifier passes `RingExempt: true`: the recipient is the organizers' mailbox.
+            "visa-application-submitted",
+            // §1382 — CouponSignupService passes `RingExempt: true`: the recipient is the event mailbox, not a participant.
+            "coupon-signup-request",
             // 🔒 §707.20 — `masterclass-cancelled` was HERE and is now RING-GATED again, by operator
             // decision 2026-07-30: *"this is wrong, as it should also be ring-gated. set it for ring
             // 2 … it is a similar mail as any other mail"*.
@@ -387,6 +433,13 @@ public static class EmailTemplateCatalog
             "feedback-intake",
             "travel-reimbursement-erp",
             "evaluation-consolidated",
+            "visa-application-submitted",   // §1383
+            "travel-claim-review-needed",   // §1387
+            "travel-claims-waiting",        // §1387
+            "campaign-release-step",        // §1388
+            "hotel-ops-change",     // §1386
+            "hotel-ops-deadline",   // §1386
+            "coupon-signup-request",   // §1382 — to the event mailbox
         };
 
     /// <summary>
@@ -527,6 +580,19 @@ public static class EmailTemplateCatalog
             "Always sent — never ring-gated (operator-confirmed). It reports that something in the "
             + "engine FAILED, tagged [DEV] or [PROD]. An alert you can switch off by rollout ring is "
             + "an alert you cannot trust.",
+        "travel-claim-review-needed" or "travel-claims-waiting" or "campaign-release-step" =>
+            "Always sent — never ring-gated. It tells the organizers' mailbox that a travel claim needs a human look; "
+            + "the recipient is a mailbox, so a ring could only drop it.",
+        "hotel-ops-change" or "hotel-ops-deadline" =>
+            "Always sent — never ring-gated. Internal hotel-ops mail to the addresses set on the hotel "
+            + "(organizer mailbox domain only). A ring could only drop a deadline warning that costs money when missed.",
+        "visa-application-submitted" =>
+            "Always sent — never ring-gated. It tells the organizers' mailbox that a visa application was "
+            + "sent or changed. The recipient is a mailbox, not a participant, so a ring could only ever drop "
+            + "the notice — and a missed visa application delays someone's trip to the event.",
+        "coupon-signup-request" =>
+            "Always sent — never ring-gated. It carries a company's coupon request from the public sign-up form to the "
+            + "event mailbox, which is not a participant. A ring would silently drop an order somebody is waiting on.",
         "hotel-calendar-selfsend" =>
             "Always sent — never ring-gated. The guest pressed \"Add to calendar\" on their own hotel "
             + "form and is waiting for it.",
@@ -566,6 +632,10 @@ public static class EmailTemplateCatalog
         "session-evaluation-results"     => EmailAudience.Speaker,
         "session-evaluation-report-ready" => EmailAudience.Speaker,   // §750
         "travel-reimbursement-paid"      => EmailAudience.Speaker,
+        "travel-claim-sent-back"         => EmailAudience.Speaker,     // §1387
+        "travel-claim-review-needed"     => EmailAudience.Organizer,   // §1387 — organizers' mailbox
+        "travel-claims-waiting"          => EmailAudience.Organizer,   // §1387 — organizers' mailbox, daily
+        "campaign-release-step"          => EmailAudience.Organizer,   // §1388 — organizers' mailbox
         // §705.13 — a speaker whose session moved room or time. Operator: "session-time-location-
         // changed must go to speakers and be sent in case of ceh changes where a session is moved to
         // new room, then speaker must be notified."
@@ -614,6 +684,7 @@ public static class EmailTemplateCatalog
 
         // --- Organizers (internal ops mail) -----------------------------------------
         "hotel-cutoff-reminder"          => EmailAudience.Organizer,
+        "hidden-speakers-weekly"         => EmailAudience.Organizer,   // §1385
         // §704.1c — found by the audit: organizer mail that had no Settings row at all.
         "some-speaker-prealert"          => EmailAudience.Organizer,
         "some-published"                 => EmailAudience.Organizer,
@@ -635,6 +706,10 @@ public static class EmailTemplateCatalog
         "travel-reimbursement-erp"       => EmailAudience.Organizer,
         "feedback-intake"                => EmailAudience.Organizer,
         "engine-alert"                   => EmailAudience.Organizer,
+        "visa-application-submitted"     => EmailAudience.Organizer,   // §1383 — organizers' mailbox
+        "hotel-ops-change"               => EmailAudience.Organizer,   // §1386 — hotel-ops recipients
+        "hotel-ops-deadline"             => EmailAudience.Organizer,   // §1386
+        "coupon-signup-request"          => EmailAudience.Organizer,   // §1382 — the event mailbox
         // §705.14 — the queue COMMIT notification. Reaches VOLUNTEERS on a volunteer commit and
         // ORGANIZERS on an organizer commit; filed under Organizer, with the per-role rings doing the
         // actual controlling.
@@ -843,6 +918,10 @@ public static class EmailTemplateCatalog
         "pin-signin"        => "Anyone signing in — the code goes to whoever asked for it, in any role.",
         // §705.12 — "invitation" / "broadcast" hints removed with their catalog entries.
         "calendar-invite"   => "The person activating their account, in any role.",
+        // §1381 — campaign mails: the audience is picked on the campaign (Organizer → Mail campaigns).
+        "campaign-learn-from-experts" or "campaign-preday-deep-dive" or "campaign-ai-new-world"
+            or "campaign-networking" or "campaign-bring-your-team" =>
+            "The audience chosen on the campaign — planned: previous attendees without an ELDK27 ticket. Previous attendees are ring 3, so they get it only when this mail's ring is Broad.",
         // §779 — every role with Signal groups in scope: today speakers, volunteers, event partners
         // and media. Sent ONLY when that person presses the button asking for it.
         "signal-join-links" => "Whoever pressed \"send me the Signal links\" — any role that has Signal groups.",
@@ -874,6 +953,10 @@ public static class EmailTemplateCatalog
             "A speaker whose session evaluation report has just been published, or republished after "
             + "late feedback changed the figures.",
         "travel-reimbursement-paid"    => "A speaker whose travel reimbursement has just been paid.",
+        "travel-claim-sent-back"       => "A speaker whose travel claim an organizer sent back (Send back to speaker) — the organizer's note and the missing items; the claim is open again.",
+        "travel-claim-review-needed"   => "The organizers' mailbox (the logistics review mailbox, default info@) — once per new set of documents from a speaker, approved or not, with the AI's recommendation (Accept / Send back / Check by hand) and the documents attached. The speaker never receives it.",
+        "travel-claims-waiting"        => "The organizers' mailbox (default info@) — at most once a day from 08:00, only when travel claims have waited more than 2 days for Accept or Send back. The speaker never receives it.",
+        "campaign-release-step"        => "The organizers' mailbox (default info@) — one line per step of a mail campaign's ring-by-ring release plan (ring 1, ring 2, everyone) and when the plan is stopped.",
         "session-time-location-changed" => "A speaker whose session has been moved to a new room or time.",
 
         // --- sponsors --------------------------------------------------------------------
@@ -913,6 +996,7 @@ public static class EmailTemplateCatalog
         // --- organizers (internal ops) ---------------------------------------------------
         // §515: audience is the RECIPIENT. These are ABOUT other roles but go to organizers.
         "hotel-cutoff-reminder" => "Organizers only — 3 days before a hotel release deadline. Not sent to speakers.",
+        "hidden-speakers-weekly" => "Organizers only — weekly from Monday 08:00 while a speaker is on no session or has no speaker profile, or a real session has no speakers. Not sent to speakers; stops by itself when nothing is hidden.",
         "group-photo-invite"    => "Organizers only — event logistics, not a speaker mail (§561).",
         "some-speaker-prealert" => "One designated organizer — ~5 minutes before a speaker post goes live, to paste in the LinkedIn handle. Never a speaker.",
         "some-published"        => "The SoMe notification list (organizers) — confirms a company-page post went live.",
@@ -931,6 +1015,10 @@ public static class EmailTemplateCatalog
         "travel-reimbursement-erp" => "The ERP mailbox — a speaker's travel-reimbursement claim and receipts, for payment. The speaker never receives it.",
         "feedback-intake"          => "The organizer ops inbox — a bug, feature idea or question raised through AiHelper, with Reply-To set to the person who asked.",
         "engine-alert"             => "The engine alert address — an internal failure notice, tagged [DEV] or [PROD]. Reaches no participant.",
+        "visa-application-submitted" => "The organizers' mailbox (Visa:NotifyEmailTo, default info@) — once when a visa application is first sent, and again only when a later save changes an answer (naming the changed fields, never their values). Reply-To is the applicant. The applicant never receives it.",
+        "hotel-ops-change"   => "The hotel's internal hotel-ops recipients (set on the hotel; default the logistics review mailbox) — the hotel change log since the last mail, with the hotel's updated .xls attached when the guest list changed. An organizer forwards it to the hotel; CEH never mails the hotel or a guest.",
+        "hotel-ops-deadline" => "The hotel's internal hotel-ops recipients — before each release / payment deadline (the hotel's lead, then 7, 3 and 1 day before), with original / allocated / reserved / confirmed / forecast per night. Never the hotel or a guest.",
+        "coupon-signup-request"    => "The event mailbox (info@) — a company's request from the public coupon sign-up form, with Reply-To set to the requester. Reaches no participant.",
         // §705.14 — say the real audience, including the part that surprises: waitlisted attendees are
         // included, and whoever triggered it is never mailed.
         "masterclass-question-posted" =>

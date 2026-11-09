@@ -84,21 +84,19 @@
         <form method="post" asp-page-handler="RunAutoAssign" class="ba-form" aria-label="Run availability auto-assign">
             <strong style="flex:1 1 100%;">@Localizer["Alloc.AutoAssignHeading"]</strong>
             <span style="flex:1 1 100%;color:#3730a3;">@Localizer["Alloc.AutoAssignVolunteerHelp"]</span>
-            @* §1297 — the SCOPE choice, stated rather than assumed. The default is the worker
-               roster; "everyone" stays one click away because a run against the whole pool is
-               still the right thing when you are sanity-checking coverage. *@
-            <label style="flex:1 1 100%;font-size:13px;color:#3730a3;display:flex;gap:6px;align-items:flex-start;">
-                <input type="checkbox" name="everyone" value="true" style="margin-top:3px;" />
-                <span>
-                    Plan for <strong>every</strong> active volunteer, not just the
-                    <a asp-page="/Organizer/VolunteerWorkerRoster">worker roster</a>
-                    (@Model.RosterCount in scope).
-                    @if (Model.RosterCount == 0)
-                    {
-                        <em>The roster is empty, so this run uses everyone either way.</em>
-                    }
-                </span>
-            </label>
+            @* §1380 — no scope checkbox any more (Leth: "Men hvis jeg ikke sætter kryds i 'Plan for every
+               active volunteer' så kommer folk ikke med"). Every active volunteer is planned; the page
+               says how, in plain words, instead of offering a choice nobody understood. *@
+            <span style="flex:1 1 100%;font-size:13px;color:#3730a3;">
+                Plans <strong>every active volunteer</strong>.
+                <a asp-page="/Organizer/VolunteerWorkerRoster">Full-day workers</a> (@Model.RosterCount marked)
+                can be scheduled all day; everyone else up to <strong>50%</strong> of the hours they said they
+                can work, so they can also attend sessions.
+                @if (Model.RosterCount == 0)
+                {
+                    <em>No one is marked as a full-day worker yet, so everyone is planned at up to 50%.</em>
+                }
+            </span>
             <button type="submit">@Localizer["Alloc.RunAutoAssign"]</button>
         </form>
     </div>

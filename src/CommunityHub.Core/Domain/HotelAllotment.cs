@@ -41,6 +41,15 @@ public class HotelAllotment
     /// </summary>
     public int RoomsAllotted { get; set; }
 
+    /// <summary>
+    /// §1386 — the ORIGINAL reservation for this night: the count the contract's release percentages
+    /// are measured against (for the prio 1 contract, what was held on the free-cancellation date).
+    /// Frozen by an organizer ("Freeze original") or automatically by the hotel-ops job once the
+    /// hotel's first release deadline has passed. Null = not frozen yet; the current count is then
+    /// the best estimate.
+    /// </summary>
+    public int? OriginalRooms { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 }
@@ -86,6 +95,12 @@ public class HotelCutoff
 
     /// <summary>Free-text detail for the organizers (clause reference, who to email, …).</summary>
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// §1386 — how many days ahead the EARLY warning goes to the hotel's ops recipients, with the
+    /// per-night reserved-vs-allocated detail. The existing 3-day organizer reminder stays as well.
+    /// </summary>
+    public int WarnDaysBefore { get; set; } = 14;
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

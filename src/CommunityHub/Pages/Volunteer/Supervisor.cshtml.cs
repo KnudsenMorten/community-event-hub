@@ -78,17 +78,27 @@ public class SupervisorModel : PageModel
         => RunAsync(async a => { await _svc.CreateSubcategoryAsync(a, categoryId, name, null, ct); return $"Subcategory '{name}' added."; });
 
     // §1299 — subcategory optional: without one the task goes directly under the category.
-    public Task<IActionResult> OnPostCreateTaskAsync(int? subcategoryId, int? categoryId, string title, DateOnly? due, string? shift, CancellationToken ct)
+    // §1380 — a supervisor's task is a VOLUNTEER task needing one person unless they say otherwise; before, it had
+    // no team (→ TrackedOnly, invisible to auto-assign and coverage) and 0 people needed.
+    public Task<IActionResult> OnPostCreateTaskAsync(int? subcategoryId, int? categoryId, string title, DateOnly? due, string? shift, CancellationToken ct,
+        string? timeEnd = null, int? resourcesNeeded = null)
         => RunAsync(async a =>
         {
-            if (subcategoryId is int sid) await _svc.CreateTaskAsync(a, sid, title, null, due, shift, ct: ct);
-            else if (categoryId is int cid) await _svc.CreateTaskInCategoryAsync(a, cid, title, null, due, shift, ct: ct);
+            var team = CommunityHub.Core.Volunteers.ResponsibleTeamRouter.VolunteerTeam;
+            var people = resourcesNeeded ?? 1;
+            if (subcategoryId is int sid) await _svc.CreateTaskAsync(a, sid, title, null, due, shift, resourcesNeeded: people, responsibleTeam: team, timeEnd: timeEnd, ct: ct);
+            else if (categoryId is int cid) await _svc.CreateTaskInCategoryAsync(a, cid, title, null, due, shift, resourcesNeeded: people, responsibleTeam: team, timeEnd: timeEnd, ct: ct);
             else return "Pick a category first.";
             return $"Task '{title}' added.";
         });
 
     public Task<IActionResult> OnPostAssignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
         => RunAsync(async a => { await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return CommunityHub.Pages.Organizer.VolunteerStructureModel.QueuedNotice; });
+
+    /// <summary>§1380 — a supervisor can take someone off a task in their own category (the service enforces
+    /// that: RequireManageCategoryAsync). The handler existed only on the organizer page, and had no button there.</summary>
+    public Task<IActionResult> OnPostUnassignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
+        => RunAsync(async a => { await _svc.UnassignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer removed from the task."; });
 
     public Task<IActionResult> OnPostSetTaskStatusAsync(int taskId, VolunteerTaskStatus status, CancellationToken ct)
         => RunAsync(async a => { await _svc.SetTaskStatusAsync(a, taskId, status, ct); return "Task status updated."; });
@@ -113,5 +123,30 @@ public class SupervisorModel : PageModel
             .Select(p => new SelectListItem(
                 string.IsNullOrWhiteSpace(p.FullName) ? p.Email : p.FullName, p.Id.ToString()))
             .ToListAsync(ct);
+
+        // §1380 — who is on each of my tasks (published + queued), so a supervisor can see and remove them.
+        var taskIds = MyCategories.SelectMany(c => c.Tasks.Select(t => t.Id)
+            .Concat(c.Subcategories.SelectMany(s => s.Tasks.Select(t => t.Id)))).Distinct().ToList();
+        var names = await _db.Participants.Where(p => p.EventId == me.EventId)
+            .Select(p => new { p.Id, p.FullName, p.Email }).ToDictionaryAsync(
+                p => p.Id, p => string.IsNullOrWhiteSpace(p.FullName) ? p.Email : p.FullName, ct);
+        var published = await _db.VolunteerTaskAssignments
+            .Where(a => a.EventId == me.EventId && taskIds.Contains(a.TaskId))
+            .Select(a => new { a.TaskId, a.ParticipantId }).ToListAsync(ct);
+        var queued = await _db.TaskAllocationDrafts
+            .Where(d => d.EventId == me.EventId && d.TargetRole == ParticipantRole.Volunteer && taskIds.Contains(d.TaskId))
+            .Select(d => new { d.TaskId, d.ParticipantId }).ToListAsync(ct);
+        Assignees = published.Select(a => (a.TaskId, a.ParticipantId, Queued: false))
+            .Concat(queued.Select(d => (d.TaskId, d.ParticipantId, Queued: true)))
+            .GroupBy(x => x.TaskId)
+            .ToDictionary(g => g.Key, g => g
+                .Select(x => new AssigneeView(x.ParticipantId, names.GetValueOrDefault(x.ParticipantId, $"#{x.ParticipantId}"), x.Queued))
+                .ToList());
     }
+
+    /// <summary>§1380 — one person on a task as the supervisor page shows them.</summary>
+    public sealed record AssigneeView(int ParticipantId, string Name, bool Queued);
+
+    /// <summary>§1380 — TaskId → the people on it (published and queued).</summary>
+    public Dictionary<int, List<AssigneeView>> Assignees { get; private set; } = new();
 }

@@ -176,6 +176,9 @@ public class TasksModel : PageModel
         // §173e step tasks both ways, so the list reflects real completion. Idempotent.
         await _formTaskReconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
+        // §1374 — the visa task follows the "Needs visa" flag and the visa form. Cheap and idempotent.
+        await new CommunityHub.Core.Visa.VisaApplicationService(_db).SyncTaskAsync(me.EventId, me.ParticipantId, ct);
+
         // The deadline tasks (speakerdl:) PLUS the §173e Get-Started step tasks. The
         // logistics FORM tasks (hotel-form: …) are intentionally NOT included for speakers —
         // their speakerdl deadline already represents the same step, so this avoids a dupe.
@@ -187,7 +190,10 @@ public class TasksModel : PageModel
                             || t.SourceKey.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.SpeakerDetailsPrefix)
                             || t.SourceKey.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.AcceptPrefix)
                             || t.SourceKey.StartsWith("signal:")
-                            || t.SourceKey.StartsWith(CommunityHub.Core.Config.PartyTaskSeeder.PartyTaskKey + ":")))
+                            || t.SourceKey.StartsWith(CommunityHub.Core.Config.PartyTaskSeeder.PartyTaskKey + ":")
+                            // §1374 — a retired visa task (flag removed) is not shown.
+                            || (t.SourceKey.StartsWith(CommunityHub.Core.Visa.VisaApplicationService.TaskKeyPrefix + ":")
+                                && t.ClosedReason == null)))
             .OrderBy(t => t.State)
             .ThenBy(t => t.DueDate)
             .ThenBy(t => t.Title)

@@ -39,7 +39,11 @@ public class HotelRoomBlocksModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!me.Role.HasOrganizerAccess()) { AccessDenied = true; return Page(); }
 
-        Snapshot = await _blocks.BuildAsync(me.EventId, ct);
-        return Page();
+        // §1386 — RETIRED (operator 2026-11-08: "looks wrong"). This page compared ONE block number per
+        // hotel (Hotel.RoomBlockSize) with the number of people placed, so it could not see nights and
+        // said "Within block" for a contract that holds 5 rooms one night and 120 the next. The per-night
+        // truth is the Hotel overview; old links and bookmarks land there.
+        await Task.CompletedTask;
+        return RedirectToPage("/Organizer/HotelOverview");
     }
 }

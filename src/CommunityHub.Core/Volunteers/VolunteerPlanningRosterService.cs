@@ -120,7 +120,7 @@ public sealed class VolunteerPlanningRosterService
         if (person is null)
             throw new VolunteerValidationException("That volunteer is not in this edition.");
         if (person.Role != ParticipantRole.Volunteer)
-            throw new VolunteerValidationException("Only volunteers can be put on the worker roster.");
+            throw new VolunteerValidationException("Only volunteers can be marked as full-day workers.");
 
         var exists = await _db.VolunteerPlanningRoster
             .AnyAsync(r => r.EventId == actor.EventId && r.ParticipantId == participantId, ct);

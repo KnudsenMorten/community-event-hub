@@ -154,6 +154,30 @@ public static class ExternalSystems
     public const string ErpShopInvoiceCreate = "e-conomic invoice creation (CEH shop)";
 
     /// <summary>
+    /// 🔴 §1379.8 — UPDATING an existing (possibly published) WordPress post in place, as its own ceiling.
+    /// </summary>
+    /// <remarks>
+    /// Narrower than <see cref="Webshop"/> on purpose (the §1305 lesson: never widen a shared ceiling):
+    /// the weekly refresh rewrites a LIVE public page, so it must be switchable on its own without touching
+    /// the Company Manager writes. Unset ⇒ <c>Integrations:AllowExternalWrites</c> (false on DEV, true on PROD).
+    /// </remarks>
+    public const string WordPressPostRefresh = "WordPress post refresh";
+
+    /// <summary>
+    /// 🔴 §1382 — creating an e-conomic CUSTOMER from the PUBLIC coupon sign-up form, as its own ceiling, narrower than
+    /// <see cref="Erp"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>§1037 lets DEV write to e-conomic (<i>"dev is allowed to readwrite to erp"</i>) — for the operator's own,
+    /// controlled tests. The coupon form is ANONYMOUS: anyone who can reach DEV could make it create real customers in the
+    /// one live e-conomic agreement. So, same shape as <see cref="ErpInvoiceCreate"/>: unset ⇒
+    /// <c>Integrations:AllowExternalWrites</c> (false on DEV, true on PROD). Set
+    /// <c>Integrations:ExternalWrites:ErpCouponCustomerCreate = true</c> to open it on a host deliberately.</para>
+    /// <para>🔒 It is checked IN ADDITION to <see cref="Erp"/> (the client's own guard) — both must say yes.</para>
+    /// </remarks>
+    public const string ErpCouponCustomerCreate = "e-conomic customer creation (coupon sign-up)";
+
+    /// <summary>
     /// The settings key for a system name. 🔑 An ALIAS, not a slug of the display name: nobody
     /// should have to write <c>Integrations:ExternalWrites:Zoho Backstage</c> (a key with a space)
     /// or guess that e-conomic's hyphen survives.
@@ -168,6 +192,8 @@ public static class ExternalSystems
         Webshop => "Webshop",
         WebshopStock => "WebshopStock",
         ErpShopInvoiceCreate => "ErpShopInvoiceCreate",
+        ErpCouponCustomerCreate => "ErpCouponCustomerCreate",
+        WordPressPostRefresh => "WordPressPostRefresh",
         // An unrecognised system keeps its own name as the key, so a new integration is
         // configurable the day it is added rather than silently falling through for ever.
         _ => system,
@@ -398,6 +424,10 @@ public sealed class ExternalWriteGuard : IExternalWriteGuard
             // and it is the line that answers "can the app in front of me invoice a customer".
             ExternalSystems.ErpInvoiceCreate,
             ExternalSystems.ErpShopInvoiceCreate,
+            // §1382 — the anonymous coupon form's customer creation (blocked on DEV unless opened deliberately).
+            ExternalSystems.ErpCouponCustomerCreate,
+            // §1379.8 — rewriting a linked (possibly published) WordPress post in place.
+            ExternalSystems.WordPressPostRefresh,
         ];
 
         var parts = systems.Select(s =>

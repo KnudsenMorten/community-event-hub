@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Core.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -227,7 +228,20 @@ public class EditParticipantModel : PageModel
     [BindProperty] public string? Phone { get; set; }
     [BindProperty] public ParticipantRole Role { get; set; } = ParticipantRole.Speaker;
     [BindProperty] public bool IsActive { get; set; } = true;
+    /// <summary>§1374 — shows the visa form (/Forms/Visa) in their menu.</summary>
+    [BindProperty] public bool NeedsVisa { get; set; }
     [BindProperty] public string? SponsorCompanyId { get; set; }
+
+    /// <summary>
+    /// §1379b — the <see cref="Participant.IsTestUser"/> flag, editable by hand. Operator 2026-11-07: a real
+    /// volunteer (participant 209) carried the flag and had to be cleared with SQL, because nothing in the app
+    /// could set it back to false (*"to my knowledge we have that flag already in code"* — it was shown and
+    /// filtered on, never editable). §940 says an organizer who converts a test account into a real person
+    /// "clears the flag by hand"; this is that hand.
+    /// </summary>
+    /// <remarks>🔒 §940 still wins: on Ring 1 the flag cannot be cleared — <see cref="ApplyTestUserFlag"/>
+    /// re-sets it and the page says so.</remarks>
+    [BindProperty] public bool IsTestUser { get; set; }
 
     /// <summary>
     /// When ticked on the create form, fire the welcome email to the new
@@ -260,6 +274,8 @@ public class EditParticipantModel : PageModel
         Phone = p.Phone;
         Role = p.Role;
         IsActive = p.IsActive;
+        IsTestUser = p.IsTestUser;
+        NeedsVisa = p.NeedsVisa;
         SponsorCompanyId = p.SponsorCompanyId;
 
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
@@ -347,6 +363,7 @@ public class EditParticipantModel : PageModel
                 Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim(),
                 Role = Role,
                 IsActive = IsActive,
+                NeedsVisa = NeedsVisa,
                 // Organizer hand-add bypasses the pre-selection queue: the row is
                 // activated immediately so the person can sign in right away.
                 LifecycleState = ParticipantLifecycleState.Active,
@@ -354,8 +371,11 @@ public class EditParticipantModel : PageModel
                 SponsorCompanyId = string.IsNullOrWhiteSpace(SponsorCompanyId) ? null : SponsorCompanyId.Trim(),
                 CreatedAt = _clock.GetUtcNow(),
             };
+            ApplyTestUserFlag(p, IsTestUser, await CompanyRingAsync(p, ct));   // §1379b
             _db.Participants.Add(p);
             await _db.SaveChangesAsync(ct);
+            await EnsureSpeakerProfileAsync(p, ct);   // §1377
+            if (p.NeedsVisa) await new CommunityHub.Core.Visa.VisaApplicationService(_db, _clock).SyncTaskAsync(me.EventId, p.Id, ct);   // §1374
 
             // Manual-create welcome hook: parity with the Sessionize import path,
             // which welcomes new speakers. Fires only when the organizer ticked
@@ -398,10 +418,18 @@ public class EditParticipantModel : PageModel
         p.Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim();
         p.Role = Role;
         p.IsActive = IsActive;
+        p.NeedsVisa = NeedsVisa;   // §1374
         p.SponsorCompanyId = string.IsNullOrWhiteSpace(SponsorCompanyId) ? null : SponsorCompanyId.Trim();
+        var testUserKept = ApplyTestUserFlag(p, IsTestUser, await CompanyRingAsync(p, ct));   // §1379b
         await _db.SaveChangesAsync(ct);
+        await EnsureSpeakerProfileAsync(p, ct);   // §1377
+        // §1374 — the visa task follows the flag (created, done, or retired).
+        await new CommunityHub.Core.Visa.VisaApplicationService(_db, _clock).SyncTaskAsync(me.EventId, p.Id, ct);
 
-        Message = "Saved.";
+        Message = testUserKept
+            ? "Saved. Still a test user: this person is on Ring 1, and Ring 1 is always test (§940) — move them to another ring first."
+            : "Saved.";
+        IsTestUser = p.IsTestUser;
 
         // 🔒 §707.15 — INACTIVE → ACTIVE RE-ONBOARDS, FROM THIS FORM TOO. Operator 2026-07-30:
         // *"inactive to active must send email again"*, for ANY role.
@@ -453,6 +481,45 @@ public class EditParticipantModel : PageModel
         IsNew = false;
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
+    }
+
+    /// <summary>
+    /// §1379b — write the organizer's choice for <see cref="Participant.IsTestUser"/>, then let §940
+    /// (<see cref="TestUserRule"/>) have the last word: a Ring-1 person stays a test user.
+    /// </summary>
+    /// <param name="companyRing">The sponsor company's ring, when the person is a sponsor contact — a
+    /// contact on the default ring inherits it (<see cref="RingResolver.EffectiveForContact"/>), so a
+    /// contact of a Ring-1 company is a Ring-1 person and must stay flagged.</param>
+    /// <returns>True when the organizer asked to CLEAR the flag and §940 kept it.</returns>
+    public static bool ApplyTestUserFlag(Participant p, bool requested, Ring? companyRing = null)
+    {
+        p.IsTestUser = requested;
+        var forced = TestUserRule.ApplyEffectiveRing(p, RingResolver.EffectiveForContact(p.Ring, companyRing));
+        return forced && !requested;
+    }
+
+    private async Task<Ring?> CompanyRingAsync(Participant p, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(p.SponsorCompanyId)
+            ? null
+            : await _db.SponsorInfos.Where(s => s.EventId == p.EventId && s.SponsorCompanyId == p.SponsorCompanyId)
+                .Select(s => (Ring?)s.Ring).FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// 🔴 §1377 — a SPEAKER SAVED HERE GETS A SPEAKER PROFILE. Until now the profile appeared only when the speaker
+    /// filled in one of their own forms, so a speaker an organizer added by hand had no profile: no category could be
+    /// set on Speaker Review and the Zoho push never saw them (operator 2026-10-29, Cecilie Waagner Falkenstrøm:
+    /// *"but cecilie is approved"*). The name is taken from the full name, as the push does (§1375).
+    /// </summary>
+    private async Task EnsureSpeakerProfileAsync(Participant p, CancellationToken ct)
+    {
+        if (p.Role != ParticipantRole.Speaker) return;
+        if (await _db.SpeakerProfiles.AnyAsync(x => x.EventId == p.EventId && x.ParticipantId == p.Id, ct)) return;
+
+        var now = _clock.GetUtcNow();
+        var profile = new SpeakerProfile { EventId = p.EventId, ParticipantId = p.Id, CreatedAt = now, UpdatedAt = now };
+        CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService.FillNameFromFullName(profile, p.FullName);
+        _db.SpeakerProfiles.Add(profile);
+        await _db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -523,7 +590,7 @@ public class EditParticipantModel : PageModel
 
         IsNew = false;
         Email = p.Email; FullName = p.FullName; Phone = p.Phone;
-        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        Role = p.Role; IsActive = p.IsActive; IsTestUser = p.IsTestUser; SponsorCompanyId = p.SponsorCompanyId;
         return Page();
     }
 
@@ -589,7 +656,7 @@ public class EditParticipantModel : PageModel
         // Re-hydrate the form.
         IsNew = false;
         Email = p.Email; FullName = p.FullName; Phone = p.Phone;
-        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        Role = p.Role; IsActive = p.IsActive; IsTestUser = p.IsTestUser; SponsorCompanyId = p.SponsorCompanyId;
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
     }
@@ -650,7 +717,7 @@ public class EditParticipantModel : PageModel
         // Re-hydrate the form.
         IsNew = false;
         Email = p.Email; FullName = p.FullName; Phone = p.Phone;
-        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        Role = p.Role; IsActive = p.IsActive; IsTestUser = p.IsTestUser; SponsorCompanyId = p.SponsorCompanyId;
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
     }
@@ -697,7 +764,7 @@ public class EditParticipantModel : PageModel
         // Re-hydrate the form.
         IsNew = false;
         Email = p.Email; FullName = p.FullName; Phone = p.Phone;
-        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        Role = p.Role; IsActive = p.IsActive; IsTestUser = p.IsTestUser; SponsorCompanyId = p.SponsorCompanyId;
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
     }

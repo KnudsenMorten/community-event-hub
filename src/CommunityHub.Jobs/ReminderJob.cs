@@ -33,6 +33,8 @@ public sealed class ReminderJob
     private readonly HotelCutoffReminderBuilder _hotelCutoffs;
     // §1127 — the sponsor webshop-links chaser.
     private readonly SponsorWebshopLinksReminderBuilder _sponsorWebshopLinks;
+    // §1385 — the weekly "hidden speakers" organizer notice.
+    private readonly HiddenSpeakersReminderBuilder _hiddenSpeakers;
     private readonly ReminderEngine _engine;
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
     private readonly CommunityHub.Core.Email.SpeakerQuestionDigestService _speakerQuestionDigest;
@@ -53,6 +55,7 @@ public sealed class ReminderJob
         GetStartedDeadlineReminderBuilder getStartedDeadline,
         HotelCutoffReminderBuilder hotelCutoffs,
         SponsorWebshopLinksReminderBuilder sponsorWebshopLinks,
+        HiddenSpeakersReminderBuilder hiddenSpeakers,
         ReminderEngine engine,
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
         CommunityHub.Core.Email.SpeakerQuestionDigestService speakerQuestionDigest,
@@ -72,6 +75,7 @@ public sealed class ReminderJob
         _getStartedDeadline = getStartedDeadline;
         _hotelCutoffs = hotelCutoffs;
         _sponsorWebshopLinks = sponsorWebshopLinks;
+        _hiddenSpeakers = hiddenSpeakers;
         _engine = engine;
         _stepResetEmails = stepResetEmails;
         _speakerQuestionDigest = speakerQuestionDigest;
@@ -172,6 +176,13 @@ public sealed class ReminderJob
             // ⚠️ X/Twitter is optional and is never chased.
             var sponsorLinks = await _sponsorWebshopLinks.BuildAsync(eventId, ct);
             sent += await _engine.SendDueAsync(eventId, sponsorLinks, ct);
+
+            // §1385: the WEEKLY "hidden speakers" notice to the ORGANIZERS — speakers on no session,
+            // speakers with no speaker profile, real sessions with no speakers. From Monday 08:00
+            // Danish time, one per organizer per ISO week (ledger), and only when the check finds a
+            // problem. Its own (mail × role) ring; organizers only, never participants.
+            var hiddenSpeakers = await _hiddenSpeakers.BuildDueAsync(eventId, ct);
+            sent += await _engine.SendDueAsync(eventId, hiddenSpeakers, ct);
 
             // The digest/notification sends are a SECOND, finer gate ('digest-emails',
             // which itself depends on the global outbound-email switch): an organizer

@@ -30,6 +30,15 @@ public sealed class AuditPageFilter : IAsyncPageFilter
     /// </summary>
     public const string SuppressGenericKey = "ceh.audit.named-row-written";
 
+    /// <summary>
+    /// §1369 — a handler with an <c>[Audit]</c> attribute can name WHAT it acted on by setting these in
+    /// <c>HttpContext.Items</c>; the attribute's fixed summary cannot ("Removed a sponsor contact" did not
+    /// say who, and finding out took an e-conomic read).
+    /// </summary>
+    public const string TargetIdKey = "ceh.audit.target-id";
+    public const string SummaryKey = "ceh.audit.summary";
+    public const string DetailKey = "ceh.audit.detail";
+
     private readonly IAuditTrail _audit;
     private readonly ICurrentParticipantAccessor _participant;
 
@@ -103,6 +112,12 @@ public sealed class AuditPageFilter : IAsyncPageFilter
                 HttpMethod = method,
                 Path = path,
             };
+
+            // §1369 — what the handler says it acted on, when it said.
+            var items = context.HttpContext.Items;
+            if (items.TryGetValue(TargetIdKey, out var tid) && tid is string t && t.Length > 0) entry.TargetId = t;
+            if (items.TryGetValue(SummaryKey, out var sum) && sum is string s && s.Length > 0) entry.Summary = s;
+            if (items.TryGetValue(DetailKey, out var det) && det is string d && d.Length > 0) entry.Detail = d;
 
             if (me is null)
             {

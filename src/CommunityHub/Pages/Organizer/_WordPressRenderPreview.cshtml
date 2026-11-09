@@ -1,0 +1,17 @@
+@using CommunityHub.Core.Integrations
+@model WordPressPostRender
+@* §1379.8 — the "Preview render" result: rendered HTML plus any token the renderer did not know. *@
+<div class="wp-render-preview" style="margin-top:12px;">
+    <h3 style="margin:0 0 6px;">Preview (live data, nothing sent)</h3>
+    @if (Model.UnknownTokens.Count > 0)
+    {
+        <p class="error">Unresolved token(s), left as typed: @string.Join(", ", Model.UnknownTokens.Select(t => "{{" + t + "}}"))</p>
+    }
+    else
+    {
+        <p class="success">All tokens resolved.</p>
+    }
+    <div style="border:1px solid #e6eaf2;border-radius:8px;padding:14px;background:#fff;overflow-x:auto;max-width:100%;">
+        @Html.Raw(Model.Html)
+    </div>
+</div>

@@ -26,19 +26,25 @@ public sealed class SoMeScheduleJob
     private readonly SoMeAutoApproveService? _autoApprove;
     private readonly ILogger<SoMeScheduleJob> _log;
     private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+    private readonly SoMeRuleConflictService? _conflicts;
+    private readonly WordPressPostRefreshService? _wordPressRefresh;
 
     public SoMeScheduleJob(
         CommunityHubDbContext db,
         SoMeScheduleService scheduler,
         ILogger<SoMeScheduleJob> log,
         CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null,
-        SoMeAutoApproveService? autoApprove = null)
+        SoMeAutoApproveService? autoApprove = null,
+        SoMeRuleConflictService? conflicts = null,
+        WordPressPostRefreshService? wordPressRefresh = null)
     {
         _db = db;
         _scheduler = scheduler;
         _log = log;
         _activity = activity;
         _autoApprove = autoApprove;
+        _conflicts = conflicts;
+        _wordPressRefresh = wordPressRefresh;
     }
 
     [Function("SoMeScheduleJob")]
@@ -56,6 +62,21 @@ public sealed class SoMeScheduleJob
         }
 
         _activity?.ReportWork();
+
+        // §1379.8 — "Refresh weekly" WordPress posts ride on this job (operator 2026-11-07: "update each week
+        // using the job that adjusts the some posts"). Each flagged post is due at most once per 7 days, so a
+        // daily tick does nothing six days out of seven. FIRST and never fatal: it must neither depend on the
+        // planner's early returns below nor stop the planner when WordPress is down.
+        if (_wordPressRefresh is not null)
+        {
+            try
+            {
+                var wp = await _wordPressRefresh.RefreshFlaggedPostsAsync(eventId.Value, DateTimeOffset.UtcNow, ct);
+                if (wp.Updated > 0 || wp.Failed > 0)
+                    _log.LogInformation("§1379.8 WordPress refresh: {Message}", wp.Message);
+            }
+            catch (Exception ex) { _log.LogWarning(ex, "§1379.8 WordPress post refresh failed."); }
+        }
 
         var result = await _scheduler.RunAsync(eventId.Value, ct);
 
@@ -83,6 +104,15 @@ public sealed class SoMeScheduleJob
             _log.LogWarning("SoMeScheduleJob: {Message}", result.Message);
             _activity?.ReportInactive(result.Message);
             return;
+        }
+
+        // 🔴 §1368 — and check the queue against his planning rules, mailing what breaks them. After
+        // planning AND auto-approval, so the check reads the queue as this tick left it. Never fatal:
+        // a failed check must not stop the next tick from planning.
+        if (_conflicts is not null)
+        {
+            try { await _conflicts.CheckAndAlertAsync(eventId.Value, result.NoRoom, ct); }
+            catch (Exception ex) { _log.LogWarning(ex, "§1368 SoMe rule-conflict check failed."); }
         }
 
         if (result.NoRoom.Count > 0)

@@ -49,6 +49,20 @@ public enum GraphicAssetType
     /// other sponsor graphic: never shown in the sponsor's own view.
     /// </remarks>
     SponsorCategory = 5,
+
+    /// <summary>
+    /// §1384 — ALL TRACKS, ALL SPEAKERS: ONE animated GIF for the whole edition, one frame per
+    /// track showing every speaker in it as a grid of faces.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-11-07: <i>"you can just make a new category, all speakers per track"</i> ·
+    /// <i>"pic must auto-update when new speakers are added"</i>. Built by the same §767 sweep as the
+    /// per-track GIFs (from the SAME per-track speaker lists) and served at a stable public URL for
+    /// mails, WordPress and SoMe. Carries no participant and no session, so it is never shown to a
+    /// speaker, and <c>SoMeSubjectGraphic</c> never attaches it to a post.
+    /// <para>🔒 APPENDED — never renumber: the value is stored in <c>GraphicAssets.Type</c>.</para>
+    /// </remarks>
+    AllTracksSpeakers = 6,
 }
 
 /// <summary>
@@ -248,6 +262,15 @@ public static class GraphicStableKey
     /// </remarks>
     public static string ForSponsorCategory(string kind, string slug) =>
         $"sponsor-{kind}:{slug}";
+
+    /// <summary>
+    /// §1384 — the ONE all-tracks overview GIF of an edition. Key <c>tracks:all-speakers</c>, file
+    /// <c>tracks-all-speakers.gif</c>, stored beside the per-track GIFs.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Cannot collide with <see cref="ForTrackGraphic"/>: that is <c>track:{slug}</c> (singular).
+    /// </remarks>
+    public static string ForAllTracksSpeakers() => "tracks:all-speakers";
 
     /// <summary>The stable, path-safe file name for a key, e.g. <c>speaker-42.png</c>.</summary>
     /// <summary>

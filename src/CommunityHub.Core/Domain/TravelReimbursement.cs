@@ -81,6 +81,115 @@ public class TravelReimbursement
     public DateTimeOffset? PaidAt { get; set; }
     public string? PaidNotes { get; set; }
 
+    // --- §1387 document review ----------------------------------------------
+
+    /// <summary>
+    /// §1387 — the speaker's answer to "do you invoice through a registered company?". Decides which
+    /// second document is required: a company invoice (yes) or a personal declaration (no). Null =
+    /// not answered (claims submitted before the question existed).
+    /// </summary>
+    public bool? HasCompany { get; set; }
+
+    /// <summary>§1387 — where the organizer review stands.</summary>
+    public TravelReviewState ReviewState { get; set; } = TravelReviewState.None;
+
+    /// <summary>§1387 — the AI's judgement of the submitted documents against the form's requirements.</summary>
+    public TravelAiVerdict AiVerdict { get; set; } = TravelAiVerdict.NotChecked;
+
+    /// <summary>§1387 — one-line summary of what is missing (or "all requirements met").</summary>
+    public string? AiSummary { get; set; }
+
+    /// <summary>§1387 — the per-requirement checklist as JSON (<see cref="TravelCheckItem"/>[]). Never holds extracted ID numbers.</summary>
+    public string? AiFindingsJson { get; set; }
+
+    public DateTimeOffset? AiCheckedAt { get; set; }
+
+    /// <summary>§1387 — hash of the files + claim the verdict was formed on; a change re-opens the question.</summary>
+    public string? AiInputHash { get; set; }
+
+    /// <summary>§1387 — when the organizers were mailed about a not-approved verdict (once per <see cref="AiInputHash"/>).</summary>
+    public string? AiNotifiedHash { get; set; }
+
+    /// <summary>§1387 — the organizer's note on Accept / Send back (sent to the speaker on Send back).</summary>
+    public string? ReviewNote { get; set; }
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public string? ReviewedByEmail { get; set; }
+    public int SentBackCount { get; set; }
+
+    /// <summary>
+    /// §1387 — when the claim + files went to the ERP inbox. The mail now waits for Accept, and is
+    /// sent once: claims submitted before §1387 were already sent on submit (stamped by the migration).
+    /// </summary>
+    public DateTimeOffset? ErpSentAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+/// <summary>§1387 — the organizer review of a submitted travel claim.</summary>
+public enum TravelReviewState
+{
+    /// <summary>Not submitted (or opted out).</summary>
+    None = 0,
+    /// <summary>Submitted and waiting for an organizer: Accept or Send back.</summary>
+    UnderReview = 1,
+    /// <summary>An organizer accepted the documents; the claim went to the ERP inbox.</summary>
+    Accepted = 2,
+    /// <summary>An organizer sent it back; the claim is open again for new files.</summary>
+    SentBack = 3,
+}
+
+/// <summary>§1387 — "Document meets requirements" as judged by the AI.</summary>
+public enum TravelAiVerdict
+{
+    NotChecked = 0,
+    Approved = 1,
+    NotApproved = 2,
+    /// <summary>The AI could not form a verdict (not configured, call failed, unreadable scan) — never read as "no".</summary>
+    CouldNotCheck = 3,
+}
+
+/// <summary>§1387 — what one uploaded file is, as the speaker labels it.</summary>
+public enum TravelDocumentKind
+{
+    Unknown = 0,
+    TicketReceipt = 1,
+    Invoice = 2,
+    PersonalDeclaration = 3,
+    Other = 4,
+}
+
+/// <summary>
+/// §1387 — one line of the AI checklist. <c>Ok</c> null = could not tell (in question).
+/// An organizer can ACCEPT a line that is missing or in question (operator 2026-11-08: <i>"i need a way to
+/// accept/override each topic in question, if we fx accept biz class claim"</i>) — who, when and why are kept on the
+/// line, survive a re-validation of the same requirement, and go to finance with the claim (<i>"eldk finance can see
+/// my overrides"</i>).
+/// </summary>
+public sealed record TravelCheckItem(string Requirement, bool? Ok, string? Note,
+    string? AcceptedBy = null, DateTimeOffset? AcceptedAt = null, string? AcceptNote = null,
+    string? SpeakerNote = null)
+{
+    /// <summary>
+    /// What the SPEAKER reads for this line (operator 2026-11-08: <i>"user friendly and humble to the speaker, be gentle in
+    /// language"</i> · <i>"we got your ticket but nowhere to send the money"</i>): the AI's kind sentence, else its finding.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ForSpeaker => string.IsNullOrWhiteSpace(SpeakerNote) ? Note : SpeakerNote;
+
+    /// <summary>An organizer accepted this line.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsAccepted => AcceptedAt is not null;
+
+    /// <summary>Missing and NOT accepted — what blocks the claim and what the speaker is told to fix.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsOpenFailure => Ok == false && !IsAccepted;
+
+    /// <summary>Not met (missing or in question) and not accepted — what an organizer can still accept.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool CanAccept => Ok != true && !IsAccepted;
+
+    /// <summary>One word for the line, as finance and the organizer page show it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string StatusText => IsAccepted ? "Accepted by organizer" : Ok switch { true => "Met", false => "Missing", _ => "In question" };
 }

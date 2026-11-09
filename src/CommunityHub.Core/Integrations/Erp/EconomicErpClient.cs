@@ -340,7 +340,8 @@ public sealed class LiveEconomicErpClient : IEconomicErpClient
         {
             ["name"] = customer.Name.Trim(),
             ["currency"] = string.IsNullOrWhiteSpace(customer.Currency) ? _options.BaseCurrency : customer.Currency!.Trim().ToUpperInvariant(),
-            ["customerGroup"] = new { customerGroupNumber = _options.CustomerGroupNumber },
+            // §1382 — a caller may name the group (the coupon sign-up uses group 2); otherwise the configured default.
+            ["customerGroup"] = new { customerGroupNumber = customer.CustomerGroupNumber is > 0 ? customer.CustomerGroupNumber.Value : _options.CustomerGroupNumber },
             ["paymentTerms"] = new { paymentTermsNumber = _options.PaymentTermsNumber },
             ["vatZone"] = new { vatZoneNumber = vatZone },
         };
@@ -354,6 +355,8 @@ public sealed class LiveEconomicErpClient : IEconomicErpClient
         if (!string.IsNullOrWhiteSpace(customer.Country)) payload["country"] = customer.Country!.Trim();
         if (!string.IsNullOrWhiteSpace(customer.Phone)) payload["telephoneAndFaxNumber"] = customer.Phone!.Trim();
         if (!string.IsNullOrWhiteSpace(customer.Website)) payload["website"] = customer.Website!.Trim();
+        // §1382 — e-conomic's customer `ean` field: the e-invoice address of a Danish public-sector customer.
+        if (!string.IsNullOrWhiteSpace(customer.Ean)) payload["ean"] = customer.Ean!.Trim();
 
         using var resp = await _http.SendAsync(
             Request(HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/customers", payload), ct);

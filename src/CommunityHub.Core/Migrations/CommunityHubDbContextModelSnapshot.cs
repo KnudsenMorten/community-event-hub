@@ -719,6 +719,116 @@ namespace CommunityHub.Core.Migrations
                     b.ToTable("CouponPrepaidPurchases");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.CouponSignupRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("CompanyName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CountryIso2")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
+                    b.Property<int?>("CouponInvoicingSettingId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("EanNumber")
+                        .HasMaxLength(13)
+                        .HasColumnType("nvarchar(13)");
+
+                    b.Property<bool>("ErpCustomerCreated")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ErpCustomerNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ErpError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("InvoiceEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<DateTimeOffset?>("MailSentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("OrderType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("PurchaseOrder")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RequestIp")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequesterEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("RequesterMobile")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("RequesterName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SplitPercent")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TicketCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TicketType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VatNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "CreatedAt");
+
+                    b.ToTable("CouponSignupRequests");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.DietaryRequirement", b =>
                 {
                     b.Property<int>("Id")
@@ -2437,6 +2547,18 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("AgreementLabel")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("AgreementNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("BookingReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("ConfirmationNumber")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -2459,6 +2581,22 @@ namespace CommunityHub.Core.Migrations
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("NotifyEmails")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("SentToHotelAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SentToHotelByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<int>("Priority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<int?>("RoomBlockSize")
                         .HasColumnType("int");
@@ -2493,6 +2631,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<DateOnly>("Night")
                         .HasColumnType("date");
 
+                    b.Property<int?>("OriginalRooms")
+                        .HasColumnType("int");
+
                     b.Property<int>("RoomsAllotted")
                         .HasColumnType("int");
 
@@ -2519,6 +2660,21 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<DateTimeOffset?>("CalendarInviteSentAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CancellationNumber")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CancelledHotelId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("GuestsInRoom")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RoommateParticipantId")
+                        .HasColumnType("int");
 
                     b.Property<DateOnly?>("CheckInDate")
                         .HasColumnType("date");
@@ -2571,6 +2727,62 @@ namespace CommunityHub.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("HotelBookings");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.HotelChangeLogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Actor")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<bool>("AffectsGuestList")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("HotelId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("NotifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ParticipantName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "At");
+
+                    b.HasIndex("EventId", "NotifiedAt");
+
+                    b.ToTable("HotelChangeLog");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.HotelCoverageExtra", b =>
@@ -2681,6 +2893,11 @@ namespace CommunityHub.Core.Migrations
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int>("WarnDaysBefore")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(14);
+
                     b.HasKey("Id");
 
                     b.HasIndex("HotelId");
@@ -2691,6 +2908,42 @@ namespace CommunityHub.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("HotelCutoffs");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.HotelForecastExtra", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ExtraRooms")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("Night")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "Night")
+                        .IsUnique();
+
+                    b.ToTable("HotelForecastExtras");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ImpersonationAudit", b =>
@@ -3116,6 +3369,41 @@ namespace CommunityHub.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("PlanEveryoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PlanEveryoneDoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PlanPreviewAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PlanPreviewDoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PlanSetByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<DateTimeOffset?>("PlanStoppedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PlanStoppedByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<DateTimeOffset?>("PlanWaveAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PlanWaveDoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("PlanWavePercent")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PlanWaveSize")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("ScheduledFor")
                         .HasColumnType("datetimeoffset");
@@ -3611,6 +3899,9 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<string>("LinkedInVanityName")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("NeedsVisa")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("OnboardingCompleted_Appreciation")
                         .HasColumnType("bit");
@@ -5923,6 +6214,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
+                    b.Property<DateOnly?>("PublishBy")
+                        .HasColumnType("date");
+
                     b.Property<int>("RoundNumber")
                         .HasColumnType("int");
 
@@ -5960,6 +6254,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<string>("LastUpdatedByEmail")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
+
+                    b.Property<int?>("MinDaysBetweenRounds")
+                        .HasColumnType("int");
 
                     b.Property<int>("Rounds")
                         .HasColumnType("int");
@@ -6166,6 +6463,9 @@ namespace CommunityHub.Core.Migrations
                         .HasColumnType("date");
 
                     b.Property<int>("MaxPostsPerDay")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxSponsorPostsPerDay")
                         .HasColumnType("int");
 
                     b.Property<string>("NotificationEmails")
@@ -7851,6 +8151,9 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
                     b.Property<int>("ParticipantId")
                         .HasColumnType("int");
 
@@ -7877,10 +8180,35 @@ namespace CommunityHub.Core.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTimeOffset?>("AiCheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("AiFindingsJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("AiInputHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("AiNotifiedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("AiSummary")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("AiVerdict")
+                        .HasColumnType("int");
+
                     b.Property<decimal?>("ClaimAmountEur")
                         .HasColumnType("decimal(10,2)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("ErpSentAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("EventId")
@@ -7889,6 +8217,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<string>("Explanation")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool?>("HasCompany")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsPaid")
                         .HasColumnType("bit");
@@ -7919,6 +8250,23 @@ namespace CommunityHub.Core.Migrations
                     b.Property<bool>("RequestReimbursement")
                         .HasColumnType("bit");
 
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("ReviewState")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ReviewedByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<int>("SentBackCount")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("SubmittedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -7933,6 +8281,254 @@ namespace CommunityHub.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("TravelReimbursements");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.TravelReviewLogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Actor")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("TravelReimbursementId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "TravelReimbursementId", "At");
+
+                    b.ToTable("TravelReviewLog");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.VisaApplication", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Accommodation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ApplicationId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("ApplicationIdSetAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateOnly?>("ArrivalDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("CompanyActivity")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("CompanyCity")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CompanyCountry")
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<string>("CompanyEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("CompanyName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CompanyPhone")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CompanyPostalCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("CompanyStreet")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CompanyWebsite")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ContactOrigin")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date");
+
+                    b.Property<string>("DepartmentAndRole")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("Entries")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FinancialScope")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FirstNames")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Gender")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("HomeCity")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("HomeCountry")
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<string>("HomePostalCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("HomeStreet")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool?>("HostGuarantees")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LastName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("LengthOfVisitDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Nationality")
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<int>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RelationshipDuration")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SpecialCircumstances")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("StayPaidBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("TravelPaidBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool?>("VisitedBefore")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId");
+
+                    b.HasIndex("ParticipantId")
+                        .IsUnique();
+
+                    b.ToTable("VisaApplications");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.VisaLetter", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId");
+
+                    b.HasIndex("ParticipantId")
+                        .IsUnique();
+
+                    b.ToTable("VisaLetters");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.VolumePackageCompany", b =>
@@ -8685,6 +9281,57 @@ namespace CommunityHub.Core.Migrations
                     b.ToTable("WebshopOrderArchives");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.WordPressRefreshPost", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BodyTemplate")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("LastPushedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("LastRefreshResult")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("LastRefreshedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("RefreshWeekly")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("WordPressPostId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "WordPressPostId")
+                        .IsUnique();
+
+                    b.ToTable("WordPressRefreshPosts");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.ZohoOrderSyncRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -9392,6 +10039,17 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Participant");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.HotelChangeLogEntry", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.HotelCoverageExtra", b =>
                 {
                     b.HasOne("CommunityHub.Core.Domain.Event", "Event")
@@ -9439,6 +10097,17 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Event");
 
                     b.Navigation("Hotel");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.HotelForecastExtra", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ImpersonationAudit", b =>
@@ -10573,6 +11242,39 @@ namespace CommunityHub.Core.Migrations
                         .IsRequired();
 
                     b.Navigation("Event");
+
+                    b.Navigation("Participant");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.TravelReviewLogEntry", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.VisaApplication", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "Participant")
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Participant");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.VisaLetter", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "Participant")
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Participant");
                 });

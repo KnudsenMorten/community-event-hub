@@ -229,7 +229,7 @@ public static class SoMeTemplateCatalog
         // §834.5 — Type 5's own copy, imported from his event-post deck (§828). Without these the
         // Type 5 template had no way to render the post he wrote.
         "{EventPostTitle}", "{EventPostBody}",
-        "{SponsorList}", "{SponsorWebsite}", "{SponsorHashtag}",
+        "{SponsorList}", "{SponsorNames}", "{SponsorWebsite}", "{SponsorHashtag}",
         // 🔴 §933 — {EditionCode} IS RETIRED and is deliberately absent from this list. Operator
         // 2026-08-07: *"replace {EditionCode} to {EventNameShort} … i dont like that name and prefer
         // {EventNameShort} and {EventNameLong} instead"*. It named an internal concept (the edition

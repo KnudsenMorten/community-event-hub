@@ -110,11 +110,8 @@ public sealed class AvailabilityAutoAssignEngine
     /// filled would read as "done".</para>
     /// </remarks>
     /// <param name="scope">
-    /// Which pool to draw from. Defaults to the curated worker roster.
-    /// ⚠️ <b>An EMPTY roster falls back to everyone</b> and says so in
-    /// <see cref="PlannerResult.ScopeFellBackToEveryone"/> — nobody has curated it on the day
-    /// this ships, and silently proposing nothing would look like a broken planner rather than
-    /// an empty list.
+    /// §1380 — no longer narrows the pool (every active volunteer is planned; the roster marks the
+    /// full-day workers). Kept for callers and echoed in <see cref="PlannerResult.Scope"/>.
     /// </param>
     public async Task<PlannerResult> SeedProposalsAsync(
         VolunteerStructureService.ActorContext actor,
@@ -152,18 +149,17 @@ public sealed class AvailabilityAutoAssignEngine
             .Select(p => p.Id)
             .ToListAsync(ct);
 
-        // ── Scope: the worker roster ────────────────────────────────────────────────────
-        var roster = await _db.VolunteerPlanningRoster
+        // ── §1380: everyone is planned; the roster marks the FULL-DAY WORKERS ───────────
+        // Leth 2026-11-02: "Umiddelbart vil jeg jo mene at 'alle' volunteers er en del af worker roster"
+        // — the operator chose his model. Roster members may be loaded all day; everyone else is capped
+        // at VolunteerPlanner.SessionAttendeeShare of their stated hours so they can attend sessions.
+        // ⚠️ This REPLACES §1297's "roster = the only pool" (and its empty-roster fallback); `scope`
+        // no longer narrows anything and is only echoed back in the result.
+        var fullDayWorkers = (await _db.VolunteerPlanningRoster
             .Where(r => r.EventId == eventId)
             .Select(r => r.ParticipantId)
-            .ToListAsync(ct);
-
-        var fellBack = false;
-        if (scope == PlannerScope.WorkersOnly)
-        {
-            if (roster.Count == 0) fellBack = true;      // nothing curated yet — plan for everyone.
-            else poolIds = poolIds.Where(roster.Contains).ToList();
-        }
+            .ToListAsync(ct)).ToHashSet();
+        const bool fellBack = false;
 
         // ── Availability, as WINDOWS ────────────────────────────────────────────────────
         // 🔒 Note is selected now; the pre-§1297 engine never read it, which is why the day and
@@ -264,7 +260,8 @@ public sealed class AvailabilityAutoAssignEngine
                 capacityByPid.TryGetValue(id, out var cap) ? cap : 0,
                 windowsByPid.TryGetValue(id, out var wins) ? wins : new Dictionary<DateOnly, DayWindow>(),
                 heldByPid.TryGetValue(id, out var held) ? held : Array.Empty<(DateOnly, TimeWindow)>(),
-                hoursByPid.GetValueOrDefault(id)))
+                hoursByPid.GetValueOrDefault(id),
+                FullDayWorker: fullDayWorkers.Contains(id)))
             .ToList();
 
         // ── Preferred volunteers per bucket ─────────────────────────────────────────────
@@ -282,7 +279,7 @@ public sealed class AvailabilityAutoAssignEngine
         var result = VolunteerPlanner.Plan(
             tasks.Select(x => PlannerTask.From(x.Task, x.CategoryId)),
             candidates, existingCountByTask, occupied, targetRole,
-            scope, fellBack, preferred);
+            scope, fellBack, preferred, reportWorkerSplit: true);
 
         if (result.Proposals.Count == 0) return result;
 

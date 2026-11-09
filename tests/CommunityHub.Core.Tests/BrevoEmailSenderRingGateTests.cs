@@ -131,6 +131,62 @@ public sealed class BrevoEmailSenderRingGateTests
         Assert.Single(h.Sent);
     }
 
+    // ---- §1381: campaign mail to previous attendees is a RING 3 send --------
+
+    private static async Task SeedPreviousAttendeeAsync(Harness h, string email)
+    {
+        using var scope = h.Provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+        db.ExternalRecipients.Add(new ExternalRecipient { EventId = EventId, Email = email, SourceEdition = "ELDK26" });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task A_campaign_mail_reaches_a_previous_attendee_only_when_released_to_Broad()
+    {
+        await using var broad = await Harness.CreateAsync(Ring.Broad, category: "campaign");
+        await SeedPreviousAttendeeAsync(broad, "past@out.test");
+        await broad.Sender.SendAsync("past@out.test", "Hi", "<p>hi</p>");
+        Assert.Single(broad.Sent);
+
+        await using var ring2 = await Harness.CreateAsync(Ring.Ring2, category: "campaign");
+        await SeedPreviousAttendeeAsync(ring2, "past@out.test");
+        await ring2.Sender.SendAsync("past@out.test", "Hi", "<p>hi</p>");
+        Assert.Empty(ring2.Sent);   // the test steps (ring 0/1/2) never reach outside people
+    }
+
+    [Fact]
+    public async Task A_previous_attendee_is_still_a_stranger_to_every_non_campaign_mail()
+    {
+        await using var h = await Harness.CreateAsync(Ring.Broad, category: "test");
+        await SeedPreviousAttendeeAsync(h, "past@out.test");
+        await h.Sender.SendAsync("past@out.test", "Hi", "<p>hi</p>");
+        Assert.Empty(h.Sent);
+        Assert.Contains(h.Logs, l => l.Contains("unknown recipient"));
+    }
+
+    [Fact]
+    public async Task A_campaign_mail_to_an_address_on_no_list_still_fails_closed()
+    {
+        await using var h = await Harness.CreateAsync(Ring.Broad, category: "campaign");
+        await h.Sender.SendAsync("nobody@out.test", "Hi", "<p>hi</p>");
+        Assert.Empty(h.Sent);
+    }
+
+    [Fact]
+    public async Task A_campaign_mail_carries_its_Brevo_tag_header_and_other_mail_does_not()
+    {
+        await using var tagged = await Harness.CreateAsync(Ring.Broad, category: "campaign", brevoTag: "ceh-campaign-9");
+        await SeedPreviousAttendeeAsync(tagged, "past@out.test");
+        await tagged.Sender.SendAsync("past@out.test", "Hi", "<p>hi</p>");
+        Assert.Equal("ceh-campaign-9", Assert.Single(tagged.Sent).Headers["X-Mailin-Tag"]);
+
+        await using var plain = await Harness.CreateAsync(Ring.Broad);
+        await plain.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+        await plain.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+        Assert.Null(Assert.Single(plain.Sent).Headers["X-Mailin-Tag"]);
+    }
+
     // ---- DB-backed sender gate (rings only) --------------------------------
 
     [Fact]
@@ -360,7 +416,9 @@ public sealed class BrevoEmailSenderRingGateTests
             int contextEventId = EventId, bool seedActiveEdition = false,
             string? featureKey = null, Ring featureRing = Ring.Broad, bool ringExempt = false,
             // §326au/§326av
-            bool outboundEnabled = true, int maxSendsPerHour = 600, int seedSentLastHour = 0)
+            bool outboundEnabled = true, int maxSendsPerHour = 600, int seedSentLastHour = 0,
+            // §1381
+            string category = "test", string? brevoTag = null)
         {
             var dbName = $"sender-rings-{Guid.NewGuid():N}";
             var services = new ServiceCollection();
@@ -412,7 +470,7 @@ public sealed class BrevoEmailSenderRingGateTests
             var logQueue = new ConcurrentQueue<string>();
             var logger = new CapturingLogger<BrevoEmailSender>(logQueue);
             var scopeFactory = new BreakableScopeFactory(provider.GetRequiredService<IServiceScopeFactory>());
-            var ctx = new FixedEmailContext(new EmailContext(Category: "test", EventId: contextEventId, FeatureKey: featureKey, RingExempt: ringExempt));
+            var ctx = new FixedEmailContext(new EmailContext(Category: category, EventId: contextEventId, FeatureKey: featureKey, RingExempt: ringExempt, BrevoTag: brevoTag));
             var options = Options.Create(new EmailOptions
             {
                 MaxReleaseRing = maxReleaseRing ?? string.Empty,
@@ -455,6 +513,7 @@ public sealed class BrevoEmailSenderRingGateTests
             foreach (var a in message.To) snap.To.Add(a);
             foreach (var a in message.CC) snap.CC.Add(a);
             foreach (var a in message.Bcc) snap.Bcc.Add(a);
+            foreach (string k in message.Headers) snap.Headers.Add(k, message.Headers[k]);   // §1381 — the Brevo tag
             _captured.Add(snap);
             return Task.CompletedTask;
         }

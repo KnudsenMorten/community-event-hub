@@ -1,0 +1,121 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteerCoverageModel
+@{
+    ViewData["Title"] = "Coverage & shortage";
+}
+
+<style>
+    .cov-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin:12px 0; }
+    .cov-tile { border:1px solid #e5e7eb; border-radius:10px; padding:12px; background:#fff; }
+    .cov-tile .n { font-size:28px; font-weight:700; color:#1D3380; line-height:1.1; }
+    .cov-tile .l { font-size:13px; color:#4b5563; }
+    .cov-ok { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 12px; }
+    .cov-warn { background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px 12px; }
+    .cov-hours { width:100%; border-collapse:collapse; font-size:14px; }
+    .cov-hours th, .cov-hours td { padding:6px 8px; border-bottom:1px solid #eef0f3; text-align:right; white-space:nowrap; }
+    .cov-hours th:first-child, .cov-hours td:first-child { text-align:left; }
+    .cov-short { color:#b91c1c; font-weight:700; }
+    .cov-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    @@media (max-width: 480px) { .cov-tile .n { font-size:22px; } .cov-hours { font-size:13px; } }
+</style>
+
+<div class="card">
+    <h1>Coverage &amp; shortage</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>
+            How many volunteers the tasks need, how many places are filled, and <strong>where we are short</strong> —
+            straight from the task plan and the availability answers. Nothing is assigned or queued from this page.
+        </p>
+        <p style="font-size:13px;color:#4b5563;">
+            Counted the same way auto-assign plans: <a asp-page="/Organizer/VolunteerWorkerRoster">full-day workers</a>
+            can give all the hours they said; everyone else up to 50%. "Filled" includes queued (not yet published) places.
+        </p>
+        <p><a asp-page="/Organizer/Volunteers">&larr; Back to Volunteers</a> · <a asp-page="/Organizer/VolunteerCalendar">Task calendar</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.Report is { } r)
+{
+    <div class="card">
+        <div class="cov-tiles">
+            <div class="cov-tile"><div class="n">@r.NeededSlots</div><div class="l">places needed</div></div>
+            <div class="cov-tile"><div class="n">@(r.NeededSlots - r.OpenSlots)</div><div class="l">filled (incl. queued)</div></div>
+            <div class="cov-tile"><div class="n">@r.OpenSlots</div><div class="l">still open</div></div>
+            <div class="cov-tile"><div class="n @(r.ExtraVolunteers > 0 ? "cov-short" : null)">@r.ExtraVolunteers</div><div class="l">more volunteers needed (estimate)</div></div>
+        </div>
+        @if (r.ExtraVolunteers == 0)
+        {
+            <div class="cov-ok">Enough volunteers have said they are available to cover every task — what is open can be filled from the people we have.</div>
+        }
+        else
+        {
+            <div class="cov-warn">
+                We need about <strong>@r.ExtraVolunteers more volunteer(s)</strong> on the busiest day. Per day below:
+                an <em>hourly</em> shortage needs more people at that hour; a gap in <em>hours</em> with no hourly shortage
+                means the people exist but are capped at 50% — marking more full-day workers closes it.
+            </div>
+        }
+        @if (r.UndatedTasks > 0)
+        {
+            <p style="font-size:13px;color:#4b5563;margin-top:10px;">
+                @r.UndatedTasks task(s) (@r.UndatedSlots place(s), @r.UndatedOpen open) have no day yet, so they are not in the per-day view.
+            </p>
+        }
+    </div>
+
+    @foreach (var d in r.Days)
+    {
+        <div class="card">
+            <h2 style="margin-top:0;">@d.Day.ToString("dddd d MMMM")</h2>
+            <p style="margin:0 0 8px;">
+                <strong>@d.NeededSlots</strong> places · <strong>@d.FilledSlots</strong> filled · <strong>@d.OpenSlots</strong> open ·
+                <strong>@d.VolunteersPresent</strong> volunteer(s) available (@d.FullDayWorkersPresent full-day)
+            </p>
+            <p style="margin:0 0 8px;font-size:14px;">
+                Tasks need <strong>@d.NeededHours.ToString("0.#") h</strong>; volunteers can give
+                <strong>@d.PlannableHours.ToString("0.#") h</strong>.
+                @if (d.GapHours > 0)
+                {
+                    <span class="cov-short">Short @d.GapHours.ToString("0.#") h ≈ @d.ExtraVolunteersAtHalfDay more volunteer(s) giving half a day (5 h).</span>
+                }
+                else
+                {
+                    <span>Enough hours.</span>
+                }
+            </p>
+            @if (d.Peak is { } p)
+            {
+                <p class="cov-short" style="margin:0 0 8px;">
+                    Busiest hour @p.Label: @p.Needed people needed, @p.Available available → short @p.ShortOfPeople.
+                </p>
+            }
+            @if (d.Hours.Count > 0)
+            {
+                <div class="cov-scroll">
+                    <table class="cov-hours">
+                        <thead><tr><th scope="col">Hour</th><th scope="col">Needed</th><th scope="col">Filled</th><th scope="col">Open</th><th scope="col">Available</th><th scope="col">Short</th></tr></thead>
+                        <tbody>
+                        @foreach (var h in d.Hours)
+                        {
+                            <tr>
+                                <td>@h.Label</td>
+                                <td>@h.Needed</td>
+                                <td>@(h.Needed - h.Open)</td>
+                                <td>@h.Open</td>
+                                <td>@h.Available</td>
+                                <td class="@(h.ShortOfPeople > 0 ? "cov-short" : null)">@(h.ShortOfPeople > 0 ? h.ShortOfPeople.ToString() : "–")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
